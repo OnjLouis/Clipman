@@ -16,6 +16,61 @@ function Fail([string]$message) {
     throw "Clipman smoke test failed: $message"
 }
 
+function Is-SmokePath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        return $false
+    }
+
+    $full = [IO.Path]::GetFullPath($path)
+    $temp = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+    if (!$full.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+
+    return $full -match '\\clipman-(local-update-smoke|github-update-smoke)-'
+}
+
+function Stop-SmokeClipmanProcesses {
+    foreach ($process in @(Get-Process clipman -ErrorAction SilentlyContinue)) {
+        $path = ''
+        try {
+            $path = $process.Path
+        }
+        catch {
+        }
+
+        if (!(Is-SmokePath $path)) {
+            continue
+        }
+
+        try {
+            $process.CloseMainWindow() | Out-Null
+            if (!$process.WaitForExit(2000)) {
+                $process.Kill()
+                $process.WaitForExit(5000)
+            }
+        }
+        catch {
+        }
+        finally {
+            try { $process.Dispose() } catch { }
+        }
+    }
+}
+
+function Clear-OldSmokeFolders {
+    Stop-SmokeClipmanProcesses
+    foreach ($pattern in @('clipman-local-update-smoke-*', 'clipman-github-update-smoke-*')) {
+        foreach ($folder in @(Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter $pattern -ErrorAction SilentlyContinue)) {
+            try {
+                Remove-Item -LiteralPath $folder.FullName -Recurse -Force -ErrorAction Stop
+            }
+            catch {
+            }
+        }
+    }
+}
+
 function Assert-Exists([string]$path, [string]$description) {
     if (!(Test-Path -LiteralPath $path)) {
         Fail "$description is missing: $path"
@@ -203,7 +258,18 @@ function Set-SmokeSettings([string]$appDir) {
     }
     $settings | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $settingsDir "$env:COMPUTERNAME-settings.json") -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $logs 'smoke-preserve.log') -Value $sentinel -Encoding UTF8
+    Assert-SmokeSettingsCannotPrompt $appDir
     return $sentinel
+}
+
+function Assert-SmokeSettingsCannotPrompt([string]$appDir) {
+    $settingsPath = Join-Path (Join-Path $appDir 'Settings') "$env:COMPUTERNAME-settings.json"
+    $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+    $databasePath = [string]$settings.DatabasePath
+    $useDefault = [bool]$settings.UseDefaultDatabasePath
+    if (!$useDefault -and !(Test-Path -LiteralPath $databasePath)) {
+        Fail "Smoke settings would trigger an interactive missing-database prompt: $databasePath"
+    }
 }
 
 function Assert-SmokeUpdateTarget([string]$appDir, [string]$sentinel, [string]$expectedVersion, [string]$label) {
@@ -356,6 +422,7 @@ function Invoke-PostPublishUpdateSmoke([string]$expectedVersion) {
     $target = Join-Path $root 'target'
     New-Item -ItemType Directory -Force -Path $root,$target | Out-Null
 
+    $startedProcess = $null
     try {
         $client = New-Object Net.WebClient
         $client.Headers['User-Agent'] = 'Clipman smoke test'
@@ -380,7 +447,7 @@ function Invoke-PostPublishUpdateSmoke([string]$expectedVersion) {
         }
 
         $exe = Join-Path $target 'clipman.exe'
-        Start-Process -FilePath $exe -WorkingDirectory $target -WindowStyle Hidden | Out-Null
+        $startedProcess = Start-Process -FilePath $exe -WorkingDirectory $target -WindowStyle Hidden -PassThru
         $deadline = (Get-Date).AddMinutes(4)
         do {
             Start-Sleep -Seconds 3
@@ -400,6 +467,21 @@ function Invoke-PostPublishUpdateSmoke([string]$expectedVersion) {
             if (Test-Path -LiteralPath $exe) { & $exe --close | Out-Null }
         } catch {
         }
+        if ($startedProcess -ne $null) {
+            try {
+                $current = Get-Process -Id $startedProcess.Id -ErrorAction SilentlyContinue
+                if ($current -ne $null -and (Is-SmokePath $current.Path)) {
+                    $current.CloseMainWindow() | Out-Null
+                    if (!$current.WaitForExit(2000)) {
+                        $current.Kill()
+                        $current.WaitForExit(5000)
+                    }
+                }
+            }
+            catch {
+            }
+        }
+        Stop-SmokeClipmanProcesses
         Start-Sleep -Seconds 1
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -905,6 +987,8 @@ internal static class ClipmanSmokeHarness
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+Clear-OldSmokeFolders
 
 if (!$SkipBuild) {
     & (Join-Path $repoRoot 'Build.ps1')
