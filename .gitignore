@@ -1,0 +1,30 @@
+# Build output
+portable/
+release/
+dist/
+*.zip
+*.7z
+*.exe
+*.pdb
+*.obj
+*.dll
+!Assets/sqlite/sqlite3.dll
+
+# Runtime data
+Settings/
+Logs/
+Reports/
+Backups/
+*.clipdb
+clipman-history.json
+clipman-settings.json
+
+# Editor and OS noise
+.vs/
+.vscode/
+bin/
+obj/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
