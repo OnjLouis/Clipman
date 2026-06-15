@@ -1568,7 +1568,7 @@ namespace Clipman
             MessageBox.Show(
                 this,
                 "Clipman " + AppVersion() + "\r\n" +
-                "Portable clipboard manager.\r\n\r\n" +
+                "Accessible clipboard management tool for Windows.\r\n\r\n" +
                 "Build: " + BuildTimestampText() + "\r\n" +
                 "Build stamp: " + BuildInfo.BuildStampUtcMs + "\r\n\r\n" +
                 "Built for fast keyboard and screen-reader use.\r\n\r\n" +

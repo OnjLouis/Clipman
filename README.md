@@ -1,6 +1,6 @@
-# Clipman
+# Clipman: Accessible Clipboard Management Tool for Windows
 
-Clipman is a small portable Windows clipboard manager designed for fast keyboard and screen-reader use.
+Clipman is a small portable accessible clipboard management tool for Windows, designed for fast keyboard and screen-reader use.
 
 For the full manual, open `Manual.html` from the Clipman folder or press `F1` in the history window.
 

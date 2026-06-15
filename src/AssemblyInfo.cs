@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("Clipman")]
-[assembly: AssemblyDescription("Portable clipboard manager")]
+[assembly: AssemblyDescription("Accessible clipboard management tool for Windows")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Andre Louis")]
 [assembly: AssemblyProduct("Clipman")]
