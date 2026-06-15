@@ -54,6 +54,8 @@ Hotkeys can be changed from Options > Preferences.
 
 Preferences remembers the tab you used last. The storage tab is named Storage and Password because it contains both the shared database path and the history password controls.
 
+The default history database, `Settings\clipman-history.clipdb`, is portable with the app folder. If Clipman is moved while using the default database, the path follows the new folder. If you choose a different database path, Clipman treats it as explicit and asks what to do if that file cannot be found at startup.
+
 Clipman remembers whether clipboard monitoring was on or off. On launch it plays the on or off sound for the restored state when sounds are enabled.
 
 ## Database

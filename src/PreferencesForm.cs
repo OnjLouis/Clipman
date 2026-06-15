@@ -290,6 +290,7 @@ namespace Clipman
                 settings.DatabaseEncryptionEnabled = !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
             }
             settings.DatabasePath = databasePath.Text.Trim();
+            settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(settings.DatabasePath);
             settings.MaxHistoryEntries = (int)maxHistoryEntries.Value;
             settings.MaxHistoryDays = (int)maxHistoryDays.Value;
             settings.SendToEnabled = sendToEnabled.Checked;
@@ -397,10 +398,12 @@ namespace Clipman
 
         private void BrowseDatabase()
         {
-            using (var dialog = new SaveFileDialog())
+            using (var dialog = new OpenFileDialog())
             {
                 dialog.Title = "Choose Clipman database file";
                 dialog.Filter = "Clipman compressed database|*.clipdb|All files|*.*";
+                dialog.CheckFileExists = false;
+                dialog.CheckPathExists = true;
                 dialog.FileName = Path.GetFileName(databasePath.Text);
                 var dir = Path.GetDirectoryName(databasePath.Text);
                 if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
@@ -411,6 +414,7 @@ namespace Clipman
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     databasePath.Text = dialog.FileName;
+                    settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(dialog.FileName);
                     ApplyNow();
                 }
             }
@@ -505,8 +509,24 @@ namespace Clipman
                 UpdateCheckFrequency = current.UpdateCheckFrequency,
                 InstallUpdatesSilently = current.InstallUpdatesSilently,
                 DatabaseEncryptionEnabled = current.DatabaseEncryptionEnabled,
-                ProtectedDatabasePassword = current.ProtectedDatabasePassword
+                ProtectedDatabasePassword = current.ProtectedDatabasePassword,
+                UseDefaultDatabasePath = current.UseDefaultDatabasePath
             };
+        }
+
+        private static bool IsCurrentDefaultDatabasePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return true;
+            try
+            {
+                var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                var defaultPath = Path.Combine(appDirectory, "Settings", "clipman-history.clipdb");
+                return string.Equals(Path.GetFullPath(path), Path.GetFullPath(defaultPath), StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static TableLayoutPanel NewRows()

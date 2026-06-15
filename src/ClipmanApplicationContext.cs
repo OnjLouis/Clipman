@@ -52,6 +52,7 @@ namespace Clipman
             appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             settingsStore = new SettingsStore(appDirectory);
             settings = settingsStore.Load();
+            ResolveDatabaseLocation();
             ResolveDatabasePassword();
             SharedUpdateStateStore.PublishCurrentBuild(settingsStore.SettingsDirectory);
             sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
@@ -254,6 +255,7 @@ namespace Clipman
             settings.SaveListPosition = updated.SaveListPosition;
             settings.Active = updated.Active;
             settings.DatabasePath = updated.DatabasePath;
+            settings.UseDefaultDatabasePath = updated.UseDefaultDatabasePath;
             settings.MaxHistoryEntries = updated.MaxHistoryEntries;
             settings.MaxHistoryDays = updated.MaxHistoryDays;
             settings.IgnoredProcesses = updated.IgnoredProcesses;
@@ -700,6 +702,7 @@ namespace Clipman
                 "Active: " + settings.Active + "\r\n" +
                 "Sounds enabled: " + settings.SoundsEnabled + "\r\n" +
                 "Database path: " + settings.DatabasePath + "\r\n" +
+                "Database path type: " + (settings.UseDefaultDatabasePath ? "Default beside Clipman" : "Explicit") + "\r\n" +
                 "Database storage status: " + (string.IsNullOrWhiteSpace(store.LastStorageError) ? "OK" : "Unavailable: " + store.LastStorageError) + "\r\n" +
                 "Entries: " + store.GetEntries().Count + "\r\n" +
                 "Show history hotkey: " + settings.ShowHistoryHotkey + " (" + (showHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
@@ -1041,6 +1044,77 @@ namespace Clipman
             }
             settings.DatabaseEncryptionEnabled = true;
             settings.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(entered);
+            settingsStore.Save(settings);
+        }
+
+        private void ResolveDatabaseLocation()
+        {
+            if (settings.UseDefaultDatabasePath || string.IsNullOrWhiteSpace(settings.DatabasePath))
+            {
+                settings.UseDefaultDatabasePath = true;
+                settings.DatabasePath = settingsStore.DefaultDatabasePath();
+                settingsStore.Save(settings);
+                return;
+            }
+
+            if (File.Exists(settings.DatabasePath))
+            {
+                return;
+            }
+
+            var message =
+                "Clipman cannot find the configured history database:" +
+                Environment.NewLine +
+                Environment.NewLine +
+                settings.DatabasePath +
+                Environment.NewLine +
+                Environment.NewLine +
+                "Choose Yes to browse for the database in a new location." +
+                Environment.NewLine +
+                "Choose No to use the default database beside Clipman." +
+                Environment.NewLine +
+                "Choose Cancel to stop Clipman.";
+            var choice = MessageBox.Show(
+                message,
+                "Clipman database not found",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button1);
+
+            if (choice == DialogResult.Cancel)
+            {
+                throw new OperationCanceledException("Clipman database location was not selected.");
+            }
+
+            if (choice == DialogResult.Yes)
+            {
+                using (var dialog = new OpenFileDialog())
+                {
+                    dialog.Title = "Locate Clipman database";
+                    dialog.Filter = "Clipman compressed database|*.clipdb|All files|*.*";
+                    dialog.CheckFileExists = true;
+                    dialog.CheckPathExists = true;
+                    var oldDir = Path.GetDirectoryName(settings.DatabasePath);
+                    if (!string.IsNullOrWhiteSpace(oldDir) && Directory.Exists(oldDir))
+                    {
+                        dialog.InitialDirectory = oldDir;
+                    }
+                    dialog.FileName = Path.GetFileName(settings.DatabasePath);
+
+                    if (dialog.ShowDialog() != DialogResult.OK)
+                    {
+                        throw new OperationCanceledException("Clipman database location was not selected.");
+                    }
+
+                    settings.DatabasePath = dialog.FileName;
+                    settings.UseDefaultDatabasePath = settingsStore.IsCurrentDefaultDatabasePath(settings.DatabasePath);
+                    settingsStore.Save(settings);
+                    return;
+                }
+            }
+
+            settings.UseDefaultDatabasePath = true;
+            settings.DatabasePath = settingsStore.DefaultDatabasePath();
             settingsStore.Save(settings);
         }
 

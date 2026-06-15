@@ -403,6 +403,7 @@
 
   <h2 id="database-and-sync">Database and Sync</h2>
   <p>By default Clipman stores user data in a <code>Settings</code> folder beside <code>clipman.exe</code>. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code> or <code>Settings\Laptop-settings.json</code>. This lets multiple computers run the same Clipman folder without fighting over hotkeys, monitoring state, startup choices, or window position. The default shared history database is <code>Settings\clipman-history.clipdb</code>.</p>
+  <p>If the default database path is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different database path, Clipman treats that path as explicit. If an explicit database path is missing at startup, Clipman asks whether to browse for the database in a new location, use the default database beside Clipman, or stop startup.</p>
 
   <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's database path to the same synced or network-shared <code>.clipdb</code> file.</p>
 
@@ -552,6 +553,14 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.0</h3>
+  <ul>
+    <li>Added portable database path handling: the default <code>Settings\clipman-history.clipdb</code> path now follows the app folder when Clipman is moved.</li>
+    <li>Added explicit database path tracking so shared or custom database locations remain fixed across app-folder moves.</li>
+    <li>Improved database browsing so choosing an existing <code>.clipdb</code> file no longer looks like an overwrite operation.</li>
+    <li>Improved startup recovery when an explicit database path is missing, with options to locate the database, use the default database, or stop startup.</li>
+  </ul>
+
   <h3>1.1.4</h3>
   <ul>
     <li>Fixed: Restored standard Options menu mnemonic behavior so Alt+O behaves like the other top-level menu keys.</li>

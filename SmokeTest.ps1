@@ -524,7 +524,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
     Assert-TextMatches $manual 'ascending and descending' 'Manual sort direction documentation'
-    Assert-TextMatches $manual '<h3>1\.1\.4</h3>' 'Manual 1.1.4 changelog'
+    Assert-TextMatches $manual '<h3>1\.5\.0</h3>' 'Manual 1.5.0 changelog'
     Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/1">issue #1</a>' 'Manual issue #1 closure'
     Assert-TextMatches $manual 'See <a href="https://github\.com/OnjLouis/Clipman/issues/2">issue #2</a>' 'Manual issue #2 review note'
     Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/3">issue #3</a>' 'Manual issue #3 closure'
@@ -565,6 +565,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'encryptDatabase|Clipboard\.SetText\(password\)' 'Preferences encryption checkbox and raw password clipboard copy'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'Logs\\\\Startup\.log' 'Startup failure log message'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'WriteStartupLog\("Startup failed\."' 'Startup failure logging'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'UseDefaultDatabasePath' 'Default database path setting'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SettingsStore.cs') 'ShouldTreatAsDefaultDatabasePath' 'Portable default database path detection'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'Clipman database not found' 'Missing explicit database prompt'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'optionsMenuItem\.ShowDropDown\(\)' 'Standard Options menu mnemonic handling'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DescribeDropEffect\(int value\)' 'Drop effect display helper'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'string\.Join\(" or ", parts\)' 'Combined drop effect wording'
@@ -682,6 +685,27 @@ internal static class ClipmanSmokeHarness
         Assert(settings.MaxHistoryEntries == 222, "Settings conflict resolver did not keep newest settings.");
         Assert(!File.Exists(conflictSettings), "Settings conflict file was not removed.");
 
+        var portableApp = Path.Combine(conflictDir, "PortableApp");
+        var oldApp = Path.Combine(conflictDir, "OldPortableApp");
+        Directory.CreateDirectory(Path.Combine(portableApp, "Settings"));
+        Directory.CreateDirectory(Path.Combine(oldApp, "Settings"));
+        var portableStore = new SettingsStore(portableApp);
+        var defaultSettings = portableStore.Load();
+        Assert(defaultSettings.UseDefaultDatabasePath, "Fresh settings did not mark the database path as default.");
+        Assert(defaultSettings.DatabasePath == portableStore.DefaultDatabasePath(), "Fresh settings did not use the current default database path.");
+
+        File.WriteAllText(portableStore.SettingsPath, "{\"DatabasePath\":\"" + EscapeJson(Path.Combine(oldApp, "Settings", "clipman-history.clipdb")) + "\"}");
+        var movedDefaultSettings = portableStore.Load();
+        Assert(movedDefaultSettings.UseDefaultDatabasePath, "Old default-looking database path was not treated as default.");
+        Assert(movedDefaultSettings.DatabasePath == portableStore.DefaultDatabasePath(), "Moved default database path did not follow the app folder.");
+
+        var explicitDb = Path.Combine(conflictDir, "Shared", "history.clipdb");
+        Directory.CreateDirectory(Path.GetDirectoryName(explicitDb));
+        File.WriteAllText(portableStore.SettingsPath, "{\"DatabasePath\":\"" + EscapeJson(explicitDb) + "\",\"UseDefaultDatabasePath\":false}");
+        var explicitSettings = portableStore.Load();
+        Assert(!explicitSettings.UseDefaultDatabasePath, "Explicit database path was incorrectly marked as default.");
+        Assert(explicitSettings.DatabasePath == explicitDb, "Explicit database path was not preserved.");
+
         var stateDir = Path.Combine(conflictDir, "state");
         Directory.CreateDirectory(stateDir);
         SharedUpdateStateStore.PublishCurrentBuild(stateDir);
@@ -730,6 +754,11 @@ internal static class ClipmanSmokeHarness
             db.Exec("insert into items (id, size, description, time) values (1, " + bytes.Length + ", 'old Clipman import text', 1700000000)");
             db.InsertBlob("insert into formats (clip_id, format, data) values (1, 'CF_UNICODETEXT', ?)", bytes);
         }
+    }
+
+    private static string EscapeJson(string text)
+    {
+        return (text ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 
     private static void CreateDittoDatabase(string path, string text)
@@ -826,6 +855,8 @@ internal static class ClipmanSmokeHarness
             (Join-Path $repoRoot 'src\SqliteClipboardImporter.cs'),
             (Join-Path $repoRoot 'src\SyncConflictResolver.cs'),
             (Join-Path $repoRoot 'src\SharedUpdateState.cs'),
+            (Join-Path $repoRoot 'src\SettingsStore.cs'),
+            (Join-Path $repoRoot 'src\DatabasePasswordProtector.cs'),
             (Join-Path $repoRoot 'src\BuildInfo.cs'),
             $testSource
         )

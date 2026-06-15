@@ -52,6 +52,7 @@ namespace Clipman
         public bool SaveListPosition { get; set; }
         public bool Active { get; set; }
         public string DatabasePath { get; set; }
+        public bool UseDefaultDatabasePath { get; set; }
         public int LastSelectedIndex { get; set; }
         public int LastSelectedTab { get; set; }
         public int LastPreferencesTab { get; set; }
@@ -81,6 +82,7 @@ namespace Clipman
             SaveListPosition = true;
             Active = true;
             DatabasePath = string.Empty;
+            UseDefaultDatabasePath = true;
             LastSelectedIndex = -1;
             LastSelectedTab = 0;
             LastPreferencesTab = 0;

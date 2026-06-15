@@ -23,7 +23,12 @@ namespace Clipman
             Directory.CreateDirectory(SettingsDirectory);
             SyncConflictResolver.ResolveSettingsConflicts(SettingsPath);
             var hadSortDescending = SettingsFileContainsProperty("SortDescending");
+            var hadUseDefaultDatabasePath = SettingsFileContainsProperty("UseDefaultDatabasePath");
             var settings = JsonUtil.Load<AppSettings>(SettingsPath);
+            if (!hadUseDefaultDatabasePath)
+            {
+                settings.UseDefaultDatabasePath = ShouldTreatAsDefaultDatabasePath(settings.DatabasePath);
+            }
             Normalize(settings);
             if (!hadSortDescending)
             {
@@ -48,9 +53,10 @@ namespace Clipman
 
         private void Normalize(AppSettings settings)
         {
-            if (string.IsNullOrWhiteSpace(settings.DatabasePath))
+            if (settings.UseDefaultDatabasePath || string.IsNullOrWhiteSpace(settings.DatabasePath))
             {
                 settings.DatabasePath = DefaultDatabasePath();
+                settings.UseDefaultDatabasePath = true;
             }
             if (settings.MaxHistoryEntries < 0)
             {
@@ -119,9 +125,45 @@ namespace Clipman
             }
         }
 
-        private string DefaultDatabasePath()
+        public string DefaultDatabasePath()
         {
             return Path.Combine(SettingsDirectory, "clipman-history.clipdb");
+        }
+
+        private bool ShouldTreatAsDefaultDatabasePath(string databasePath)
+        {
+            if (string.IsNullOrWhiteSpace(databasePath)) return true;
+            if (IsCurrentDefaultDatabasePath(databasePath)) return true;
+
+            try
+            {
+                var full = Path.GetFullPath(databasePath);
+                var file = Path.GetFileName(full);
+                var parent = Directory.GetParent(full);
+                return string.Equals(file, "clipman-history.clipdb", StringComparison.OrdinalIgnoreCase) &&
+                    parent != null &&
+                    string.Equals(parent.Name, "Settings", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool IsCurrentDefaultDatabasePath(string databasePath)
+        {
+            if (string.IsNullOrWhiteSpace(databasePath)) return false;
+            try
+            {
+                return string.Equals(
+                    Path.GetFullPath(databasePath),
+                    Path.GetFullPath(DefaultDatabasePath()),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string MachineSettingsFileName()
