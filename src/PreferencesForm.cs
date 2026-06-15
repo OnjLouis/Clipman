@@ -494,6 +494,7 @@ namespace Clipman
                 MaxHistoryDays = current.MaxHistoryDays,
                 IgnoredProcesses = current.IgnoredProcesses == null ? new List<string>() : new List<string>(current.IgnoredProcesses),
                 SortMode = current.SortMode,
+                SortDescending = current.SortDescending,
                 SendToEnabled = current.SendToEnabled,
                 ShowHistoryAfterSendTo = current.ShowHistoryAfterSendTo,
                 GroupFilter = current.GroupFilter,

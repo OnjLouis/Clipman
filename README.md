@@ -22,6 +22,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Press F2 to edit an entry name and stored clipboard text.
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
+- Sort direction can be toggled between ascending and descending from the View menu.
 - Use the File history tab to review file copy/cut clipboard events captured while Clipman is running and restore them to the Windows clipboard.
 - Optional history size and age limits, with pinned entries kept.
 - Optional ignored application list for sensitive apps.

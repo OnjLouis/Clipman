@@ -39,6 +39,7 @@ namespace Clipman
         private ToolStripMenuItem sortGroupMenuItem;
         private ToolStripMenuItem sortMachineMenuItem;
         private ToolStripMenuItem sortManualMenuItem;
+        private ToolStripMenuItem sortDirectionMenuItem;
         private ToolStripMenuItem groupEntryMenuItem;
         private List<ClipEntry> entries = new List<ClipEntry>();
         private string lastSearch = string.Empty;
@@ -214,7 +215,7 @@ namespace Clipman
             var selectedId = !string.IsNullOrEmpty(preferredSelectedId)
                 ? preferredSelectedId
                 : selectedEntry == null ? null : selectedEntry.Id;
-            entries = store.GetEntries(settings.SortMode, settings.GroupFilter);
+            entries = store.GetEntries(settings.SortMode, settings.GroupFilter, settings.SortDescending);
             list.BeginUpdate();
             list.Items.Clear();
             var insertedSeparator = false;
@@ -326,12 +327,15 @@ namespace Clipman
             sortGroupMenuItem = new ToolStripMenuItem("Sort by &group", null, (s, e) => SetSortMode("Group"));
             sortMachineMenuItem = new ToolStripMenuItem("Sort by &machine", null, (s, e) => SetSortMode("Machine"));
             sortManualMenuItem = new ToolStripMenuItem("&Manual order", null, (s, e) => SetSortMode("Manual"));
+            sortDirectionMenuItem = new ToolStripMenuItem("", null, (s, e) => ToggleSortDirection());
             view.DropDownItems.Add(sortLastUsedMenuItem);
             view.DropDownItems.Add(sortAddedMenuItem);
             view.DropDownItems.Add(sortTextMenuItem);
             view.DropDownItems.Add(sortGroupMenuItem);
             view.DropDownItems.Add(sortMachineMenuItem);
             view.DropDownItems.Add(sortManualMenuItem);
+            view.DropDownItems.Add("-");
+            view.DropDownItems.Add(sortDirectionMenuItem);
             view.DropDownItems.Add("-");
             view.DropDownItems.Add("Move &up\tAlt+Up", null, (s, e) => MoveSelected(-1));
             view.DropDownItems.Add("Move &down\tAlt+Down", null, (s, e) => MoveSelected(1));
@@ -859,6 +863,14 @@ namespace Clipman
             statusText.Text = "Sorted clipboard history.";
         }
 
+        private void ToggleSortDirection()
+        {
+            settings.SortDescending = !settings.SortDescending;
+            saveSettings();
+            Reload();
+            statusText.Text = settings.SortDescending ? "Sorted descending." : "Sorted ascending.";
+        }
+
         private void RefreshGroupFilterItems()
         {
             if (groupFilter == null) return;
@@ -1112,7 +1124,7 @@ namespace Clipman
 
         private void CopyPinnedByPosition(int position)
         {
-            var pinnedEntries = store.GetEntries(settings.SortMode, "Pinned");
+            var pinnedEntries = store.GetEntries(settings.SortMode, "Pinned", settings.SortDescending);
             if (position < 0 || position >= pinnedEntries.Count)
             {
                 statusText.Text = "No pinned clipboard entry at position " + (position + 1) + ".";
@@ -1522,6 +1534,11 @@ namespace Clipman
             if (sortGroupMenuItem != null) sortGroupMenuItem.Checked = IsSortMode("Group");
             if (sortMachineMenuItem != null) sortMachineMenuItem.Checked = IsSortMode("Machine");
             if (sortManualMenuItem != null) sortManualMenuItem.Checked = IsSortMode("Manual");
+            if (sortDirectionMenuItem != null)
+            {
+                sortDirectionMenuItem.Text = settings.SortDescending ? "Sort &ascending" : "Sort &descending";
+                sortDirectionMenuItem.Checked = settings.SortDescending;
+            }
         }
 
         private void OpenManual()
@@ -1546,7 +1563,7 @@ namespace Clipman
         private static string AppVersion()
         {
             var version = typeof(HistoryForm).Assembly.GetName().Version;
-            return version == null ? "1.1.0" : version.Major + "." + version.Minor + "." + version.Build;
+            return version == null ? "1.1.1" : version.Major + "." + version.Minor + "." + version.Build;
         }
 
         private void ShowDiagnostics()

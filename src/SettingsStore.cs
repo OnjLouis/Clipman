@@ -22,8 +22,13 @@ namespace Clipman
         {
             Directory.CreateDirectory(SettingsDirectory);
             SyncConflictResolver.ResolveSettingsConflicts(SettingsPath);
+            var hadSortDescending = SettingsFileContainsProperty("SortDescending");
             var settings = JsonUtil.Load<AppSettings>(SettingsPath);
             Normalize(settings);
+            if (!hadSortDescending)
+            {
+                settings.SortDescending = DefaultSortDescending(settings.SortMode);
+            }
             Save(settings);
             return settings;
         }
@@ -80,6 +85,38 @@ namespace Clipman
                 settings.LastPreferencesTab = 0;
             }
             settings.DatabaseEncryptionEnabled = !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
+        }
+
+        private bool SettingsFileContainsProperty(string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(propertyName) || !File.Exists(SettingsPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                var text = File.ReadAllText(SettingsPath);
+                return text.IndexOf("\"" + propertyName + "\"", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool DefaultSortDescending(string sortMode)
+        {
+            switch ((sortMode ?? string.Empty).Trim().ToUpperInvariant())
+            {
+                case "TEXT":
+                case "GROUP":
+                case "MACHINE":
+                case "MANUAL":
+                    return false;
+                default:
+                    return true;
+            }
         }
 
         private string DefaultDatabasePath()

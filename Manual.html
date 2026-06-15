@@ -91,7 +91,7 @@
     <li>Press <code>F4</code> to view the full selected text in a read-only edit field.</li>
     <li>Press <code>Shift+Enter</code> to pin or unpin an entry. Pinned entries are protected from delete and cleanup.</li>
     <li>Select multiple entries to copy, delete, pin, unpin, or move them together.</li>
-    <li>Use the View menu to sort history by last used, added date, text, group, machine, or manual order.</li>
+    <li>Use the View menu to sort history by last used, added date, text, group, machine, or manual order. The same menu toggles the current sort between ascending and descending.</li>
     <li>Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected entries in manual order.</li>
     <li>Press <code>Ctrl+1</code> through <code>Ctrl+0</code> to copy one of the first ten pinned entries and close history.</li>
     <li>Press <code>Alt+1</code> through <code>Alt+0</code> to jump to one of the first ten group filters.</li>
@@ -343,7 +343,7 @@
   <h2 id="sorting-and-manual-order">Sorting and Manual Order</h2>
   <p>The Text history list includes the entry text, name, group, machine, added time, and last-used time. The machine column records the computer that added or most recently re-added the entry, which helps when several computers share the same database.</p>
 
-  <p>The View menu can sort normal history entries by last used, added date, text, group, machine, or manual order. Group sorting places grouped entries together and leaves ungrouped entries after named groups. Machine sorting groups entries by the computer that added or most recently re-added them. Pinned entries stay above normal entries and keep their own manual order regardless of the selected sort mode. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected pinned entries within the pinned section, or selected normal entries within the normal history section. Move pinned and normal entries separately.</p>
+  <p>The View menu can sort normal history entries by last used, added date, text, group, machine, or manual order. The sort direction command in the same menu toggles the current sort between ascending and descending; its label changes to show the action it will take next. Group sorting places grouped entries together and leaves ungrouped entries after named groups. Machine sorting groups entries by the computer that added or most recently re-added them. Pinned entries stay above normal entries and keep their own manual order regardless of the selected sort mode or direction. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected pinned entries within the pinned section, or selected normal entries within the normal history section. Move pinned and normal entries separately.</p>
 
   <h2 id="cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</h2>
   <p><code>Ctrl+C</code> and <code>Ctrl+X</code> put normal text on the Windows clipboard, so the text can be pasted into other applications. Clipman also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries.</p>
@@ -383,7 +383,7 @@
       </tr>
       <tr>
         <td>View</td>
-        <td>Sort Text history entries by last used, added date, text, group, machine, or manual order, and move selected entries up or down in manual order.</td>
+        <td>Sort Text history entries by last used, added date, text, group, machine, or manual order, toggle ascending or descending order, and move selected entries up or down in manual order.</td>
       </tr>
       <tr>
         <td>Options</td>
@@ -550,6 +550,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.1.1</h3>
+  <ul>
+    <li>Added a View menu command to toggle the current Text history sort between ascending and descending.</li>
+    <li>Improved Preferences window activation so it appears more reliably the first time it is opened after Clipman starts.</li>
+    <li>Improved live-copy smoke testing so a supplied live folder is rebuilt and refreshed in the same pass.</li>
+  </ul>
+
   <h3>1.1</h3>
   <ul>
     <li>Initial public release of the rebuilt Clipman.</li>

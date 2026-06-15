@@ -80,6 +80,44 @@ function Assert-LiveCopyReasonable([string]$path) {
     Assert-NotExists (Join-Path $path 'sounds\sounds') 'Nested duplicate live sounds folder'
 }
 
+function Deploy-LiveCopy([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        return
+    }
+
+    if (!(Test-Path -LiteralPath $path)) {
+        Write-Host "Live path not found, skipping live-copy deployment: $path"
+        return
+    }
+
+    $liveExe = Join-Path $path 'clipman.exe'
+    if (Test-Path -LiteralPath $liveExe) {
+        try {
+            & $liveExe --close | Out-Null
+            Start-Sleep -Seconds 2
+        }
+        catch {
+            Write-Host "Could not ask live Clipman to close before deployment: $($_.Exception.Message)"
+        }
+    }
+
+    foreach ($fileName in @('clipman.exe', 'Manual.html', 'LICENSE.txt', 'sqlite3.dll')) {
+        $source = Join-Path $portable $fileName
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $path $fileName) -Force
+        }
+    }
+
+    $soundSource = Join-Path $portable 'sounds'
+    $soundTarget = Join-Path $path 'sounds'
+    if (Test-Path -LiteralPath $soundSource) {
+        Remove-Item -LiteralPath $soundTarget -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $soundSource -Destination $soundTarget -Recurse -Force
+    }
+
+    Write-Host "Deployed live copy to $path"
+}
+
 function Assert-TextDoesNotMatch([string]$path, [string]$pattern, [string]$description) {
     Assert-Exists $path $description
     $text = Get-Content -LiteralPath $path -Raw
@@ -118,6 +156,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Ctrl\+1</code> to <code>Ctrl\+4' 'Manual preferences tab shortcut documentation'
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
+    Assert-TextMatches $manual 'ascending and descending' 'Manual sort direction documentation'
+    Assert-TextMatches $manual '<h3>1\.1\.1</h3>' 'Manual 1.1.1 changelog'
     Assert-TextMatches $manual 'deliberately ignores that generated password copy' 'Manual generated password documentation'
     Assert-TextMatches $manual '<h2 id="application-files">Application Files</h2>' 'Manual application files section'
     Assert-TextMatches $manual '<code>sqlite3\.dll</code>' 'Manual SQLite runtime file documentation'
@@ -135,6 +175,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Switch Preferences tabs' 'README preferences tab shortcut'
     Assert-TextMatches $readme 'Storage and Password' 'README storage/password tab documentation'
     Assert-TextMatches $readme 'LICENSE\.txt' 'README license file documentation'
+    Assert-TextMatches $readme 'Sort direction can be toggled' 'README sort direction documentation'
     Assert-TextMatches $readme 'Settings\\sounds' 'README user sound override documentation'
     Assert-TextMatches $readme 'Multiple machines can write to the same history database' 'README shared history explanation'
     Assert-TextMatches $readme 'Optional history password encryption' 'README encryption documentation'
@@ -437,6 +478,7 @@ if (!$SkipBuild) {
 Assert-ManualAndReadmeClean
 Assert-CodeBehavior
 Assert-CleanPortable $portable
+Deploy-LiveCopy $LivePath
 Assert-LiveCopyReasonable $LivePath
 
 Write-Host 'Clipman smoke test passed.'

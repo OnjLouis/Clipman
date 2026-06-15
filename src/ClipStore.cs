@@ -72,15 +72,20 @@ namespace Clipman
 
         public List<ClipEntry> GetEntries()
         {
-            return GetEntries("LastUsed");
+            return GetEntries("LastUsed", "All", true);
         }
 
         public List<ClipEntry> GetEntries(string sortMode)
         {
-            return GetEntries(sortMode, "All");
+            return GetEntries(sortMode, "All", true);
         }
 
         public List<ClipEntry> GetEntries(string sortMode, string groupFilter)
+        {
+            return GetEntries(sortMode, groupFilter, true);
+        }
+
+        public List<ClipEntry> GetEntries(string sortMode, string groupFilter, bool descending)
         {
             lock (sync)
             {
@@ -89,32 +94,48 @@ namespace Clipman
                     .Where(e => e.Pinned)
                     .OrderBy(e => e.ManualOrder)
                     .ThenByDescending(e => e.CreatedUnixMs);
-                var normal = SortNormalEntries(filtered.Where(e => !e.Pinned), sortMode);
+                var normal = SortNormalEntries(filtered.Where(e => !e.Pinned), sortMode, descending);
 
                 return pinned.Concat(normal).Select(Clone).ToList();
             }
         }
 
-        private static IEnumerable<ClipEntry> SortNormalEntries(IEnumerable<ClipEntry> entries, string sortMode)
+        private static IEnumerable<ClipEntry> SortNormalEntries(IEnumerable<ClipEntry> entries, string sortMode, bool descending)
         {
             switch ((sortMode ?? string.Empty).Trim().ToUpperInvariant())
             {
                 case "ADDED":
-                    return entries.OrderByDescending(e => e.CreatedUnixMs);
+                    return descending
+                        ? entries.OrderByDescending(e => e.CreatedUnixMs)
+                        : entries.OrderBy(e => e.CreatedUnixMs);
                 case "TEXT":
-                    return entries.OrderBy(e => e.Text ?? string.Empty, StringComparer.CurrentCultureIgnoreCase);
+                    return descending
+                        ? entries.OrderByDescending(e => e.Text ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+                        : entries.OrderBy(e => e.Text ?? string.Empty, StringComparer.CurrentCultureIgnoreCase);
                 case "GROUP":
-                    return entries
+                    return descending
+                        ? entries
+                        .OrderByDescending(e => string.IsNullOrWhiteSpace(e.Group) ? "\uffff" : e.Group.Trim(), StringComparer.CurrentCultureIgnoreCase)
+                        .ThenByDescending(e => e.Text ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+                        : entries
                         .OrderBy(e => string.IsNullOrWhiteSpace(e.Group) ? "\uffff" : e.Group.Trim(), StringComparer.CurrentCultureIgnoreCase)
                         .ThenBy(e => e.Text ?? string.Empty, StringComparer.CurrentCultureIgnoreCase);
                 case "MACHINE":
-                    return entries
+                    return descending
+                        ? entries
+                        .OrderByDescending(e => string.IsNullOrWhiteSpace(e.SourceMachine) ? "\uffff" : e.SourceMachine.Trim(), StringComparer.CurrentCultureIgnoreCase)
+                        .ThenByDescending(e => e.Text ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+                        : entries
                         .OrderBy(e => string.IsNullOrWhiteSpace(e.SourceMachine) ? "\uffff" : e.SourceMachine.Trim(), StringComparer.CurrentCultureIgnoreCase)
                         .ThenBy(e => e.Text ?? string.Empty, StringComparer.CurrentCultureIgnoreCase);
                 case "MANUAL":
-                    return entries.OrderBy(e => e.ManualOrder);
+                    return descending
+                        ? entries.OrderByDescending(e => e.ManualOrder)
+                        : entries.OrderBy(e => e.ManualOrder);
                 default:
-                    return entries.OrderByDescending(e => e.LastUsedUnixMs);
+                    return descending
+                        ? entries.OrderByDescending(e => e.LastUsedUnixMs)
+                        : entries.OrderBy(e => e.LastUsedUnixMs);
             }
         }
 

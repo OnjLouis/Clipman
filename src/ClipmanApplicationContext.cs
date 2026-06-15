@@ -165,12 +165,7 @@ namespace Clipman
 
             if (preferencesForm != null && !preferencesForm.IsDisposed)
             {
-                if (preferencesForm.WindowState == FormWindowState.Minimized)
-                {
-                    preferencesForm.WindowState = FormWindowState.Normal;
-                }
-                preferencesForm.Activate();
-                preferencesForm.BringToFront();
+                FocusPreferencesForm();
                 return;
             }
 
@@ -184,6 +179,31 @@ namespace Clipman
             {
                 preferencesForm.Show();
             }
+            FocusPreferencesForm();
+        }
+
+        private void FocusPreferencesForm()
+        {
+            if (preferencesForm == null || preferencesForm.IsDisposed) return;
+            if (preferencesForm.WindowState == FormWindowState.Minimized)
+            {
+                preferencesForm.WindowState = FormWindowState.Normal;
+            }
+            if (!preferencesForm.Visible)
+            {
+                preferencesForm.Show();
+            }
+            preferencesForm.BeginInvoke(new Action(() =>
+            {
+                if (preferencesForm == null || preferencesForm.IsDisposed) return;
+                if (preferencesForm.WindowState == FormWindowState.Minimized)
+                {
+                    preferencesForm.WindowState = FormWindowState.Normal;
+                }
+                preferencesForm.Activate();
+                preferencesForm.BringToFront();
+                preferencesForm.Focus();
+            }));
         }
 
         private void ApplyPreferences(AppSettings updated)
@@ -209,6 +229,7 @@ namespace Clipman
             settings.MaxHistoryDays = updated.MaxHistoryDays;
             settings.IgnoredProcesses = updated.IgnoredProcesses;
             settings.SortMode = updated.SortMode;
+            settings.SortDescending = updated.SortDescending;
             settings.SendToEnabled = updated.SendToEnabled;
             settings.ShowHistoryAfterSendTo = updated.ShowHistoryAfterSendTo;
             settings.GroupFilter = updated.GroupFilter;
