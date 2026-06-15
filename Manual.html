@@ -552,17 +552,22 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.1.4</h3>
+  <ul>
+    <li>Fixed: Restored standard Options menu mnemonic behavior so Alt+O behaves like the other top-level menu keys.</li>
+  </ul>
+
   <h3>1.1.3</h3>
   <ul>
     <li>Fixed: Preferences now uses a stronger foreground activation path when opened from the Options menu, covering systems where the first activation request is ignored.</li>
-    <li>Fixed: Alt+O is now handled from the history list, file history list, form key handler, and command-key path so the Options menu opens consistently.</li>
+    <li>Improved: Options menu mnemonics use the standard Windows menu behavior so they land in the menu consistently with the other top-level menus.</li>
     <li>Improved: File history now normalizes raw DropEffect text anywhere it appears, so values such as DropEffect 5 are shown as Copy or Link.</li>
   </ul>
 
   <h3>1.1.2</h3>
   <ul>
     <li>Fixed: Preferences now comes to the foreground when opened from the Options menu. Closes <a href="https://github.com/OnjLouis/Clipman/issues/1">issue #1</a>.</li>
-    <li>Fixed: Alt+O now opens the Options menu explicitly, even on systems where the normal menu mnemonic was not being routed. Closes <a href="https://github.com/OnjLouis/Clipman/issues/2">issue #2</a>.</li>
+    <li>Reviewed: Alt+O uses the standard Windows menu mnemonic path. The reported routing problem was isolated to Windows 7. See <a href="https://github.com/OnjLouis/Clipman/issues/2">issue #2</a>.</li>
     <li>Improved: File history now describes combined file clipboard operations such as Copy or Link instead of showing raw DropEffect numbers. Closes <a href="https://github.com/OnjLouis/Clipman/issues/3">issue #3</a>.</li>
     <li>Improved: Shared database paths now handle missing files and temporarily unavailable folders more gracefully, with diagnostics explaining the storage state. Closes <a href="https://github.com/OnjLouis/Clipman/issues/4">issue #4</a>.</li>
     <li>Improved: Release smoke testing now checks open GitHub issues and verifies updater behavior before publishing.</li>

@@ -458,13 +458,7 @@ namespace Clipman
 
         private void ListKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Alt && e.KeyCode == Keys.O)
-            {
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                OpenOptionsMenu();
-            }
-            else if (e.Alt && e.KeyCode == Keys.Enter)
+            if (e.Alt && e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
                 ShowEntryProperties();
@@ -639,13 +633,6 @@ namespace Clipman
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (e.Alt && e.KeyCode == Keys.O)
-            {
-                OpenOptionsMenu();
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                return;
-            }
             if (e.KeyCode == Keys.Apps || (e.Shift && e.KeyCode == Keys.F10))
             {
                 if (IsFileClipboardTabActive())
@@ -731,11 +718,6 @@ namespace Clipman
             if ((keyData & Keys.Alt) == Keys.Alt)
             {
                 var key = keyData & Keys.KeyCode;
-                if (key == Keys.O)
-                {
-                    OpenOptionsMenu();
-                    return true;
-                }
                 if (key == Keys.T)
                 {
                     SelectMainTab();
@@ -761,16 +743,6 @@ namespace Clipman
         private void CloseHistoryWindow()
         {
             Hide();
-        }
-
-        private void OpenOptionsMenu()
-        {
-            if (optionsMenuItem == null) return;
-            menuStrip.Focus();
-            menuStrip.Select();
-            optionsMenuItem.Select();
-            optionsMenuItem.ShowDropDown();
-            statusText.Text = "Options menu.";
         }
 
         protected override void OnShown(EventArgs e)
@@ -943,13 +915,7 @@ namespace Clipman
 
         private void FileEventsListKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Alt && e.KeyCode == Keys.O)
-            {
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                OpenOptionsMenu();
-            }
-            else if (e.KeyCode == Keys.Enter)
+            if (e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
