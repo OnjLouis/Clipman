@@ -9,6 +9,7 @@ namespace Clipman
         public const int WM_HOTKEY = 0x0312;
         public const int WM_CLIPBOARDUPDATE = 0x031D;
         public const int SW_SHOWNORMAL = 1;
+        public const int SW_RESTORE = 9;
 
         [Flags]
         public enum Modifiers : uint

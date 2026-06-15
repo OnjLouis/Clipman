@@ -552,6 +552,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.1.3</h3>
+  <ul>
+    <li>Fixed: Preferences now uses a stronger foreground activation path when opened from the Options menu, covering systems where the first activation request is ignored.</li>
+    <li>Fixed: Alt+O is now handled from the history list, file history list, form key handler, and command-key path so the Options menu opens consistently.</li>
+    <li>Improved: File history now normalizes raw DropEffect text anywhere it appears, so values such as DropEffect 5 are shown as Copy or Link.</li>
+  </ul>
+
   <h3>1.1.2</h3>
   <ul>
     <li>Fixed: Preferences now comes to the foreground when opened from the Options menu. Closes <a href="https://github.com/OnjLouis/Clipman/issues/1">issue #1</a>.</li>

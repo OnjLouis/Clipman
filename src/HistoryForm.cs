@@ -189,10 +189,11 @@ namespace Clipman
             fileEventsList.Items.Clear();
             foreach (var item in events)
             {
+                NormalizeFileClipboardEvent(item);
                 var text = FileEventDisplayText(item);
                 var row = new ListViewItem(text);
                 row.SubItems.Add(item.Source ?? string.Empty);
-                row.SubItems.Add(item.Operation ?? string.Empty);
+                row.SubItems.Add(NormalizeDropEffectText(item.Operation));
                 row.SubItems.Add(item.FileCount > 0 ? item.FileCount.ToString() : string.Empty);
                 row.SubItems.Add(item.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss"));
                 row.Tag = item;
@@ -457,7 +458,13 @@ namespace Clipman
 
         private void ListKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Alt && e.KeyCode == Keys.Enter)
+            if (e.Alt && e.KeyCode == Keys.O)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OpenOptionsMenu();
+            }
+            else if (e.Alt && e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
                 ShowEntryProperties();
@@ -632,6 +639,13 @@ namespace Clipman
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (e.Alt && e.KeyCode == Keys.O)
+            {
+                OpenOptionsMenu();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
             if (e.KeyCode == Keys.Apps || (e.Shift && e.KeyCode == Keys.F10))
             {
                 if (IsFileClipboardTabActive())
@@ -719,11 +733,8 @@ namespace Clipman
                 var key = keyData & Keys.KeyCode;
                 if (key == Keys.O)
                 {
-                    if (optionsMenuItem != null)
-                    {
-                        optionsMenuItem.ShowDropDown();
-                        return true;
-                    }
+                    OpenOptionsMenu();
+                    return true;
                 }
                 if (key == Keys.T)
                 {
@@ -750,6 +761,16 @@ namespace Clipman
         private void CloseHistoryWindow()
         {
             Hide();
+        }
+
+        private void OpenOptionsMenu()
+        {
+            if (optionsMenuItem == null) return;
+            menuStrip.Focus();
+            menuStrip.Select();
+            optionsMenuItem.Select();
+            optionsMenuItem.ShowDropDown();
+            statusText.Text = "Options menu.";
         }
 
         protected override void OnShown(EventArgs e)
@@ -922,7 +943,13 @@ namespace Clipman
 
         private void FileEventsListKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Enter)
+            if (e.Alt && e.KeyCode == Keys.O)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OpenOptionsMenu();
+            }
+            else if (e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
@@ -1034,10 +1061,11 @@ namespace Clipman
 
         private string FileClipboardEventDetails(ClipboardEventSummary item)
         {
+            NormalizeFileClipboardEvent(item);
             var lines = new List<string>();
             lines.Add("Captured: " + item.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss"));
             lines.Add("Source: " + (item.Source ?? string.Empty));
-            lines.Add("Operation: " + (item.Operation ?? string.Empty));
+            lines.Add("Operation: " + NormalizeDropEffectText(item.Operation));
             lines.Add("File count: " + item.FileCount);
             if (item.Formats != null && item.Formats.Count > 0)
             {
@@ -1055,11 +1083,13 @@ namespace Clipman
         private static string FileEventDisplayText(ClipboardEventSummary item)
         {
             if (item == null) return string.Empty;
+            NormalizeFileClipboardEvent(item);
             if (item.Files != null && item.Files.Count > 0)
             {
                 var first = Path.GetFileName(item.Files[0]);
                 if (string.IsNullOrWhiteSpace(first)) first = item.Files[0];
-                var operation = string.IsNullOrWhiteSpace(item.Operation) ? "Files" : item.Operation;
+                var operation = NormalizeDropEffectText(item.Operation);
+                if (string.IsNullOrWhiteSpace(operation)) operation = "Files";
                 var count = item.FileCount > 0 ? item.FileCount : item.Files.Count;
                 return operation + ", " + count + " file" + (count == 1 ? string.Empty : "s") + ", " + first;
             }
@@ -1070,6 +1100,33 @@ namespace Clipman
             }
 
             return "Non-text clipboard event";
+        }
+
+        private static void NormalizeFileClipboardEvent(ClipboardEventSummary item)
+        {
+            if (item == null) return;
+            item.Operation = NormalizeDropEffectText(item.Operation);
+            if (item.Formats == null || item.Formats.Count == 0) return;
+            for (var i = 0; i < item.Formats.Count; i++)
+            {
+                item.Formats[i] = NormalizeDropEffectText(item.Formats[i]);
+            }
+        }
+
+        private static string NormalizeDropEffectText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            return Regex.Replace(
+                text,
+                @"\b(?:Preferred\s+)?DropEffect\s*[:=]?\s*(\d+)\b",
+                match =>
+                {
+                    int value;
+                    if (!int.TryParse(match.Groups[1].Value, out value)) return match.Value;
+                    var description = ClipmanApplicationContext.DescribeDropEffect(value);
+                    return string.IsNullOrWhiteSpace(description) ? "No file operation" : description;
+                },
+                RegexOptions.IgnoreCase);
         }
 
         private void ApplyGroupFilter()

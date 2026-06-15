@@ -171,18 +171,32 @@ namespace Clipman
 
             preferencesForm = new PreferencesForm(settings, ApplyPreferences, CopySensitiveTextToClipboard);
             preferencesForm.FormClosed += (s, e) => preferencesForm = null;
-            if (historyForm != null && !historyForm.IsDisposed)
-            {
-                preferencesForm.Show(historyForm);
-            }
-            else
-            {
-                preferencesForm.Show();
-            }
+            preferencesForm.Show();
             FocusPreferencesForm();
         }
 
         private void FocusPreferencesForm()
+        {
+            if (preferencesForm == null || preferencesForm.IsDisposed) return;
+            FocusPreferencesFormNow();
+            BeginDelayedPreferencesFocus(80);
+            BeginDelayedPreferencesFocus(250);
+            BeginDelayedPreferencesFocus(600);
+        }
+
+        private void BeginDelayedPreferencesFocus(int delayMilliseconds)
+        {
+            var timer = new System.Windows.Forms.Timer { Interval = delayMilliseconds };
+            timer.Tick += (s, e) =>
+            {
+                timer.Stop();
+                timer.Dispose();
+                FocusPreferencesFormNow();
+            };
+            timer.Start();
+        }
+
+        private void FocusPreferencesFormNow()
         {
             if (preferencesForm == null || preferencesForm.IsDisposed) return;
             if (preferencesForm.WindowState == FormWindowState.Minimized)
@@ -193,12 +207,27 @@ namespace Clipman
             {
                 preferencesForm.Show();
             }
+            var handle = preferencesForm.Handle;
+            if (handle != IntPtr.Zero)
+            {
+                NativeMethods.ShowWindow(handle, NativeMethods.SW_RESTORE);
+                NativeMethods.SetForegroundWindow(handle);
+            }
+            preferencesForm.Activate();
+            preferencesForm.BringToFront();
+            preferencesForm.Focus();
             preferencesForm.BeginInvoke(new Action(() =>
             {
                 if (preferencesForm == null || preferencesForm.IsDisposed) return;
                 if (preferencesForm.WindowState == FormWindowState.Minimized)
                 {
                     preferencesForm.WindowState = FormWindowState.Normal;
+                }
+                var delayedHandle = preferencesForm.Handle;
+                if (delayedHandle != IntPtr.Zero)
+                {
+                    NativeMethods.ShowWindow(delayedHandle, NativeMethods.SW_RESTORE);
+                    NativeMethods.SetForegroundWindow(delayedHandle);
                 }
                 preferencesForm.Activate();
                 preferencesForm.BringToFront();
