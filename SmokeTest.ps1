@@ -614,7 +614,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual '<h2 id="contents">Contents</h2>' 'Manual table of contents'
     Assert-TextMatches $manual 'Project page: <a href="https://github.com/OnjLouis/Clipman">' 'Manual project page link'
     Assert-TextMatches $manual 'Remove URL tracking' 'Manual URL tracking documentation'
-    Assert-TextMatches $manual 'File history is session-only' 'Manual file-history session-only note'
+    Assert-TextMatches $manual 'machine-specific database named like <code>Settings\\Desktop-file-history\.clipdb</code>' 'Manual persistent file-history documentation'
+    Assert-TextMatches $manual 'Press <code>Del</code> to remove selected file-history events' 'Manual file-history delete shortcut'
+    Assert-TextMatches $manual 'remove file events where all referenced files and folders are now missing' 'Manual missing file cleanup documentation'
     Assert-TextMatches $manual 'Run Clipman at Windows startup' 'Manual startup documentation'
     Assert-TextMatches $manual 'Install updates silently when possible' 'Manual silent update documentation'
     Assert-TextMatches $manual 'Settings\\sounds' 'Manual user sound override documentation'
@@ -627,9 +629,17 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'During an online or automatic update' 'Manual seamless update explanation'
     Assert-TextMatches $manual 'Storage and Password' 'Manual storage/password tab documentation'
     Assert-TextMatches $manual 'Ctrl\+1</code> to <code>Ctrl\+4' 'Manual preferences tab shortcut documentation'
+    Assert-TextMatches $manual 'Close history or Preferences window' 'Manual Esc close shortcut documentation'
+    Assert-TextMatches $manual 'Ctrl\+Del' 'Manual file-history clear shortcut documentation'
+    Assert-TextMatches $manual 'Alt\+Del' 'Manual file-history remove-missing shortcut documentation'
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
     Assert-TextMatches $manual 'ascending and descending' 'Manual sort direction documentation'
+    Assert-TextMatches $manual '<h3>1\.5\.3</h3>' 'Manual 1.5.3 changelog'
+    Assert-TextMatches $manual 'Preferences now opens as an owned dialog' 'Manual 1.5.3 preferences ownership changelog'
+    Assert-TextMatches $manual 'Ctrl\+Del</code> clears file history' 'Manual 1.5.3 file history shortcut changelog'
+    Assert-TextMatches $manual '<h3>1\.5\.2</h3>' 'Manual 1.5.2 changelog'
+    Assert-TextMatches $manual 'persistent machine-specific File history storage' 'Manual persistent file history changelog'
     Assert-TextMatches $manual '<h3>1\.5\.1</h3>' 'Manual 1.5.1 changelog'
     Assert-TextMatches $manual 'Bundled factory sounds are now replaced cleanly' 'Manual factory sounds update cleanup changelog'
     Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/1">issue #1</a>' 'Manual issue #1 closure'
@@ -651,6 +661,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme '<code>Ctrl\+Alt\+`</code>' 'README backtick hotkey formatting'
     Assert-TextMatches $readme 'automatic update checks' 'README update preferences'
     Assert-TextMatches $readme 'Switch Preferences tabs' 'README preferences tab shortcut'
+    Assert-TextMatches $readme 'Close history or Preferences' 'README Esc close shortcut'
+    Assert-TextMatches $readme 'Ctrl\+Del' 'README file-history clear shortcut'
+    Assert-TextMatches $readme 'Alt\+Del' 'README file-history remove-missing shortcut'
     Assert-TextMatches $readme 'Storage and Password' 'README storage/password tab documentation'
     Assert-TextMatches $readme 'LICENSE\.txt' 'README license file documentation'
     Assert-TextMatches $readme 'Sort direction can be toggled' 'README sort direction documentation'
@@ -659,6 +672,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'start a copy from a different folder' 'README different folder takeover behavior'
     Assert-TextMatches $readme 'Multiple machines can write to the same history database' 'README shared history explanation'
     Assert-TextMatches $readme 'Optional history password encryption' 'README encryption documentation'
+    Assert-TextMatches $readme 'Desktop-file-history\.clipdb' 'README persistent file-history documentation'
+    Assert-TextMatches $readme 'remove file events where all referenced files or folders are now missing' 'README missing file cleanup documentation'
     Assert-TextMatches $readme 'deliberately ignores that generated password copy' 'README generated password documentation'
     Assert-TextMatches $readme 'old Clipman `clipman\.db` and Ditto SQLite databases' 'README SQLite import documentation'
     Assert-TextMatches $readme 'Press Backspace in the history list' 'README Backspace normal-entry shortcut'
@@ -670,9 +685,23 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'CleanupObsoleteFactorySoundBackups' 'Updater factory sound backup cleanup code'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'InstanceStateStore\.IsSameRunningFolder' 'Cross-folder instance takeover code'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ClipDatabaseFile\.IsEncryptedFile\(settings\.DatabasePath\)' 'Startup encrypted database detection'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DefaultFileHistoryDatabasePath\(\)' 'Machine-specific file history database path'
+    Assert-TextMatches (Join-Path $repoRoot 'src\FileClipboardEventStore.cs') 'FileClipboardDatabase' 'Persistent file history store'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'class ShortcutButton' 'Shortcut button accessible object'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'override string KeyboardShortcut' 'Shortcut button keyboard shortcut accessibility'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'ShortcutText = "Esc"' 'History close button shortcut accessibility'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'ShortcutText = "Esc"' 'Preferences close button shortcut accessibility'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ShowDialog\(historyForm\)' 'Preferences opens as owned modal dialog'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Clear file history' 'File history clear UI'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'Text = "Clear file history \(Ctrl\+Del\)"|Text = "Remove missing files \(Alt\+Del\)"' 'No visible shortcut captions on file history buttons'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Ctrl\+Del' 'File history clear shortcut exposure'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Remove missing file events' 'File history missing-file cleanup UI'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Alt\+Del' 'File history missing-file shortcut exposure'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Clear text &history' 'Clear text history menu item'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'CopySensitiveTextToClipboard' 'Sensitive clipboard copy suppression'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'LastPreferencesTab' 'Preferences tab persistence application'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'SelectPreferencesTabByShortcut' 'Preferences tab shortcut code'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Shortcut Ctrl\+1' 'Preferences tab shortcut accessibility text'
     Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'LastPreferencesTab' 'Preferences tab persistence setting'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'encryptDatabase|Clipboard\.SetText\(password\)' 'Preferences encryption checkbox and raw password clipboard copy'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'Logs\\\\Startup\.log' 'Startup failure log message'
@@ -759,6 +788,27 @@ internal static class ClipmanSmokeHarness
         }
         Assert(wrongPasswordRejected, "Encrypted .clipdb did not reject the wrong password.");
         File.Delete(encryptedPath);
+
+        var fileHistoryPath = Path.Combine(Path.GetTempPath(), "clipman-file-history-test-" + Guid.NewGuid().ToString("N") + ".clipdb");
+        ClipDatabaseFile.SaveAtomic(fileHistoryPath, new FileClipboardDatabase
+        {
+            Events =
+            {
+                new ClipboardEventSummary
+                {
+                    Source = "Smoke",
+                    SourceMachine = "TestMachine",
+                    Operation = "Copy",
+                    FileCount = 1,
+                    Files = { Path.Combine(Path.GetTempPath(), "example.txt") },
+                    Formats = { "FileDrop" }
+                }
+            }
+        }, password);
+        Assert(ClipDatabaseFile.IsEncryptedFile(fileHistoryPath), "Encrypted file-history .clipdb file was not recognized as encrypted.");
+        var fileHistoryLoaded = ClipDatabaseFile.Load<FileClipboardDatabase>(fileHistoryPath, password);
+        Assert(fileHistoryLoaded.Events.Count == 1 && fileHistoryLoaded.Events[0].Files.Count == 1, "File-history .clipdb round trip failed.");
+        File.Delete(fileHistoryPath);
 
         var oldClipmanDb = Path.Combine(Path.GetTempPath(), "clipman-old-" + Guid.NewGuid().ToString("N") + ".db");
         CreateOldClipmanDatabase(oldClipmanDb, "old Clipman import text");

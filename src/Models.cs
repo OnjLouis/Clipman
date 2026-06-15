@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web.Script.Serialization;
+using System.Windows.Forms;
 
 namespace Clipman
 {
@@ -40,6 +41,57 @@ namespace Clipman
             Version = 1;
             UpdatedUnixMs = TimeUtil.NowUnixMs();
             Entries = new List<ClipEntry>();
+        }
+    }
+
+    public sealed class ShortcutButton : Button
+    {
+        public string ShortcutText { get; set; }
+        public Keys ShortcutKeys { get; set; }
+
+        public ShortcutButton()
+        {
+            AccessibleRole = AccessibleRole.PushButton;
+        }
+
+        protected override AccessibleObject CreateAccessibilityInstance()
+        {
+            return new ShortcutButtonAccessibleObject(this);
+        }
+
+        private sealed class ShortcutButtonAccessibleObject : Control.ControlAccessibleObject
+        {
+            private readonly ShortcutButton owner;
+
+            public ShortcutButtonAccessibleObject(ShortcutButton owner)
+                : base(owner)
+            {
+                this.owner = owner;
+            }
+
+            public override string KeyboardShortcut
+            {
+                get
+                {
+                    return string.IsNullOrWhiteSpace(owner.ShortcutText)
+                        ? base.KeyboardShortcut
+                        : owner.ShortcutText;
+                }
+            }
+        }
+    }
+
+    public sealed class FileClipboardDatabase
+    {
+        public int Version { get; set; }
+        public long UpdatedUnixMs { get; set; }
+        public List<ClipboardEventSummary> Events { get; set; }
+
+        public FileClipboardDatabase()
+        {
+            Version = 1;
+            UpdatedUnixMs = TimeUtil.NowUnixMs();
+            Events = new List<ClipboardEventSummary>();
         }
     }
 
@@ -107,9 +159,11 @@ namespace Clipman
 
     public sealed class ClipboardEventSummary
     {
+        public string Id { get; set; }
         public DateTime CapturedAt { get; set; }
         public string Source { get; set; }
         public string Operation { get; set; }
+        public string SourceMachine { get; set; }
         public bool ContainsText { get; set; }
         public int FileCount { get; set; }
         public List<string> Files { get; set; }
@@ -117,8 +171,10 @@ namespace Clipman
 
         public ClipboardEventSummary()
         {
+            Id = Guid.NewGuid().ToString("N");
             Source = string.Empty;
             Operation = string.Empty;
+            SourceMachine = string.Empty;
             Files = new List<string>();
             Formats = new List<string>();
         }

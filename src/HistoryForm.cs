@@ -18,6 +18,10 @@ namespace Clipman
         private readonly Action<ClipEntry> copyEntry;
         private readonly Action<List<ClipEntry>> copyEntries;
         private readonly Func<List<ClipboardEventSummary>> recentClipboardEvents;
+        private readonly Func<List<string>, int> deleteRecentClipboardEvents;
+        private readonly Func<int> clearRecentClipboardEvents;
+        private readonly Func<int> removeMissingRecentClipboardEvents;
+        private readonly Func<bool> clearTextHistory;
         private readonly Action showPreferences;
         private readonly Action toggleActive;
         private readonly Action exitApp;
@@ -48,7 +52,7 @@ namespace Clipman
         private DateTime lastTypeSearchUtc = DateTime.MinValue;
         private bool updatingGroupFilter;
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeMissingRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
@@ -56,6 +60,10 @@ namespace Clipman
             this.copyEntry = copyEntry;
             this.copyEntries = copyEntries;
             this.recentClipboardEvents = recentClipboardEvents;
+            this.deleteRecentClipboardEvents = deleteRecentClipboardEvents;
+            this.clearRecentClipboardEvents = clearRecentClipboardEvents;
+            this.removeMissingRecentClipboardEvents = removeMissingRecentClipboardEvents;
+            this.clearTextHistory = clearTextHistory;
             this.showPreferences = showPreferences;
             this.toggleActive = toggleActive;
             this.exitApp = exitApp;
@@ -112,6 +120,7 @@ namespace Clipman
             groupFilter.Leave += (s, e) => ApplyGroupFilter();
             filterPanel.Controls.Add(groupLabel);
             filterPanel.Controls.Add(groupFilter);
+            filterPanel.Controls.Add(CreateCloseButton());
 
             list = new ListView
             {
@@ -144,9 +153,9 @@ namespace Clipman
                 View = View.Details,
                 FullRowSelect = true,
                 HideSelection = false,
-                MultiSelect = false,
+                MultiSelect = true,
                 AccessibleName = "File history",
-                AccessibleDescription = "Recent file and non-text clipboard events. Press Enter on a file event to put its files back on the clipboard."
+                AccessibleDescription = "Recent file and non-text clipboard events. Press Enter on a file event to put its files back on the clipboard. Press Delete to remove selected events, Control Delete to clear file history, or Alt Delete to remove missing file events."
             };
             fileEventsList.Columns.Add("Event", 420);
             fileEventsList.Columns.Add("Source", 120);
@@ -157,7 +166,39 @@ namespace Clipman
             fileEventsList.DoubleClick += (s, e) => RestoreSelectedFileClipboardEvent();
             fileEventsContextMenu = BuildFileEventsContextMenu();
             fileEventsList.ContextMenuStrip = fileEventsContextMenu;
+            var fileActionsPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 34,
+                FlowDirection = FlowDirection.LeftToRight,
+                Padding = new Padding(8, 5, 0, 0),
+                TabIndex = 1
+            };
+            var clearFileHistoryButton = new ShortcutButton
+            {
+                Text = "Clear file history",
+                ShortcutText = "Ctrl+Del",
+                ShortcutKeys = Keys.Control | Keys.Delete,
+                Width = 130,
+                AccessibleName = "Clear file history",
+                AccessibleDescription = "Clears all file-history events. Shortcut Control Delete."
+            };
+            clearFileHistoryButton.Click += (s, e) => ClearFileClipboardHistory();
+            var removeMissingButton = new ShortcutButton
+            {
+                Text = "Remove missing files",
+                ShortcutText = "Alt+Del",
+                ShortcutKeys = Keys.Alt | Keys.Delete,
+                Width = 150,
+                AccessibleName = "Remove missing file events",
+                AccessibleDescription = "Removes file-history events where all referenced files or folders are missing. Shortcut Alt Delete."
+            };
+            removeMissingButton.Click += (s, e) => RemoveMissingFileClipboardEvents();
+            fileActionsPanel.Controls.Add(clearFileHistoryButton);
+            fileActionsPanel.Controls.Add(removeMissingButton);
+            fileActionsPanel.Controls.Add(CreateCloseButton());
             fileTab.Controls.Add(fileEventsList);
+            fileTab.Controls.Add(fileActionsPanel);
 
             tabs.TabPages.Add(mainTab);
             tabs.TabPages.Add(fileTab);
@@ -175,6 +216,21 @@ namespace Clipman
             Reload();
         }
 
+        private ShortcutButton CreateCloseButton()
+        {
+            var closeButton = new ShortcutButton
+            {
+                Text = "Close",
+                ShortcutText = "Esc",
+                ShortcutKeys = Keys.Escape,
+                Width = 80,
+                AccessibleName = "Close",
+                AccessibleDescription = "Closes the history window. Shortcut Escape."
+            };
+            closeButton.Click += (s, e) => CloseHistoryWindow();
+            return closeButton;
+        }
+
         public void Reload()
         {
             Reload(null, -1);
@@ -182,9 +238,16 @@ namespace Clipman
 
         public void RefreshFileClipboardEvents()
         {
+            RefreshFileClipboardEvents(-1);
+        }
+
+        private void RefreshFileClipboardEvents(int preferredIndex)
+        {
             if (fileEventsList == null) return;
             var events = recentClipboardEvents == null ? new List<ClipboardEventSummary>() : recentClipboardEvents() ?? new List<ClipboardEventSummary>();
-            var selectedIndex = fileEventsList.SelectedIndices.Count > 0 ? fileEventsList.SelectedIndices[0] : -1;
+            var selectedIndex = preferredIndex >= 0
+                ? preferredIndex
+                : fileEventsList.SelectedIndices.Count > 0 ? fileEventsList.SelectedIndices[0] : -1;
             fileEventsList.BeginUpdate();
             fileEventsList.Items.Clear();
             foreach (var item in events)
@@ -202,9 +265,11 @@ namespace Clipman
             fileEventsList.EndUpdate();
             if (fileEventsList.Items.Count > 0)
             {
-                if (selectedIndex < 0 || selectedIndex >= fileEventsList.Items.Count) selectedIndex = 0;
+                if (selectedIndex < 0) selectedIndex = 0;
+                if (selectedIndex >= fileEventsList.Items.Count) selectedIndex = fileEventsList.Items.Count - 1;
                 fileEventsList.Items[selectedIndex].Selected = true;
                 fileEventsList.Items[selectedIndex].Focused = true;
+                fileEventsList.Items[selectedIndex].EnsureVisible();
             }
         }
 
@@ -293,6 +358,8 @@ namespace Clipman
             file.DropDownItems.Add("&Import...", null, (s, e) => Import(false));
             file.DropDownItems.Add("Import and &replace...", null, (s, e) => Import(true));
             file.DropDownItems.Add("&Export...", null, (s, e) => Export());
+            file.DropDownItems.Add("-");
+            file.DropDownItems.Add("Clear text &history...", null, (s, e) => ClearTextClipboardHistory());
             file.DropDownItems.Add("-");
             file.DropDownItems.Add("&Close\tEsc", null, (s, e) => CloseHistoryWindow());
             file.DropDownItems.Add("E&xit", null, (s, e) => exitApp());
@@ -388,6 +455,11 @@ namespace Clipman
                 copyPaths.Enabled = hasFiles;
                 var details = edit.DropDownItems.Add("&View event details\tF4", null, (s, e) => ViewSelectedFileClipboardEvent());
                 details.Enabled = item != null;
+                var delete = edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelectedFileClipboardEvent());
+                delete.Enabled = item != null;
+                edit.DropDownItems.Add("-");
+                edit.DropDownItems.Add("&Remove missing file events\tAlt+Del", null, (s, e) => RemoveMissingFileClipboardEvents());
+                edit.DropDownItems.Add("&Clear file history...\tCtrl+Del", null, (s, e) => ClearFileClipboardHistory());
                 return;
             }
 
@@ -454,6 +526,11 @@ namespace Clipman
             copyPaths.Enabled = hasFiles;
             var details = menu.Items.Add("&View event details\tF4", null, (sender, args) => ViewSelectedFileClipboardEvent());
             details.Enabled = item != null;
+            var delete = menu.Items.Add("&Delete selected\tDel", null, (sender, args) => DeleteSelectedFileClipboardEvent());
+            delete.Enabled = item != null;
+            menu.Items.Add("-");
+            menu.Items.Add("&Remove missing file events\tAlt+Del", null, (sender, args) => RemoveMissingFileClipboardEvents());
+            menu.Items.Add("&Clear file history...\tCtrl+Del", null, (sender, args) => ClearFileClipboardHistory());
         }
 
         private void ListKeyDown(object sender, KeyEventArgs e)
@@ -708,6 +785,11 @@ namespace Clipman
             if ((keyData & Keys.Control) == Keys.Control)
             {
                 var key = keyData & Keys.KeyCode;
+                if (IsFileClipboardTabActive() && key == Keys.Delete)
+                {
+                    ClearFileClipboardHistory();
+                    return true;
+                }
                 if (key == Keys.Tab)
                 {
                     SelectNextTab((keyData & Keys.Shift) != Keys.Shift);
@@ -718,6 +800,11 @@ namespace Clipman
             if ((keyData & Keys.Alt) == Keys.Alt)
             {
                 var key = keyData & Keys.KeyCode;
+                if (IsFileClipboardTabActive() && key == Keys.Delete)
+                {
+                    RemoveMissingFileClipboardEvents();
+                    return true;
+                }
                 if (key == Keys.T)
                 {
                     SelectMainTab();
@@ -921,11 +1008,29 @@ namespace Clipman
                 e.SuppressKeyPress = true;
                 RestoreSelectedFileClipboardEvent(true);
             }
+            else if (e.Control && e.KeyCode == Keys.Delete)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                ClearFileClipboardHistory();
+            }
+            else if (e.Alt && e.KeyCode == Keys.Delete)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                RemoveMissingFileClipboardEvents();
+            }
             else if (e.Control && e.KeyCode == Keys.C)
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
                 CopySelectedFileClipboardPaths();
+            }
+            else if (e.KeyCode == Keys.Delete)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                DeleteSelectedFileClipboardEvent();
             }
             else if (e.Modifiers == Keys.None && e.KeyCode == Keys.F4)
             {
@@ -1017,6 +1122,53 @@ namespace Clipman
             {
                 viewer.ShowDialog(this);
             }
+        }
+
+        private void DeleteSelectedFileClipboardEvent()
+        {
+            if (fileEventsList == null || fileEventsList.SelectedItems.Count == 0) return;
+            var preferredIndex = fileEventsList.SelectedItems[0].Index;
+            var ids = fileEventsList.SelectedItems.Cast<ListViewItem>()
+                .Select(i => i.Tag as ClipboardEventSummary)
+                .Where(e => e != null && !string.IsNullOrWhiteSpace(e.Id))
+                .Select(e => e.Id)
+                .ToList();
+            var removed = deleteRecentClipboardEvents == null ? 0 : deleteRecentClipboardEvents(ids);
+            RefreshFileClipboardEvents(preferredIndex);
+            statusText.Text = removed == 1 ? "Deleted one file history event." : "Deleted " + removed + " file history events.";
+        }
+
+        private void ClearFileClipboardHistory()
+        {
+            if (MessageBox.Show(
+                this,
+                "Clear file history?\r\n\r\nThis removes remembered file and non-text clipboard events from this computer. It does not delete any files from disk.",
+                "Clear file history",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            var removed = clearRecentClipboardEvents == null ? 0 : clearRecentClipboardEvents();
+            RefreshFileClipboardEvents(0);
+            statusText.Text = removed == 1 ? "Cleared one file history event." : "Cleared " + removed + " file history events.";
+        }
+
+        private void RemoveMissingFileClipboardEvents()
+        {
+            var removed = removeMissingRecentClipboardEvents == null ? 0 : removeMissingRecentClipboardEvents();
+            RefreshFileClipboardEvents();
+            statusText.Text = removed == 1 ? "Removed one missing file event." : "Removed " + removed + " missing file events.";
+        }
+
+        private void ClearTextClipboardHistory()
+        {
+            if (clearTextHistory == null) return;
+            if (!clearTextHistory()) return;
+            Reload(null, 0);
+            statusText.Text = "Cleared text clipboard history.";
         }
 
         private ClipboardEventSummary SelectedFileClipboardEvent()

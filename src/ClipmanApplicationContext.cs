@@ -35,10 +35,9 @@ namespace Clipman
         private FileSystemWatcher executableWatcher;
         private System.Threading.Timer sharedStateTimer;
         private System.Threading.Timer updateCheckTimer;
-        private readonly List<ClipboardEventSummary> recentClipboardEvents = new List<ClipboardEventSummary>();
-        private readonly object recentClipboardEventsLock = new object();
         private AppSettings settings;
         private ClipStore store;
+        private FileClipboardEventStore fileEventStore;
         private HistoryForm historyForm;
         private PreferencesForm preferencesForm;
         private bool ignoreNextClipboardChange;
@@ -58,6 +57,8 @@ namespace Clipman
             sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
             store = new ClipStore(settings.DatabasePath, CurrentDatabasePassword);
             store.Changed += StoreChanged;
+            fileEventStore = new FileClipboardEventStore(settingsStore.DefaultFileHistoryDatabasePath(), CurrentDatabasePassword);
+            fileEventStore.Changed += FileEventStoreChanged;
 
             invoker = new Control();
             invoker.CreateControl();
@@ -103,7 +104,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveMissingRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
                 created = true;
             }
 
@@ -158,22 +159,21 @@ namespace Clipman
 
         public void ShowPreferences()
         {
-            var open = Application.OpenForms.Cast<Form>().OfType<PreferencesForm>().FirstOrDefault();
-            if (open != null && !open.IsDisposed)
-            {
-                preferencesForm = open;
-            }
-
             if (preferencesForm != null && !preferencesForm.IsDisposed)
             {
                 FocusPreferencesForm();
                 return;
             }
 
+            if (historyForm == null || historyForm.IsDisposed || !historyForm.Visible)
+            {
+                ShowHistory();
+            }
+
             preferencesForm = new PreferencesForm(settings, ApplyPreferences, CopySensitiveTextToClipboard);
             preferencesForm.FormClosed += (s, e) => preferencesForm = null;
-            preferencesForm.Show();
-            FocusPreferencesForm();
+            preferencesForm.ShowDialog(historyForm);
+            preferencesForm = null;
         }
 
         private void FocusPreferencesForm()
@@ -206,7 +206,7 @@ namespace Clipman
             }
             if (!preferencesForm.Visible)
             {
-                preferencesForm.Show();
+                return;
             }
             var handle = preferencesForm.Handle;
             if (handle != IntPtr.Zero)
@@ -294,6 +294,7 @@ namespace Clipman
             {
                 ResolveDatabasePassword();
                 store.ChangeDatabasePassword();
+                fileEventStore.ChangeDatabasePassword();
             }
             RegisterHotkeys();
             if (startupChanged)
@@ -440,53 +441,72 @@ namespace Clipman
             }
 
             if (summary == null) return;
-            lock (recentClipboardEventsLock)
-            {
-                var existingIndex = recentClipboardEvents.FindIndex(item => SameFileClipboardEvent(item, summary));
-                if (existingIndex >= 0)
-                {
-                    recentClipboardEvents.RemoveAt(existingIndex);
-                }
-                recentClipboardEvents.Insert(0, summary);
-                if (recentClipboardEvents.Count > 25)
-                {
-                    recentClipboardEvents.RemoveRange(25, recentClipboardEvents.Count - 25);
-                }
-            }
-
-            if (historyForm != null && !historyForm.IsDisposed)
-            {
-                historyForm.BeginInvoke(new Action(() => historyForm.RefreshFileClipboardEvents()));
-            }
-        }
-
-        private static bool SameFileClipboardEvent(ClipboardEventSummary left, ClipboardEventSummary right)
-        {
-            if (left == null || right == null) return false;
-            if (left.Files == null || right.Files == null) return false;
-            if (left.Files.Count != right.Files.Count) return false;
-            if (left.Files.Count == 0) return false;
-
-            var leftFiles = left.Files
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Select(path => path.Trim())
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var rightFiles = right.Files
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Select(path => path.Trim())
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            return leftFiles.SequenceEqual(rightFiles, StringComparer.OrdinalIgnoreCase);
+            fileEventStore.Add(summary);
         }
 
         private List<ClipboardEventSummary> GetRecentClipboardEvents()
         {
-            lock (recentClipboardEventsLock)
+            return fileEventStore.GetEvents();
+        }
+
+        private int DeleteRecentClipboardEvents(List<string> ids)
+        {
+            return fileEventStore.DeleteMany(ids);
+        }
+
+        private int ClearRecentClipboardEvents()
+        {
+            return fileEventStore.Clear();
+        }
+
+        private int RemoveMissingRecentClipboardEvents()
+        {
+            return fileEventStore.RemoveMissingFileEvents();
+        }
+
+        private bool ClearTextHistory()
+        {
+            var password = CurrentDatabasePassword();
+            if (!string.IsNullOrEmpty(password))
             {
-                return recentClipboardEvents.Select(CloneClipboardEvent).ToList();
+                var entered = PasswordPromptForm.Ask(
+                    "Clear Clipman history",
+                    "Enter the history password to clear all saved text clipboard entries.");
+                if (!string.Equals(entered, password, StringComparison.Ordinal))
+                {
+                    MessageBox.Show("The history password did not match. Clipboard history was not cleared.", "Clipman", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
             }
+
+            var message =
+                "Clear all saved text clipboard history?" +
+                Environment.NewLine +
+                Environment.NewLine +
+                "This will remove every text entry from the current Clipman database. A timestamped backup will be created first.";
+            if (MessageBox.Show(message, "Clear Clipman history", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            {
+                return false;
+            }
+
+            BackupDatabase(settings.DatabasePath, "before-clear-history");
+            store.ReplaceAll(new List<ClipEntry>());
+            return true;
+        }
+
+        private static void BackupDatabase(string databasePath, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(databasePath) || !File.Exists(databasePath)) return;
+            var directory = Path.GetDirectoryName(databasePath);
+            var name = Path.GetFileNameWithoutExtension(databasePath);
+            var extension = Path.GetExtension(databasePath);
+            if (string.IsNullOrEmpty(directory)) directory = AppDomain.CurrentDomain.BaseDirectory;
+            if (string.IsNullOrEmpty(name)) name = "clipman-history";
+            if (string.IsNullOrEmpty(extension)) extension = ".clipdb";
+            var safeReason = string.IsNullOrWhiteSpace(reason) ? "backup" : reason.Trim();
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var backupPath = Path.Combine(directory, name + "." + safeReason + "-" + stamp + extension);
+            File.Copy(databasePath, backupPath, false);
         }
 
         private static ClipboardEventSummary CloneClipboardEvent(ClipboardEventSummary source)
@@ -494,9 +514,11 @@ namespace Clipman
             if (source == null) return null;
             return new ClipboardEventSummary
             {
+                Id = source.Id,
                 CapturedAt = source.CapturedAt,
                 Source = source.Source ?? string.Empty,
                 Operation = source.Operation ?? string.Empty,
+                SourceMachine = source.SourceMachine ?? string.Empty,
                 ContainsText = source.ContainsText,
                 FileCount = source.FileCount,
                 Files = source.Files == null ? new List<string>() : source.Files.ToList(),
@@ -520,6 +542,7 @@ namespace Clipman
             {
                 CapturedAt = DateTime.Now,
                 Source = FriendlyProcessName(sourceProcessName),
+                SourceMachine = Environment.MachineName ?? string.Empty,
                 ContainsText = hasText,
                 Formats = formats.ToList(),
                 Operation = ClipboardDropEffect(data)
@@ -705,6 +728,9 @@ namespace Clipman
                 "Database path type: " + (settings.UseDefaultDatabasePath ? "Default beside Clipman" : "Explicit") + "\r\n" +
                 "Database storage status: " + (string.IsNullOrWhiteSpace(store.LastStorageError) ? "OK" : "Unavailable: " + store.LastStorageError) + "\r\n" +
                 "Entries: " + store.GetEntries().Count + "\r\n" +
+                "File history path: " + fileEventStore.DatabasePath + "\r\n" +
+                "File history storage status: " + (string.IsNullOrWhiteSpace(fileEventStore.LastStorageError) ? "OK" : "Unavailable: " + fileEventStore.LastStorageError) + "\r\n" +
+                "File history events: " + fileEventStore.GetEvents().Count + "\r\n" +
                 "Show history hotkey: " + settings.ShowHistoryHotkey + " (" + (showHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle hotkey: " + settings.ToggleActiveHotkey + " (" + (toggleHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle alternate UK key: " + (toggleAlternateHotkeyRegistered ? "registered" : "not registered or not needed") + "\r\n" +
@@ -733,18 +759,14 @@ namespace Clipman
 
         private string BuildRecentClipboardEventsText()
         {
-            List<ClipboardEventSummary> snapshots;
-            lock (recentClipboardEventsLock)
-            {
-                snapshots = recentClipboardEvents.ToList();
-            }
+            var snapshots = fileEventStore.GetEvents();
 
             if (snapshots.Count == 0)
             {
-                return "Recent non-text clipboard events: none recorded.";
+                return "File and non-text clipboard events: none recorded.";
             }
 
-            var lines = new List<string> { "Recent non-text clipboard events:" };
+            var lines = new List<string> { "File and non-text clipboard events:" };
             foreach (var item in snapshots)
             {
                 var title = item.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss") +
@@ -791,6 +813,14 @@ namespace Clipman
             }
         }
 
+        private void FileEventStoreChanged(object sender, EventArgs e)
+        {
+            if (historyForm != null && !historyForm.IsDisposed)
+            {
+                historyForm.BeginInvoke(new Action(() => historyForm.RefreshFileClipboardEvents()));
+            }
+        }
+
         private string TrayText()
         {
             return settings.Active ? "Clipman: on" : "Clipman: off";
@@ -824,6 +854,7 @@ namespace Clipman
                 notifyIcon.Visible = false;
                 notifyIcon.Dispose();
                 store.Dispose();
+                fileEventStore.Dispose();
                 messageWindow.DestroyHandle();
             }
             base.Dispose(disposing);
@@ -1000,6 +1031,7 @@ namespace Clipman
         private void ResolveDatabasePassword()
         {
             var databaseIsEncrypted = false;
+            var fileHistoryIsEncrypted = false;
             try
             {
                 databaseIsEncrypted = ClipDatabaseFile.IsEncryptedFile(settings.DatabasePath);
@@ -1007,8 +1039,15 @@ namespace Clipman
             catch
             {
             }
+            try
+            {
+                fileHistoryIsEncrypted = ClipDatabaseFile.IsEncryptedFile(settingsStore.DefaultFileHistoryDatabasePath());
+            }
+            catch
+            {
+            }
 
-            if (!databaseIsEncrypted && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 settings.DatabaseEncryptionEnabled = false;
                 return;
@@ -1027,7 +1066,7 @@ namespace Clipman
                 }
             }
 
-            if (!databaseIsEncrypted)
+            if (!databaseIsEncrypted && !fileHistoryIsEncrypted)
             {
                 settings.DatabaseEncryptionEnabled = false;
                 settings.ProtectedDatabasePassword = string.Empty;

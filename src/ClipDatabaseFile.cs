@@ -27,9 +27,14 @@ namespace Clipman
 
         public static ClipDatabase Load(string path, string password)
         {
+            return Load<ClipDatabase>(path, password);
+        }
+
+        public static T Load<T>(string path, string password) where T : new()
+        {
             if (!File.Exists(path))
             {
-                return new ClipDatabase();
+                return new T();
             }
 
             string text;
@@ -41,7 +46,7 @@ namespace Clipman
             {
                 text = IsCompressedPath(path) ? ReadCompressedText(path) : File.ReadAllText(path, Encoding.UTF8);
             }
-            return JsonUtil.Deserialize<ClipDatabase>(text);
+            return JsonUtil.Deserialize<T>(text);
         }
 
         public static void SaveAtomic(string path, ClipDatabase database)
@@ -50,6 +55,11 @@ namespace Clipman
         }
 
         public static void SaveAtomic(string path, ClipDatabase database, string password)
+        {
+            SaveAtomic<ClipDatabase>(path, database, password);
+        }
+
+        public static void SaveAtomic<T>(string path, T database, string password) where T : new()
         {
             if (!string.IsNullOrEmpty(password) && IsCompressedPath(path))
             {
@@ -124,7 +134,7 @@ namespace Clipman
             return true;
         }
 
-        private static void WriteCompressedPayload(Stream output, ClipDatabase database)
+        private static void WriteCompressedPayload<T>(Stream output, T database) where T : new()
         {
             output.Write(CompressedMagic, 0, CompressedMagic.Length);
             using (var gzip = new GZipStream(output, CompressionMode.Compress, true))
@@ -134,7 +144,7 @@ namespace Clipman
             }
         }
 
-        private static void SaveCompressedAtomic(string path, ClipDatabase database)
+        private static void SaveCompressedAtomic<T>(string path, T database) where T : new()
         {
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir))
@@ -203,7 +213,7 @@ namespace Clipman
             }
         }
 
-        private static void SaveEncryptedAtomic(string path, ClipDatabase database, string password)
+        private static void SaveEncryptedAtomic<T>(string path, T database, string password) where T : new()
         {
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir))

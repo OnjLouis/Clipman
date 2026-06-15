@@ -130,6 +130,11 @@ namespace Clipman
             return Path.Combine(SettingsDirectory, "clipman-history.clipdb");
         }
 
+        public string DefaultFileHistoryDatabasePath()
+        {
+            return Path.Combine(SettingsDirectory, MachineNameSafe() + "-file-history.clipdb");
+        }
+
         private bool ShouldTreatAsDefaultDatabasePath(string databasePath)
         {
             if (string.IsNullOrWhiteSpace(databasePath)) return true;
@@ -168,6 +173,11 @@ namespace Clipman
 
         private static string MachineSettingsFileName()
         {
+            return MachineNameSafe() + "-settings.json";
+        }
+
+        private static string MachineNameSafe()
+        {
             var name = Environment.MachineName;
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -181,7 +191,7 @@ namespace Clipman
                 safe = "ThisComputer";
             }
 
-            return safe + "-settings.json";
+            return safe;
         }
     }
 }

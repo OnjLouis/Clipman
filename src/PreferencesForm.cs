@@ -29,7 +29,7 @@ namespace Clipman
         private readonly TextBox databasePasswordConfirm;
         private readonly CheckBox showDatabasePassword;
         private readonly Action<string> copySensitiveText;
-        private readonly Button closeButton;
+        private readonly ShortcutButton closeButton;
         private readonly NumericUpDown maxHistoryEntries;
         private readonly NumericUpDown maxHistoryDays;
         private readonly TextBox ignoredProcesses;
@@ -62,13 +62,18 @@ namespace Clipman
                 Width = 760,
                 Height = 515,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom,
-                AccessibleName = "Preference sections"
+                AccessibleName = "Preference sections",
+                AccessibleDescription = "Preference sections. Press Control 1 through Control 4 to switch tabs."
             };
 
             var general = new TabPage("General");
             var hotkeys = new TabPage("Hotkeys");
             var storage = new TabPage("Storage and Password");
             var integration = new TabPage("Startup and updates");
+            general.AccessibleDescription = "General preferences. Shortcut Ctrl+1.";
+            hotkeys.AccessibleDescription = "Hotkeys preferences. Shortcut Ctrl+2.";
+            storage.AccessibleDescription = "Storage and Password preferences. Shortcut Ctrl+3.";
+            integration.AccessibleDescription = "Startup and updates preferences. Shortcut Ctrl+4.";
 
             active = NewCheckBox("Clipboard monitoring &active", settings.Active);
             soundsEnabled = NewCheckBox("&Play sounds", settings.SoundsEnabled);
@@ -187,17 +192,22 @@ namespace Clipman
             preferencesTabs.SelectedIndexChanged += (s, e) => ApplyNow();
             Controls.Add(preferencesTabs);
 
-            closeButton = new Button
+            closeButton = new ShortcutButton
             {
                 Text = "Close",
+                ShortcutText = "Esc",
+                ShortcutKeys = Keys.Escape,
                 Left = 690,
                 Top = 535,
                 Width = 80,
-                Anchor = AnchorStyles.Right | AnchorStyles.Bottom
+                Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+                AccessibleName = "Close",
+                AccessibleDescription = "Closes Preferences. Shortcut Escape."
             };
             closeButton.Click += (s, e) => Close();
             Controls.Add(closeButton);
             AcceptButton = closeButton;
+            CancelButton = closeButton;
 
             WireLiveEvents();
             loading = false;
