@@ -62,6 +62,8 @@ By default Clipman stores machine-specific settings and shared history in a `Set
 
 To share a database between machines, open Options > Preferences on each machine and set the database file to the same synced or network-shared `.clipdb` path. When that file changes, Clipman reloads it without needing to restart.
 
+If the shared database file is missing but its folder is available, Clipman creates it when it next saves. If the folder or drive is temporarily unavailable, Clipman keeps running and reports the storage problem in diagnostics; when the location returns, it merges the existing database before saving.
+
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
 
 Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. Clipman protects saved passwords with Windows for the current user and machine, so copying a settings file to another computer does not copy a working key. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.

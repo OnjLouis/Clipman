@@ -516,17 +516,30 @@ namespace Clipman
                 if (stream == null || stream.Length < 4) return string.Empty;
                 var bytes = stream.ToArray();
                 var value = BitConverter.ToInt32(bytes, 0);
-                switch (value)
-                {
-                    case 1: return "Copy";
-                    case 2: return "Move";
-                    case 4: return "Link";
-                    default: return "DropEffect " + value;
-                }
+                return DescribeDropEffect(value);
             }
             catch
             {
                 return string.Empty;
+            }
+        }
+
+        internal static string DescribeDropEffect(int value)
+        {
+            var parts = new List<string>();
+            if ((value & 1) == 1) parts.Add("Copy");
+            if ((value & 2) == 2) parts.Add("Move");
+            if ((value & 4) == 4) parts.Add("Link");
+            var knownBits = value & 7;
+            if (parts.Count > 0 && knownBits == value)
+            {
+                return string.Join(" or ", parts);
+            }
+
+            switch (value)
+            {
+                case 0: return string.Empty;
+                default: return "Unknown operation " + value;
             }
         }
 
@@ -658,6 +671,7 @@ namespace Clipman
                 "Active: " + settings.Active + "\r\n" +
                 "Sounds enabled: " + settings.SoundsEnabled + "\r\n" +
                 "Database path: " + settings.DatabasePath + "\r\n" +
+                "Database storage status: " + (string.IsNullOrWhiteSpace(store.LastStorageError) ? "OK" : "Unavailable: " + store.LastStorageError) + "\r\n" +
                 "Entries: " + store.GetEntries().Count + "\r\n" +
                 "Show history hotkey: " + settings.ShowHistoryHotkey + " (" + (showHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle hotkey: " + settings.ToggleActiveHotkey + " (" + (toggleHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +

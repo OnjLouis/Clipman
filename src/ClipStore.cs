@@ -13,10 +13,12 @@ namespace Clipman
         private Timer reloadTimer;
         private ClipDatabase database = new ClipDatabase();
         private Func<string> passwordProvider;
+        private bool storageUnavailable;
 
         public event EventHandler Changed;
 
         public string DatabasePath { get; private set; }
+        public string LastStorageError { get; private set; }
 
         public ClipStore(string databasePath) : this(databasePath, string.Empty)
         {
@@ -582,16 +584,48 @@ namespace Clipman
         private void LoadLocked()
         {
             var password = CurrentPassword();
-            SyncConflictResolver.ResolveDatabaseConflicts(DatabasePath, password);
-            database = ClipDatabaseFile.Load(DatabasePath, password);
-            if (database.Entries == null) database.Entries = new List<ClipEntry>();
-            NormalizeManualOrderLocked();
+            try
+            {
+                SyncConflictResolver.ResolveDatabaseConflicts(DatabasePath, password);
+                database = ClipDatabaseFile.Load(DatabasePath, password);
+                if (database.Entries == null) database.Entries = new List<ClipEntry>();
+                NormalizeManualOrderLocked();
+                storageUnavailable = false;
+                LastStorageError = string.Empty;
+            }
+            catch (Exception ex)
+            {
+                if (!IsStorageAccessException(ex)) throw;
+                database = new ClipDatabase();
+                storageUnavailable = true;
+                LastStorageError = ex.Message;
+            }
         }
 
         private void SaveLocked()
         {
             database.UpdatedUnixMs = TimeUtil.NowUnixMs();
-            ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
+            try
+            {
+                if (storageUnavailable)
+                {
+                    MergeExistingDatabaseIfAvailableLocked();
+                }
+
+                ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
+                storageUnavailable = false;
+                LastStorageError = string.Empty;
+                if (watcher == null)
+                {
+                    ResetWatcherLocked();
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!IsStorageAccessException(ex)) throw;
+                storageUnavailable = true;
+                LastStorageError = ex.Message;
+            }
         }
 
         private string CurrentPassword()
@@ -645,26 +679,39 @@ namespace Clipman
         {
             if (watcher != null) watcher.Dispose();
             if (reloadTimer != null) reloadTimer.Dispose();
+            watcher = null;
+            reloadTimer = null;
 
             var dir = Path.GetDirectoryName(DatabasePath);
             var file = Path.GetFileName(DatabasePath);
             if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(file))
             {
-                watcher = null;
-                reloadTimer = null;
                 return;
             }
 
-            Directory.CreateDirectory(dir);
-            reloadTimer = new Timer(delegate { ReloadFromWatcher(); }, null, Timeout.Infinite, Timeout.Infinite);
-            watcher = new FileSystemWatcher(dir, file)
+            try
             {
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName | NotifyFilters.CreationTime
-            };
-            watcher.Changed += WatcherChanged;
-            watcher.Created += WatcherChanged;
-            watcher.Renamed += WatcherChanged;
-            watcher.EnableRaisingEvents = true;
+                Directory.CreateDirectory(dir);
+                reloadTimer = new Timer(delegate { ReloadFromWatcher(); }, null, Timeout.Infinite, Timeout.Infinite);
+                watcher = new FileSystemWatcher(dir, file)
+                {
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName | NotifyFilters.CreationTime
+                };
+                watcher.Changed += WatcherChanged;
+                watcher.Created += WatcherChanged;
+                watcher.Renamed += WatcherChanged;
+                watcher.EnableRaisingEvents = true;
+            }
+            catch (Exception ex)
+            {
+                if (!IsStorageAccessException(ex)) throw;
+                storageUnavailable = true;
+                LastStorageError = ex.Message;
+                if (watcher != null) watcher.Dispose();
+                if (reloadTimer != null) reloadTimer.Dispose();
+                watcher = null;
+                reloadTimer = null;
+            }
         }
 
         private void WatcherChanged(object sender, FileSystemEventArgs e)
@@ -730,6 +777,37 @@ namespace Clipman
         private static bool IsProtected(ClipEntry entry)
         {
             return entry != null && (entry.Pinned || !string.IsNullOrWhiteSpace(entry.Name));
+        }
+
+        private void MergeExistingDatabaseIfAvailableLocked()
+        {
+            if (!File.Exists(DatabasePath)) return;
+            var existing = ClipDatabaseFile.Load(DatabasePath, CurrentPassword());
+            if (existing == null || existing.Entries == null || existing.Entries.Count == 0) return;
+
+            foreach (var entry in existing.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
+            {
+                if (database.Entries.Any(e =>
+                    (!string.IsNullOrEmpty(e.Id) && string.Equals(e.Id, entry.Id, StringComparison.Ordinal)) ||
+                    string.Equals(e.Text, entry.Text, StringComparison.Ordinal)))
+                {
+                    continue;
+                }
+
+                database.Entries.Add(Clone(entry));
+            }
+
+            NormalizeManualOrderLocked();
+        }
+
+        private static bool IsStorageAccessException(Exception ex)
+        {
+            return ex is IOException ||
+                   ex is UnauthorizedAccessException ||
+                   ex is DirectoryNotFoundException ||
+                   ex is PathTooLongException ||
+                   ex is NotSupportedException ||
+                   ex is System.Security.SecurityException;
         }
 
         private static string CurrentMachineName()

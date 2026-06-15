@@ -408,6 +408,8 @@
 
   <p>Multiple running Clipman instances can use the same history database. When one machine writes a new entry, the database is saved atomically and the other machines reload it when the changed file arrives. Each text entry stores the machine name that added or most recently re-added it, and the history list includes a Machine column and machine sort mode so shared setups can tell which computer supplied an entry.</p>
 
+  <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
+
   <p><strong>History password:</strong> Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed <code>.clipdb</code> storage without password encryption. If you enter and confirm a history password, the database is encrypted with AES and checked with a message authentication code before loading. The history password is protected by Windows for the current user account and machine. Copying a settings file to another computer does not copy a working key; that computer must be given the same history password through its own Preferences window.</p>
 
   <p>The Generate password button creates a random history password, fills both password fields, copies it to the Windows clipboard, and saves it for this Windows user. Clipman deliberately ignores that generated password copy, so it is not added to clipboard history. You are responsible for saving that password somewhere safe and entering it on each computer that shares the encrypted history. If the password is lost, Clipman cannot recover the encrypted history.</p>
@@ -550,6 +552,15 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.1.2</h3>
+  <ul>
+    <li>Fixed: Preferences now comes to the foreground when opened from the Options menu. Closes <a href="https://github.com/OnjLouis/Clipman/issues/1">issue #1</a>.</li>
+    <li>Fixed: Alt+O now opens the Options menu explicitly, even on systems where the normal menu mnemonic was not being routed. Closes <a href="https://github.com/OnjLouis/Clipman/issues/2">issue #2</a>.</li>
+    <li>Improved: File history now describes combined file clipboard operations such as Copy or Link instead of showing raw DropEffect numbers. Closes <a href="https://github.com/OnjLouis/Clipman/issues/3">issue #3</a>.</li>
+    <li>Improved: Shared database paths now handle missing files and temporarily unavailable folders more gracefully, with diagnostics explaining the storage state. Closes <a href="https://github.com/OnjLouis/Clipman/issues/4">issue #4</a>.</li>
+    <li>Improved: Release smoke testing now checks open GitHub issues and verifies updater behavior before publishing.</li>
+  </ul>
+
   <h3>1.1.1</h3>
   <ul>
     <li>Added a View menu command to toggle the current Text history sort between ascending and descending.</li>

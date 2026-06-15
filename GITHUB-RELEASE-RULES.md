@@ -19,8 +19,18 @@ If token-based authentication fails, stop and report it. Do not trigger an inter
 Before pushing or publishing, run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1
+powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -LivePath D:\Dropbox\SOFTWARE\clipman
 ```
+
+The normal smoke test also stages a disposable portable copy in `%TEMP%`, applies the freshly built ZIP with Clipman's updater command line, and verifies that runtime folders such as `Settings` and `Logs` survive while stale update folders are removed.
+
+After publishing a GitHub release, run the post-publish updater smoke test:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -LivePath D:\Dropbox\SOFTWARE\clipman -Version <version> -RunPostPublishUpdateSmoke
+```
+
+That downloads the previous GitHub release ZIP into `%TEMP%`, starts it with startup/silent update settings, and verifies that it updates itself to `<version>`. Restart Andre's live copy afterwards if the test closed it.
 
 The clean portable output must contain only shipped app files:
 

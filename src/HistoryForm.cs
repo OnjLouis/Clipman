@@ -32,6 +32,7 @@ namespace Clipman
         private readonly ContextMenuStrip historyContextMenu;
         private readonly ContextMenuStrip fileEventsContextMenu;
         private ToolStripMenuItem preferencesMenuItem;
+        private ToolStripMenuItem optionsMenuItem;
         private ToolStripMenuItem toggleMenuItem;
         private ToolStripMenuItem sortLastUsedMenuItem;
         private ToolStripMenuItem sortAddedMenuItem;
@@ -315,6 +316,7 @@ namespace Clipman
             actions.DropDownOpening += (s, e) => SetMenuItemsEnabled(actions, !IsFileClipboardTabActive());
 
             var options = new ToolStripMenuItem("&Options");
+            optionsMenuItem = options;
             preferencesMenuItem = new ToolStripMenuItem("&Preferences...\tCtrl+,", null, (s, e) => showPreferences());
             toggleMenuItem = new ToolStripMenuItem("&Toggle on/off", null, (s, e) => toggleActive());
             options.DropDownItems.Add(preferencesMenuItem);
@@ -715,6 +717,14 @@ namespace Clipman
             if ((keyData & Keys.Alt) == Keys.Alt)
             {
                 var key = keyData & Keys.KeyCode;
+                if (key == Keys.O)
+                {
+                    if (optionsMenuItem != null)
+                    {
+                        optionsMenuItem.ShowDropDown();
+                        return true;
+                    }
+                }
                 if (key == Keys.T)
                 {
                     SelectMainTab();

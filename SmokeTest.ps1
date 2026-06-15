@@ -1,11 +1,16 @@
 param(
     [string]$LivePath = '',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$RunPostPublishUpdateSmoke,
+    [string]$Version = '',
+    [int[]]$ReviewedOpenIssue = @(),
+    [switch]$SkipGitHubActivityCheck
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $portable = Join-Path $repoRoot 'portable'
+$programBuilds = 'D:\Dropbox\backups\Clipman\Program Builds'
 
 function Fail([string]$message) {
     throw "Clipman smoke test failed: $message"
@@ -118,6 +123,254 @@ function Deploy-LiveCopy([string]$path) {
     Write-Host "Deployed live copy to $path"
 }
 
+function Read-AppVersion {
+    $exe = Join-Path $portable 'clipman.exe'
+    Assert-Exists $exe 'Portable executable for version read'
+    $version = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        $version = (Get-Item -LiteralPath $exe).VersionInfo.FileVersion
+    }
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        Fail 'Could not read Clipman version from portable executable.'
+    }
+    return $version.Trim()
+}
+
+function New-PortableZip([string]$zipPath) {
+    if (Test-Path -LiteralPath $zipPath) {
+        Remove-Item -LiteralPath $zipPath -Force
+    }
+    $items = Get-ChildItem -LiteralPath $portable -Force
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        try {
+            Compress-Archive -LiteralPath $items.FullName -DestinationPath $zipPath -CompressionLevel Optimal
+            return
+        }
+        catch {
+            $lastError = $_
+            Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    throw $lastError
+}
+
+function Set-SmokeSettings([string]$appDir) {
+    $settingsDir = Join-Path $appDir 'Settings'
+    $logs = Join-Path $appDir 'Logs'
+    New-Item -ItemType Directory -Force -Path $settingsDir,$logs | Out-Null
+    $sentinel = 'clipman-update-smoke-' + [Guid]::NewGuid().ToString('N')
+    $settings = [ordered]@{
+        ShowHistoryHotkey = 'Ctrl+Alt+\'
+        ToggleActiveHotkey = 'Ctrl+Alt+`'
+        RemoveDuplicates = $true
+        SoundsEnabled = $false
+        SaveListPosition = $true
+        Active = $true
+        DatabasePath = (Join-Path $settingsDir "clipman-history-$sentinel.clipdb")
+        LastSelectedIndex = -1
+        LastSelectedTab = 0
+        LastPreferencesTab = 0
+        MaxHistoryEntries = 1000
+        MaxHistoryDays = 0
+        IgnoredProcesses = @()
+        SortMode = 'LastUsed'
+        SortDescending = $true
+        SendToEnabled = $false
+        ShowHistoryAfterSendTo = $false
+        GroupFilter = 'All'
+        DuplicateMode = 'MoveToTop'
+        AutoGroupByApp = $true
+        AutoRemoveUrlTracking = $false
+        RunAtStartup = $false
+        UpdateCheckFrequency = 'Startup'
+        InstallUpdatesSilently = $true
+        DatabaseEncryptionEnabled = $false
+        ProtectedDatabasePassword = ''
+    }
+    $settings | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $settingsDir "$env:COMPUTERNAME-settings.json") -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $logs 'smoke-preserve.log') -Value $sentinel -Encoding UTF8
+    return $sentinel
+}
+
+function Assert-SmokeUpdateTarget([string]$appDir, [string]$sentinel, [string]$expectedVersion, [string]$label) {
+    $exe = Join-Path $appDir 'clipman.exe'
+    Assert-Exists $exe "$label executable"
+    $actualVersion = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
+    if ($actualVersion -ne $expectedVersion) {
+        Fail "$label executable version is $actualVersion, expected $expectedVersion."
+    }
+    Assert-Exists (Join-Path $appDir 'Settings') "$label preserved Settings folder"
+    Assert-Exists (Join-Path $appDir "Settings\$env:COMPUTERNAME-settings.json") "$label preserved machine settings"
+    Assert-Exists (Join-Path $appDir 'Logs\smoke-preserve.log') "$label preserved log file"
+    Assert-NotExists (Join-Path $appDir 'README.md') "$label stale README"
+    Assert-NotExists (Join-Path $appDir 'Update Temp') "$label legacy update temp"
+    Assert-NotExists (Join-Path $appDir 'Update Backups') "$label legacy update backups"
+    Assert-NotExists (Join-Path $appDir 'sounds\sounds') "$label nested sounds folder"
+    $settingsText = Get-Content -LiteralPath (Join-Path $appDir "Settings\$env:COMPUTERNAME-settings.json") -Raw
+    if ($settingsText -notmatch [regex]::Escape($sentinel)) {
+        Fail "$label did not preserve smoke sentinel settings."
+    }
+    $logText = Get-Content -LiteralPath (Join-Path $appDir 'Logs\smoke-preserve.log') -Raw
+    if ($logText -notmatch [regex]::Escape($sentinel)) {
+        Fail "$label did not preserve smoke sentinel log."
+    }
+}
+
+function Invoke-LocalUpdaterSmoke([string]$expectedVersion) {
+    Write-Host "Running local updater smoke."
+    $root = Join-Path ([IO.Path]::GetTempPath()) ('clipman-local-update-smoke-' + [Guid]::NewGuid().ToString('N'))
+    $target = Join-Path $root 'target'
+    $zip = Join-Path $root 'Clipman-update.zip'
+    $temp = Join-Path $root 'updater-temp'
+    New-Item -ItemType Directory -Force -Path $target,$temp | Out-Null
+    try {
+        Copy-Item -LiteralPath (Get-ChildItem -LiteralPath $portable -Force).FullName -Destination $target -Recurse -Force
+        Set-Content -LiteralPath (Join-Path $target 'README.md') -Value 'stale file should be removed' -Encoding UTF8
+        New-Item -ItemType Directory -Force -Path (Join-Path $target 'Update Temp\old'),(Join-Path $target 'Update Backups\old') | Out-Null
+        Set-Content -LiteralPath (Join-Path $target 'Update Temp\old\temp.txt') -Value 'old temp' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $target 'Update Backups\old\backup.txt') -Value 'old backup' -Encoding UTF8
+        $sentinel = Set-SmokeSettings $target
+        New-PortableZip $zip
+        $updater = Join-Path $portable 'clipman.exe'
+        $targetExe = Join-Path $target 'clipman.exe'
+        $updateUrl = ([Uri]$zip).AbsoluteUri
+        $arguments = @(
+            '--apply-update',
+            '--update-url', ('"' + $updateUrl + '"'),
+            '--update-target', ('"' + $target + '"'),
+            '--update-exe', ('"' + $targetExe + '"'),
+            '--update-temp', ('"' + $temp + '"'),
+            '--update-wait-pid', '0',
+            '--update-no-restart'
+        ) -join ' '
+        $process = Start-Process -FilePath $updater -ArgumentList $arguments -WorkingDirectory $repoRoot -WindowStyle Hidden -Wait -PassThru
+        if ($process.ExitCode -ne 0) {
+            Fail "Local updater smoke exited with code $($process.ExitCode)."
+        }
+        Assert-NotExists (Join-Path $target 'Logs\Updater.log') 'Local updater smoke error log'
+        Assert-SmokeUpdateTarget $target $sentinel $expectedVersion 'Local updater smoke'
+    }
+    finally {
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-GitHubReleases {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+    } catch {
+    }
+    $client = New-Object Net.WebClient
+    $client.Headers['User-Agent'] = 'Clipman smoke test'
+    $json = $client.DownloadString('https://api.github.com/repos/OnjLouis/Clipman/releases?per_page=100')
+    $items = $json | ConvertFrom-Json
+    foreach ($item in $items) {
+        Write-Output $item
+    }
+}
+
+function Invoke-GitHubJsonArray([string]$uri, [hashtable]$headers) {
+    $items = Invoke-RestMethod -Uri $uri -Headers $headers
+    foreach ($item in $items) {
+        Write-Output $item
+    }
+}
+
+function Resolve-PreviousGitHubRelease([string]$currentVersion) {
+    $current = [Version]$currentVersion
+    $candidates = @()
+    foreach ($release in Get-GitHubReleases) {
+        $tag = if ($release.tag_name) { [string]$release.tag_name } else { '' }
+        $text = $tag.Trim()
+        if ($text -notmatch '^[vV]?(\d+(?:\.\d+){1,3})$') {
+            continue
+        }
+        $text = $Matches[1]
+        $parsed = $null
+        if (![Version]::TryParse($text, [ref]$parsed)) {
+            continue
+        }
+        if ($parsed -lt $current) {
+            $asset = @(@($release.assets) | Where-Object { $_.name -match '^Clipman-.*\.zip$' } | Select-Object -First 1)
+            if ($asset.Count -gt 0) {
+                $candidates += [pscustomobject]@{ Version = $parsed; Text = $text; Release = $release; Asset = $asset[0] }
+            }
+        }
+    }
+    $previous = @($candidates | Sort-Object Version -Descending | Select-Object -First 1)
+    if ($previous.Count -eq 0) {
+        $seen = @()
+        foreach ($release in Get-GitHubReleases) {
+            $assetNames = @(@($release.assets) | ForEach-Object { $_.name }) -join ', '
+            $seen += "$($release.tag_name): $assetNames"
+        }
+        Fail "Could not find a previous GitHub release ZIP before $currentVersion. Seen releases: $($seen -join '; ')"
+    }
+    return $previous[0]
+}
+
+function Invoke-PostPublishUpdateSmoke([string]$expectedVersion) {
+    if (!$RunPostPublishUpdateSmoke) {
+        return
+    }
+
+    $previous = Resolve-PreviousGitHubRelease $expectedVersion
+    Write-Host "Running post-publish updater smoke: $($previous.Text) -> $expectedVersion."
+
+    $root = Join-Path ([IO.Path]::GetTempPath()) ('clipman-github-update-smoke-' + [Guid]::NewGuid().ToString('N'))
+    $previousZip = Join-Path $root ('Clipman-' + $previous.Text + '.zip')
+    $target = Join-Path $root 'target'
+    New-Item -ItemType Directory -Force -Path $root,$target | Out-Null
+
+    try {
+        $client = New-Object Net.WebClient
+        $client.Headers['User-Agent'] = 'Clipman smoke test'
+        $client.DownloadFile([string]$previous.Asset.browser_download_url, $previousZip)
+        Expand-Archive -LiteralPath $previousZip -DestinationPath $target -Force
+        $sentinel = Set-SmokeSettings $target
+        New-Item -ItemType Directory -Force -Path (Join-Path $target 'Update Temp\old'),(Join-Path $target 'Update Backups\old') | Out-Null
+        Set-Content -LiteralPath (Join-Path $target 'Update Temp\old\temp.txt') -Value 'old temp' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $target 'Update Backups\old\backup.txt') -Value 'old backup' -Encoding UTF8
+
+        if (Get-Process clipman -ErrorAction SilentlyContinue) {
+            if (![string]::IsNullOrWhiteSpace($LivePath) -and (Test-Path -LiteralPath (Join-Path $LivePath 'clipman.exe'))) {
+                & (Join-Path $LivePath 'clipman.exe') --close | Out-Null
+            }
+            else {
+                & (Join-Path $target 'clipman.exe') --close | Out-Null
+            }
+            Start-Sleep -Seconds 3
+        }
+
+        $exe = Join-Path $target 'clipman.exe'
+        Start-Process -FilePath $exe -WorkingDirectory $target -WindowStyle Hidden | Out-Null
+        $deadline = (Get-Date).AddMinutes(4)
+        do {
+            Start-Sleep -Seconds 3
+            $actualVersion = if (Test-Path -LiteralPath $exe) { (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion } else { '' }
+            if ($actualVersion -eq $expectedVersion) {
+                break
+            }
+        } while ((Get-Date) -lt $deadline)
+
+        & $exe --close | Out-Null
+        Start-Sleep -Seconds 2
+        Assert-SmokeUpdateTarget $target $sentinel $expectedVersion 'Post-publish updater smoke'
+    }
+    finally {
+        try {
+            $exe = Join-Path $target 'clipman.exe'
+            if (Test-Path -LiteralPath $exe) { & $exe --close | Out-Null }
+        } catch {
+        }
+        Start-Sleep -Seconds 1
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Assert-TextDoesNotMatch([string]$path, [string]$pattern, [string]$description) {
     Assert-Exists $path $description
     $text = Get-Content -LiteralPath $path -Raw
@@ -131,6 +384,110 @@ function Assert-TextMatches([string]$path, [string]$pattern, [string]$descriptio
     $text = Get-Content -LiteralPath $path -Raw
     if ($text -notmatch $pattern) {
         Fail "$description is missing expected text matching: $pattern"
+    }
+}
+
+function Get-GitHubHeaders {
+    $token = $env:GH_TOKEN
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        $token = $env:GITHUB_TOKEN
+    }
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        foreach ($candidate in @(
+            (Join-Path $repoRoot 'token.txt'),
+            'D:\Dropbox\backups\Codex\current\token.txt'
+        )) {
+            if (Test-Path -LiteralPath $candidate) {
+                $token = (Get-Content -LiteralPath $candidate -Raw).Trim()
+                if (![string]::IsNullOrWhiteSpace($token)) {
+                    break
+                }
+            }
+        }
+    }
+
+    $headers = @{
+        'User-Agent' = 'Clipman smoke test'
+        'Accept' = 'application/vnd.github+json'
+    }
+    if (![string]::IsNullOrWhiteSpace($token)) {
+        $headers['Authorization'] = "Bearer $token"
+    }
+    return $headers
+}
+
+function Get-ChangelogEntry([string]$releaseVersion) {
+    $manual = Join-Path $repoRoot 'Manual.html'
+    $text = Get-Content -LiteralPath $manual -Raw
+    $escaped = [regex]::Escape($releaseVersion)
+    $match = [regex]::Match($text, "(?is)<h3>\s*$escaped\s*</h3>(.*?)(?=<h3>|<h2)")
+    if (!$match.Success) {
+        return ''
+    }
+    return $match.Groups[1].Value
+}
+
+function Get-ChangelogClosedIssueNumbers([string]$releaseVersion) {
+    $entry = Get-ChangelogEntry $releaseVersion
+    $numbers = @()
+    foreach ($match in [regex]::Matches($entry, '(?i)\b(?:closes|fixes|resolves)\s+(?:github\s+)?(?:issue\s+)?#(\d+)\b')) {
+        $numbers += [int]$match.Groups[1].Value
+    }
+    foreach ($match in [regex]::Matches($entry, 'https://github\.com/OnjLouis/Clipman/issues/(\d+)')) {
+        $prefix = $entry.Substring([Math]::Max(0, $match.Index - 80), [Math]::Min(80, $match.Index))
+        if ($prefix -match '(?i)\b(?:closes|fixes|resolves)\b') {
+            $numbers += [int]$match.Groups[1].Value
+        }
+    }
+    return @($numbers | Select-Object -Unique)
+}
+
+function Assert-GitHubActivityChecked([string]$releaseVersion) {
+    if ($SkipGitHubActivityCheck) {
+        Write-Host 'GitHub activity check skipped by request.'
+        return
+    }
+
+    Write-Host 'Checking GitHub issues and pull requests.'
+    $headers = Get-GitHubHeaders
+    try {
+        $repo = 'OnjLouis/Clipman'
+        $issues = @(Invoke-GitHubJsonArray "https://api.github.com/repos/$repo/issues?state=open&per_page=100" $headers)
+        $realIssues = @($issues | Where-Object { -not $_.pull_request })
+        $closedByThisRelease = @(Get-ChangelogClosedIssueNumbers $releaseVersion)
+        $reviewedIssueNumbers = @($ReviewedOpenIssue | ForEach-Object { [int]$_ })
+        $blockingIssues = @($realIssues | Where-Object {
+            [int]$_.number -notin $closedByThisRelease -and [int]$_.number -notin $reviewedIssueNumbers
+        })
+        if ($blockingIssues.Count -gt 0) {
+            $summary = ($blockingIssues | ForEach-Object { "#$($_.number) $($_.title)" }) -join '; '
+            Fail "Open GitHub issues need review before release: $summary"
+        }
+        $coveredIssues = @($realIssues | Where-Object { [int]$_.number -in $closedByThisRelease })
+        if ($coveredIssues.Count -gt 0) {
+            $summary = ($coveredIssues | ForEach-Object { "#$($_.number) $($_.title)" }) -join '; '
+            Write-Host "Open GitHub issues are covered by this release changelog: $summary"
+        }
+        $reviewedIssues = @($realIssues | Where-Object { [int]$_.number -in $reviewedIssueNumbers -and [int]$_.number -notin $closedByThisRelease })
+        if ($reviewedIssues.Count -gt 0) {
+            $summary = ($reviewedIssues | ForEach-Object { "#$($_.number) $($_.title)" }) -join '; '
+            Write-Host "Open GitHub issues were reviewed and intentionally left open: $summary"
+        }
+        if ($realIssues.Count -eq 0) {
+            Write-Host 'No open GitHub issues.'
+        } else {
+            Write-Host 'No unreviewed open GitHub issues.'
+        }
+
+        $pulls = @(Invoke-GitHubJsonArray "https://api.github.com/repos/$repo/pulls?state=open&per_page=100" $headers | Where-Object { $_ -and $_.number })
+        if ($pulls.Count -gt 0) {
+            $summary = ($pulls | ForEach-Object { "#$($_.number) $($_.title)" }) -join '; '
+            Fail "Open GitHub pull requests need review before release: $summary"
+        }
+        Write-Host 'No open GitHub pull requests.'
+    }
+    catch {
+        Fail "Could not check GitHub activity: $($_.Exception.Message)"
     }
 }
 
@@ -157,6 +514,10 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
     Assert-TextMatches $manual 'ascending and descending' 'Manual sort direction documentation'
+    Assert-TextMatches $manual '<h3>1\.1\.2</h3>' 'Manual 1.1.2 changelog'
+    Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/1">issue #1</a>' 'Manual issue #1 closure'
+    Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/2">issue #2</a>' 'Manual issue #2 closure'
+    Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/3">issue #3</a>' 'Manual issue #3 closure'
     Assert-TextMatches $manual '<h3>1\.1\.1</h3>' 'Manual 1.1.1 changelog'
     Assert-TextMatches $manual 'deliberately ignores that generated password copy' 'Manual generated password documentation'
     Assert-TextMatches $manual '<h2 id="application-files">Application Files</h2>' 'Manual application files section'
@@ -194,6 +555,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'encryptDatabase|Clipboard\.SetText\(password\)' 'Preferences encryption checkbox and raw password clipboard copy'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'Logs\\\\Startup\.log' 'Startup failure log message'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'WriteStartupLog\("Startup failed\."' 'Startup failure logging'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'optionsMenuItem\.ShowDropDown\(\)' 'Explicit Alt+O Options menu handling'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DescribeDropEffect\(int value\)' 'Drop effect display helper'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'string\.Join\(" or ", parts\)' 'Combined drop effect wording'
     Assert-TextMatches (Join-Path $repoRoot 'src\AssemblyInfo.cs') 'AssemblyCompany\("Andre Louis"\)' 'Executable company metadata'
     Assert-TextMatches (Join-Path $repoRoot 'src\AssemblyInfo.cs') 'Copyright \(c\) Andre Louis' 'Executable copyright metadata'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Build stamp: ' 'About build stamp'
@@ -475,10 +839,17 @@ if (!$SkipBuild) {
     & (Join-Path $repoRoot 'Build.ps1')
 }
 
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Read-AppVersion
+}
+
 Assert-ManualAndReadmeClean
+Assert-GitHubActivityChecked $Version
 Assert-CodeBehavior
 Assert-CleanPortable $portable
+Invoke-LocalUpdaterSmoke $Version
 Deploy-LiveCopy $LivePath
 Assert-LiveCopyReasonable $LivePath
+Invoke-PostPublishUpdateSmoke $Version
 
 Write-Host 'Clipman smoke test passed.'

@@ -20,6 +20,7 @@ namespace Clipman
                 string exePath;
                 string tempBase;
                 string pidText;
+                var noRestart = args.Any(arg => string.Equals(arg, "--update-no-restart", StringComparison.OrdinalIgnoreCase));
                 TryGetOptionValue(args, "--update-url", out zipUrl);
                 TryGetOptionValue(args, "--update-target", out targetDir);
                 TryGetOptionValue(args, "--update-exe", out exePath);
@@ -41,7 +42,7 @@ namespace Clipman
                     WaitForProcessExit(processId);
                 }
 
-                ApplyUpdate(zipUrl, targetDir, exePath, string.IsNullOrWhiteSpace(tempBase) ? Path.GetTempPath() : tempBase);
+                ApplyUpdate(zipUrl, targetDir, exePath, string.IsNullOrWhiteSpace(tempBase) ? Path.GetTempPath() : tempBase, noRestart);
             }
             catch (Exception ex)
             {
@@ -55,7 +56,7 @@ namespace Clipman
             }
         }
 
-        private static void ApplyUpdate(string zipUrl, string targetDir, string exePath, string tempBase)
+        private static void ApplyUpdate(string zipUrl, string targetDir, string exePath, string tempBase, bool noRestart)
         {
             Directory.CreateDirectory(tempBase);
             var root = Path.Combine(tempBase, "ClipmanUpdate_" + Guid.NewGuid().ToString("N"));
@@ -113,6 +114,12 @@ namespace Clipman
             finally
             {
                 TryDeleteDirectory(root);
+            }
+
+            if (noRestart)
+            {
+                WriteUpdateHistory(targetDir, "Update applied. Restart skipped by command line.");
+                return;
             }
 
             WriteUpdateHistory(targetDir, "Update applied. Restarting Clipman.");
