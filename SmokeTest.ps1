@@ -219,6 +219,7 @@ function Assert-SmokeUpdateTarget([string]$appDir, [string]$sentinel, [string]$e
     Assert-NotExists (Join-Path $appDir 'Update Temp') "$label legacy update temp"
     Assert-NotExists (Join-Path $appDir 'Update Backups') "$label legacy update backups"
     Assert-NotExists (Join-Path $appDir 'sounds\sounds') "$label nested sounds folder"
+    Assert-NoFactorySoundBackups $appDir $label
     $settingsText = Get-Content -LiteralPath (Join-Path $appDir "Settings\$env:COMPUTERNAME-settings.json") -Raw
     if ($settingsText -notmatch [regex]::Escape($sentinel)) {
         Fail "$label did not preserve smoke sentinel settings."
@@ -226,6 +227,22 @@ function Assert-SmokeUpdateTarget([string]$appDir, [string]$sentinel, [string]$e
     $logText = Get-Content -LiteralPath (Join-Path $appDir 'Logs\smoke-preserve.log') -Raw
     if ($logText -notmatch [regex]::Escape($sentinel)) {
         Fail "$label did not preserve smoke sentinel log."
+    }
+}
+
+function Assert-NoFactorySoundBackups([string]$appDir, [string]$label) {
+    foreach ($root in @((Join-Path $appDir 'Backups\Updates'), (Join-Path $appDir 'Update Backups'))) {
+        if (!(Test-Path -LiteralPath $root)) {
+            continue
+        }
+
+        $matches = @(
+            Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'Previous-sounds*' }
+        )
+        if ($matches.Count -gt 0) {
+            Fail "$label left factory sound update backups: $(@($matches | ForEach-Object { $_.FullName }) -join '; ')"
+        }
     }
 }
 
@@ -242,6 +259,9 @@ function Invoke-LocalUpdaterSmoke([string]$expectedVersion) {
         New-Item -ItemType Directory -Force -Path (Join-Path $target 'Update Temp\old'),(Join-Path $target 'Update Backups\old') | Out-Null
         Set-Content -LiteralPath (Join-Path $target 'Update Temp\old\temp.txt') -Value 'old temp' -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $target 'Update Backups\old\backup.txt') -Value 'old backup' -Encoding UTF8
+        $staleSoundBackup = Join-Path $target 'Backups\Updates\old-sounds'
+        New-Item -ItemType Directory -Force -Path $staleSoundBackup | Out-Null
+        Set-Content -LiteralPath (Join-Path $staleSoundBackup 'Previous-sounds.zip') -Value 'stale factory sound backup' -Encoding UTF8
         $sentinel = Set-SmokeSettings $target
         New-PortableZip $zip
         $updater = Join-Path $portable 'clipman.exe'
@@ -344,6 +364,9 @@ function Invoke-PostPublishUpdateSmoke([string]$expectedVersion) {
         New-Item -ItemType Directory -Force -Path (Join-Path $target 'Update Temp\old'),(Join-Path $target 'Update Backups\old') | Out-Null
         Set-Content -LiteralPath (Join-Path $target 'Update Temp\old\temp.txt') -Value 'old temp' -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $target 'Update Backups\old\backup.txt') -Value 'old backup' -Encoding UTF8
+        $staleSoundBackup = Join-Path $target 'Backups\Updates\old-sounds'
+        New-Item -ItemType Directory -Force -Path $staleSoundBackup | Out-Null
+        Set-Content -LiteralPath (Join-Path $staleSoundBackup 'Previous-sounds.zip') -Value 'stale factory sound backup' -Encoding UTF8
 
         if (Get-Process clipman -ErrorAction SilentlyContinue) {
             if (![string]::IsNullOrWhiteSpace($LivePath) -and (Test-Path -LiteralPath (Join-Path $LivePath 'clipman.exe'))) {
@@ -524,7 +547,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
     Assert-TextMatches $manual 'ascending and descending' 'Manual sort direction documentation'
-    Assert-TextMatches $manual '<h3>1\.5\.0</h3>' 'Manual 1.5.0 changelog'
+    Assert-TextMatches $manual '<h3>1\.5\.1</h3>' 'Manual 1.5.1 changelog'
+    Assert-TextMatches $manual 'Bundled factory sounds are now replaced cleanly' 'Manual factory sounds update cleanup changelog'
     Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/1">issue #1</a>' 'Manual issue #1 closure'
     Assert-TextMatches $manual 'See <a href="https://github\.com/OnjLouis/Clipman/issues/2">issue #2</a>' 'Manual issue #2 review note'
     Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/3">issue #3</a>' 'Manual issue #3 closure'
@@ -548,6 +572,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'LICENSE\.txt' 'README license file documentation'
     Assert-TextMatches $readme 'Sort direction can be toggled' 'README sort direction documentation'
     Assert-TextMatches $readme 'Settings\\sounds' 'README user sound override documentation'
+    Assert-TextMatches $readme 'Bundled sounds in the root `sounds` folder are factory files' 'README factory sound update behavior'
+    Assert-TextMatches $readme 'start a copy from a different folder' 'README different folder takeover behavior'
     Assert-TextMatches $readme 'Multiple machines can write to the same history database' 'README shared history explanation'
     Assert-TextMatches $readme 'Optional history password encryption' 'README encryption documentation'
     Assert-TextMatches $readme 'deliberately ignores that generated password copy' 'README generated password documentation'
@@ -557,6 +583,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Help` > `Donate`' 'README donate documentation'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'PublishCloseRequest' 'Updater shared close request code'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'TryRestartUpdatedApp' 'Updater restart code'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'ReplaceFactoryDirectory' 'Updater factory folder replacement code'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'CleanupObsoleteFactorySoundBackups' 'Updater factory sound backup cleanup code'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'InstanceStateStore\.IsSameRunningFolder' 'Cross-folder instance takeover code'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ClipDatabaseFile\.IsEncryptedFile\(settings\.DatabasePath\)' 'Startup encrypted database detection'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'CopySensitiveTextToClipboard' 'Sensitive clipboard copy suppression'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'LastPreferencesTab' 'Preferences tab persistence application'

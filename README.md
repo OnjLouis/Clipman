@@ -82,6 +82,10 @@ During an update, Clipman downloads the release ZIP to a temporary folder, publi
 
 Custom sounds can be placed in `Settings\sounds` using the same file names as the bundled sounds: `copy.wav`, `on.wav`, `off.wav`, and `skip.wav`. Clipman uses those first and falls back to the bundled defaults for any missing sound.
 
+Bundled sounds in the root `sounds` folder are factory files. Updates replace them without backing them up, and only user-provided sounds in `Settings\sounds` are treated as custom data.
+
+If Clipman is already running and you start a copy from the same folder, the existing history window is shown. If you start a copy from a different folder, the old copy is asked to close and the new folder takes over.
+
 Questions and feedback can be sent through `Help` > `Contact` in the app or <https://onj.me/contact>.
 
 Clipman is free software. If you want to support Andre's work, use `Help` > `Donate` in the app or visit <https://www.paypal.me/AndreLouis>.

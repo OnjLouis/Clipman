@@ -87,6 +87,7 @@ namespace Clipman
                 Directory.CreateDirectory(targetDir);
                 var backupRoot = Path.Combine(Path.Combine(targetDir, "Backups\\Updates"), DateTime.Now.ToString("yyyyMMdd-HHmmss"));
                 CleanupObsoleteRootUpdateFolders(targetDir, backupRoot);
+                CleanupObsoleteFactorySoundBackups(targetDir);
 
                 foreach (var item in Directory.GetFileSystemEntries(source))
                 {
@@ -99,7 +100,14 @@ namespace Clipman
                     var destination = Path.Combine(targetDir, name);
                     if (Directory.Exists(item))
                     {
-                        ReplaceDirectory(item, destination, backupRoot);
+                        if (IsFactoryReplacedDirectory(name))
+                        {
+                            ReplaceFactoryDirectory(item, destination);
+                        }
+                        else
+                        {
+                            ReplaceDirectory(item, destination, backupRoot);
+                        }
                     }
                     else
                     {
@@ -108,6 +116,7 @@ namespace Clipman
                 }
 
                 TryDeleteFile(Path.Combine(targetDir, "README.md"));
+                CleanupObsoleteFactorySoundBackups(targetDir);
                 RemoveEmptyDirectory(backupRoot);
                 CleanupEmptyBackupFolders(targetDir);
             }
@@ -139,6 +148,21 @@ namespace Clipman
             return false;
         }
 
+        private static bool IsFactoryReplacedDirectory(string name)
+        {
+            return string.Equals(name, "sounds", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void ReplaceFactoryDirectory(string source, string destination)
+        {
+            if (Directory.Exists(destination))
+            {
+                DeleteDirectoryWithRetry(destination);
+            }
+
+            CopyDirectory(source, destination);
+        }
+
         private static void ReplaceDirectory(string source, string destination, string backupRoot)
         {
             if (Directory.Exists(destination))
@@ -160,6 +184,37 @@ namespace Clipman
             }
 
             TryDeleteDirectory(Path.Combine(targetDir, "Update Temp"));
+        }
+
+        private static void CleanupObsoleteFactorySoundBackups(string targetDir)
+        {
+            try
+            {
+                var backupRoots = new[]
+                {
+                    Path.Combine(targetDir, "Backups\\Updates"),
+                    Path.Combine(targetDir, "Update Backups")
+                };
+
+                foreach (var root in backupRoots)
+                {
+                    if (!Directory.Exists(root)) continue;
+
+                    foreach (var file in Directory.GetFiles(root, "Previous-sounds*.zip", SearchOption.AllDirectories))
+                    {
+                        TryDeleteFile(file);
+                    }
+
+                    foreach (var folder in Directory.GetDirectories(root, "Previous-sounds*", SearchOption.AllDirectories)
+                        .OrderByDescending(path => path.Length))
+                    {
+                        TryDeleteDirectory(folder);
+                    }
+                }
+            }
+            catch
+            {
+            }
         }
 
         private static void DownloadUpdateZip(string zipUrl, string destination)

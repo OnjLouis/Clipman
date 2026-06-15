@@ -114,17 +114,112 @@ namespace Clipman
                 return;
             }
 
-            bool created;
-            using (var mutex = new Mutex(true, MutexName, out created))
+            Mutex mutex;
+            if (!AcquireSingleInstanceMutex(out mutex))
             {
-                if (!created)
+                return;
+            }
+
+            using (mutex)
+            {
+                var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                InstanceStateStore.PublishCurrent(appDirectory);
+                try
                 {
-                    SignalEvent(ShowEventName);
-                    return;
+                    RunApplication();
+                }
+                finally
+                {
+                    InstanceStateStore.ClearIfCurrent(appDirectory);
                 }
 
-                RunApplication();
                 GC.KeepAlive(mutex);
+            }
+        }
+
+        private static bool AcquireSingleInstanceMutex(out Mutex mutex)
+        {
+            mutex = null;
+            if (TryAcquireMutex(out mutex))
+            {
+                return true;
+            }
+
+            var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            if (InstanceStateStore.IsSameRunningFolder(appDirectory))
+            {
+                SignalEvent(ShowEventName);
+                return false;
+            }
+
+            SignalEvent(CloseEventName);
+            WaitForPreviousInstanceToExit();
+            ResetEvent(CloseEventName);
+
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (TryAcquireMutex(out mutex))
+                {
+                    return true;
+                }
+
+                Thread.Sleep(250);
+            }
+
+            SignalEvent(ShowEventName);
+            return false;
+        }
+
+        private static bool TryAcquireMutex(out Mutex mutex)
+        {
+            bool created;
+            mutex = new Mutex(true, MutexName, out created);
+            if (created)
+            {
+                return true;
+            }
+
+            mutex.Dispose();
+            mutex = null;
+            return false;
+        }
+
+        private static void WaitForPreviousInstanceToExit()
+        {
+            var processId = InstanceStateStore.RunningProcessId();
+            if (processId > 0)
+            {
+                try
+                {
+                    using (var process = Process.GetProcessById(processId))
+                    {
+                        if (process.WaitForExit(10000))
+                        {
+                            return;
+                        }
+                    }
+                }
+                catch
+                {
+                    return;
+                }
+            }
+
+            var current = Process.GetCurrentProcess();
+            var processName = Path.GetFileNameWithoutExtension(Application.ExecutablePath);
+            foreach (var process in Process.GetProcessesByName(processName).Where(p => p.Id != current.Id).ToList())
+            {
+                using (process)
+                {
+                    try
+                    {
+                        process.WaitForExit(2000);
+                    }
+                    catch
+                    {
+                    }
+                }
             }
         }
 
@@ -187,6 +282,21 @@ namespace Clipman
                 using (var ev = new EventWaitHandle(false, EventResetMode.ManualReset, name, out created))
                 {
                     ev.Set();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void ResetEvent(string name)
+        {
+            try
+            {
+                bool created;
+                using (var ev = new EventWaitHandle(false, EventResetMode.ManualReset, name, out created))
+                {
+                    ev.Reset();
                 }
             }
             catch
