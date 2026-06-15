@@ -120,6 +120,16 @@ function Deploy-LiveCopy([string]$path) {
         Copy-Item -LiteralPath $soundSource -Destination $soundTarget -Recurse -Force
     }
 
+    if (Test-Path -LiteralPath $liveExe) {
+        try {
+            Start-Process -FilePath $liveExe -WorkingDirectory $path -WindowStyle Hidden | Out-Null
+            Start-Sleep -Seconds 3
+        }
+        catch {
+            Write-Host "Could not restart live Clipman after deployment: $($_.Exception.Message)"
+        }
+    }
+
     Write-Host "Deployed live copy to $path"
 }
 
