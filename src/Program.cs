@@ -124,6 +124,7 @@ namespace Clipman
             {
                 var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
                 InstanceStateStore.PublishCurrent(appDirectory);
+                CleanupObsoleteFactorySoundBackups(appDirectory);
                 try
                 {
                     RunApplication();

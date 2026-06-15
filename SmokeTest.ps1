@@ -179,7 +179,8 @@ function Set-SmokeSettings([string]$appDir) {
         SoundsEnabled = $false
         SaveListPosition = $true
         Active = $true
-        DatabasePath = (Join-Path $settingsDir "clipman-history-$sentinel.clipdb")
+        DatabasePath = (Join-Path $settingsDir 'clipman-history.clipdb')
+        UseDefaultDatabasePath = $true
         LastSelectedIndex = -1
         LastSelectedTab = 0
         LastPreferencesTab = 0
@@ -190,7 +191,7 @@ function Set-SmokeSettings([string]$appDir) {
         SortDescending = $true
         SendToEnabled = $false
         ShowHistoryAfterSendTo = $false
-        GroupFilter = 'All'
+        GroupFilter = $sentinel
         DuplicateMode = 'MoveToTop'
         AutoGroupByApp = $true
         AutoRemoveUrlTracking = $false
