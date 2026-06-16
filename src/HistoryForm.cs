@@ -156,7 +156,7 @@ namespace Clipman
                 HideSelection = false,
                 MultiSelect = true,
                 AccessibleName = "File history",
-                AccessibleDescription = "Recent file and non-text clipboard events. Press Enter on a file event to put its files back on the clipboard. Press Delete to remove selected events, Control Delete to clear file history, or Alt Delete to remove unavailable events."
+                AccessibleDescription = "Recent file and non-text clipboard events. Select one or more events with standard Windows list selection. Press Enter to put selected files back on the clipboard, Shift Enter to go to one selected file or folder, Delete to remove selected events, Control Delete to clear file history, or Alt Delete to remove unavailable events."
             };
             fileEventsList.Columns.Add("Event", 420);
             fileEventsList.Columns.Add("Source", 120);
@@ -449,10 +449,13 @@ namespace Clipman
             edit.DropDownItems.Clear();
             if (IsFileClipboardTabActive())
             {
-                var item = SelectedFileClipboardEvent();
-                var hasFiles = item != null && item.Files != null && item.Files.Count > 0;
-                var restore = edit.DropDownItems.Add("&Restore files to clipboard\tEnter", null, (s, e) => RestoreSelectedFileClipboardEvent());
+                var items = SelectedFileClipboardEvents();
+                var item = items.Count == 1 ? items[0] : null;
+                var hasFiles = items.Any(HasRestorableFilePaths);
+                var restore = edit.DropDownItems.Add("&Restore files to clipboard\tEnter", null, (s, e) => RestoreSelectedFileClipboardEvents());
                 restore.Enabled = hasFiles;
+                var goToFile = edit.DropDownItems.Add("&Go to file\tShift+Enter", null, (s, e) => GoToSelectedFileClipboardEvent());
+                goToFile.Enabled = item != null && item.Files != null && item.Files.Count == 1;
                 var copyPaths = edit.DropDownItems.Add("&Copy file paths\tCtrl+C", null, (s, e) => CopySelectedFileClipboardPaths());
                 copyPaths.Enabled = hasFiles;
                 var details = edit.DropDownItems.Add("&View event details\tF4", null, (s, e) => ViewSelectedFileClipboardEvent());
@@ -518,12 +521,15 @@ namespace Clipman
 
         private void PopulateFileEventsContextMenu(ContextMenuStrip menu)
         {
-            var item = SelectedFileClipboardEvent();
-            var hasFiles = item != null && item.Files != null && item.Files.Count > 0;
+            var items = SelectedFileClipboardEvents();
+            var item = items.Count == 1 ? items[0] : null;
+            var hasFiles = items.Any(HasRestorableFilePaths);
 
             menu.Items.Clear();
-            var restore = menu.Items.Add("&Restore files to clipboard\tEnter", null, (sender, args) => RestoreSelectedFileClipboardEvent());
+            var restore = menu.Items.Add("&Restore files to clipboard\tEnter", null, (sender, args) => RestoreSelectedFileClipboardEvents());
             restore.Enabled = hasFiles;
+            var goToFile = menu.Items.Add("&Go to file\tShift+Enter", null, (sender, args) => GoToSelectedFileClipboardEvent());
+            goToFile.Enabled = item != null && item.Files != null && item.Files.Count == 1;
             var copyPaths = menu.Items.Add("&Copy file paths\tCtrl+C", null, (sender, args) => CopySelectedFileClipboardPaths());
             copyPaths.Enabled = hasFiles;
             var details = menu.Items.Add("&View event details\tF4", null, (sender, args) => ViewSelectedFileClipboardEvent());
@@ -1016,7 +1022,13 @@ namespace Clipman
 
         private void FileEventsListKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Enter)
+            if (e.Shift && e.KeyCode == Keys.Enter)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                GoToSelectedFileClipboardEvent();
+            }
+            else if (e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
@@ -1062,25 +1074,32 @@ namespace Clipman
 
         private void RestoreSelectedFileClipboardEvent()
         {
-            RestoreSelectedFileClipboardEvent(false);
+            RestoreSelectedFileClipboardEvents(false);
         }
 
         private void RestoreSelectedFileClipboardEvent(bool closeAfterRestore)
         {
-            var item = SelectedFileClipboardEvent();
-            if (item == null || item.Files == null || item.Files.Count == 0)
+            RestoreSelectedFileClipboardEvents(closeAfterRestore);
+        }
+
+        private void RestoreSelectedFileClipboardEvents()
+        {
+            RestoreSelectedFileClipboardEvents(false);
+        }
+
+        private void RestoreSelectedFileClipboardEvents(bool closeAfterRestore)
+        {
+            var selected = SelectedFileClipboardEvents();
+            var existing = ExistingFileClipboardPaths(selected);
+            if (selected.Count == 0)
             {
-                statusText.Text = "Selected clipboard event does not contain files.";
+                statusText.Text = "No file clipboard event is selected.";
                 return;
             }
 
-            var existing = item.Files
-                .Where(path => !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path)))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
             if (existing.Length == 0)
             {
-                statusText.Text = "No existing files or folders remain for the selected clipboard event.";
+                statusText.Text = "No existing files or folders remain for the selected file-history event or events.";
                 return;
             }
 
@@ -1103,19 +1122,65 @@ namespace Clipman
             }
         }
 
-        private void CopySelectedFileClipboardPaths()
+        private void GoToSelectedFileClipboardEvent()
         {
             var item = SelectedFileClipboardEvent();
-            if (item == null || item.Files == null || item.Files.Count == 0)
+            if (item == null || item.Files == null || item.Files.Count != 1)
             {
-                statusText.Text = "Selected clipboard event does not contain files.";
+                statusText.Text = "Go to file needs one selected file-history event containing exactly one file or folder.";
                 return;
             }
 
-            Clipboard.SetText(string.Join(Environment.NewLine, item.Files));
-            statusText.Text = item.Files.Count == 1
+            var path = item.Files[0];
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                statusText.Text = "Selected file-history event does not contain a usable path.";
+                return;
+            }
+
+            try
+            {
+                if (File.Exists(path))
+                {
+                    Process.Start("explorer.exe", "/select,\"" + path + "\"");
+                    statusText.Text = "Opened file location.";
+                }
+                else if (Directory.Exists(path))
+                {
+                    Process.Start("explorer.exe", "\"" + path + "\"");
+                    statusText.Text = "Opened folder.";
+                }
+                else
+                {
+                    statusText.Text = "That file or folder no longer exists.";
+                }
+            }
+            catch (Exception ex)
+            {
+                statusText.Text = "Could not open file location: " + ex.Message;
+            }
+        }
+
+        private void CopySelectedFileClipboardPaths()
+        {
+            var selected = SelectedFileClipboardEvents();
+            var paths = AllFileClipboardPaths(selected);
+            if (selected.Count == 0)
+            {
+                statusText.Text = "No file clipboard event is selected.";
+                return;
+            }
+
+            if (paths.Length == 0)
+            {
+                statusText.Text = "Selected file-history event or events do not contain file paths.";
+                return;
+            }
+
+            Clipboard.SetText(string.Join(Environment.NewLine, paths));
+            statusText.Text = paths.Length == 1
                 ? "Copied one file path to the clipboard."
-                : "Copied " + item.Files.Count + " file paths to the clipboard.";
+                : "Copied " + paths.Length + " file paths to the clipboard.";
         }
 
         private void ViewSelectedFileClipboardEvent()
@@ -1189,6 +1254,38 @@ namespace Clipman
         {
             if (fileEventsList == null || fileEventsList.SelectedItems.Count == 0) return null;
             return fileEventsList.SelectedItems[0].Tag as ClipboardEventSummary;
+        }
+
+        private List<ClipboardEventSummary> SelectedFileClipboardEvents()
+        {
+            if (fileEventsList == null || fileEventsList.SelectedItems.Count == 0) return new List<ClipboardEventSummary>();
+            return fileEventsList.SelectedItems.Cast<ListViewItem>()
+                .OrderBy(i => i.Index)
+                .Select(i => i.Tag as ClipboardEventSummary)
+                .Where(e => e != null)
+                .ToList();
+        }
+
+        private static bool HasRestorableFilePaths(ClipboardEventSummary item)
+        {
+            return ExistingFileClipboardPaths(new[] { item }).Length > 0;
+        }
+
+        private static string[] AllFileClipboardPaths(IEnumerable<ClipboardEventSummary> items)
+        {
+            return (items ?? Enumerable.Empty<ClipboardEventSummary>())
+                .Where(item => item != null && item.Files != null)
+                .SelectMany(item => item.Files)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        private static string[] ExistingFileClipboardPaths(IEnumerable<ClipboardEventSummary> items)
+        {
+            return AllFileClipboardPaths(items)
+                .Where(path => File.Exists(path) || Directory.Exists(path))
+                .ToArray();
         }
 
         private string FileClipboardEventDetails(ClipboardEventSummary item)
@@ -1285,8 +1382,7 @@ namespace Clipman
         {
             var selected = SelectedEntries();
             if (selected.Count == 0) return;
-            settings.LastSelectedIndex = list.SelectedIndices.Count > 0 ? list.SelectedIndices[0] : -1;
-            saveSettings();
+            SaveCurrentListPositionIfEnabled();
             if (selected.Count == 1)
             {
                 copyEntry(selected[0]);
@@ -1300,6 +1396,14 @@ namespace Clipman
             {
                 Hide();
             }
+        }
+
+        private void SaveCurrentListPositionIfEnabled()
+        {
+            if (!settings.SaveListPosition) return;
+            var selectedIndex = list.SelectedIndices.Count > 0 ? list.SelectedIndices[0] : -1;
+            settings.LastSelectedIndex = selectedIndex;
+            saveSettings();
         }
 
         private void CopySelectedPlainText(bool closeAfterCopy)

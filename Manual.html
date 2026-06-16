@@ -95,7 +95,7 @@
     <li>Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected entries in manual order.</li>
     <li>Press <code>Ctrl+1</code> through <code>Ctrl+0</code> to copy one of the first ten pinned entries and close history.</li>
     <li>Press <code>Alt+1</code> through <code>Alt+0</code> to jump to one of the first ten group filters.</li>
-    <li>Use the File history tab to review recent file, folder, and non-text clipboard events captured by Clipman. Press <code>Enter</code> on a file event to put those files back on the Windows clipboard. Press <code>Del</code> to remove selected file-history events, <code>Ctrl+Del</code> to clear file history, and <code>Alt+Del</code> to remove unavailable events that cannot be restored as files. Its Application key menu is separate from the text history menu and only shows file-event actions.</li>
+    <li>Use the File history tab to review recent file, folder, and non-text clipboard events captured by Clipman. Select one or more file events with standard Windows list selection, then press <code>Enter</code> to put their existing files back on the Windows clipboard. Press <code>Shift+Enter</code> to go to a single selected file or folder. Press <code>Del</code> to remove selected file-history events, <code>Ctrl+Del</code> to clear file history, and <code>Alt+Del</code> to remove unavailable events that cannot be restored as files. Its Application key menu is separate from the text history menu and only shows file-event actions.</li>
     <li>Press <code>Esc</code> or close the window to hide history without exiting Clipman.</li>
     <li>Use the toggle hotkey to turn clipboard monitoring on or off.</li>
     <li>The notification area icon shows whether monitoring is on or off.</li>
@@ -297,9 +297,14 @@
         <td>History window only</td>
       </tr>
       <tr>
-        <td>Restore selected file event to the Windows clipboard</td>
+        <td>Restore selected file events to the Windows clipboard</td>
         <td><code>Enter</code></td>
-        <td>File history tab only</td>
+        <td>File history tab only. Works with one or more selected file events.</td>
+      </tr>
+      <tr>
+        <td>Go to selected file or folder</td>
+        <td><code>Shift+Enter</code></td>
+        <td>File history tab only. Requires one selected file event containing exactly one file or folder.</td>
       </tr>
       <tr>
         <td>Copy selected file-event paths as text</td>
@@ -465,7 +470,7 @@
   <h2 id="file-history">File History</h2>
   <p>The File history tab shows file, folder, and non-text clipboard events captured by Clipman. File history is stored separately from text history in a machine-specific database named like <code>Settings\Desktop-file-history.clipdb</code>. If you set a history password, file history uses the same password; there is not a second password to remember. File history stores paths and clipboard-format details only. It does not copy or preserve the actual file contents.</p>
 
-  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. Press <code>Enter</code> to restore the selected file event to the Windows clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> to copy the file paths as text without closing. Press <code>Del</code> to remove selected file-history events from the list.</p>
+  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. The File history list supports standard Windows multi-selection, so you can use <code>Shift+Up</code>, <code>Shift+Down</code>, <code>Ctrl+Up</code>, <code>Ctrl+Down</code>, and <code>Ctrl+Space</code> to build a selection before acting on it. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the Windows clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> to copy all selected file paths as text without closing. Press <code>Shift+Enter</code> to open Explorer at a single selected file or folder; this command requires one selected event containing exactly one path. Press <code>Del</code> to remove selected file-history events from the list.</p>
 
   <p>The File history tab has buttons to clear all file-history events or remove unavailable events. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> for clear file history and <code>Alt+Del</code> for remove unavailable events. Preferences can also remove unavailable events automatically as new file-history events are captured.</p>
 
@@ -591,6 +596,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.5</h3>
+  <ul>
+    <li>Fixed: Save list position now only saves and restores list position when enabled.</li>
+    <li>Fixed: File history Preferences now apply immediately to the running Clipman instance.</li>
+    <li>Added File history Go to file with <code>Shift+Enter</code>, plus multi-selection support for restoring several file events or copying their paths in one operation.</li>
+  </ul>
+
   <h3>1.5.4</h3>
   <ul>
     <li>Improved menu mnemonics so menu items have unique access keys wherever practical.</li>

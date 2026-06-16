@@ -23,7 +23,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
 - Sort direction can be toggled between ascending and descending from the View menu.
-- Use the File history tab to review file copy/cut and non-text clipboard events captured by Clipman and restore file events to the Windows clipboard.
+- Use the File history tab to review file copy/cut and non-text clipboard events captured by Clipman, restore one or more selected file events to the Windows clipboard, or go to one selected file or folder.
 - File history diagnostics are capped by preference, and unavailable file-history events can be removed manually or automatically.
 - Optional history size and age limits, with pinned entries kept.
 - Optional ignored application list for sensitive apps.
@@ -81,6 +81,8 @@ When a history password is saved, `.clipdb` imports and exports use the current 
 Old Clipman and Ditto imports read text entries only. They do not import images or every custom clipboard format.
 
 The File history tab can delete selected file events with `Del`, clear file history with `Ctrl+Del`, and remove unavailable events with `Alt+Del`. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files or folders are now missing.
+
+File history supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Use `Shift+Enter` to open Explorer at one selected file or folder.
 
 File history preferences can automatically remove unavailable events as new file-history events arrive. Diagnostics include the total file-history count, but only list the configured number of recent events so copied file operations do not make diagnostics excessively long.
 

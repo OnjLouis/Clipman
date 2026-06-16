@@ -248,6 +248,7 @@ namespace Clipman
             var updatePolicyChanged =
                 !string.Equals(settings.UpdateCheckFrequency, updated.UpdateCheckFrequency, StringComparison.OrdinalIgnoreCase) ||
                 settings.InstallUpdatesSilently != updated.InstallUpdatesSilently;
+            var saveListPositionTurnedOff = settings.SaveListPosition && !updated.SaveListPosition;
             settings.ShowHistoryHotkey = updated.ShowHistoryHotkey;
             settings.ToggleActiveHotkey = updated.ToggleActiveHotkey;
             settings.RemoveDuplicates = updated.RemoveDuplicates;
@@ -267,12 +268,18 @@ namespace Clipman
             settings.DuplicateMode = updated.DuplicateMode;
             settings.AutoGroupByApp = updated.AutoGroupByApp;
             settings.AutoRemoveUrlTracking = updated.AutoRemoveUrlTracking;
+            settings.AutoRemoveUnavailableFileHistoryEvents = updated.AutoRemoveUnavailableFileHistoryEvents;
+            settings.DiagnosticsFileHistoryLimit = updated.DiagnosticsFileHistoryLimit;
             settings.RunAtStartup = updated.RunAtStartup;
             settings.UpdateCheckFrequency = updated.UpdateCheckFrequency;
             settings.InstallUpdatesSilently = updated.InstallUpdatesSilently;
             settings.DatabaseEncryptionEnabled = updated.DatabaseEncryptionEnabled;
             settings.ProtectedDatabasePassword = updated.ProtectedDatabasePassword;
             settings.LastPreferencesTab = updated.LastPreferencesTab;
+            if (saveListPositionTurnedOff)
+            {
+                settings.LastSelectedIndex = -1;
+            }
             settingsStore.Save(settings);
             if (sendToChanged)
             {
