@@ -12,6 +12,41 @@ if (-not (Test-Path -LiteralPath $csc)) {
 $portable = Join-Path $PSScriptRoot 'portable'
 New-Item -ItemType Directory -Force -Path $portable | Out-Null
 
+function Get-ClipmanVersion {
+    $assemblyInfo = Join-Path $PSScriptRoot 'src\AssemblyInfo.cs'
+    $text = Get-Content -LiteralPath $assemblyInfo -Raw
+    $match = [regex]::Match($text, 'AssemblyInformationalVersion\("(?<version>[^"]+)"\)')
+    if (-not $match.Success) {
+        throw "Could not find AssemblyInformationalVersion in $assemblyInfo"
+    }
+
+    return $match.Groups['version'].Value
+}
+
+function Assert-VersionCanBuild {
+    $version = Get-ClipmanVersion
+    $tag = "v$version"
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $git) {
+        return
+    }
+
+    $insideWorkTree = & git -C $PSScriptRoot rev-parse --is-inside-work-tree 2>$null
+    if ($LASTEXITCODE -ne 0 -or $insideWorkTree -ne 'true') {
+        return
+    }
+
+    $status = & git -C $PSScriptRoot status --porcelain --untracked-files=all
+    if ([string]::IsNullOrWhiteSpace(($status -join ''))) {
+        return
+    }
+
+    $releasedTag = & git -C $PSScriptRoot tag --list $tag
+    if (-not [string]::IsNullOrWhiteSpace(($releasedTag -join ''))) {
+        throw "Version $version has already been released as tag $tag, but this working tree has new changes. Bump AssemblyInformationalVersion, AssemblyVersion, and AssemblyFileVersion before building. If the next version is unclear, ask Andre what it should be and tell him the current version is $version."
+    }
+}
+
 function Assert-PortableShape {
     $forbiddenFiles = @(
         'README.md',
@@ -40,6 +75,8 @@ function Assert-PortableShape {
         }
     }
 }
+
+Assert-VersionCanBuild
 
 $manifest = Join-Path $PSScriptRoot 'src\clipman.exe.manifest'
 $references = @(

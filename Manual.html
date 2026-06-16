@@ -95,7 +95,7 @@
     <li>Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected entries in manual order.</li>
     <li>Press <code>Ctrl+1</code> through <code>Ctrl+0</code> to copy one of the first ten pinned entries and close history.</li>
     <li>Press <code>Alt+1</code> through <code>Alt+0</code> to jump to one of the first ten group filters.</li>
-    <li>Use the File history tab to review recent file, folder, and non-text clipboard events captured by Clipman. Press <code>Enter</code> on a file event to put those files back on the Windows clipboard. Press <code>Del</code> to remove selected file-history events, <code>Ctrl+Del</code> to clear file history, and <code>Alt+Del</code> to remove missing file events. Its Application key menu is separate from the text history menu and only shows file-event actions.</li>
+    <li>Use the File history tab to review recent file, folder, and non-text clipboard events captured by Clipman. Press <code>Enter</code> on a file event to put those files back on the Windows clipboard. Press <code>Del</code> to remove selected file-history events, <code>Ctrl+Del</code> to clear file history, and <code>Alt+Del</code> to remove unavailable events that cannot be restored as files. Its Application key menu is separate from the text history menu and only shows file-event actions.</li>
     <li>Press <code>Esc</code> or close the window to hide history without exiting Clipman.</li>
     <li>Use the toggle hotkey to turn clipboard monitoring on or off.</li>
     <li>The notification area icon shows whether monitoring is on or off.</li>
@@ -124,6 +124,16 @@
       <tr>
         <td>Open preferences</td>
         <td><code>Ctrl+,</code></td>
+        <td>History window only</td>
+      </tr>
+      <tr>
+        <td>Import clipboard entries</td>
+        <td><code>Ctrl+I</code></td>
+        <td>History window only</td>
+      </tr>
+      <tr>
+        <td>Export clipboard entries</td>
+        <td><code>Ctrl+E</code></td>
         <td>History window only</td>
       </tr>
       <tr>
@@ -163,7 +173,7 @@
       </tr>
       <tr>
         <td>Switch Preferences tabs</td>
-        <td><code>Ctrl+1</code> to <code>Ctrl+4</code></td>
+        <td><code>Ctrl+1</code> to <code>Ctrl+5</code></td>
         <td>Preferences window only</td>
       </tr>
       <tr>
@@ -312,7 +322,7 @@
         <td>File history tab only</td>
       </tr>
       <tr>
-        <td>Remove missing file-history events</td>
+        <td>Remove unavailable file-history events</td>
         <td><code>Alt+Del</code></td>
         <td>File history tab only</td>
       </tr>
@@ -322,13 +332,15 @@
   <p>The current global hotkeys are shown in the notification area menu. The toggle hotkey is also shown in the Options menu inside the history window.</p>
 
   <h2 id="preferences">Preferences</h2>
-  <p>Open <strong>Options, Preferences</strong> from the history window. Preferences are split into tabs for General, Hotkeys, Storage and Password, and Startup and updates. Changes apply immediately; use Close when finished. Clipman remembers the Preferences tab you used last. Press <code>Ctrl+1</code> through <code>Ctrl+4</code> to switch directly between the tabs.</p>
+  <p>Open <strong>Options, Preferences</strong> from the history window. Preferences are split into tabs for General, File history, Hotkeys, Storage and Password, and Startup and updates. Changes apply immediately; use Close when finished. Clipman remembers the Preferences tab you used last. Press <code>Ctrl+1</code> through <code>Ctrl+5</code> to switch directly between the tabs.</p>
 
-  <p>Preferences can change the global hotkeys, sound behavior, duplicate handling, saved list position, active state, database path, history limits, ignored applications, Send To integration, automatic URL-tracking removal, Windows startup registration, update checks, silent update installs, and whether Send To imports bring the history window to the front.</p>
+  <p>Preferences can change the global hotkeys, sound behavior, duplicate handling, saved list position, active state, database path, history limits, File history cleanup and diagnostics detail, ignored applications, Send To integration, automatic URL-tracking removal, Windows startup registration, update checks, silent update installs, and whether Send To imports bring the history window to the front.</p>
 
   <p><strong>Automatically group new clips by source application</strong> is enabled by default for new installs. It places newly captured clipboard text into a group named after the application Clipman believes supplied the clipboard text, such as Chrome, Thunderbird, or Outlook. Disable it if you prefer all new entries to start ungrouped.</p>
 
   <p>Clipman first asks Windows for the clipboard owner application, then falls back to the foreground application if Windows does not expose a useful owner. Some background hotkeys or automation tools may still be attributed to the foreground application because the Windows clipboard does not always preserve reliable source metadata.</p>
+
+  <p><strong>File history:</strong> Use this tab to control file-history maintenance. The automatic cleanup option removes unavailable events as new file-history events arrive. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. The diagnostics event limit controls how many recent file-history events are listed in Help, Diagnostics. Use <code>0</code> to show only the total count and omit event details.</p>
 
   <p>Global hotkey fields accept only combinations with at least two modifiers and one real key, such as <code>Ctrl+Alt+\</code> or <code>Ctrl+Shift+H</code>. Modifier-only keys, single keys, and unsafe Windows shortcuts are rejected.</p>
 
@@ -395,7 +407,7 @@
       </tr>
       <tr>
         <td>Edit</td>
-        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove missing file events, and clear file history.</td>
+        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history.</td>
       </tr>
       <tr>
         <td>Actions</td>
@@ -403,7 +415,7 @@
       </tr>
       <tr>
         <td>View</td>
-        <td>Sort Text history entries by last used, added date, text, group, machine, or manual order, toggle ascending or descending order, and move selected entries up or down in manual order.</td>
+        <td>Sort Text history entries from the Sort by submenu, toggle ascending or descending order, and move selected entries up or down in manual order.</td>
       </tr>
       <tr>
         <td>Options</td>
@@ -455,7 +467,7 @@
 
   <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. Press <code>Enter</code> to restore the selected file event to the Windows clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> to copy the file paths as text without closing. Press <code>Del</code> to remove selected file-history events from the list.</p>
 
-  <p>The File history tab has buttons to clear all file-history events or remove file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> for clear file history and <code>Alt+Del</code> for remove missing file events. Non-file clipboard events, such as specialist formats from audio editors, are kept for information but cannot be restored as files.</p>
+  <p>The File history tab has buttons to clear all file-history events or remove unavailable events. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> for clear file history and <code>Alt+Del</code> for remove unavailable events. Preferences can also remove unavailable events automatically as new file-history events are captured.</p>
 
   <h2 id="import-and-export">Import and Export</h2>
   <ul>
@@ -472,7 +484,7 @@
 
   <p>Use <strong>Preferences, Startup and updates</strong> to choose whether Clipman checks for updates never, at startup, hourly, or daily. If <strong>Install updates silently when possible</strong> is enabled, automatic checks can install a newer ZIP release without prompting. Manual update checks still show the normal update dialog.</p>
 
-  <p>Use <strong>Help, Version history</strong> to review the latest release notes, <strong>Help, Project page</strong> or <code>Ctrl+F1</code> to open the GitHub project page, <strong>Help, Contact</strong> to send questions or feedback, <strong>Help, Donate</strong> to support the project, and <strong>Help, Diagnostics</strong> or <code>Alt+F1</code> to open diagnostics.</p>
+  <p>Use <strong>Help, Version history</strong> to review the latest release notes, <strong>Help, Project page</strong> or <code>Ctrl+F1</code> to open the GitHub project page, <strong>Help, Contact</strong> to send questions or feedback, <strong>Help, Donate</strong> to support the project, and <strong>Help, Diagnostics</strong> or <code>Alt+F1</code> to open diagnostics. Diagnostics show the total File history count, but only list the configured number of recent events from Preferences, File history.</p>
 
   <h2 id="sounds">Sounds</h2>
   <p>Clipman can play short sounds when text is copied, monitoring is turned on, monitoring is turned off, or a clipboard item is ignored because monitoring is off. Sounds can be enabled or disabled in preferences.</p>
@@ -579,17 +591,26 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.4</h3>
+  <ul>
+    <li>Improved menu mnemonics so menu items have unique access keys wherever practical.</li>
+    <li>Moved sort choices into <strong>View, Sort by</strong>, matching the Explorer-style menu pattern and avoiding View menu key conflicts.</li>
+    <li>Added <code>Ctrl+I</code> for Import and <code>Ctrl+E</code> for Export.</li>
+    <li>Improved File history cleanup: <code>Alt+Del</code> now removes non-restorable non-file clipboard events as well as file events whose paths no longer exist.</li>
+    <li>Added File history preferences for automatic unavailable-event cleanup and a configurable diagnostics event limit.</li>
+  </ul>
+
   <h3>1.5.3</h3>
   <ul>
     <li>Improved: The history window and Preferences window now include clean Close buttons that expose <code>Esc</code> to screen readers without adding shortcut text to the visible button labels.</li>
     <li>Improved: Preferences now opens as an owned dialog instead of a separate Alt+Tab window, keeping it in the same Clipman context as the history window.</li>
-    <li>Added File history shortcuts: <code>Ctrl+Del</code> clears file history and <code>Alt+Del</code> removes missing file events.</li>
+    <li>Added File history shortcuts: <code>Ctrl+Del</code> clears file history and <code>Alt+Del</code> removes unavailable events.</li>
   </ul>
 
   <h3>1.5.2</h3>
   <ul>
     <li>Added persistent machine-specific File history storage using the same history password as text history.</li>
-    <li>Added File history cleanup commands: delete selected events, clear file history, and remove events whose referenced files or folders are missing.</li>
+    <li>Added File history cleanup commands: delete selected events, clear file history, and remove unavailable events.</li>
     <li>Added a File menu command to clear all saved text history, with confirmation and password re-entry when a history password is set.</li>
   </ul>
 

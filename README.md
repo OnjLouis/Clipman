@@ -24,6 +24,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
 - Sort direction can be toggled between ascending and descending from the View menu.
 - Use the File history tab to review file copy/cut and non-text clipboard events captured by Clipman and restore file events to the Windows clipboard.
+- File history diagnostics are capped by preference, and unavailable file-history events can be removed manually or automatically.
 - Optional history size and age limits, with pinned entries kept.
 - Optional ignored application list for sensitive apps.
 - Import and export clipboard history for backup, including text imports from old Clipman `clipman.db` and Ditto SQLite databases.
@@ -40,7 +41,9 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Show clipboard history: `Ctrl+Alt+\`
 - Toggle monitoring on/off: <code>Ctrl+Alt+`</code>
 - Preferences: `Ctrl+,` in the history window only.
-- Switch Preferences tabs: `Ctrl+1` to `Ctrl+4` in the Preferences window.
+- Import clipboard entries: `Ctrl+I`
+- Export clipboard entries: `Ctrl+E`
+- Switch Preferences tabs: `Ctrl+1` to `Ctrl+5` in the Preferences window.
 - Close history or Preferences: `Esc`
 - Manual: `F1` in the history window.
 - Check for updates: `Shift+F1` in the history window.
@@ -53,7 +56,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 
 Hotkeys can be changed from Options > Preferences.
 
-Preferences remembers the tab you used last. The storage tab is named Storage and Password because it contains both the shared database path and the history password controls.
+Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared database path and the history password controls.
 
 The default history database, `Settings\clipman-history.clipdb`, is portable with the app folder. If Clipman is moved while using the default database, the path follows the new folder. If you choose a different database path, Clipman treats it as explicit and asks what to do if that file cannot be found at startup.
 
@@ -77,7 +80,9 @@ When a history password is saved, `.clipdb` imports and exports use the current 
 
 Old Clipman and Ditto imports read text entries only. They do not import images or every custom clipboard format.
 
-The File history tab can delete selected file events with `Del`, clear file history with `Ctrl+Del`, and remove file events where all referenced files or folders are now missing with `Alt+Del`.
+The File history tab can delete selected file events with `Del`, clear file history with `Ctrl+Del`, and remove unavailable events with `Alt+Del`. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files or folders are now missing.
+
+File history preferences can automatically remove unavailable events as new file-history events arrive. Diagnostics include the total file-history count, but only list the configured number of recent events so copied file operations do not make diagnostics excessively long.
 
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
@@ -104,6 +109,14 @@ Before preparing a GitHub push or release, run:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1
 ```
+
+Before release, also run the community search checklist:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\CommunitySearch.ps1
+```
+
+This checks GitHub for Clipman activity and writes web/community search links for public feedback that may not have arrived as a GitHub issue.
 
 Release rules for coding agents live in `GITHUB-RELEASE-RULES.md`.
 

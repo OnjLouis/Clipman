@@ -124,6 +124,8 @@ namespace Clipman
         public bool InstallUpdatesSilently { get; set; }
         public bool DatabaseEncryptionEnabled { get; set; }
         public string ProtectedDatabasePassword { get; set; }
+        public bool AutoRemoveUnavailableFileHistoryEvents { get; set; }
+        public int DiagnosticsFileHistoryLimit { get; set; }
 
         public AppSettings()
         {
@@ -154,6 +156,8 @@ namespace Clipman
             InstallUpdatesSilently = false;
             DatabaseEncryptionEnabled = false;
             ProtectedDatabasePassword = string.Empty;
+            AutoRemoveUnavailableFileHistoryEvents = false;
+            DiagnosticsFileHistoryLimit = 20;
         }
     }
 

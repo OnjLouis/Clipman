@@ -86,9 +86,17 @@ namespace Clipman
             {
                 settings.LastSelectedTab = 0;
             }
-            if (settings.LastPreferencesTab < 0 || settings.LastPreferencesTab > 3)
+            if (settings.LastPreferencesTab < 0 || settings.LastPreferencesTab > 4)
             {
                 settings.LastPreferencesTab = 0;
+            }
+            if (settings.DiagnosticsFileHistoryLimit < 0)
+            {
+                settings.DiagnosticsFileHistoryLimit = 0;
+            }
+            if (settings.DiagnosticsFileHistoryLimit > 200)
+            {
+                settings.DiagnosticsFileHistoryLimit = 200;
             }
             settings.DatabaseEncryptionEnabled = !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
         }

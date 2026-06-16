@@ -69,3 +69,11 @@ Update `Manual.html` for user-facing behavior changes.
 Update `README.md` for GitHub/project overview changes.
 
 Do not include user-specific paths, private clipboard contents, personal settings, or local machine names in public docs, changelogs, or release notes.
+
+## Private Handover Parity
+
+Andre's private Clipman handover lives at `D:\Dropbox\txt\codex\Clipman.txt`. It is not part of the source package, portable build, GitHub repository, or release ZIP.
+
+When changing source, release rules, updater behavior, storage behavior, accessibility behavior, packaging rules, smoke-test expectations, or other facts a future Clipman thread must know, update that handover in the same pass.
+
+`SmokeTest.ps1` checks the private handover when it exists on Andre's machine. Do not bypass that failure by deleting or shipping the handover file.

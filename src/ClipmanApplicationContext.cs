@@ -104,7 +104,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveMissingRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
                 created = true;
             }
 
@@ -442,6 +442,10 @@ namespace Clipman
 
             if (summary == null) return;
             fileEventStore.Add(summary);
+            if (settings.AutoRemoveUnavailableFileHistoryEvents)
+            {
+                fileEventStore.RemoveUnavailableEvents();
+            }
         }
 
         private List<ClipboardEventSummary> GetRecentClipboardEvents()
@@ -459,9 +463,9 @@ namespace Clipman
             return fileEventStore.Clear();
         }
 
-        private int RemoveMissingRecentClipboardEvents()
+        private int RemoveUnavailableRecentClipboardEvents()
         {
-            return fileEventStore.RemoveMissingFileEvents();
+            return fileEventStore.RemoveUnavailableEvents();
         }
 
         private bool ClearTextHistory()
@@ -731,6 +735,8 @@ namespace Clipman
                 "File history path: " + fileEventStore.DatabasePath + "\r\n" +
                 "File history storage status: " + (string.IsNullOrWhiteSpace(fileEventStore.LastStorageError) ? "OK" : "Unavailable: " + fileEventStore.LastStorageError) + "\r\n" +
                 "File history events: " + fileEventStore.GetEvents().Count + "\r\n" +
+                "File history diagnostics limit: " + settings.DiagnosticsFileHistoryLimit + "\r\n" +
+                "Auto remove unavailable file history events: " + settings.AutoRemoveUnavailableFileHistoryEvents + "\r\n" +
                 "Show history hotkey: " + settings.ShowHistoryHotkey + " (" + (showHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle hotkey: " + settings.ToggleActiveHotkey + " (" + (toggleHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle alternate UK key: " + (toggleAlternateHotkeyRegistered ? "registered" : "not registered or not needed") + "\r\n" +
@@ -760,14 +766,23 @@ namespace Clipman
         private string BuildRecentClipboardEventsText()
         {
             var snapshots = fileEventStore.GetEvents();
+            var total = snapshots.Count;
+            var limit = settings.DiagnosticsFileHistoryLimit;
+            if (limit < 0) limit = 0;
+            if (limit > 200) limit = 200;
 
-            if (snapshots.Count == 0)
+            if (total == 0)
             {
                 return "File and non-text clipboard events: none recorded.";
             }
 
-            var lines = new List<string> { "File and non-text clipboard events:" };
-            foreach (var item in snapshots)
+            if (limit == 0)
+            {
+                return "File and non-text clipboard events: " + total + " recorded. Details omitted by diagnostics preference.";
+            }
+
+            var lines = new List<string> { "File and non-text clipboard events: showing " + Math.Min(limit, total) + " of " + total + "." };
+            foreach (var item in snapshots.Take(limit))
             {
                 var title = item.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss") +
                     " | Source: " + (string.IsNullOrWhiteSpace(item.Source) ? "Unknown" : item.Source);
@@ -800,6 +815,10 @@ namespace Clipman
                 {
                     lines.Add("  Formats: " + string.Join(", ", item.Formats.Take(12)));
                 }
+            }
+            if (total > limit)
+            {
+                lines.Add("... " + (total - limit) + " more event(s) omitted by diagnostics preference.");
             }
 
             return string.Join("\r\n", lines);

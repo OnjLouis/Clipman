@@ -100,20 +100,23 @@ namespace Clipman
             }
         }
 
-        public int RemoveMissingFileEvents()
+        public int RemoveUnavailableEvents()
         {
             lock (sync)
             {
-                var removed = database.Events.RemoveAll(e =>
-                    e != null &&
-                    e.Files != null &&
-                    e.Files.Count > 0 &&
-                    e.Files.All(path => string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path))));
+                var removed = database.Events.RemoveAll(IsUnavailableEvent);
                 if (removed == 0) return 0;
                 SaveLocked();
                 OnChanged();
                 return removed;
             }
+        }
+
+        private static bool IsUnavailableEvent(ClipboardEventSummary item)
+        {
+            if (item == null) return false;
+            if (item.Files == null || item.Files.Count == 0) return true;
+            return item.Files.All(path => string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path)));
         }
 
         public void ChangeDatabasePassword()

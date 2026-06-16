@@ -32,6 +32,8 @@ namespace Clipman
         private readonly ShortcutButton closeButton;
         private readonly NumericUpDown maxHistoryEntries;
         private readonly NumericUpDown maxHistoryDays;
+        private readonly CheckBox autoRemoveUnavailableFileHistoryEvents;
+        private readonly NumericUpDown diagnosticsFileHistoryLimit;
         private readonly TextBox ignoredProcesses;
         private readonly CheckBox sendToEnabled;
         private readonly CheckBox showHistoryAfterSendTo;
@@ -63,17 +65,19 @@ namespace Clipman
                 Height = 515,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom,
                 AccessibleName = "Preference sections",
-                AccessibleDescription = "Preference sections. Press Control 1 through Control 4 to switch tabs."
+                AccessibleDescription = "Preference sections. Press Control 1 through Control 5 to switch tabs."
             };
 
             var general = new TabPage("General");
+            var fileHistory = new TabPage("File history");
             var hotkeys = new TabPage("Hotkeys");
             var storage = new TabPage("Storage and Password");
             var integration = new TabPage("Startup and updates");
             general.AccessibleDescription = "General preferences. Shortcut Ctrl+1.";
-            hotkeys.AccessibleDescription = "Hotkeys preferences. Shortcut Ctrl+2.";
-            storage.AccessibleDescription = "Storage and Password preferences. Shortcut Ctrl+3.";
-            integration.AccessibleDescription = "Startup and updates preferences. Shortcut Ctrl+4.";
+            fileHistory.AccessibleDescription = "File history preferences. Shortcut Ctrl+2.";
+            hotkeys.AccessibleDescription = "Hotkeys preferences. Shortcut Ctrl+3.";
+            storage.AccessibleDescription = "Storage and Password preferences. Shortcut Ctrl+4.";
+            integration.AccessibleDescription = "Startup and updates preferences. Shortcut Ctrl+5.";
 
             active = NewCheckBox("Clipboard monitoring &active", settings.Active);
             soundsEnabled = NewCheckBox("&Play sounds", settings.SoundsEnabled);
@@ -98,6 +102,15 @@ namespace Clipman
             AddRow(generalLayout, "Maximum entry &age, days:", maxHistoryDays);
             AddFullRow(generalLayout, NewNote("Use 0 for no limit. Pinned entries are kept."));
             general.Controls.Add(generalLayout);
+
+            autoRemoveUnavailableFileHistoryEvents = NewCheckBox("Automatically remove &unavailable file-history events", settings.AutoRemoveUnavailableFileHistoryEvents);
+            diagnosticsFileHistoryLimit = NewNumeric(Clamp(settings.DiagnosticsFileHistoryLimit, 0, 200), 0, 200, 1);
+            var fileHistoryLayout = NewRows();
+            AddFullRow(fileHistoryLayout, autoRemoveUnavailableFileHistoryEvents);
+            AddFullRow(fileHistoryLayout, NewNote("Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced paths are now missing."));
+            AddRow(fileHistoryLayout, "&Diagnostics event limit:", diagnosticsFileHistoryLimit);
+            AddFullRow(fileHistoryLayout, NewNote("Use 0 to include no file-history event details in diagnostics. The total event count is still shown."));
+            fileHistory.Controls.Add(fileHistoryLayout);
 
             showHotkey = NewHotkeyBox(settings.ShowHistoryHotkey, "Show or hide clipboard history global hotkey");
             toggleHotkey = NewHotkeyBox(settings.ToggleActiveHotkey, "Toggle clipboard monitoring global hotkey");
@@ -185,6 +198,7 @@ namespace Clipman
             integration.Controls.Add(integrationLayout);
 
             preferencesTabs.TabPages.Add(general);
+            preferencesTabs.TabPages.Add(fileHistory);
             preferencesTabs.TabPages.Add(hotkeys);
             preferencesTabs.TabPages.Add(storage);
             preferencesTabs.TabPages.Add(integration);
@@ -253,6 +267,8 @@ namespace Clipman
             autoRemoveUrlTracking.CheckedChanged += (s, e) => ApplyNow();
             saveListPosition.CheckedChanged += (s, e) => ApplyNow();
             active.CheckedChanged += (s, e) => ApplyNow();
+            autoRemoveUnavailableFileHistoryEvents.CheckedChanged += (s, e) => ApplyNow();
+            diagnosticsFileHistoryLimit.ValueChanged += (s, e) => ApplyNow();
             runAtStartup.CheckedChanged += (s, e) => ApplyNow();
             updateCheckFrequency.SelectedIndexChanged += (s, e) => ApplyNow();
             installUpdatesSilently.CheckedChanged += (s, e) => ApplyNow();
@@ -286,6 +302,8 @@ namespace Clipman
             settings.AutoRemoveUrlTracking = autoRemoveUrlTracking.Checked;
             settings.SaveListPosition = saveListPosition.Checked;
             settings.Active = active.Checked;
+            settings.AutoRemoveUnavailableFileHistoryEvents = autoRemoveUnavailableFileHistoryEvents.Checked;
+            settings.DiagnosticsFileHistoryLimit = (int)diagnosticsFileHistoryLimit.Value;
             settings.RunAtStartup = runAtStartup.Checked;
             settings.UpdateCheckFrequency = StoredUpdateFrequency(Convert.ToString(updateCheckFrequency.SelectedItem));
             settings.InstallUpdatesSilently = installUpdatesSilently.Checked;
@@ -515,6 +533,8 @@ namespace Clipman
                 DuplicateMode = current.DuplicateMode,
                 AutoGroupByApp = current.AutoGroupByApp,
                 AutoRemoveUrlTracking = current.AutoRemoveUrlTracking,
+                AutoRemoveUnavailableFileHistoryEvents = current.AutoRemoveUnavailableFileHistoryEvents,
+                DiagnosticsFileHistoryLimit = current.DiagnosticsFileHistoryLimit,
                 RunAtStartup = current.RunAtStartup,
                 UpdateCheckFrequency = current.UpdateCheckFrequency,
                 InstallUpdatesSilently = current.InstallUpdatesSilently,

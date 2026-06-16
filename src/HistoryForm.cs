@@ -20,7 +20,7 @@ namespace Clipman
         private readonly Func<List<ClipboardEventSummary>> recentClipboardEvents;
         private readonly Func<List<string>, int> deleteRecentClipboardEvents;
         private readonly Func<int> clearRecentClipboardEvents;
-        private readonly Func<int> removeMissingRecentClipboardEvents;
+        private readonly Func<int> removeUnavailableRecentClipboardEvents;
         private readonly Func<bool> clearTextHistory;
         private readonly Action showPreferences;
         private readonly Action toggleActive;
@@ -38,6 +38,7 @@ namespace Clipman
         private ToolStripMenuItem preferencesMenuItem;
         private ToolStripMenuItem optionsMenuItem;
         private ToolStripMenuItem toggleMenuItem;
+        private ToolStripMenuItem sortMenuItem;
         private ToolStripMenuItem sortLastUsedMenuItem;
         private ToolStripMenuItem sortAddedMenuItem;
         private ToolStripMenuItem sortTextMenuItem;
@@ -52,7 +53,7 @@ namespace Clipman
         private DateTime lastTypeSearchUtc = DateTime.MinValue;
         private bool updatingGroupFilter;
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeMissingRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
@@ -62,7 +63,7 @@ namespace Clipman
             this.recentClipboardEvents = recentClipboardEvents;
             this.deleteRecentClipboardEvents = deleteRecentClipboardEvents;
             this.clearRecentClipboardEvents = clearRecentClipboardEvents;
-            this.removeMissingRecentClipboardEvents = removeMissingRecentClipboardEvents;
+            this.removeUnavailableRecentClipboardEvents = removeUnavailableRecentClipboardEvents;
             this.clearTextHistory = clearTextHistory;
             this.showPreferences = showPreferences;
             this.toggleActive = toggleActive;
@@ -155,7 +156,7 @@ namespace Clipman
                 HideSelection = false,
                 MultiSelect = true,
                 AccessibleName = "File history",
-                AccessibleDescription = "Recent file and non-text clipboard events. Press Enter on a file event to put its files back on the clipboard. Press Delete to remove selected events, Control Delete to clear file history, or Alt Delete to remove missing file events."
+                AccessibleDescription = "Recent file and non-text clipboard events. Press Enter on a file event to put its files back on the clipboard. Press Delete to remove selected events, Control Delete to clear file history, or Alt Delete to remove unavailable events."
             };
             fileEventsList.Columns.Add("Event", 420);
             fileEventsList.Columns.Add("Source", 120);
@@ -184,18 +185,18 @@ namespace Clipman
                 AccessibleDescription = "Clears all file-history events. Shortcut Control Delete."
             };
             clearFileHistoryButton.Click += (s, e) => ClearFileClipboardHistory();
-            var removeMissingButton = new ShortcutButton
+            var removeUnavailableButton = new ShortcutButton
             {
-                Text = "Remove missing files",
+                Text = "Remove unavailable",
                 ShortcutText = "Alt+Del",
                 ShortcutKeys = Keys.Alt | Keys.Delete,
-                Width = 150,
-                AccessibleName = "Remove missing file events",
-                AccessibleDescription = "Removes file-history events where all referenced files or folders are missing. Shortcut Alt Delete."
+                Width = 160,
+                AccessibleName = "Remove unavailable file-history events",
+                AccessibleDescription = "Removes file-history events that cannot be restored, including non-file clipboard events and events where all referenced files or folders are missing. Shortcut Alt Delete."
             };
-            removeMissingButton.Click += (s, e) => RemoveMissingFileClipboardEvents();
+            removeUnavailableButton.Click += (s, e) => RemoveUnavailableFileClipboardEvents();
             fileActionsPanel.Controls.Add(clearFileHistoryButton);
-            fileActionsPanel.Controls.Add(removeMissingButton);
+            fileActionsPanel.Controls.Add(removeUnavailableButton);
             fileActionsPanel.Controls.Add(CreateCloseButton());
             fileTab.Controls.Add(fileEventsList);
             fileTab.Controls.Add(fileActionsPanel);
@@ -355,9 +356,9 @@ namespace Clipman
             menu.MenuDeactivate += (s, e) => BeginDelayedFocus(80);
 
             var file = new ToolStripMenuItem("&File");
-            file.DropDownItems.Add("&Import...", null, (s, e) => Import(false));
+            file.DropDownItems.Add("&Import...\tCtrl+I", null, (s, e) => Import(false));
             file.DropDownItems.Add("Import and &replace...", null, (s, e) => Import(true));
-            file.DropDownItems.Add("&Export...", null, (s, e) => Export());
+            file.DropDownItems.Add("&Export...\tCtrl+E", null, (s, e) => Export());
             file.DropDownItems.Add("-");
             file.DropDownItems.Add("Clear text &history...", null, (s, e) => ClearTextClipboardHistory());
             file.DropDownItems.Add("-");
@@ -370,17 +371,17 @@ namespace Clipman
 
             var actions = new ToolStripMenuItem("&Actions");
             actions.DropDownItems.Add("Copy as plain &text\tCtrl+Shift+C", null, (s, e) => CopySelectedPlainText(false));
-            actions.DropDownItems.Add("&Trim leading and trailing whitespace\tCtrl+Shift+T", null, (s, e) => TransformSelected(TrimText, "Trimmed selected entry or entries."));
+            actions.DropDownItems.Add("T&rim leading and trailing whitespace\tCtrl+Shift+T", null, (s, e) => TransformSelected(TrimText, "Trimmed selected entry or entries."));
             actions.DropDownItems.Add("Convert to &single line\tCtrl+Shift+L", null, (s, e) => TransformSelected(SingleLineText, "Converted selected entry or entries to single line."));
             actions.DropDownItems.Add("Remove &blank lines\tCtrl+Shift+B", null, (s, e) => TransformSelected(RemoveBlankLines, "Removed blank lines from selected entry or entries."));
-            actions.DropDownItems.Add("Remove URL t&racking\tCtrl+Shift+R", null, (s, e) => TransformSelected(UrlTrackingCleaner.CleanText, "Removed URL tracking from selected entry or entries."));
+            actions.DropDownItems.Add("Remove URL trac&king\tCtrl+Shift+R", null, (s, e) => TransformSelected(UrlTrackingCleaner.CleanText, "Removed URL tracking from selected entry or entries."));
             actions.DropDownItems.Add("&Uppercase", null, (s, e) => TransformSelected(t => (t ?? string.Empty).ToUpperInvariant(), "Uppercased selected entry or entries."));
             actions.DropDownItems.Add("&Lowercase", null, (s, e) => TransformSelected(t => (t ?? string.Empty).ToLowerInvariant(), "Lowercased selected entry or entries."));
             actions.DropDownItems.Add("HTML &encode", null, (s, e) => TransformSelected(System.Net.WebUtility.HtmlEncode, "HTML-encoded selected entry or entries."));
             actions.DropDownItems.Add("&HTML decode", null, (s, e) => TransformSelected(System.Net.WebUtility.HtmlDecode, "HTML-decoded selected entry or entries."));
             actions.DropDownItems.Add("HTML to readable te&xt\tCtrl+Shift+H", null, (s, e) => TransformSelected(HtmlToText, "Converted selected HTML entry or entries to readable text."));
-            actions.DropDownItems.Add("&URL encode\tCtrl+Shift+U", null, (s, e) => TransformSelected(UrlEncode, "URL-encoded selected entry or entries."));
-            actions.DropDownItems.Add("U&RL decode", null, (s, e) => TransformSelected(Uri.UnescapeDataString, "URL-decoded selected entry or entries."));
+            actions.DropDownItems.Add("URL e&ncode\tCtrl+Shift+U", null, (s, e) => TransformSelected(UrlEncode, "URL-encoded selected entry or entries."));
+            actions.DropDownItems.Add("URL &decode", null, (s, e) => TransformSelected(Uri.UnescapeDataString, "URL-decoded selected entry or entries."));
             actions.DropDownOpening += (s, e) => SetMenuItemsEnabled(actions, !IsFileClipboardTabActive());
 
             var options = new ToolStripMenuItem("&Options");
@@ -391,22 +392,23 @@ namespace Clipman
             options.DropDownItems.Add(toggleMenuItem);
 
             var view = new ToolStripMenuItem("&View");
-            sortLastUsedMenuItem = new ToolStripMenuItem("Sort by &last used", null, (s, e) => SetSortMode("LastUsed"));
-            sortAddedMenuItem = new ToolStripMenuItem("Sort by &added", null, (s, e) => SetSortMode("Added"));
-            sortTextMenuItem = new ToolStripMenuItem("Sort by &text", null, (s, e) => SetSortMode("Text"));
-            sortGroupMenuItem = new ToolStripMenuItem("Sort by &group", null, (s, e) => SetSortMode("Group"));
-            sortMachineMenuItem = new ToolStripMenuItem("Sort by &machine", null, (s, e) => SetSortMode("Machine"));
+            sortMenuItem = new ToolStripMenuItem("S&ort by");
+            sortLastUsedMenuItem = new ToolStripMenuItem("&Last used", null, (s, e) => SetSortMode("LastUsed"));
+            sortAddedMenuItem = new ToolStripMenuItem("&Added", null, (s, e) => SetSortMode("Added"));
+            sortTextMenuItem = new ToolStripMenuItem("&Text", null, (s, e) => SetSortMode("Text"));
+            sortGroupMenuItem = new ToolStripMenuItem("&Group", null, (s, e) => SetSortMode("Group"));
+            sortMachineMenuItem = new ToolStripMenuItem("Mac&hine", null, (s, e) => SetSortMode("Machine"));
             sortManualMenuItem = new ToolStripMenuItem("&Manual order", null, (s, e) => SetSortMode("Manual"));
             sortDirectionMenuItem = new ToolStripMenuItem("", null, (s, e) => ToggleSortDirection());
-            view.DropDownItems.Add(sortLastUsedMenuItem);
-            view.DropDownItems.Add(sortAddedMenuItem);
-            view.DropDownItems.Add(sortTextMenuItem);
-            view.DropDownItems.Add(sortGroupMenuItem);
-            view.DropDownItems.Add(sortMachineMenuItem);
-            view.DropDownItems.Add(sortManualMenuItem);
-            view.DropDownItems.Add("-");
             view.DropDownItems.Add(sortDirectionMenuItem);
             view.DropDownItems.Add("-");
+            sortMenuItem.DropDownItems.Add(sortLastUsedMenuItem);
+            sortMenuItem.DropDownItems.Add(sortAddedMenuItem);
+            sortMenuItem.DropDownItems.Add(sortTextMenuItem);
+            sortMenuItem.DropDownItems.Add(sortGroupMenuItem);
+            sortMenuItem.DropDownItems.Add(sortMachineMenuItem);
+            sortMenuItem.DropDownItems.Add(sortManualMenuItem);
+            view.DropDownItems.Add(sortMenuItem);
             view.DropDownItems.Add("Move &up\tAlt+Up", null, (s, e) => MoveSelected(-1));
             view.DropDownItems.Add("Move &down\tAlt+Down", null, (s, e) => MoveSelected(1));
             view.DropDownOpening += (s, e) => SetMenuItemsEnabled(view, !IsFileClipboardTabActive());
@@ -458,12 +460,12 @@ namespace Clipman
                 var delete = edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelectedFileClipboardEvent());
                 delete.Enabled = item != null;
                 edit.DropDownItems.Add("-");
-                edit.DropDownItems.Add("&Remove missing file events\tAlt+Del", null, (s, e) => RemoveMissingFileClipboardEvents());
-                edit.DropDownItems.Add("&Clear file history...\tCtrl+Del", null, (s, e) => ClearFileClipboardHistory());
+                edit.DropDownItems.Add("Remove &unavailable events\tAlt+Del", null, (s, e) => RemoveUnavailableFileClipboardEvents());
+                edit.DropDownItems.Add("C&lear file history...\tCtrl+Del", null, (s, e) => ClearFileClipboardHistory());
                 return;
             }
 
-            edit.DropDownItems.Add("&Copy and close\tEnter", null, (s, e) => CopySelected());
+            edit.DropDownItems.Add("Copy and c&lose\tEnter", null, (s, e) => CopySelected());
             edit.DropDownItems.Add("&Copy\tCtrl+C", null, (s, e) => CopySelected(false));
             edit.DropDownItems.Add("Cu&t\tCtrl+X", null, (s, e) => CutSelected());
             edit.DropDownItems.Add("&Paste after selected\tCtrl+V", null, (s, e) => PasteAfterSelected());
@@ -476,7 +478,7 @@ namespace Clipman
             edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelected());
             edit.DropDownItems.Add("&Find...\tCtrl+F", null, (s, e) => ShowSearchDialog(false));
             edit.DropDownItems.Add("Find &next\tF3", null, (s, e) => RepeatSearch(false));
-            edit.DropDownItems.Add("Find &previous\tShift+F3", null, (s, e) => RepeatSearch(true));
+            edit.DropDownItems.Add("Find previou&s\tShift+F3", null, (s, e) => RepeatSearch(true));
         }
 
         private static void SetMenuItemsEnabled(ToolStripMenuItem menu, bool enabled)
@@ -499,7 +501,7 @@ namespace Clipman
         private void PopulateContextMenu(ContextMenuStrip menu)
         {
             menu.Items.Clear();
-            menu.Items.Add("&Copy and close\tEnter", null, (sender, args) => CopySelected());
+            menu.Items.Add("Copy and c&lose\tEnter", null, (sender, args) => CopySelected());
             menu.Items.Add("&Copy\tCtrl+C", null, (sender, args) => CopySelected(false));
             menu.Items.Add("Cu&t\tCtrl+X", null, (sender, args) => CutSelected());
             menu.Items.Add("&Paste after selected\tCtrl+V", null, (sender, args) => PasteAfterSelected());
@@ -511,7 +513,7 @@ namespace Clipman
             menu.Items.Add("&Delete selected\tDel", null, (sender, args) => DeleteSelected());
             menu.Items.Add("&Find...\tCtrl+F", null, (sender, args) => ShowSearchDialog(false));
             menu.Items.Add("Find &next\tF3", null, (sender, args) => RepeatSearch(false));
-            menu.Items.Add("Find &previous\tShift+F3", null, (sender, args) => RepeatSearch(true));
+            menu.Items.Add("Find previou&s\tShift+F3", null, (sender, args) => RepeatSearch(true));
         }
 
         private void PopulateFileEventsContextMenu(ContextMenuStrip menu)
@@ -529,8 +531,8 @@ namespace Clipman
             var delete = menu.Items.Add("&Delete selected\tDel", null, (sender, args) => DeleteSelectedFileClipboardEvent());
             delete.Enabled = item != null;
             menu.Items.Add("-");
-            menu.Items.Add("&Remove missing file events\tAlt+Del", null, (sender, args) => RemoveMissingFileClipboardEvents());
-            menu.Items.Add("&Clear file history...\tCtrl+Del", null, (sender, args) => ClearFileClipboardHistory());
+            menu.Items.Add("Remove &unavailable events\tAlt+Del", null, (sender, args) => RemoveUnavailableFileClipboardEvents());
+            menu.Items.Add("C&lear file history...\tCtrl+Del", null, (sender, args) => ClearFileClipboardHistory());
         }
 
         private void ListKeyDown(object sender, KeyEventArgs e)
@@ -741,6 +743,18 @@ namespace Clipman
                 e.Handled = true;
                 return;
             }
+            if (e.Control && e.KeyCode == Keys.I)
+            {
+                Import(false);
+                e.Handled = true;
+                return;
+            }
+            if (e.Control && e.KeyCode == Keys.E)
+            {
+                Export();
+                e.Handled = true;
+                return;
+            }
             if (e.Shift && e.KeyCode == Keys.F1)
             {
                 UpdateService.CheckForUpdates(this, AppVersion(), exitApp);
@@ -802,7 +816,7 @@ namespace Clipman
                 var key = keyData & Keys.KeyCode;
                 if (IsFileClipboardTabActive() && key == Keys.Delete)
                 {
-                    RemoveMissingFileClipboardEvents();
+                    RemoveUnavailableFileClipboardEvents();
                     return true;
                 }
                 if (key == Keys.T)
@@ -1018,7 +1032,7 @@ namespace Clipman
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
-                RemoveMissingFileClipboardEvents();
+                RemoveUnavailableFileClipboardEvents();
             }
             else if (e.Control && e.KeyCode == Keys.C)
             {
@@ -1156,11 +1170,11 @@ namespace Clipman
             statusText.Text = removed == 1 ? "Cleared one file history event." : "Cleared " + removed + " file history events.";
         }
 
-        private void RemoveMissingFileClipboardEvents()
+        private void RemoveUnavailableFileClipboardEvents()
         {
-            var removed = removeMissingRecentClipboardEvents == null ? 0 : removeMissingRecentClipboardEvents();
+            var removed = removeUnavailableRecentClipboardEvents == null ? 0 : removeUnavailableRecentClipboardEvents();
             RefreshFileClipboardEvents();
-            statusText.Text = removed == 1 ? "Removed one missing file event." : "Removed " + removed + " missing file events.";
+            statusText.Text = removed == 1 ? "Removed one unavailable file-history event." : "Removed " + removed + " unavailable file-history events.";
         }
 
         private void ClearTextClipboardHistory()
@@ -1721,7 +1735,7 @@ namespace Clipman
             if (sortManualMenuItem != null) sortManualMenuItem.Checked = IsSortMode("Manual");
             if (sortDirectionMenuItem != null)
             {
-                sortDirectionMenuItem.Text = settings.SortDescending ? "Sort &ascending" : "Sort &descending";
+                sortDirectionMenuItem.Text = settings.SortDescending ? "Sort &ascending" : "Sort de&scending";
                 sortDirectionMenuItem.Checked = settings.SortDescending;
             }
         }
