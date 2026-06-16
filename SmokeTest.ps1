@@ -1171,8 +1171,8 @@ Assert-HandoverParity $Version
 Assert-CodeBehavior
 Assert-CleanPortable $portable
 Invoke-LocalUpdaterSmoke $Version
+Invoke-PostPublishUpdateSmoke $Version
 Deploy-LiveCopy $LivePath
 Assert-LiveCopyReasonable $LivePath
-Invoke-PostPublishUpdateSmoke $Version
 
 Write-Host 'Clipman smoke test passed.'
