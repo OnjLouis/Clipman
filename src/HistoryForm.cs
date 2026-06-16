@@ -471,7 +471,7 @@ namespace Clipman
             edit.DropDownItems.Add("Copy and c&lose\tEnter", null, (s, e) => CopySelected());
             edit.DropDownItems.Add("&Copy\tCtrl+C", null, (s, e) => CopySelected(false));
             edit.DropDownItems.Add("Cu&t\tCtrl+X", null, (s, e) => CutSelected());
-            edit.DropDownItems.Add("&Paste after selected\tCtrl+V", null, (s, e) => PasteAfterSelected());
+            edit.DropDownItems.Add("Paste &after selected\tCtrl+V", null, (s, e) => PasteAfterSelected());
             edit.DropDownItems.Add("&Edit entry...\tF2", null, (s, e) => NameSelectedEntry());
             groupEntryMenuItem = new ToolStripMenuItem("&Group entry...\tCtrl+G", null, (s, e) => GroupSelectedEntries());
             edit.DropDownItems.Add(groupEntryMenuItem);
@@ -507,7 +507,7 @@ namespace Clipman
             menu.Items.Add("Copy and c&lose\tEnter", null, (sender, args) => CopySelected());
             menu.Items.Add("&Copy\tCtrl+C", null, (sender, args) => CopySelected(false));
             menu.Items.Add("Cu&t\tCtrl+X", null, (sender, args) => CutSelected());
-            menu.Items.Add("&Paste after selected\tCtrl+V", null, (sender, args) => PasteAfterSelected());
+            menu.Items.Add("Paste &after selected\tCtrl+V", null, (sender, args) => PasteAfterSelected());
             menu.Items.Add("&Edit entry...\tF2", null, (sender, args) => NameSelectedEntry());
             menu.Items.Add("&Group entry...\tCtrl+G", null, (sender, args) => GroupSelectedEntries());
             menu.Items.Add("Entry &properties...\tAlt+Enter", null, (sender, args) => ShowEntryProperties());
@@ -849,7 +849,18 @@ namespace Clipman
 
         private void CloseHistoryWindow()
         {
+            SaveCurrentListPositionIfEnabled();
             Hide();
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            if (!Visible)
+            {
+                SaveCurrentListPositionIfEnabled();
+            }
+
+            base.OnVisibleChanged(e);
         }
 
         protected override void OnShown(EventArgs e)
@@ -867,6 +878,7 @@ namespace Clipman
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            SaveCurrentListPositionIfEnabled();
             if (e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;

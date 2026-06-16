@@ -80,8 +80,8 @@ namespace Clipman
             integration.AccessibleDescription = "Startup and updates preferences. Shortcut Ctrl+5.";
 
             active = NewCheckBox("Clipboard monitoring &active", settings.Active);
-            soundsEnabled = NewCheckBox("&Play sounds", settings.SoundsEnabled);
-            autoGroupByApp = NewCheckBox("Automatically group new clips by source &application", settings.AutoGroupByApp);
+            soundsEnabled = NewCheckBox("Play &sounds", settings.SoundsEnabled);
+            autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
             autoRemoveUrlTracking = NewCheckBox("Automatically remove URL &tracking from copied text", settings.AutoRemoveUrlTracking);
             saveListPosition = NewCheckBox("Save list &position", settings.SaveListPosition);
             removeDuplicates = NewCheckBox("&Remove duplicate entries", settings.RemoveDuplicates);
@@ -99,7 +99,7 @@ namespace Clipman
             AddFullRow(generalLayout, removeDuplicates);
             AddRow(generalLayout, "&Duplicate handling:", duplicateMode);
             AddRow(generalLayout, "Maximum &entries:", maxHistoryEntries);
-            AddRow(generalLayout, "Maximum entry &age, days:", maxHistoryDays);
+            AddRow(generalLayout, "Maximum entry a&ge, days:", maxHistoryDays);
             AddFullRow(generalLayout, NewNote("Use 0 for no limit. Pinned entries are kept."));
             general.Controls.Add(generalLayout);
 
@@ -185,8 +185,8 @@ namespace Clipman
             runAtStartup = NewCheckBox("Run Clipman at Windows &startup", settings.RunAtStartup);
             updateCheckFrequency = NewComboBox("Update check frequency", new[] { "Never", "At startup", "Hourly", "Daily" }, DisplayUpdateFrequency(settings.UpdateCheckFrequency));
             installUpdatesSilently = NewCheckBox("&Install updates silently when possible", settings.InstallUpdatesSilently);
-            sendToEnabled = NewCheckBox("Add Clipman to the Windows &Send To menu for text files", settings.SendToEnabled);
-            showHistoryAfterSendTo = NewCheckBox("Show history window after Send To imports", settings.ShowHistoryAfterSendTo);
+            sendToEnabled = NewCheckBox("Add Clipman to the Windows Send &To menu for text files", settings.SendToEnabled);
+            showHistoryAfterSendTo = NewCheckBox("Show history window &after Send To imports", settings.ShowHistoryAfterSendTo);
 
             var integrationLayout = NewRows();
             AddFullRow(integrationLayout, runAtStartup);
