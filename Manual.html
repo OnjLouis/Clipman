@@ -608,6 +608,12 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.9</h3>
+  <ul>
+    <li>Fixed Text history delete selection when deleting the last visible row. Clipman now keeps focus near the deleted row instead of jumping back to the top pinned entry.</li>
+    <li>Fixed a Save list position off focus race where pressing an arrow key immediately after opening history could be undone by delayed or duplicate focus resets.</li>
+  </ul>
+
   <h3>1.5.8</h3>
   <ul>
     <li>Improved File history parity with Text history: file events can now be pinned with <code>Shift+Enter</code>, moved with <code>Alt+Up</code> and <code>Alt+Down</code>, and restored from the first ten pinned file events with <code>Ctrl+1</code> through <code>Ctrl+0</code>.</li>

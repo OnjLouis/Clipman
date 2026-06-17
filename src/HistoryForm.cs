@@ -55,6 +55,7 @@ namespace Clipman
         private DateTime lastTypeSearchUtc = DateTime.MinValue;
         private string fileTypeSearchBuffer = string.Empty;
         private DateTime lastFileTypeSearchUtc = DateTime.MinValue;
+        private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
 
         public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
@@ -350,7 +351,16 @@ namespace Clipman
                 index = preferredIndex >= 0 ? preferredIndex : settings.LastSelectedIndex;
             }
             if (index < 0 && preferredIndex >= 0) index = preferredIndex;
-            if (index < 0 || index >= list.Items.Count)
+            if (list.Items.Count == 0)
+            {
+                statusText.Text = entries.Count + " clipboard entries.";
+                return;
+            }
+            if (index >= list.Items.Count)
+            {
+                index = list.Items.Count - 1;
+            }
+            if (index < 0)
             {
                 index = DefaultHistoryIndex();
             }
@@ -366,18 +376,14 @@ namespace Clipman
 
         public void FocusHistoryList(bool firstShow)
         {
+            if (pendingHistoryFocus) return;
+            pendingHistoryFocus = true;
             BeginInvoke(new Action(() =>
             {
+                pendingHistoryFocus = false;
+                if (!Visible) return;
                 ResetListPositionIfDisabled();
                 FocusActiveTabNow();
-                BeginDelayedFocus(100);
-                BeginDelayedFocus(300);
-                BeginDelayedFocus(firstShow ? 900 : 500);
-                if (!settings.SaveListPosition)
-                {
-                    BeginDelayedReset(150);
-                    BeginDelayedReset(firstShow ? 950 : 550);
-                }
             }));
         }
 
@@ -2381,19 +2387,6 @@ namespace Clipman
                 timer.Stop();
                 timer.Dispose();
                 FocusActiveTabNow();
-            };
-            timer.Start();
-        }
-
-        private void BeginDelayedReset(int intervalMs)
-        {
-            var timer = new Timer();
-            timer.Interval = intervalMs;
-            timer.Tick += (s, e) =>
-            {
-                timer.Stop();
-                timer.Dispose();
-                ResetListPositionIfDisabled();
             };
             timer.Start();
         }

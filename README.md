@@ -91,6 +91,13 @@ File history preferences can automatically remove unavailable unpinned events as
 
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
+## Changelog
+
+### 1.5.9
+
+- Fixed Text history delete selection when deleting the last visible row. Clipman now keeps focus near the deleted row instead of jumping back to the top pinned entry.
+- Fixed a Save list position off focus race where pressing an arrow key immediately after opening history could be undone by delayed or duplicate focus resets.
+
 Clipman also writes a small shared update-state file in the `Settings` folder. It includes the public version, an internal UTC build stamp, and the expected executable hash. If another running instance sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so shared-folder installs can pick up the current build even when the public version number has not changed.
 
 During an update, Clipman downloads the release ZIP to a temporary folder, publishes a short close request so other instances running from the same shared folder stand down, replaces app files while preserving `Settings`, then restarts. The updated copy publishes the new shared state so other machines restart after the updated executable reaches them through a cloud service or network share.
