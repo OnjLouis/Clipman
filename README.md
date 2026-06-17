@@ -23,8 +23,8 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
 - Sort direction can be toggled between ascending and descending from the View menu.
-- Use the File history tab to review file copy/cut and non-text clipboard events captured by Clipman, restore one or more selected file events to the Windows clipboard, or go to one selected file or folder.
-- File history diagnostics are capped by preference, and unavailable file-history events can be removed manually or automatically.
+- Use the File history tab to review file copy/cut and non-text clipboard events captured by Clipman, restore one or more selected file events to the Windows clipboard, pin important file events, move them in manual order, or go to one selected file or folder. File history rows start with the file or folder name, and you can type several characters of a file name to jump to a matching event.
+- File history diagnostics are capped by preference, and unavailable unpinned file-history events can be removed manually or automatically.
 - Optional history size and age limits, with pinned entries kept.
 - Optional ignored application list for sensitive apps.
 - Import and export clipboard history for backup, including text imports from old Clipman `clipman.db` and Ditto SQLite databases.
@@ -50,6 +50,9 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Project page: `Ctrl+F1` in the history window.
 - Diagnostics: `Alt+F1` in the history window.
 - Toggle pinned entry: `Shift+Enter`
+- Toggle pinned file-history event: `Shift+Enter` on the File history tab.
+- Go to selected file or folder: `Ctrl+Enter` on the File history tab.
+- Restore pinned file event: `Ctrl+1` to `Ctrl+0` on the File history tab.
 - Copy without closing history: `Ctrl+C`
 - Search: `Ctrl+F`, then `F3` or `Shift+F3`
 - Edit entry name and text: `F2`
@@ -80,11 +83,11 @@ When a history password is saved, `.clipdb` imports and exports use the current 
 
 Old Clipman and Ditto imports read text entries only. They do not import images or every custom clipboard format.
 
-The File history tab can delete selected file events with `Del`, clear file history with `Ctrl+Del`, and remove unavailable events with `Alt+Del`. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files or folders are now missing.
+The File history tab can delete selected unpinned file events with `Del`, clear normal file history with `Ctrl+Del`, and remove unavailable unpinned events with `Alt+Del`. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files or folders are now missing.
 
-File history supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Use `Shift+Enter` to open Explorer at one selected file or folder.
+File history rows start with the file or folder name, followed by the operation and file count. File history supports buffered type-to-jump navigation by file name, so typing `13.t` keeps looking for that full prefix rather than jumping separately on `t`. It also supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Use `Shift+Enter` to pin or unpin selected file events, `Ctrl+Enter` to open Explorer at one selected file or folder, and `Alt+Up` or `Alt+Down` to move selected file events within the pinned or normal section. Pinned file events are kept during delete, clear, unavailable-event cleanup, and file-history size trimming.
 
-File history preferences can automatically remove unavailable events as new file-history events arrive. Diagnostics include the total file-history count, but only list the configured number of recent events so copied file operations do not make diagnostics excessively long.
+File history preferences can automatically remove unavailable unpinned events as new file-history events arrive. Diagnostics include the total file-history count, but only list the configured number of recent events so copied file operations do not make diagnostics excessively long.
 
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 

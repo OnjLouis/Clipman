@@ -104,7 +104,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
                 created = true;
             }
 
@@ -473,6 +473,16 @@ namespace Clipman
         private int RemoveUnavailableRecentClipboardEvents()
         {
             return fileEventStore.RemoveUnavailableEvents();
+        }
+
+        private bool ToggleRecentClipboardEventPinned(string id)
+        {
+            return fileEventStore.TogglePinned(id);
+        }
+
+        private void MoveRecentClipboardEvents(List<string> ids, int direction)
+        {
+            fileEventStore.MoveEvents(ids, direction);
         }
 
         private bool ClearTextHistory()

@@ -622,14 +622,15 @@ function Assert-HandoverParity([string]$releaseVersion) {
     }
 
     Assert-TextMatches $handover "Current development version: $([regex]::Escape($releaseVersion))" 'Private handover current development version'
-    Assert-TextMatches $handover 'Current 1\.5\.7 development context' 'Private handover current development context'
+    Assert-TextMatches $handover "Current $([regex]::Escape($releaseVersion)) development context" 'Private handover current development context'
     Assert-TextMatches $handover 'CommunitySearch\.ps1' 'Private handover community search workflow'
     Assert-TextMatches $handover 'machine-specific \.clipdb file' 'Private handover persistent file history'
     Assert-TextMatches $handover 'Save list position only writes LastSelectedIndex' 'Private handover save-position context'
     Assert-TextMatches $handover 'history window is hidden, closed, or toggled away' 'Private handover save-position hide context'
     Assert-TextMatches $handover 'still-live in-session ListView selection' 'Private handover in-session save-position context'
     Assert-TextMatches $handover 'Play sounds and Save list position both using Alt\+P' 'Private handover mnemonic regression context'
-    Assert-TextMatches $handover 'Shift\+Enter goes to a single selected file or folder' 'Private handover file-history go-to-file context'
+    Assert-TextMatches $handover 'Ctrl\+Enter goes to one selected file or folder' 'Private handover file-history go-to-file context'
+    Assert-TextMatches $handover 'Shift\+Enter pins or unpins selected file-history events' 'Private handover file-history pin context'
     Assert-TextDoesNotMatch $handover 'File history is session-only and held in RAM|Current public release: 1\.5\.1|Current development version: 1\.5\.1|Current development version: 1\.5\.4|Current development version: 1\.5\.5|Current development version: 1\.5\.6' 'Private handover stale facts'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'Private Handover Parity' 'Release rules handover parity section'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'D:\\Dropbox\\txt\\codex\\Clipman\.txt' 'Release rules handover path'
@@ -643,7 +644,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Project page: <a href="https://github.com/OnjLouis/Clipman">' 'Manual project page link'
     Assert-TextMatches $manual 'Remove URL tracking' 'Manual URL tracking documentation'
     Assert-TextMatches $manual 'machine-specific database named like <code>Settings\\Desktop-file-history\.clipdb</code>' 'Manual persistent file-history documentation'
-    Assert-TextMatches $manual 'Press <code>Del</code> to remove selected file-history events' 'Manual file-history delete shortcut'
+    Assert-TextMatches $manual 'Press <code>Del</code> to remove selected unpinned file-history events' 'Manual file-history delete shortcut'
     Assert-TextMatches $manual 'remove unavailable events' 'Manual unavailable event cleanup documentation'
     Assert-TextMatches $manual 'Run Clipman at Windows startup' 'Manual startup documentation'
     Assert-TextMatches $manual 'Install updates silently when possible' 'Manual silent update documentation'
@@ -668,6 +669,14 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
     Assert-TextMatches $manual 'ascending and descending' 'Manual sort direction documentation'
+    Assert-TextMatches $manual '<h3>1\.5\.8</h3>' 'Manual 1.5.8 changelog'
+    Assert-TextMatches $manual 'File history parity with Text history' 'Manual 1.5.8 file-history parity changelog'
+    Assert-TextMatches $manual 'file and folder names now come first in each row' 'Manual 1.5.8 file-history filename-first changelog'
+    Assert-TextMatches $manual 'buffered type-to-jump by full filename prefix' 'Manual 1.5.8 file-history buffered navigation changelog'
+    Assert-TextMatches $manual 'File history rows start with the file or folder name' 'Manual file-history filename-first documentation'
+    Assert-TextMatches $manual 'supports buffered type-to-jump navigation by file name' 'Manual file-history type-to-jump documentation'
+    Assert-TextMatches $manual 'Changed File history Go to file from <code>Shift\+Enter</code> to <code>Ctrl\+Enter</code>' 'Manual 1.5.8 go-to-file shortcut changelog'
+    Assert-TextMatches $manual 'Save list position no longer pulls focus back to an older saved row' 'Manual 1.5.8 delete-position changelog'
     Assert-TextMatches $manual '<h3>1\.5\.7</h3>' 'Manual 1.5.7 changelog'
     Assert-TextMatches $manual 'reopening Text history now resets the live selection' 'Manual 1.5.7 save-position live-selection changelog'
     Assert-TextMatches $manual '<h3>1\.5\.6</h3>' 'Manual 1.5.6 changelog'
@@ -676,7 +685,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual '<h3>1\.5\.5</h3>' 'Manual 1.5.5 changelog'
     Assert-TextMatches $manual 'Save list position now only saves and restores list position when enabled' 'Manual 1.5.5 save position changelog'
     Assert-TextMatches $manual 'standard Windows multi-selection' 'Manual file-history multi-selection documentation'
-    Assert-TextMatches $manual 'Go to file with <code>Shift\+Enter</code>' 'Manual 1.5.5 go-to-file changelog'
+    Assert-TextMatches $manual 'Go to file with <code>Shift\+Enter</code>' 'Manual 1.5.5 go-to-file historical changelog'
     Assert-TextMatches $manual '<h3>1\.5\.4</h3>' 'Manual 1.5.4 changelog'
     Assert-TextMatches $manual 'non-restorable non-file clipboard events' 'Manual 1.5.4 unavailable file-history cleanup changelog'
     Assert-TextMatches $manual 'configurable diagnostics event limit' 'Manual 1.5.4 diagnostics limit changelog'
@@ -711,7 +720,10 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Ctrl\+1` to `Ctrl\+5' 'README preferences tab range'
     Assert-TextMatches $readme 'File history preferences' 'README file-history preferences documentation'
     Assert-TextMatches $readme 'standard Windows multi-selection' 'README file-history multi-selection documentation'
-    Assert-TextMatches $readme 'Shift\+Enter` to open Explorer' 'README file-history go-to-file documentation'
+    Assert-TextMatches $readme 'File history rows start with the file or folder name' 'README file-history filename-first documentation'
+    Assert-TextMatches $readme 'buffered type-to-jump navigation by file name' 'README file-history type-to-jump documentation'
+    Assert-TextMatches $readme 'Shift\+Enter` to pin or unpin selected file events' 'README file-history pin documentation'
+    Assert-TextMatches $readme 'Ctrl\+Enter` to open Explorer' 'README file-history go-to-file documentation'
     Assert-TextMatches $readme 'Import clipboard entries: `Ctrl\+I`' 'README import shortcut'
     Assert-TextMatches $readme 'Export clipboard entries: `Ctrl\+E`' 'README export shortcut'
     Assert-TextMatches $readme 'CommunitySearch\.ps1' 'README community search checklist'
@@ -727,7 +739,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Multiple machines can write to the same history database' 'README shared history explanation'
     Assert-TextMatches $readme 'Optional history password encryption' 'README encryption documentation'
     Assert-TextMatches $readme 'Desktop-file-history\.clipdb' 'README persistent file-history documentation'
-    Assert-TextMatches $readme 'remove unavailable events' 'README unavailable event cleanup documentation'
+    Assert-TextMatches $readme 'remove unavailable unpinned events' 'README unavailable event cleanup documentation'
     Assert-TextMatches $readme 'deliberately ignores that generated password copy' 'README generated password documentation'
     Assert-TextMatches $readme 'old Clipman `clipman\.db` and Ditto SQLite databases' 'README SQLite import documentation'
     Assert-TextMatches $readme 'Press Backspace in the history list' 'README Backspace normal-entry shortcut'
@@ -741,6 +753,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ClipDatabaseFile\.IsEncryptedFile\(settings\.DatabasePath\)' 'Startup encrypted database detection'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DefaultFileHistoryDatabasePath\(\)' 'Machine-specific file history database path'
     Assert-TextMatches (Join-Path $repoRoot 'src\FileClipboardEventStore.cs') 'FileClipboardDatabase' 'Persistent file history store'
+    Assert-TextMatches (Join-Path $repoRoot 'src\FileClipboardEventStore.cs') 'TogglePinned' 'File history pinning store'
+    Assert-TextMatches (Join-Path $repoRoot 'src\FileClipboardEventStore.cs') 'MoveEvents' 'File history move store'
+    Assert-TextMatches (Join-Path $repoRoot 'src\FileClipboardEventStore.cs') 'RemoveAll\(e => !e\.Pinned' 'File history cleanup protects pinned events'
     Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'class ShortcutButton' 'Shortcut button accessible object'
     Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'override string KeyboardShortcut' 'Shortcut button keyboard shortcut accessibility'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'ShortcutText = "Esc"' 'History close button shortcut accessibility'
@@ -797,6 +812,16 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Save list &position' 'Preferences Save list position unique mnemonic'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') '&Play sounds' 'Preferences old duplicate Play sounds mnemonic'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'GoToSelectedFileClipboardEvent' 'File history go-to-file command'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'fileEventsList\.KeyPress \+= FileEventsListKeyPress' 'File history keypress navigation hook'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'TypeSearchFileHistory' 'File history buffered type-to-jump implementation'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'FileEventSearchText' 'File history filename search target'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'return string\.IsNullOrWhiteSpace\(first\) \? "File clipboard event" : first;' 'File history primary column contains filename only'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'fileEventsList\.Columns\.Add\("Operation", 90\);[\s\S]*fileEventsList\.Columns\.Add\("Files", 70\);[\s\S]*fileEventsList\.Columns\.Add\("Source", 120\);' 'File history columns read filename, operation, files, then source'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Ctrl\+Enter' 'File history go-to-file shortcut text'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'FilePinMenuText' 'File history pin menu text'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'RestorePinnedFileClipboardEventByPosition' 'File history Ctrl+number pinned restore'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'SaveListPositionIndex\(preferredIndex\)' 'Delete/cut updates saved position before store refresh'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'Go to file\\tShift\+Enter' 'No current file-history Shift+Enter go-to-file shortcut'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'SelectedFileClipboardEvents' 'File history multi-selection helper'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'ExistingFileClipboardPaths\(selected\)' 'File history restore uses all selected events'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'fileRange|RangeMarker|RestoreMarked|CopyMarked|marked range|Set range &start|Set range &end' 'No stale file-history marker implementation'
@@ -935,10 +960,18 @@ internal static class ClipmanSmokeHarness
                 FileCount = 0,
                 Formats = { "WaveAudio" }
             });
+            var pinnedNonFile = fileStore.GetEvents().First(e => e.Source == "Forge16");
+            Assert(fileStore.TogglePinned(pinnedNonFile.Id), "File-history TogglePinned did not pin the selected event.");
             var removedUnavailable = fileStore.RemoveUnavailableEvents();
-            Assert(removedUnavailable == 2, "File-history unavailable cleanup did not remove missing and no-file events.");
+            Assert(removedUnavailable == 1, "File-history unavailable cleanup did not protect pinned unavailable events.");
             var remainingFileEvents = fileStore.GetEvents();
-            Assert(remainingFileEvents.Count == 1 && remainingFileEvents[0].Files.Count == 1 && remainingFileEvents[0].Files[0] == existingFile, "File-history unavailable cleanup removed the wrong event.");
+            Assert(remainingFileEvents.Count == 2, "File-history unavailable cleanup returned the wrong event count when a pinned unavailable event was present.");
+            Assert(remainingFileEvents.Any(e => e.Pinned && e.Source == "Forge16"), "File-history unavailable cleanup removed a pinned event.");
+            Assert(remainingFileEvents.Any(e => e.Files.Count == 1 && e.Files[0] == existingFile), "File-history unavailable cleanup removed the existing file event.");
+            var beforeMove = remainingFileEvents.Select(e => e.Id).ToList();
+            fileStore.MoveEvents(new[] { beforeMove.Last() }, -1);
+            var afterMove = fileStore.GetEvents().Select(e => e.Id).ToList();
+            Assert(beforeMove.Count == afterMove.Count, "File-history move changed the event count.");
         }
         File.Delete(cleanupHistoryPath);
         File.Delete(existingFile);

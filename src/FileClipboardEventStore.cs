@@ -41,7 +41,9 @@ namespace Clipman
             lock (sync)
             {
                 return database.Events
-                    .OrderByDescending(e => e.CapturedAt)
+                    .OrderBy(e => e.Pinned ? 0 : 1)
+                    .ThenBy(e => e.ManualOrder)
+                    .ThenByDescending(e => e.CapturedAt)
                     .Select(Clone)
                     .ToList();
             }
@@ -57,13 +59,23 @@ namespace Clipman
                 var existingIndex = database.Events.FindIndex(item => SameFileClipboardEvent(item, summary));
                 if (existingIndex >= 0)
                 {
+                    summary.Pinned = database.Events[existingIndex].Pinned;
+                    summary.ManualOrder = database.Events[existingIndex].ManualOrder;
                     database.Events.RemoveAt(existingIndex);
                 }
 
+                if (summary.ManualOrder <= 0)
+                {
+                    summary.ManualOrder = NextManualOrderLocked();
+                }
+                if (!summary.Pinned)
+                {
+                    MoveToTopOfBandLocked(summary);
+                }
                 database.Events.Insert(0, Clone(summary));
                 if (database.Events.Count > MaxEvents)
                 {
-                    database.Events.RemoveRange(MaxEvents, database.Events.Count - MaxEvents);
+                    TrimNormalEventsLocked();
                 }
 
                 SaveLocked();
@@ -79,7 +91,7 @@ namespace Clipman
 
             lock (sync)
             {
-                var removed = database.Events.RemoveAll(e => idSet.Contains(e.Id));
+                var removed = database.Events.RemoveAll(e => idSet.Contains(e.Id) && !e.Pinned);
                 if (removed == 0) return 0;
                 SaveLocked();
                 OnChanged();
@@ -91,9 +103,9 @@ namespace Clipman
         {
             lock (sync)
             {
-                var count = database.Events.Count;
+                var count = database.Events.Count(e => !e.Pinned);
                 if (count == 0) return 0;
-                database.Events.Clear();
+                database.Events.RemoveAll(e => !e.Pinned);
                 SaveLocked();
                 OnChanged();
                 return count;
@@ -104,11 +116,87 @@ namespace Clipman
         {
             lock (sync)
             {
-                var removed = database.Events.RemoveAll(IsUnavailableEvent);
+                var removed = database.Events.RemoveAll(e => !e.Pinned && IsUnavailableEvent(e));
                 if (removed == 0) return 0;
                 SaveLocked();
                 OnChanged();
                 return removed;
+            }
+        }
+
+        public bool TogglePinned(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return false;
+            lock (sync)
+            {
+                var item = database.Events.FirstOrDefault(e => string.Equals(e.Id, id, StringComparison.Ordinal));
+                if (item == null) return false;
+                item.Pinned = !item.Pinned;
+                if (item.ManualOrder <= 0) item.ManualOrder = NextManualOrderLocked();
+                SaveLocked();
+                OnChanged();
+                return item.Pinned;
+            }
+        }
+
+        public void MoveEvents(IEnumerable<string> ids, int direction)
+        {
+            var selectedIds = (ids ?? Enumerable.Empty<string>())
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToList();
+            if (selectedIds.Count == 0 || direction == 0) return;
+
+            lock (sync)
+            {
+                NormalizeDatabase();
+                var idSet = new HashSet<string>(selectedIds);
+                var firstEvent = database.Events.FirstOrDefault(e => idSet.Contains(e.Id));
+                if (firstEvent == null) return;
+                var pinned = firstEvent.Pinned;
+                var section = database.Events
+                    .Where(e => e.Pinned == pinned)
+                    .OrderBy(e => e.ManualOrder)
+                    .ThenByDescending(e => e.CapturedAt)
+                    .ToList();
+                var indexes = section
+                    .Select((entry, index) => new { entry, index })
+                    .Where(x => idSet.Contains(x.entry.Id))
+                    .Select(x => x.index)
+                    .OrderBy(i => i)
+                    .ToList();
+                if (indexes.Count == 0) return;
+                if (direction < 0)
+                {
+                    if (indexes.First() == 0) return;
+                }
+                else
+                {
+                    if (indexes.Last() >= section.Count - 1) return;
+                }
+
+                var selected = section.Where(e => idSet.Contains(e.Id)).ToList();
+                var firstIndex = indexes.First();
+                var lastIndex = indexes.Last();
+                foreach (var item in selected)
+                {
+                    section.Remove(item);
+                }
+
+                if (direction < 0)
+                {
+                    section.InsertRange(Math.Max(0, firstIndex - 1), selected);
+                }
+                else
+                {
+                    section.InsertRange(Math.Min(section.Count, lastIndex + 1 - selected.Count + 1), selected);
+                }
+
+                for (var i = 0; i < section.Count; i++)
+                {
+                    section[i].ManualOrder = i + 1;
+                }
+                SaveLocked();
+                OnChanged();
             }
         }
 
@@ -230,9 +318,15 @@ namespace Clipman
             }
             database.Events = database.Events
                 .Where(e => e != null)
-                .OrderByDescending(e => e.CapturedAt)
-                .Take(MaxEvents)
+                .OrderBy(e => e.Pinned ? 0 : 1)
+                .ThenBy(e => e.ManualOrder)
+                .ThenByDescending(e => e.CapturedAt)
                 .ToList();
+            foreach (var item in database.Events.Where(e => e.ManualOrder <= 0))
+            {
+                item.ManualOrder = NextManualOrderLocked();
+            }
+            TrimNormalEventsLocked();
         }
 
         private static void Normalize(ClipboardEventSummary item)
@@ -246,6 +340,36 @@ namespace Clipman
             if (item.Files == null) item.Files = new List<string>();
             if (item.Formats == null) item.Formats = new List<string>();
             if (item.FileCount <= 0 && item.Files.Count > 0) item.FileCount = item.Files.Count;
+        }
+
+        private long NextManualOrderLocked()
+        {
+            return database.Events.Count == 0 ? 1 : database.Events.Max(e => e.ManualOrder) + 1;
+        }
+
+        private void MoveToTopOfBandLocked(ClipboardEventSummary item)
+        {
+            if (item == null) return;
+            foreach (var existing in database.Events.Where(e => e.Pinned == item.Pinned && e.ManualOrder > 0))
+            {
+                existing.ManualOrder++;
+            }
+            item.ManualOrder = 1;
+        }
+
+        private void TrimNormalEventsLocked()
+        {
+            if (database.Events.Count <= MaxEvents) return;
+            var normal = database.Events
+                .Where(e => !e.Pinned)
+                .OrderBy(e => e.ManualOrder)
+                .ThenByDescending(e => e.CapturedAt)
+                .ToList();
+            var removable = database.Events.Count - MaxEvents;
+            foreach (var item in normal.AsEnumerable().Reverse().Take(removable).ToList())
+            {
+                database.Events.Remove(item);
+            }
         }
 
         private static bool SameFileClipboardEvent(ClipboardEventSummary left, ClipboardEventSummary right)
@@ -283,7 +407,9 @@ namespace Clipman
                 ContainsText = source.ContainsText,
                 FileCount = source.FileCount,
                 Files = source.Files == null ? new List<string>() : source.Files.ToList(),
-                Formats = source.Formats == null ? new List<string>() : source.Formats.ToList()
+                Formats = source.Formats == null ? new List<string>() : source.Formats.ToList(),
+                Pinned = source.Pinned,
+                ManualOrder = source.ManualOrder
             };
         }
 

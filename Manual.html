@@ -95,7 +95,7 @@
     <li>Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected entries in manual order.</li>
     <li>Press <code>Ctrl+1</code> through <code>Ctrl+0</code> to copy one of the first ten pinned entries and close history.</li>
     <li>Press <code>Alt+1</code> through <code>Alt+0</code> to jump to one of the first ten group filters.</li>
-    <li>Use the File history tab to review recent file, folder, and non-text clipboard events captured by Clipman. Select one or more file events with standard Windows list selection, then press <code>Enter</code> to put their existing files back on the Windows clipboard. Press <code>Shift+Enter</code> to go to a single selected file or folder. Press <code>Del</code> to remove selected file-history events, <code>Ctrl+Del</code> to clear file history, and <code>Alt+Del</code> to remove unavailable events that cannot be restored as files. Its Application key menu is separate from the text history menu and only shows file-event actions.</li>
+    <li>Use the File history tab to review recent file, folder, and non-text clipboard events captured by Clipman. File events start with the file or folder name, followed by the operation and file count, so screen readers announce the most useful part first. Type the beginning of a file name to jump through File history; Clipman buffers multiple typed characters, so typing <code>13.t</code> looks for that prefix rather than treating <code>t</code> as a separate jump. Select one or more file events with standard Windows list selection, then press <code>Enter</code> to put their existing files back on the Windows clipboard. Press <code>Shift+Enter</code> to pin or unpin file events, <code>Ctrl+Enter</code> to go to a single selected file or folder, <code>Alt+Up</code> or <code>Alt+Down</code> to move selected file events, <code>Del</code> to remove selected unpinned file-history events, <code>Ctrl+Del</code> to clear normal file history, and <code>Alt+Del</code> to remove unavailable unpinned events. Its Application key menu is separate from the text history menu and only shows file-event actions.</li>
     <li>Press <code>Esc</code> or close the window to hide history without exiting Clipman.</li>
     <li>Use the toggle hotkey to turn clipboard monitoring on or off.</li>
     <li>The notification area icon shows whether monitoring is on or off.</li>
@@ -287,12 +287,12 @@
         <td>Text history tab only</td>
       </tr>
       <tr>
-        <td>Move selected entries up</td>
+        <td>Move selected entries or file events up</td>
         <td><code>Alt+Up</code></td>
         <td>History window only</td>
       </tr>
       <tr>
-        <td>Move selected entries down</td>
+        <td>Move selected entries or file events down</td>
         <td><code>Alt+Down</code></td>
         <td>History window only</td>
       </tr>
@@ -302,8 +302,18 @@
         <td>File history tab only. Works with one or more selected file events.</td>
       </tr>
       <tr>
-        <td>Go to selected file or folder</td>
+        <td>Pin or unpin selected file events</td>
         <td><code>Shift+Enter</code></td>
+        <td>File history tab only. Pinned file events are protected from cleanup.</td>
+      </tr>
+      <tr>
+        <td>Restore pinned file event by position</td>
+        <td><code>Ctrl+1</code> through <code>Ctrl+0</code></td>
+        <td>File history tab only. Uses the first ten pinned file events.</td>
+      </tr>
+      <tr>
+        <td>Go to selected file or folder</td>
+        <td><code>Ctrl+Enter</code></td>
         <td>File history tab only. Requires one selected file event containing exactly one file or folder.</td>
       </tr>
       <tr>
@@ -470,9 +480,11 @@
   <h2 id="file-history">File History</h2>
   <p>The File history tab shows file, folder, and non-text clipboard events captured by Clipman. File history is stored separately from text history in a machine-specific database named like <code>Settings\Desktop-file-history.clipdb</code>. If you set a history password, file history uses the same password; there is not a second password to remember. File history stores paths and clipboard-format details only. It does not copy or preserve the actual file contents.</p>
 
-  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. The File history list supports standard Windows multi-selection, so you can use <code>Shift+Up</code>, <code>Shift+Down</code>, <code>Ctrl+Up</code>, <code>Ctrl+Down</code>, and <code>Ctrl+Space</code> to build a selection before acting on it. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the Windows clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> to copy all selected file paths as text without closing. Press <code>Shift+Enter</code> to open Explorer at a single selected file or folder; this command requires one selected event containing exactly one path. Press <code>Del</code> to remove selected file-history events from the list.</p>
+  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. File history rows start with the file or folder name, then show the operation and file count. The File history list supports buffered type-to-jump navigation by file name, so you can type several characters of a name to reach the matching file event. It also supports standard Windows multi-selection, so you can use <code>Shift+Up</code>, <code>Shift+Down</code>, <code>Ctrl+Up</code>, <code>Ctrl+Down</code>, and <code>Ctrl+Space</code> to build a selection before acting on it. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the Windows clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> to copy all selected file paths as text without closing. Press <code>Shift+Enter</code> to pin or unpin selected file events, and press <code>Ctrl+Enter</code> to open Explorer at a single selected file or folder; this command requires one selected event containing exactly one path. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected file events within the pinned or normal section. Press <code>Del</code> to remove selected unpinned file-history events from the list.</p>
 
-  <p>The File history tab has buttons to clear all file-history events or remove unavailable events. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> for clear file history and <code>Alt+Del</code> for remove unavailable events. Preferences can also remove unavailable events automatically as new file-history events are captured.</p>
+  <p>Pinned file events are grouped at the top of File history, with the same normal-entries separator used by Text history. They are protected from <code>Del</code>, <code>Ctrl+Del</code>, automatic unavailable-event cleanup, and file-history size trimming. Use <code>Ctrl+1</code> through <code>Ctrl+0</code> from the File history tab to restore one of the first ten pinned file events and close history.</p>
+
+  <p>The File history tab has buttons to clear normal file-history events or remove unavailable unpinned events. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> for clear normal file history and <code>Alt+Del</code> for remove unavailable unpinned events. Preferences can also remove unavailable unpinned events automatically as new file-history events are captured.</p>
 
   <h2 id="import-and-export">Import and Export</h2>
   <ul>
@@ -537,7 +549,7 @@
   <h2 id="non-text-clipboard-events">Non-text Clipboard Events</h2>
   <p>Clipman stores text history in the main history database and stores file or non-text clipboard events in a separate machine-specific file-history database. Use the File history tab to review those events. It can show files copied or cut in Windows Explorer, file-like clipboard operations from other programs, and specialist formats such as audio-editor clipboard data. Clipman cannot retrieve events from before it was running, and file events are useful only while the referenced files still exist at the same paths.</p>
 
-  <p>Press <code>Enter</code> on a file event to put its files back on the Windows clipboard, ready to paste into Explorer or another file-aware application. Press <code>Ctrl+C</code> to copy the file paths as text, <code>Del</code> to remove selected events from file history, or <code>F4</code> to view event details. Non-file events are informational; they can be reviewed or deleted, but they cannot be restored as files. Open <strong>Help, Diagnostics</strong> for a text report of the same events.</p>
+  <p>Press <code>Enter</code> on a file event to put its files back on the Windows clipboard, ready to paste into Explorer or another file-aware application. Press <code>Ctrl+C</code> to copy the file paths as text, <code>Shift+Enter</code> to pin or unpin selected events, <code>Ctrl+Enter</code> to go to one selected file or folder, <code>Del</code> to remove selected unpinned events from file history, or <code>F4</code> to view event details. Non-file events are informational; they can be reviewed, pinned, moved, or deleted, but they cannot be restored as files. Open <strong>Help, Diagnostics</strong> for a text report of the same events.</p>
 
   <h2 id="command-line">Command Line</h2>
   <table>
@@ -596,6 +608,15 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.8</h3>
+  <ul>
+    <li>Improved File history parity with Text history: file events can now be pinned with <code>Shift+Enter</code>, moved with <code>Alt+Up</code> and <code>Alt+Down</code>, and restored from the first ten pinned file events with <code>Ctrl+1</code> through <code>Ctrl+0</code>.</li>
+    <li>Improved File history presentation and navigation: file and folder names now come first in each row, and File history supports buffered type-to-jump by full filename prefix.</li>
+    <li>Changed File history Go to file from <code>Shift+Enter</code> to <code>Ctrl+Enter</code> so <code>Shift+Enter</code> consistently means pin or unpin in both history tabs.</li>
+    <li>Improved File history cleanup so pinned file events are kept during delete, clear, unavailable-event cleanup, and size trimming.</li>
+    <li>Fixed Text history delete and cut selection handling so Save list position no longer pulls focus back to an older saved row after the list refreshes.</li>
+  </ul>
+
   <h3>1.5.7</h3>
   <ul>
     <li>Fixed: With Save list position off, reopening Text history now resets the live selection instead of keeping the hidden window's previous selection.</li>

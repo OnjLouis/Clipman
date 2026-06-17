@@ -172,6 +172,8 @@ namespace Clipman
         public int FileCount { get; set; }
         public List<string> Files { get; set; }
         public List<string> Formats { get; set; }
+        public bool Pinned { get; set; }
+        public long ManualOrder { get; set; }
 
         public ClipboardEventSummary()
         {
