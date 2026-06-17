@@ -326,7 +326,7 @@ namespace Clipman
             if (index < 0 && preferredIndex >= 0) index = preferredIndex;
             if (index < 0 || index >= list.Items.Count)
             {
-                index = list.Items.Count - 1;
+                index = DefaultHistoryIndex();
             }
             index = NormalizeSelectableIndex(index);
             SelectIndex(index);
@@ -342,11 +342,24 @@ namespace Clipman
         {
             BeginInvoke(new Action(() =>
             {
+                ResetListPositionIfDisabled();
                 FocusActiveTabNow();
                 BeginDelayedFocus(100);
                 BeginDelayedFocus(300);
                 BeginDelayedFocus(firstShow ? 900 : 500);
+                if (!settings.SaveListPosition)
+                {
+                    BeginDelayedReset(150);
+                    BeginDelayedReset(firstShow ? 950 : 550);
+                }
             }));
+        }
+
+        private void ResetListPositionIfDisabled()
+        {
+            if (settings.SaveListPosition) return;
+            if (IsFileClipboardTabActive()) return;
+            SelectDefaultHistoryIndex();
         }
 
         private MenuStrip BuildMenu()
@@ -2021,10 +2034,24 @@ namespace Clipman
         {
             if (index < 0 || index >= list.Items.Count) return;
             list.SelectedItems.Clear();
+            foreach (ListViewItem item in list.Items)
+            {
+                item.Focused = false;
+            }
             list.Items[index].Selected = true;
             list.Items[index].Focused = true;
             list.Items[index].EnsureVisible();
             list.Focus();
+        }
+
+        private int DefaultHistoryIndex()
+        {
+            return NormalizeSelectableIndex(0);
+        }
+
+        private void SelectDefaultHistoryIndex()
+        {
+            SelectIndex(DefaultHistoryIndex());
         }
 
         private void FocusHistoryListNow()
@@ -2078,6 +2105,19 @@ namespace Clipman
                 timer.Stop();
                 timer.Dispose();
                 FocusActiveTabNow();
+            };
+            timer.Start();
+        }
+
+        private void BeginDelayedReset(int intervalMs)
+        {
+            var timer = new Timer();
+            timer.Interval = intervalMs;
+            timer.Tick += (s, e) =>
+            {
+                timer.Stop();
+                timer.Dispose();
+                ResetListPositionIfDisabled();
             };
             timer.Start();
         }
