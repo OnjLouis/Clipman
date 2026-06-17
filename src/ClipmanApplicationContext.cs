@@ -457,7 +457,7 @@ namespace Clipman
 
         private List<ClipboardEventSummary> GetRecentClipboardEvents()
         {
-            return fileEventStore.GetEvents();
+            return fileEventStore.GetEvents(settings.FileHistorySortMode, settings.FileHistorySortDescending);
         }
 
         private int DeleteRecentClipboardEvents(List<string> ids)

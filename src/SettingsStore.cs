@@ -23,6 +23,7 @@ namespace Clipman
             Directory.CreateDirectory(SettingsDirectory);
             SyncConflictResolver.ResolveSettingsConflicts(SettingsPath);
             var hadSortDescending = SettingsFileContainsProperty("SortDescending");
+            var hadFileHistorySortDescending = SettingsFileContainsProperty("FileHistorySortDescending");
             var hadUseDefaultDatabasePath = SettingsFileContainsProperty("UseDefaultDatabasePath");
             var settings = JsonUtil.Load<AppSettings>(SettingsPath);
             if (!hadUseDefaultDatabasePath)
@@ -33,6 +34,10 @@ namespace Clipman
             if (!hadSortDescending)
             {
                 settings.SortDescending = DefaultSortDescending(settings.SortMode);
+            }
+            if (!hadFileHistorySortDescending)
+            {
+                settings.FileHistorySortDescending = DefaultFileHistorySortDescending(settings.FileHistorySortMode);
             }
             Save(settings);
             return settings;
@@ -74,6 +79,11 @@ namespace Clipman
             {
                 settings.SortMode = "LastUsed";
             }
+            if (string.IsNullOrWhiteSpace(settings.FileHistorySortMode))
+            {
+                settings.FileHistorySortMode = "Manual";
+            }
+            settings.FileHistorySortMode = NormalizeFileHistorySortMode(settings.FileHistorySortMode);
             if (string.IsNullOrWhiteSpace(settings.GroupFilter))
             {
                 settings.GroupFilter = "All";
@@ -130,6 +140,38 @@ namespace Clipman
                     return false;
                 default:
                     return true;
+            }
+        }
+
+        private static bool DefaultFileHistorySortDescending(string sortMode)
+        {
+            switch ((sortMode ?? string.Empty).Trim().ToUpperInvariant())
+            {
+                case "TIME":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static string NormalizeFileHistorySortMode(string sortMode)
+        {
+            switch ((sortMode ?? string.Empty).Trim().ToUpperInvariant())
+            {
+                case "TIME":
+                    return "Time";
+                case "FILES":
+                    return "Files";
+                case "NAME":
+                    return "Name";
+                case "OPERATION":
+                    return "Operation";
+                case "SOURCE":
+                    return "Source";
+                case "MANUAL":
+                    return "Manual";
+                default:
+                    return "Manual";
             }
         }
 

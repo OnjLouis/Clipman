@@ -527,6 +527,8 @@ namespace Clipman
                 IgnoredProcesses = current.IgnoredProcesses == null ? new List<string>() : new List<string>(current.IgnoredProcesses),
                 SortMode = current.SortMode,
                 SortDescending = current.SortDescending,
+                FileHistorySortMode = current.FileHistorySortMode,
+                FileHistorySortDescending = current.FileHistorySortDescending,
                 SendToEnabled = current.SendToEnabled,
                 ShowHistoryAfterSendTo = current.ShowHistoryAfterSendTo,
                 GroupFilter = current.GroupFilter,

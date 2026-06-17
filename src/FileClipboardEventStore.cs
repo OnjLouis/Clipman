@@ -38,14 +38,54 @@ namespace Clipman
 
         public List<ClipboardEventSummary> GetEvents()
         {
+            return GetEvents("Manual", false);
+        }
+
+        public List<ClipboardEventSummary> GetEvents(string sortMode, bool descending)
+        {
             lock (sync)
             {
-                return database.Events
-                    .OrderBy(e => e.Pinned ? 0 : 1)
-                    .ThenBy(e => e.ManualOrder)
-                    .ThenByDescending(e => e.CapturedAt)
+                var pinned = database.Events
+                    .Where(e => e.Pinned)
+                    .OrderBy(e => e.ManualOrder)
+                    .ThenByDescending(e => e.CapturedAt);
+                var normal = SortNormalEvents(database.Events.Where(e => !e.Pinned), sortMode, descending);
+
+                return pinned.Concat(normal)
                     .Select(Clone)
                     .ToList();
+            }
+        }
+
+        private static IEnumerable<ClipboardEventSummary> SortNormalEvents(IEnumerable<ClipboardEventSummary> events, string sortMode, bool descending)
+        {
+            switch ((sortMode ?? string.Empty).Trim().ToUpperInvariant())
+            {
+                case "TIME":
+                    return descending
+                        ? events.OrderByDescending(e => e.CapturedAt)
+                        : events.OrderBy(e => e.CapturedAt);
+                case "FILES":
+                    return descending
+                        ? events.OrderByDescending(e => e.FileCount).ThenBy(PrimaryName, StringComparer.CurrentCultureIgnoreCase)
+                        : events.OrderBy(e => e.FileCount).ThenBy(PrimaryName, StringComparer.CurrentCultureIgnoreCase);
+                case "NAME":
+                    return descending
+                        ? events.OrderByDescending(PrimaryName, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(e => e.CapturedAt)
+                        : events.OrderBy(PrimaryName, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(e => e.CapturedAt);
+                case "OPERATION":
+                    return descending
+                        ? events.OrderByDescending(e => e.Operation ?? string.Empty, StringComparer.CurrentCultureIgnoreCase).ThenBy(PrimaryName, StringComparer.CurrentCultureIgnoreCase)
+                        : events.OrderBy(e => e.Operation ?? string.Empty, StringComparer.CurrentCultureIgnoreCase).ThenBy(PrimaryName, StringComparer.CurrentCultureIgnoreCase);
+                case "SOURCE":
+                    return descending
+                        ? events.OrderByDescending(e => e.Source ?? string.Empty, StringComparer.CurrentCultureIgnoreCase).ThenBy(PrimaryName, StringComparer.CurrentCultureIgnoreCase)
+                        : events.OrderBy(e => e.Source ?? string.Empty, StringComparer.CurrentCultureIgnoreCase).ThenBy(PrimaryName, StringComparer.CurrentCultureIgnoreCase);
+                case "MANUAL":
+                default:
+                    return descending
+                        ? events.OrderByDescending(e => e.ManualOrder).ThenByDescending(e => e.CapturedAt)
+                        : events.OrderBy(e => e.ManualOrder).ThenByDescending(e => e.CapturedAt);
             }
         }
 
@@ -345,6 +385,20 @@ namespace Clipman
         private long NextManualOrderLocked()
         {
             return database.Events.Count == 0 ? 1 : database.Events.Max(e => e.ManualOrder) + 1;
+        }
+
+        private static string PrimaryName(ClipboardEventSummary item)
+        {
+            if (item == null) return string.Empty;
+            if (item.Files != null && item.Files.Count > 0 && !string.IsNullOrWhiteSpace(item.Files[0]))
+            {
+                var name = Path.GetFileName(item.Files[0]);
+                return string.IsNullOrWhiteSpace(name) ? item.Files[0] : name;
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Operation)) return item.Operation;
+            if (item.Formats != null && item.Formats.Count > 0) return item.Formats[0] ?? string.Empty;
+            return "Clipboard event";
         }
 
         private void MoveToTopOfBandLocked(ClipboardEventSummary item)

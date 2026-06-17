@@ -113,6 +113,8 @@ namespace Clipman
         public List<string> IgnoredProcesses { get; set; }
         public string SortMode { get; set; }
         public bool SortDescending { get; set; }
+        public string FileHistorySortMode { get; set; }
+        public bool FileHistorySortDescending { get; set; }
         public bool SendToEnabled { get; set; }
         public bool ShowHistoryAfterSendTo { get; set; }
         public string GroupFilter { get; set; }
@@ -145,6 +147,8 @@ namespace Clipman
             IgnoredProcesses = new List<string>();
             SortMode = "LastUsed";
             SortDescending = true;
+            FileHistorySortMode = "Manual";
+            FileHistorySortDescending = false;
             SendToEnabled = false;
             ShowHistoryAfterSendTo = true;
             GroupFilter = "All";

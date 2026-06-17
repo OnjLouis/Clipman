@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -213,7 +214,11 @@ namespace Clipman
             tabs.TabPages.Add(mainTab);
             tabs.TabPages.Add(fileTab);
             tabs.SelectedIndex = NormalizeTabIndex(settings.LastSelectedTab);
-            tabs.SelectedIndexChanged += (s, e) => SaveSelectedTab();
+            tabs.SelectedIndexChanged += (s, e) =>
+            {
+                SaveSelectedTab();
+                UpdateMenuHotkeys();
+            };
             Controls.Add(tabs);
 
             statusText = new ToolStripStatusLabel("Ready");
@@ -398,6 +403,7 @@ namespace Clipman
         {
             var menu = new MenuStrip();
             menuStrip = menu;
+            menu.MenuActivate += (s, e) => UpdateMenuHotkeys();
             menu.MenuDeactivate += (s, e) => BeginDelayedFocus(80);
 
             var file = new ToolStripMenuItem("&File");
@@ -420,6 +426,7 @@ namespace Clipman
             actions.DropDownItems.Add("Convert to &single line\tCtrl+Shift+L", null, (s, e) => TransformSelected(SingleLineText, "Converted selected entry or entries to single line."));
             actions.DropDownItems.Add("Remove &blank lines\tCtrl+Shift+B", null, (s, e) => TransformSelected(RemoveBlankLines, "Removed blank lines from selected entry or entries."));
             actions.DropDownItems.Add("Remove URL trac&king\tCtrl+Shift+R", null, (s, e) => TransformSelected(UrlTrackingCleaner.CleanText, "Removed URL tracking from selected entry or entries."));
+            actions.DropDownItems.Add("Clean link for &sharing\tCtrl+Shift+S", null, (s, e) => TransformSelected(UrlTrackingCleaner.CleanForSharing, "Cleaned selected link or links for sharing."));
             actions.DropDownItems.Add("&Uppercase", null, (s, e) => TransformSelected(t => (t ?? string.Empty).ToUpperInvariant(), "Uppercased selected entry or entries."));
             actions.DropDownItems.Add("&Lowercase", null, (s, e) => TransformSelected(t => (t ?? string.Empty).ToLowerInvariant(), "Lowercased selected entry or entries."));
             actions.DropDownItems.Add("HTML &encode", null, (s, e) => TransformSelected(System.Net.WebUtility.HtmlEncode, "HTML-encoded selected entry or entries."));
@@ -438,6 +445,7 @@ namespace Clipman
 
             var view = new ToolStripMenuItem("&View");
             sortMenuItem = new ToolStripMenuItem("S&ort by");
+            sortMenuItem.DropDownOpening += (s, e) => UpdateMenuHotkeys();
             sortLastUsedMenuItem = new ToolStripMenuItem("&Last used", null, (s, e) => SetSortMode("LastUsed"));
             sortAddedMenuItem = new ToolStripMenuItem("&Added", null, (s, e) => SetSortMode("Added"));
             sortTextMenuItem = new ToolStripMenuItem("&Text", null, (s, e) => SetSortMode("Text"));
@@ -456,12 +464,7 @@ namespace Clipman
             view.DropDownItems.Add(sortMenuItem);
             view.DropDownItems.Add("Move &up\tAlt+Up", null, (s, e) => MoveSelectedActiveTab(-1));
             view.DropDownItems.Add("Move &down\tAlt+Down", null, (s, e) => MoveSelectedActiveTab(1));
-            view.DropDownOpening += (s, e) =>
-            {
-                var fileTabActive = IsFileClipboardTabActive();
-                sortDirectionMenuItem.Enabled = !fileTabActive;
-                sortMenuItem.Enabled = !fileTabActive;
-            };
+            view.DropDownOpening += (s, e) => UpdateMenuHotkeys();
 
             var help = new ToolStripMenuItem("&Help");
             help.DropDownItems.Add("&Manual\tF1", null, (s, e) => OpenManual());
@@ -565,6 +568,14 @@ namespace Clipman
             menu.Items.Add("Entry &properties...\tAlt+Enter", null, (sender, args) => ShowEntryProperties());
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
             menu.Items.Add(PinMenuText(), null, (sender, args) => TogglePinned());
+            var pinnedShortcutPosition = SelectedPinnedEntryShortcutPosition();
+            if (pinnedShortcutPosition >= 0)
+            {
+                menu.Items.Add(
+                    "Copy pinned entry " + ShortcutDisplayNumber(pinnedShortcutPosition) + "\t" + PinnedShortcutText(pinnedShortcutPosition, false),
+                    null,
+                    (sender, args) => CopyPinnedByPosition(pinnedShortcutPosition));
+            }
             menu.Items.Add("&Delete selected\tDel", null, (sender, args) => DeleteSelected());
             menu.Items.Add("&Find...\tCtrl+F", null, (sender, args) => ShowSearchDialog(false));
             menu.Items.Add("Find &next\tF3", null, (sender, args) => RepeatSearch(false));
@@ -584,6 +595,20 @@ namespace Clipman
             copyPaths.Enabled = hasFiles;
             var pin = menu.Items.Add(FilePinMenuText(), null, (sender, args) => ToggleSelectedFileClipboardEventPinned());
             pin.Enabled = items.Count > 0;
+            var pinnedShortcutPosition = SelectedPinnedFileEventShortcutPosition();
+            if (pinnedShortcutPosition >= 0)
+            {
+                var restorePinned = menu.Items.Add(
+                    "Restore pinned file event " + ShortcutDisplayNumber(pinnedShortcutPosition) + "\t" + PinnedShortcutText(pinnedShortcutPosition, false),
+                    null,
+                    (sender, args) => RestorePinnedFileClipboardEventByPosition(pinnedShortcutPosition));
+                restorePinned.Enabled = hasFiles;
+                var copyPinnedPaths = menu.Items.Add(
+                    "Copy pinned file paths " + ShortcutDisplayNumber(pinnedShortcutPosition) + "\t" + PinnedShortcutText(pinnedShortcutPosition, true),
+                    null,
+                    (sender, args) => CopyPinnedFileClipboardEventPathsByPosition(pinnedShortcutPosition));
+                copyPinnedPaths.Enabled = hasFiles;
+            }
             var goToFile = menu.Items.Add("&Go to file\tCtrl+Enter", null, (sender, args) => GoToSelectedFileClipboardEvent());
             goToFile.Enabled = item != null && item.Files != null && item.Files.Count == 1;
             var details = menu.Items.Add("&View event details\tF4", null, (sender, args) => ViewSelectedFileClipboardEvent());
@@ -593,6 +618,53 @@ namespace Clipman
             menu.Items.Add("-");
             menu.Items.Add("Remove &unavailable events\tAlt+Del", null, (sender, args) => RemoveUnavailableFileClipboardEvents());
             menu.Items.Add("C&lear file history...\tCtrl+Del", null, (sender, args) => ClearFileClipboardHistory());
+        }
+
+        private int SelectedPinnedEntryShortcutPosition()
+        {
+            var selected = SelectedEntries();
+            if (selected.Count != 1 || !selected[0].Pinned) return -1;
+
+            var pinnedEntries = store.GetEntries(settings.SortMode, "Pinned", settings.SortDescending);
+            for (var i = 0; i < pinnedEntries.Count && i < 10; i++)
+            {
+                if (string.Equals(pinnedEntries[i].Id, selected[0].Id, StringComparison.Ordinal))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private int SelectedPinnedFileEventShortcutPosition()
+        {
+            var selected = SelectedFileClipboardEvents();
+            if (selected.Count != 1 || !selected[0].Pinned) return -1;
+
+            var pinnedEvents = recentClipboardEvents == null
+                ? new List<ClipboardEventSummary>()
+                : (recentClipboardEvents() ?? new List<ClipboardEventSummary>()).Where(e => e.Pinned).ToList();
+            for (var i = 0; i < pinnedEvents.Count && i < 10; i++)
+            {
+                if (string.Equals(pinnedEvents[i].Id, selected[0].Id, StringComparison.Ordinal))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static string ShortcutDisplayNumber(int zeroBasedPosition)
+        {
+            return zeroBasedPosition == 9 ? "10" : (zeroBasedPosition + 1).ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static string PinnedShortcutText(int zeroBasedPosition, bool shift)
+        {
+            var key = zeroBasedPosition == 9 ? "0" : (zeroBasedPosition + 1).ToString(CultureInfo.InvariantCulture);
+            return shift ? "Ctrl+Shift+" + key : "Ctrl+" + key;
         }
 
         private void ListKeyDown(object sender, KeyEventArgs e)
@@ -643,6 +715,11 @@ namespace Clipman
             {
                 e.Handled = true;
                 TransformSelected(UrlTrackingCleaner.CleanText, "Removed URL tracking from selected entry or entries.");
+            }
+            else if (e.Control && e.Shift && e.KeyCode == Keys.S)
+            {
+                e.Handled = true;
+                TransformSelected(UrlTrackingCleaner.CleanForSharing, "Cleaned selected link or links for sharing.");
             }
             else if (e.Control && e.Shift && e.KeyCode == Keys.H)
             {
@@ -816,7 +893,14 @@ namespace Clipman
             {
                 if (IsFileClipboardTabActive())
                 {
-                    RestorePinnedFileClipboardEventByPosition(e.KeyCode - Keys.D1);
+                    if (e.Shift)
+                    {
+                        CopyPinnedFileClipboardEventPathsByPosition(e.KeyCode - Keys.D1);
+                    }
+                    else
+                    {
+                        RestorePinnedFileClipboardEventByPosition(e.KeyCode - Keys.D1);
+                    }
                 }
                 else
                 {
@@ -829,7 +913,14 @@ namespace Clipman
             {
                 if (IsFileClipboardTabActive())
                 {
-                    RestorePinnedFileClipboardEventByPosition(9);
+                    if (e.Shift)
+                    {
+                        CopyPinnedFileClipboardEventPathsByPosition(9);
+                    }
+                    else
+                    {
+                        RestorePinnedFileClipboardEventByPosition(9);
+                    }
                 }
                 else
                 {
@@ -1134,16 +1225,54 @@ namespace Clipman
             statusText.Text = "No normal entries.";
         }
 
+        private void JumpToNormalFileClipboardEvents()
+        {
+            for (var i = 0; i < fileEventsList.Items.Count; i++)
+            {
+                var item = fileEventsList.Items[i].Tag as ClipboardEventSummary;
+                if (item == null || item.Pinned) continue;
+                SelectFileIndex(i);
+                statusText.Text = "Normal file-history events.";
+                fileEventsList.Focus();
+                return;
+            }
+
+            statusText.Text = "No normal file-history events.";
+        }
+
         private void SetSortMode(string sortMode)
         {
-            settings.SortMode = sortMode;
-            saveSettings();
-            Reload();
-            statusText.Text = "Sorted clipboard history.";
+            if (IsFileClipboardTabActive())
+            {
+                var selectedIds = SelectedFileClipboardEvents().Select(e => e.Id).ToList();
+                settings.FileHistorySortMode = FileSortModeForMenuSort(sortMode);
+                saveSettings();
+                RefreshFileClipboardEvents();
+                RestoreFileEventSelection(selectedIds);
+                statusText.Text = "Sorted file history.";
+            }
+            else
+            {
+                settings.SortMode = sortMode;
+                saveSettings();
+                Reload();
+                statusText.Text = "Sorted clipboard history.";
+            }
         }
 
         private void ToggleSortDirection()
         {
+            if (IsFileClipboardTabActive())
+            {
+                var selectedIds = SelectedFileClipboardEvents().Select(e => e.Id).ToList();
+                settings.FileHistorySortDescending = !settings.FileHistorySortDescending;
+                saveSettings();
+                RefreshFileClipboardEvents();
+                RestoreFileEventSelection(selectedIds);
+                statusText.Text = FileSortDirectionStatusText();
+                return;
+            }
+
             settings.SortDescending = !settings.SortDescending;
             saveSettings();
             Reload();
@@ -1243,19 +1372,39 @@ namespace Clipman
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
-                RestorePinnedFileClipboardEventByPosition(e.KeyCode - Keys.D1);
+                if (e.Shift)
+                {
+                    CopyPinnedFileClipboardEventPathsByPosition(e.KeyCode - Keys.D1);
+                }
+                else
+                {
+                    RestorePinnedFileClipboardEventByPosition(e.KeyCode - Keys.D1);
+                }
             }
             else if (e.Control && e.KeyCode == Keys.D0)
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
-                RestorePinnedFileClipboardEventByPosition(9);
+                if (e.Shift)
+                {
+                    CopyPinnedFileClipboardEventPathsByPosition(9);
+                }
+                else
+                {
+                    RestorePinnedFileClipboardEventByPosition(9);
+                }
             }
             else if (e.KeyCode == Keys.Delete)
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
                 DeleteSelectedFileClipboardEvent();
+            }
+            else if (e.KeyCode == Keys.Back)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                JumpToNormalFileClipboardEvents();
             }
             else if (e.Modifiers == Keys.None && e.KeyCode == Keys.F4)
             {
@@ -1306,6 +1455,20 @@ namespace Clipman
             RestoreFileClipboardEvents(new List<ClipboardEventSummary> { pinnedEvents[position] }, true);
         }
 
+        private void CopyPinnedFileClipboardEventPathsByPosition(int position)
+        {
+            var pinnedEvents = recentClipboardEvents == null
+                ? new List<ClipboardEventSummary>()
+                : (recentClipboardEvents() ?? new List<ClipboardEventSummary>()).Where(e => e.Pinned).ToList();
+            if (position < 0 || position >= pinnedEvents.Count)
+            {
+                statusText.Text = "No pinned file-history event at position " + (position + 1) + ".";
+                return;
+            }
+
+            CopyFileClipboardEventPaths(new List<ClipboardEventSummary> { pinnedEvents[position] }, true);
+        }
+
         private void RestoreFileClipboardEvents(List<ClipboardEventSummary> selected, bool closeAfterRestore)
         {
             var existing = ExistingFileClipboardPaths(selected);
@@ -1325,7 +1488,10 @@ namespace Clipman
             {
                 var paths = new StringCollection();
                 paths.AddRange(existing);
-                Clipboard.SetFileDropList(paths);
+                var data = new DataObject();
+                data.SetFileDropList(paths);
+                data.SetText(string.Join(Environment.NewLine, existing), TextDataFormat.UnicodeText);
+                Clipboard.SetDataObject(data, true);
                 statusText.Text = existing.Length == 1
                     ? "Restored one file or folder to the clipboard."
                     : "Restored " + existing.Length + " files or folders to the clipboard.";
@@ -1381,7 +1547,11 @@ namespace Clipman
 
         private void CopySelectedFileClipboardPaths()
         {
-            var selected = SelectedFileClipboardEvents();
+            CopyFileClipboardEventPaths(SelectedFileClipboardEvents(), false);
+        }
+
+        private void CopyFileClipboardEventPaths(List<ClipboardEventSummary> selected, bool closeAfterCopy)
+        {
             var paths = AllFileClipboardPaths(selected);
             if (selected.Count == 0)
             {
@@ -1399,6 +1569,10 @@ namespace Clipman
             statusText.Text = paths.Length == 1
                 ? "Copied one file path to the clipboard."
                 : "Copied " + paths.Length + " file paths to the clipboard.";
+            if (closeAfterCopy)
+            {
+                CloseHistoryWindow();
+            }
         }
 
         private void ViewSelectedFileClipboardEvent()
@@ -1490,6 +1664,9 @@ namespace Clipman
             {
                 moveRecentClipboardEvents(selectedIds, direction);
             }
+            settings.FileHistorySortMode = "Manual";
+            settings.FileHistorySortDescending = false;
+            saveSettings();
             RefreshFileClipboardEvents();
             RestoreFileEventSelection(selectedIds);
             statusText.Text = direction < 0 ? "Moved selected file-history event or events up." : "Moved selected file-history event or events down.";
@@ -1661,6 +1838,32 @@ namespace Clipman
         private bool IsSortMode(string sortMode)
         {
             return string.Equals(settings.SortMode ?? "LastUsed", sortMode, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsFileSortMode(string sortMode)
+        {
+            return string.Equals(settings.FileHistorySortMode ?? "Manual", sortMode, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FileSortModeForMenuSort(string menuSortMode)
+        {
+            switch ((menuSortMode ?? string.Empty).Trim().ToUpperInvariant())
+            {
+                case "LASTUSED":
+                    return "Time";
+                case "ADDED":
+                    return "Files";
+                case "TEXT":
+                    return "Name";
+                case "GROUP":
+                    return "Operation";
+                case "MACHINE":
+                    return "Source";
+                case "MANUAL":
+                    return "Manual";
+                default:
+                    return "Manual";
+            }
         }
 
         private void CopySelected()
@@ -2130,6 +2333,7 @@ namespace Clipman
 
         private void UpdateMenuHotkeys()
         {
+            var fileTabActive = IsFileClipboardTabActive();
             if (preferencesMenuItem != null)
             {
                 preferencesMenuItem.Text = "&Preferences...\tCtrl+,";
@@ -2138,17 +2342,63 @@ namespace Clipman
             {
                 toggleMenuItem.Text = "&Toggle on/off\t" + settings.ToggleActiveHotkey;
             }
-            if (sortLastUsedMenuItem != null) sortLastUsedMenuItem.Checked = IsSortMode("LastUsed");
-            if (sortAddedMenuItem != null) sortAddedMenuItem.Checked = IsSortMode("Added");
-            if (sortTextMenuItem != null) sortTextMenuItem.Checked = IsSortMode("Text");
-            if (sortGroupMenuItem != null) sortGroupMenuItem.Checked = IsSortMode("Group");
-            if (sortMachineMenuItem != null) sortMachineMenuItem.Checked = IsSortMode("Machine");
-            if (sortManualMenuItem != null) sortManualMenuItem.Checked = IsSortMode("Manual");
+            if (sortLastUsedMenuItem != null)
+            {
+                sortLastUsedMenuItem.Text = fileTabActive ? "&Time captured" : "&Last used";
+                sortLastUsedMenuItem.Checked = fileTabActive ? IsFileSortMode("Time") : IsSortMode("LastUsed");
+            }
+            if (sortAddedMenuItem != null)
+            {
+                sortAddedMenuItem.Text = fileTabActive ? "&File count" : "&Added";
+                sortAddedMenuItem.Checked = fileTabActive ? IsFileSortMode("Files") : IsSortMode("Added");
+            }
+            if (sortTextMenuItem != null)
+            {
+                sortTextMenuItem.Text = fileTabActive ? "&Name" : "&Text";
+                sortTextMenuItem.Checked = fileTabActive ? IsFileSortMode("Name") : IsSortMode("Text");
+            }
+            if (sortGroupMenuItem != null)
+            {
+                sortGroupMenuItem.Text = fileTabActive ? "&Operation" : "&Group";
+                sortGroupMenuItem.Checked = fileTabActive ? IsFileSortMode("Operation") : IsSortMode("Group");
+            }
+            if (sortMachineMenuItem != null)
+            {
+                sortMachineMenuItem.Text = fileTabActive ? "&Source application" : "Mac&hine";
+                sortMachineMenuItem.Checked = fileTabActive ? IsFileSortMode("Source") : IsSortMode("Machine");
+            }
+            if (sortManualMenuItem != null) sortManualMenuItem.Checked = fileTabActive ? IsFileSortMode("Manual") : IsSortMode("Manual");
             if (sortDirectionMenuItem != null)
             {
-                sortDirectionMenuItem.Text = settings.SortDescending ? "Sort &ascending" : "Sort de&scending";
-                sortDirectionMenuItem.Checked = settings.SortDescending;
+                var descending = fileTabActive ? settings.FileHistorySortDescending : settings.SortDescending;
+                if (fileTabActive && IsFileSortMode("Time"))
+                {
+                    sortDirectionMenuItem.Text = descending ? "Sort file history &oldest first" : "Sort file history &newest first";
+                }
+                else if (fileTabActive)
+                {
+                    sortDirectionMenuItem.Text = descending ? "Sort file history &ascending" : "Sort file history de&scending";
+                }
+                else
+                {
+                    sortDirectionMenuItem.Text = descending ? "Sort text history &ascending" : "Sort text history de&scending";
+                }
+                sortDirectionMenuItem.Checked = descending;
             }
+            if (sortMenuItem != null)
+            {
+                sortMenuItem.Text = fileTabActive ? "S&ort file history by" : "S&ort text history by";
+            }
+        }
+
+        private string FileSortDirectionStatusText()
+        {
+            if (IsFileSortMode("Time"))
+            {
+                return settings.FileHistorySortDescending ? "Sorted file history newest first." : "Sorted file history oldest first.";
+            }
+
+            return settings.FileHistorySortDescending ? "Sorted file history descending." : "Sorted file history ascending.";
         }
 
         private void OpenManual()

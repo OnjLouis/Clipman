@@ -277,6 +277,11 @@
         <td>Text history tab only</td>
       </tr>
       <tr>
+        <td>Clean selected link or links for sharing</td>
+        <td><code>Ctrl+Shift+S</code></td>
+        <td>Text history tab only</td>
+      </tr>
+      <tr>
         <td>Convert selected HTML entry or entries to readable text</td>
         <td><code>Ctrl+Shift+H</code></td>
         <td>Text history tab only</td>
@@ -310,6 +315,11 @@
         <td>Restore pinned file event by position</td>
         <td><code>Ctrl+1</code> through <code>Ctrl+0</code></td>
         <td>File history tab only. Uses the first ten pinned file events.</td>
+      </tr>
+      <tr>
+        <td>Copy paths from pinned file event by position</td>
+        <td><code>Ctrl+Shift+1</code> through <code>Ctrl+Shift+0</code></td>
+        <td>File history tab only. Uses the first ten pinned file events and closes history.</td>
       </tr>
       <tr>
         <td>Go to selected file or folder</td>
@@ -369,7 +379,7 @@
   <p>Use <strong>Preferences, Startup and updates, Run Clipman at Windows startup</strong> to start Clipman automatically when you sign in. This creates a per-user startup entry for the current <code>clipman.exe</code> path and does not require administrator permission.</p>
 
   <h2 id="pinned-entries">Pinned Entries</h2>
-  <p>Pinned entries are grouped at the top of the history list. A separator marks the start of normal entries. Press <code>Home</code> to reach the top of the list, and press <code>Backspace</code> to jump to the first normal entry. Pinned entries are read-only for normal cleanup: Delete skips them, and history size or age limits do not remove them. Use <code>Shift+Enter</code> or <strong>Edit, Toggle pinned</strong> to change the pinned state. Use <code>Ctrl+1</code> through <code>Ctrl+0</code> to copy one of the first ten pinned entries and close history.</p>
+  <p>Pinned entries are grouped at the top of the history list. A separator marks the start of normal entries. Press <code>Home</code> to reach the top of the list, and press <code>Backspace</code> to jump to the first normal entry. Pinned entries are read-only for normal cleanup: Delete skips them, and history size or age limits do not remove them. Use <code>Shift+Enter</code> or <strong>Edit, Toggle pinned</strong> to change the pinned state. Use <code>Ctrl+1</code> through <code>Ctrl+0</code> to copy one of the first ten pinned entries and close history. When one of those pinned entries is selected, its Application key menu also shows the matching pinned-entry shortcut.</p>
 
   <h2 id="entry-names-and-text">Entry Names and Text</h2>
   <p>Use <code>F2</code> to edit the selected entry. You can add a short name or hint, and you can also edit the stored clipboard text itself. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
@@ -390,7 +400,7 @@
   <h2 id="sorting-and-manual-order">Sorting and Manual Order</h2>
   <p>The Text history list includes the entry text, name, group, machine, added time, and last-used time. The machine column records the computer that added or most recently re-added the entry, which helps when several computers share the same database.</p>
 
-  <p>The View menu can sort normal history entries by last used, added date, text, group, machine, or manual order. The sort direction command in the same menu toggles the current sort between ascending and descending; its label changes to show the action it will take next. Group sorting places grouped entries together and leaves ungrouped entries after named groups. Machine sorting groups entries by the computer that added or most recently re-added them. Pinned entries stay above normal entries and keep their own manual order regardless of the selected sort mode or direction. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected pinned entries within the pinned section, or selected normal entries within the normal history section. Move pinned and normal entries separately.</p>
+  <p>The View menu can sort normal Text history entries by last used, added date, text, group, machine, or manual order. On the File history tab, the same menu changes to file-oriented choices: time captured, file count, name, operation, source application, or manual order. The sort direction command in the same menu toggles the current tab's sort between ascending and descending; its label changes to show the action it will take next. When File history is sorted by time, the direction command says oldest first or newest first instead, because that wording is clearer for dated file events. Group sorting places grouped text entries together and leaves ungrouped entries after named groups. Machine sorting groups text entries by the computer that added or most recently re-added them. Pinned entries and pinned file events stay above normal entries and keep their own manual order regardless of the selected sort mode or direction. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected pinned entries within the pinned section, or selected normal entries within the normal history section. Move pinned and normal entries separately.</p>
 
   <h2 id="cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</h2>
   <p><code>Ctrl+C</code> and <code>Ctrl+X</code> put normal text on the Windows clipboard, so the text can be pasted into other applications. Clipman also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries.</p>
@@ -399,11 +409,13 @@
   <p>Preferences can limit the maximum number of entries or maximum entry age. Use <code>0</code> for no limit. Pinned entries and named entries are kept even when limits are applied.</p>
 
   <h2 id="actions">Actions</h2>
-  <p>The Actions menu contains simple text cleanup tools for selected entries: copy as plain text, trim whitespace, convert to single line, remove blank lines, remove URL tracking, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode. The most common actions also have shortcuts: <code>Ctrl+Shift+C</code> for plain-text copy, <code>Ctrl+Shift+T</code> for trim, <code>Ctrl+Shift+L</code> for single line, <code>Ctrl+Shift+B</code> for remove blank lines, <code>Ctrl+Shift+R</code> for remove URL tracking, <code>Ctrl+Shift+H</code> for HTML to readable text, and <code>Ctrl+Shift+U</code> for URL encode. Transform actions update the stored entry and also put the transformed result on the Windows clipboard.</p>
+  <p>The Actions menu contains simple text cleanup tools for selected entries: copy as plain text, trim whitespace, convert to single line, remove blank lines, remove URL tracking, clean links for sharing, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode. The most common actions also have shortcuts: <code>Ctrl+Shift+C</code> for plain-text copy, <code>Ctrl+Shift+T</code> for trim, <code>Ctrl+Shift+L</code> for single line, <code>Ctrl+Shift+B</code> for remove blank lines, <code>Ctrl+Shift+R</code> for remove URL tracking, <code>Ctrl+Shift+S</code> for clean link for sharing, <code>Ctrl+Shift+H</code> for HTML to readable text, and <code>Ctrl+Shift+U</code> for URL encode. Transform actions update the stored entry and also put the transformed result on the Windows clipboard.</p>
 
   <p><strong>Copy as plain text</strong> copies the selected entry using only the Windows plain-text clipboard format. It does not strip HTML tags from stored HTML source. Use <strong>HTML to readable text</strong> when you want Clipman to remove HTML tags and keep the readable text.</p>
 
   <p><strong>Remove URL tracking</strong> removes common tracking query parameters from web links, including <code>utm_*</code>, <code>fbclid</code>, <code>gclid</code>, <code>msclkid</code>, and similar marketing identifiers. It works on plain links and common HTML link attributes such as <code>href</code> and <code>src</code>. Automatic URL-tracking removal is opt-in from Preferences; when enabled, newly copied text is cleaned before Clipman stores it, and the cleaned text is placed on the Windows clipboard.</p>
+
+  <p><strong>Clean link for sharing</strong> removes tracking parameters and also removes share-state parameters that can change how a shared link opens. For YouTube links this includes timestamp parameters such as <code>t</code>, <code>start</code>, and <code>time_continue</code>, plus common share metadata such as <code>pp</code>, <code>si</code>, and <code>feature</code>. Use this when you want to share the clean video or page URL rather than a link that opens from the middle of a video.</p>
 
   <p><strong>URL encode</strong> is for text that needs to be safe inside a URL. For example, <code>Where's My Car?</code> becomes <code>Where%27s%20My%20Car%3F</code>. <strong>HTML encode</strong> is for text that needs to be safe inside HTML source, where characters such as ampersands and quotes may need to become HTML entities. Use URL encode for web links, query strings, podcast episode links, and similar copy/paste jobs.</p>
 
@@ -422,15 +434,15 @@
       </tr>
       <tr>
         <td>Edit</td>
-        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history.</td>
+        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history. When a selected pinned text entry or file event is in the first ten pinned items, the menu also shows the relevant pinned shortcut.</td>
       </tr>
       <tr>
         <td>Actions</td>
-        <td>Text cleanup and transformation commands for selected Text history entries, including plain-text copy, trim, single line, remove blank lines, remove URL tracking, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode.</td>
+        <td>Text cleanup and transformation commands for selected Text history entries, including plain-text copy, trim, single line, remove blank lines, remove URL tracking, clean link for sharing, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode.</td>
       </tr>
       <tr>
         <td>View</td>
-        <td>Sort Text history entries from the Sort by submenu, toggle ascending or descending order, and move selected entries up or down in manual order.</td>
+        <td>Sort Text history or File history entries from the Sort by submenu, toggle ascending or descending order, and move selected entries up or down in manual order. The sort fields change to match the active tab.</td>
       </tr>
       <tr>
         <td>Options</td>
@@ -480,9 +492,9 @@
   <h2 id="file-history">File History</h2>
   <p>The File history tab shows file, folder, and non-text clipboard events captured by Clipman. File history is stored separately from text history in a machine-specific database named like <code>Settings\Desktop-file-history.clipdb</code>. If you set a history password, file history uses the same password; there is not a second password to remember. File history stores paths and clipboard-format details only. It does not copy or preserve the actual file contents.</p>
 
-  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. File history rows start with the file or folder name, then show the operation and file count. The File history list supports buffered type-to-jump navigation by file name, so you can type several characters of a name to reach the matching file event. It also supports standard Windows multi-selection, so you can use <code>Shift+Up</code>, <code>Shift+Down</code>, <code>Ctrl+Up</code>, <code>Ctrl+Down</code>, and <code>Ctrl+Space</code> to build a selection before acting on it. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the Windows clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> to copy all selected file paths as text without closing. Press <code>Shift+Enter</code> to pin or unpin selected file events, and press <code>Ctrl+Enter</code> to open Explorer at a single selected file or folder; this command requires one selected event containing exactly one path. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected file events within the pinned or normal section. Press <code>Del</code> to remove selected unpinned file-history events from the list.</p>
+  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. File history rows start with the file or folder name, then show the operation and file count. The File history list supports buffered type-to-jump navigation by file name, so you can type several characters of a name to reach the matching file event. It also supports standard Windows multi-selection, so you can use <code>Shift+Up</code>, <code>Shift+Down</code>, <code>Ctrl+Up</code>, <code>Ctrl+Down</code>, and <code>Ctrl+Space</code> to build a selection before acting on it. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the Windows clipboard and close the history window, matching Text history behavior. Restored file events include both Windows file-drop data and a text version of the paths, so more file dialogs and edit fields can paste a path when they expect text. Press <code>Ctrl+C</code> to copy all selected file paths as text without closing. Use the View menu to sort normal file events by time captured, file count, name, operation, source application, or manual order. Press <code>Backspace</code> to jump to the first normal file event below pinned file events. Press <code>Shift+Enter</code> to pin or unpin selected file events, and press <code>Ctrl+Enter</code> to open Explorer at a single selected file or folder; this command requires one selected event containing exactly one path. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected file events within the pinned or normal section. Moving file events switches File history back to manual order. Press <code>Del</code> to remove selected unpinned file-history events from the list.</p>
 
-  <p>Pinned file events are grouped at the top of File history, with the same normal-entries separator used by Text history. They are protected from <code>Del</code>, <code>Ctrl+Del</code>, automatic unavailable-event cleanup, and file-history size trimming. Use <code>Ctrl+1</code> through <code>Ctrl+0</code> from the File history tab to restore one of the first ten pinned file events and close history.</p>
+  <p>Pinned file events are grouped at the top of File history, with the same normal-entries separator used by Text history. They are protected from <code>Del</code>, <code>Ctrl+Del</code>, automatic unavailable-event cleanup, and file-history size trimming. Use <code>Ctrl+1</code> through <code>Ctrl+0</code> from the File history tab to restore one of the first ten pinned file events and close history. Use <code>Ctrl+Shift+1</code> through <code>Ctrl+Shift+0</code> to copy paths from one of the first ten pinned file events as text and close history. When a selected pinned file event is in the first ten pinned file events, its Application key menu also shows those shortcuts.</p>
 
   <p>The File history tab has buttons to clear normal file-history events or remove unavailable unpinned events. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> for clear normal file history and <code>Alt+Del</code> for remove unavailable unpinned events. Preferences can also remove unavailable unpinned events automatically as new file-history events are captured.</p>
 
@@ -608,6 +620,15 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.10</h3>
+  <ul>
+    <li>Added File history sorting from the View menu. File history can now sort normal file events by time captured, file count, name, operation, source application, or manual order.</li>
+    <li>Added <code>Backspace</code> on the File history tab to jump to the first normal file event below pinned file events, matching Text history navigation.</li>
+    <li>Added Clean link for sharing with <code>Ctrl+Shift+S</code>. It removes tracking parameters and YouTube share-state parameters such as timestamps, so shared video links can open from the start instead of the copied playback position.</li>
+    <li>Improved File history restore so restored file events also place the file paths on the clipboard as text, and added <code>Ctrl+Shift+1</code> through <code>Ctrl+Shift+0</code> to copy pinned file-event paths as text.</li>
+    <li>Improved Application key menus so selected pinned text entries and file events show their matching quick-copy shortcuts when they are in the first ten pinned items.</li>
+  </ul>
+
   <h3>1.5.9</h3>
   <ul>
     <li>Fixed Text history delete selection when deleting the last visible row. Clipman now keeps focus near the deleted row instead of jumping back to the top pinned entry.</li>

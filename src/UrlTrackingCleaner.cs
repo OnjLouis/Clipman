@@ -44,12 +44,22 @@ namespace Clipman
 
         public static string CleanText(string text)
         {
+            return CleanText(text, false);
+        }
+
+        public static string CleanForSharing(string text)
+        {
+            return CleanText(text, true);
+        }
+
+        private static string CleanText(string text, bool cleanShareState)
+        {
             if (string.IsNullOrEmpty(text)) return string.Empty;
 
             var cleaned = HtmlUrlAttributeRegex.Replace(text, match =>
             {
                 var url = match.Groups["url"].Value;
-                var cleanedUrl = CleanUrl(url, true);
+                var cleanedUrl = CleanUrl(url, true, cleanShareState);
                 return match.Groups["prefix"].Value + cleanedUrl + match.Groups["suffix"].Value;
             });
 
@@ -63,13 +73,13 @@ namespace Clipman
                     value = value.Substring(0, value.Length - 1);
                 }
 
-                return CleanUrl(value, false) + trailing;
+                return CleanUrl(value, false, cleanShareState) + trailing;
             });
 
             return cleaned;
         }
 
-        private static string CleanUrl(string url, bool htmlAttribute)
+        private static string CleanUrl(string url, bool htmlAttribute, bool cleanShareState)
         {
             if (string.IsNullOrWhiteSpace(url)) return url ?? string.Empty;
 
@@ -94,7 +104,7 @@ namespace Clipman
             {
                 var equals = part.IndexOf('=');
                 var name = equals >= 0 ? part.Substring(0, equals) : part;
-                if (ShouldRemoveParameter(name))
+                if (ShouldRemoveParameter(name) || (cleanShareState && ShouldRemoveShareParameter(uri, name)))
                 {
                     changed = true;
                     continue;
@@ -119,6 +129,32 @@ namespace Clipman
             if (decoded.StartsWith("utm_", StringComparison.OrdinalIgnoreCase)) return true;
             if (decoded.StartsWith("hsa_", StringComparison.OrdinalIgnoreCase)) return true;
             return TrackingParameters.Contains(decoded);
+        }
+
+        private static bool ShouldRemoveShareParameter(Uri uri, string name)
+        {
+            if (uri == null || string.IsNullOrWhiteSpace(name)) return false;
+            var host = uri.Host ?? string.Empty;
+            var decoded = Uri.UnescapeDataString(name).Trim();
+            if (IsYouTubeHost(host))
+            {
+                return decoded.Equals("t", StringComparison.OrdinalIgnoreCase) ||
+                    decoded.Equals("time_continue", StringComparison.OrdinalIgnoreCase) ||
+                    decoded.Equals("start", StringComparison.OrdinalIgnoreCase) ||
+                    decoded.Equals("pp", StringComparison.OrdinalIgnoreCase) ||
+                    decoded.Equals("si", StringComparison.OrdinalIgnoreCase) ||
+                    decoded.Equals("feature", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return decoded.Equals("si", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsYouTubeHost(string host)
+        {
+            if (string.IsNullOrWhiteSpace(host)) return false;
+            return host.Equals("youtu.be", StringComparison.OrdinalIgnoreCase) ||
+                host.Equals("youtube.com", StringComparison.OrdinalIgnoreCase) ||
+                host.EndsWith(".youtube.com", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string DecodeHtmlAmpersands(string value)

@@ -18,6 +18,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Press Enter on a history entry to copy it back to the clipboard and close history.
 - Press Ctrl+C to copy without closing the history window.
 - Press Shift+Enter to pin or unpin an entry. Pinned entries are protected from delete and cleanup.
+- Application key menus show pinned quick-copy shortcuts when the selected pinned text entry or file-history event is one of the first ten pinned items.
 - Press Backspace in the history list to jump to the first normal entry below pinned entries.
 - Press F2 to edit an entry name and stored clipboard text.
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
@@ -53,6 +54,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Toggle pinned file-history event: `Shift+Enter` on the File history tab.
 - Go to selected file or folder: `Ctrl+Enter` on the File history tab.
 - Restore pinned file event: `Ctrl+1` to `Ctrl+0` on the File history tab.
+- Copy paths from pinned file event: `Ctrl+Shift+1` to `Ctrl+Shift+0` on the File history tab.
 - Copy without closing history: `Ctrl+C`
 - Search: `Ctrl+F`, then `F3` or `Shift+F3`
 - Edit entry name and text: `F2`
@@ -85,13 +87,23 @@ Old Clipman and Ditto imports read text entries only. They do not import images 
 
 The File history tab can delete selected unpinned file events with `Del`, clear normal file history with `Ctrl+Del`, and remove unavailable unpinned events with `Alt+Del`. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files or folders are now missing.
 
-File history rows start with the file or folder name, followed by the operation and file count. File history supports buffered type-to-jump navigation by file name, so typing `13.t` keeps looking for that full prefix rather than jumping separately on `t`. It also supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Use `Shift+Enter` to pin or unpin selected file events, `Ctrl+Enter` to open Explorer at one selected file or folder, and `Alt+Up` or `Alt+Down` to move selected file events within the pinned or normal section. Pinned file events are kept during delete, clear, unavailable-event cleanup, and file-history size trimming.
+File history rows start with the file or folder name, followed by the operation and file count. File history supports buffered type-to-jump navigation by file name, so typing `13.t` keeps looking for that full prefix rather than jumping separately on `t`. It also supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Restored file events include both Windows file-drop data and a text version of the paths. Use the View menu to sort normal file events by time captured, file count, name, operation, source application, or manual order. When File history is sorted by time, the direction command says oldest first or newest first. Press `Backspace` to jump to the first normal file event below pinned file events. Use `Shift+Enter` to pin or unpin selected file events, `Ctrl+Enter` to open Explorer at one selected file or folder, and `Alt+Up` or `Alt+Down` to move selected file events within the pinned or normal section. Use `Ctrl+Shift+1` through `Ctrl+Shift+0` to copy paths from one of the first ten pinned file events as text and close history. When one of those pinned file events is selected, its Application key menu shows the matching restore and copy-path shortcuts. Pinned file events are kept during delete, clear, unavailable-event cleanup, and file-history size trimming.
+
+The Actions menu includes cleanups for selected text entries. `Ctrl+Shift+R` removes ordinary URL tracking parameters. `Ctrl+Shift+S` cleans links for sharing by removing tracking plus share-state parameters such as YouTube timestamps, so a copied video link can be shared from the start rather than the current playback position.
 
 File history preferences can automatically remove unavailable unpinned events as new file-history events arrive. Diagnostics include the total file-history count, but only list the configured number of recent events so copied file operations do not make diagnostics excessively long.
 
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.5.10
+
+- Added File history sorting from the View menu. File history can now sort normal file events by time captured, file count, name, operation, source application, or manual order.
+- Added `Backspace` on the File history tab to jump to the first normal file event below pinned file events, matching Text history navigation.
+- Added Clean link for sharing with `Ctrl+Shift+S`. It removes tracking parameters and YouTube share-state parameters such as timestamps, so shared video links can open from the start instead of the copied playback position.
+- Improved File history restore so restored file events also place file paths on the clipboard as text, and added `Ctrl+Shift+1` through `Ctrl+Shift+0` to copy pinned file-event paths as text.
+- Improved Application key menus so selected pinned text entries and file events show their matching quick-copy shortcuts when they are in the first ten pinned items.
 
 ### 1.5.9
 
