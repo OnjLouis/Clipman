@@ -670,7 +670,13 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Ctrl\+Shift\+1' 'Manual pinned file path shortcut documentation'
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
-    Assert-TextMatches $manual 'ascending and descending' 'Manual sort direction documentation'
+    Assert-TextMatches $manual '<h3>1\.5\.11</h3>' 'Manual 1.5.11 changelog'
+    Assert-TextMatches $manual 'oldest first, newest first, A first, Z first' 'Manual 1.5.11 sort direction wording'
+    Assert-TextMatches $manual 'choose a Clipman data folder instead of an individual <code>\.clipdb</code> file' 'Manual 1.5.11 data-folder changelog'
+    Assert-TextMatches $manual 'Clipman stores the shared text history as <code>clipman-history\.clipdb</code> inside the chosen folder' 'Manual data-folder storage documentation'
+    Assert-TextMatches $manual 'settings-location\.json' 'Manual data-folder pointer documentation'
+    Assert-TextMatches $manual 'active settings in that folder beside <code>clipman-history\.clipdb</code>' 'Manual active settings in selected data folder'
+    Assert-TextDoesNotMatch $manual 'between ascending and descending|toggle ascending or descending order' 'Manual avoids unclear ascending/descending sort wording'
     Assert-TextMatches $manual '<h3>1\.5\.10</h3>' 'Manual 1.5.10 changelog'
     Assert-TextMatches $manual 'File history sorting from the View menu' 'Manual 1.5.10 file-history sort changelog'
     Assert-TextMatches $manual 'Backspace</code> on the File history tab' 'Manual 1.5.10 file-history Backspace changelog'
@@ -724,6 +730,11 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Ctrl\+A' 'Manual select-all/viewer shortcut'
     Assert-TextMatches $manual 'Tyler Spivey' 'Manual credits'
     Assert-TextMatches $readme 'Project page: <https://github.com/OnjLouis/Clipman>' 'README project page link'
+    Assert-TextMatches $readme '### 1\.5\.11' 'README 1.5.11 changelog'
+    Assert-TextMatches $readme 'oldest first, newest first, A first, Z first' 'README 1.5.11 sort direction wording'
+    Assert-TextMatches $readme 'choose a Clipman data folder instead of an individual `\.clipdb` file' 'README 1.5.11 data-folder changelog'
+    Assert-TextMatches $readme 'set the data folder to the same synced or network-shared folder' 'README data-folder sharing documentation'
+    Assert-TextMatches $readme 'small pointer remains in the app''s `Settings` folder' 'README data-folder pointer documentation'
     Assert-TextMatches $readme '### 1\.5\.10' 'README 1.5.10 changelog'
     Assert-TextMatches $readme 'File history sorting from the View menu' 'README 1.5.10 file-history sort changelog'
     Assert-TextMatches $readme 'Backspace` on the File history tab' 'README 1.5.10 file-history Backspace changelog'
@@ -750,7 +761,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Alt\+Del' 'README file-history remove-missing shortcut'
     Assert-TextMatches $readme 'Storage and Password' 'README storage/password tab documentation'
     Assert-TextMatches $readme 'LICENSE\.txt' 'README license file documentation'
-    Assert-TextMatches $readme 'Sort direction can be toggled' 'README sort direction documentation'
+    Assert-TextMatches $readme 'Sort direction uses clearer first-style labels' 'README sort direction documentation'
     Assert-TextMatches $readme 'Settings\\sounds' 'README user sound override documentation'
     Assert-TextMatches $readme 'Bundled sounds in the root `sounds` folder are factory files' 'README factory sound update behavior'
     Assert-TextMatches $readme 'start a copy from a different folder' 'README different folder takeover behavior'
@@ -791,12 +802,13 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') '&Export\.\.\.\\tCtrl\+E' 'Export menu shortcut'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'S&ort by' 'View sort submenu mnemonic'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Mac&hine' 'Sort by machine unique mnemonic'
-    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort text history de&scending' 'Text history sort descending menu label'
-    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort text history &ascending' 'Text history sort ascending menu label'
-    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort file history de&scending' 'File history sort descending menu label'
-    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort file history &ascending' 'File history sort ascending menu label'
-    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort file history &newest first' 'File history newest-first menu label'
-    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'Switch to de&scending sort' 'Old sort direction wording'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort text history oldest &first' 'Text history oldest-first menu label'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort text history newest &first' 'Text history newest-first menu label'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort text history A &first' 'Text history A-first menu label'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort text history Z &first' 'Text history Z-first menu label'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort file history fewest files &first' 'File history fewest-files-first menu label'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort file history most files &first' 'File history most-files-first menu label'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'Switch to de&scending sort|Sort text history &ascending|Sort text history de&scending|Sort file history &ascending|Sort file history de&scending' 'Old sort direction wording'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Copy and c&lose' 'Copy and close unique mnemonic'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Paste &after selected' 'Paste after selected unique mnemonic'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') '&Paste after selected' 'Old Paste after selected duplicate mnemonic'
@@ -862,6 +874,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'WriteStartupLog\("Startup failed\."' 'Startup failure logging'
     Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'UseDefaultDatabasePath' 'Default database path setting'
     Assert-TextMatches (Join-Path $repoRoot 'src\SettingsStore.cs') 'ShouldTreatAsDefaultDatabasePath' 'Portable default database path detection'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'FolderBrowserDialog' 'Preferences uses folder picker for data folder'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'DatabasePathFromFolderOrFile' 'Preferences derives database path from data folder'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Choose Clipman database file|Clipman compressed database\|\\*\.clipdb' 'Preferences no longer exposes database-file picker'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'Clipman database not found' 'Missing explicit database prompt'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'optionsMenuItem\.ShowDropDown\(\)' 'Standard Options menu mnemonic handling'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DescribeDropEffect\(int value\)' 'Drop effect display helper'
@@ -872,6 +887,19 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Based on earlier Clipman work by Tyler Spivey' 'About credits'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'sqlite3\.dll' 'GitHub release rules SQLite runtime packaging'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'LICENSE\.txt' 'GitHub release rules license packaging'
+    Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'ClipmanMac/dist/ClipmanMac\.zip' 'GitHub release rules Mac release ZIP packaging'
+    Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'CFBundleShortVersionString.*AssemblyInformationalVersion' 'GitHub release rules Mac version parity'
+    Assert-TextMatches (Join-Path $repoRoot 'CLIPMAN_AGENT_SYNC.md') 'shared-version\.sh' 'Agent sync Mac version workflow'
+    Assert-TextMatches (Join-Path $repoRoot 'CLIPMAN_AGENT_SYNC.md') 'Windows remains the source of truth' 'Agent sync Windows release source of truth'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\shared-version.sh') 'AssemblyInformationalVersion' 'Mac shared version script reads Windows informational version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\shared-version.sh') 'AssemblyFileVersion' 'Mac shared version script reads Windows file version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" version' 'Mac release package reads shared short version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" build' 'Mac release package reads shared build version'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') '<string>0\.1</string>|<string>1</string>' 'Mac release package must not hard-code bundle version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" version' 'Mac dev package reads shared short version'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') '<string>0\.1</string>|<string>1</string>' 'Mac dev package must not hard-code bundle version'
+    Assert-TextMatches (Join-Path $repoRoot '.gitignore') 'ClipmanMac/dist/' 'Root gitignore ignores Mac release dist'
+    Assert-TextMatches (Join-Path $repoRoot '.gitignore') 'ClipmanMac/\.build/' 'Root gitignore ignores Swift build products'
 
     $forbidden = 'Merjille|Kobo|VIP40|D:\\|E:\\|\bolder installs\b|\bolder versions\b|migration|migrate automatically|temporary workaround|Dropbox'
     Assert-TextDoesNotMatch $manual $forbidden 'Manual'
@@ -1068,6 +1096,15 @@ internal static class ClipmanSmokeHarness
         var explicitSettings = portableStore.Load();
         Assert(!explicitSettings.UseDefaultDatabasePath, "Explicit database path was incorrectly marked as default.");
         Assert(explicitSettings.DatabasePath == explicitDb, "Explicit database path was not preserved.");
+        var explicitSettingsFolder = Path.GetDirectoryName(explicitDb);
+        Assert(portableStore.SettingsDirectory == explicitSettingsFolder, "Explicit data folder did not become the active settings folder.");
+        Assert(portableStore.SettingsPath == Path.Combine(explicitSettingsFolder, Environment.MachineName + "-settings.json"), "Explicit data folder did not get the machine settings file.");
+        Assert(File.Exists(Path.Combine(portableApp, "Settings", "settings-location.json")), "Settings location pointer was not written beside the app.");
+        Assert(File.Exists(portableStore.SettingsPath), "Machine settings were not written into the explicit data folder.");
+        var reloadedExplicitStore = new SettingsStore(portableApp);
+        var reloadedExplicitSettings = reloadedExplicitStore.Load();
+        Assert(reloadedExplicitSettings.DatabasePath == explicitDb, "Settings location pointer did not reload the explicit database path.");
+        Assert(reloadedExplicitStore.SettingsDirectory == explicitSettingsFolder, "Settings location pointer did not reload the explicit data folder.");
 
         var stateDir = Path.Combine(conflictDir, "state");
         Directory.CreateDirectory(stateDir);

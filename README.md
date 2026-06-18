@@ -1,10 +1,12 @@
-# Clipman: Accessible Clipboard Management Tool for Windows
+# Clipman: Accessible Clipboard Management Tool
 
-Clipman is a small portable accessible clipboard management tool for Windows, designed for fast keyboard and screen-reader use.
+Clipman is a small portable accessible clipboard management tool designed for fast keyboard and screen-reader use. The main implementation is Windows; the `ClipmanMac` folder contains the native macOS/AppKit implementation that shares the same text-history database contract.
 
 For the full manual, open `Manual.html` from the Clipman folder or press `F1` in the history window.
 
 Project page: <https://github.com/OnjLouis/Clipman>
+
+macOS tester builds are produced from `ClipmanMac` and attached to releases in this same repository so Windows and Mac downloads appear together.
 
 ## Features
 
@@ -23,7 +25,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Press F2 to edit an entry name and stored clipboard text.
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
-- Sort direction can be toggled between ascending and descending from the View menu.
+- Sort direction uses clearer first-style labels from the View menu, such as oldest first, newest first, A first, or Z first depending on the active sort field.
 - Use the File history tab to review file copy/cut and non-text clipboard events captured by Clipman, restore one or more selected file events to the Windows clipboard, pin important file events, move them in manual order, or go to one selected file or folder. File history rows start with the file or folder name, and you can type several characters of a file name to jump to a matching event.
 - File history diagnostics are capped by preference, and unavailable unpinned file-history events can be removed manually or automatically.
 - Optional history size and age limits, with pinned entries kept.
@@ -31,7 +33,7 @@ Project page: <https://github.com/OnjLouis/Clipman>
 - Import and export clipboard history for backup, including text imports from old Clipman `clipman.db` and Ditto SQLite databases.
 - Compressed Clipman database can live in a cloud service, synced folder, or network share.
 - Optional history password encryption, with the password protected by Windows per user and machine.
-- The app watches the database file and reloads when another machine or process replaces it.
+- The app watches the database file inside the configured data folder and reloads when another machine or process replaces it.
 - Tray and app menus show the configured global hotkeys.
 - Help menu links to the GitHub project, release history, update checker, contact page, and donate page.
 - Optional per-user Windows startup entry.
@@ -61,19 +63,19 @@ Project page: <https://github.com/OnjLouis/Clipman>
 
 Hotkeys can be changed from Options > Preferences.
 
-Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared database path and the history password controls.
+Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared data folder and the history password controls.
 
-The default history database, `Settings\clipman-history.clipdb`, is portable with the app folder. If Clipman is moved while using the default database, the path follows the new folder. If you choose a different database path, Clipman treats it as explicit and asks what to do if that file cannot be found at startup.
+The default data folder is `Settings` beside `clipman.exe`. If Clipman is moved while using that default data folder, settings and history follow the new folder. If you choose a different data folder, Clipman uses `clipman-history.clipdb` inside that folder and stores this machine's settings beside it. A small pointer remains in the app's `Settings` folder so Clipman can find the selected data folder on the next launch.
 
 Clipman remembers whether clipboard monitoring was on or off. On launch it plays the on or off sound for the restored state when sounds are enabled.
 
 ## Database
 
-By default Clipman stores machine-specific settings and shared history in a `Settings` folder beside `clipman.exe`. Settings use the computer name, such as `Desktop-settings.json`, while the live history file uses the `.clipdb` format, which is compressed with a Clipman-specific header rather than plain text.
+By default Clipman stores machine-specific settings and shared history in a `Settings` folder beside `clipman.exe`. If you choose a different data folder, active machine settings move into that selected folder. Settings use the computer name, such as `Desktop-settings.json`, while the live history file uses the `.clipdb` format, which is compressed with a Clipman-specific header rather than plain text.
 
 File and non-text clipboard history is stored separately in a machine-specific file such as `Settings\Desktop-file-history.clipdb`. It uses the same history password when one is configured, but it is not shared by default because file paths are usually machine-specific. It stores paths and clipboard format details only, not file contents.
 
-To share a database between machines, open Options > Preferences on each machine and set the database file to the same synced or network-shared `.clipdb` path. When that file changes, Clipman reloads it without needing to restart.
+To share a database between machines, open Options > Preferences on each machine and set the data folder to the same synced or network-shared folder. Clipman uses `clipman-history.clipdb` inside that folder. When that file changes, Clipman reloads it without needing to restart. Existing explicit `.clipdb` paths remain readable for compatibility, but the Preferences Browse button now chooses a folder so users do not accidentally select a machine-specific file-history database.
 
 If the shared database file is missing but its folder is available, Clipman creates it when it next saves. If the folder or drive is temporarily unavailable, Clipman keeps running and reports the storage problem in diagnostics; when the location returns, it merges the existing database before saving.
 
@@ -87,7 +89,7 @@ Old Clipman and Ditto imports read text entries only. They do not import images 
 
 The File history tab can delete selected unpinned file events with `Del`, clear normal file history with `Ctrl+Del`, and remove unavailable unpinned events with `Alt+Del`. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files or folders are now missing.
 
-File history rows start with the file or folder name, followed by the operation and file count. File history supports buffered type-to-jump navigation by file name, so typing `13.t` keeps looking for that full prefix rather than jumping separately on `t`. It also supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Restored file events include both Windows file-drop data and a text version of the paths. Use the View menu to sort normal file events by time captured, file count, name, operation, source application, or manual order. When File history is sorted by time, the direction command says oldest first or newest first. Press `Backspace` to jump to the first normal file event below pinned file events. Use `Shift+Enter` to pin or unpin selected file events, `Ctrl+Enter` to open Explorer at one selected file or folder, and `Alt+Up` or `Alt+Down` to move selected file events within the pinned or normal section. Use `Ctrl+Shift+1` through `Ctrl+Shift+0` to copy paths from one of the first ten pinned file events as text and close history. When one of those pinned file events is selected, its Application key menu shows the matching restore and copy-path shortcuts. Pinned file events are kept during delete, clear, unavailable-event cleanup, and file-history size trimming.
+File history rows start with the file or folder name, followed by the operation and file count. File history supports buffered type-to-jump navigation by file name, so typing `13.t` keeps looking for that full prefix rather than jumping separately on `t`. It also supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Restored file events include both Windows file-drop data and a text version of the paths. Use the View menu to sort normal file events by time captured, file count, name, operation, source application, or manual order. The direction command names the next result plainly, such as oldest first, newest first, fewest files first, most files first, A first, or Z first. Press `Backspace` to jump to the first normal file event below pinned file events. Use `Shift+Enter` to pin or unpin selected file events, `Ctrl+Enter` to open Explorer at one selected file or folder, and `Alt+Up` or `Alt+Down` to move selected file events within the pinned or normal section. Use `Ctrl+Shift+1` through `Ctrl+Shift+0` to copy paths from one of the first ten pinned file events as text and close history. When one of those pinned file events is selected, its Application key menu shows the matching restore and copy-path shortcuts. Pinned file events are kept during delete, clear, unavailable-event cleanup, and file-history size trimming.
 
 The Actions menu includes cleanups for selected text entries. `Ctrl+Shift+R` removes ordinary URL tracking parameters. `Ctrl+Shift+S` cleans links for sharing by removing tracking plus share-state parameters such as YouTube timestamps, so a copied video link can be shared from the start rather than the current playback position.
 
@@ -96,6 +98,12 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.5.11
+
+- Changed the sort direction command wording to clearer first-style labels, such as oldest first, newest first, A first, Z first, fewest files first, or most files first depending on the active sort field.
+- Changed database selection in Preferences to choose a Clipman data folder instead of an individual `.clipdb` file. Clipman derives `clipman-history.clipdb` inside that folder while keeping existing explicit file paths compatible.
+- Changed custom data folders to keep this machine's active settings beside `clipman-history.clipdb`, with a small pointer in the app's local `Settings` folder so shared/synced Clipman folders remain self-contained.
 
 ### 1.5.10
 

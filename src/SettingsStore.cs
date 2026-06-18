@@ -7,30 +7,36 @@ namespace Clipman
 {
     internal sealed class SettingsStore
     {
+        private const string PointerFileName = "settings-location.json";
         public string AppDirectory { get; private set; }
+        public string AppSettingsDirectory { get; private set; }
         public string SettingsDirectory { get; private set; }
         public string SettingsPath { get; private set; }
 
         public SettingsStore(string appDirectory)
         {
             AppDirectory = appDirectory;
-            SettingsDirectory = Path.Combine(appDirectory, "Settings");
-            SettingsPath = Path.Combine(SettingsDirectory, MachineSettingsFileName());
+            AppSettingsDirectory = Path.Combine(appDirectory, "Settings");
+            SetActiveSettingsDirectory(AppSettingsDirectory);
         }
 
         public AppSettings Load()
         {
-            Directory.CreateDirectory(SettingsDirectory);
+            Directory.CreateDirectory(AppSettingsDirectory);
+            var loaded = LoadBestSettings();
+            SettingsPath = loaded.Path;
+            SettingsDirectory = Path.GetDirectoryName(SettingsPath) ?? AppSettingsDirectory;
             SyncConflictResolver.ResolveSettingsConflicts(SettingsPath);
-            var hadSortDescending = SettingsFileContainsProperty("SortDescending");
-            var hadFileHistorySortDescending = SettingsFileContainsProperty("FileHistorySortDescending");
-            var hadUseDefaultDatabasePath = SettingsFileContainsProperty("UseDefaultDatabasePath");
-            var settings = JsonUtil.Load<AppSettings>(SettingsPath);
+            var hadSortDescending = SettingsFileContainsProperty(SettingsPath, "SortDescending");
+            var hadFileHistorySortDescending = SettingsFileContainsProperty(SettingsPath, "FileHistorySortDescending");
+            var hadUseDefaultDatabasePath = SettingsFileContainsProperty(SettingsPath, "UseDefaultDatabasePath");
+            var settings = loaded.Settings;
             if (!hadUseDefaultDatabasePath)
             {
                 settings.UseDefaultDatabasePath = ShouldTreatAsDefaultDatabasePath(settings.DatabasePath);
             }
             Normalize(settings);
+            PrepareSettingsDirectoryFor(settings);
             if (!hadSortDescending)
             {
                 settings.SortDescending = DefaultSortDescending(settings.SortMode);
@@ -45,9 +51,11 @@ namespace Clipman
 
         public void Save(AppSettings settings)
         {
+            PrepareSettingsDirectoryFor(settings);
             Directory.CreateDirectory(SettingsDirectory);
             Normalize(settings);
             JsonUtil.SaveAtomic(SettingsPath, settings);
+            SaveDataFolderPointer(SettingsDirectory);
         }
 
         public string DatabasePassword(AppSettings settings)
@@ -111,16 +119,110 @@ namespace Clipman
             settings.DatabaseEncryptionEnabled = !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
         }
 
-        private bool SettingsFileContainsProperty(string propertyName)
+        private LoadedSettings LoadBestSettings()
         {
-            if (string.IsNullOrWhiteSpace(propertyName) || !File.Exists(SettingsPath))
+            var candidates = SettingsCandidates();
+            foreach (var path in candidates.Where(File.Exists))
+            {
+                try
+                {
+                    var settings = JsonUtil.Load<AppSettings>(path);
+                    return new LoadedSettings(path, settings);
+                }
+                catch
+                {
+                }
+            }
+
+            return new LoadedSettings(Path.Combine(AppSettingsDirectory, MachineSettingsFileName()), new AppSettings());
+        }
+
+        private IEnumerable<string> SettingsCandidates()
+        {
+            var candidates = new List<string>();
+            var pointerFolder = LoadDataFolderPointer();
+            if (!string.IsNullOrWhiteSpace(pointerFolder))
+            {
+                candidates.Add(Path.Combine(pointerFolder, MachineSettingsFileName()));
+            }
+            candidates.Add(Path.Combine(AppSettingsDirectory, MachineSettingsFileName()));
+
+            return candidates
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private string LoadDataFolderPointer()
+        {
+            var path = Path.Combine(AppSettingsDirectory, PointerFileName);
+            if (!File.Exists(path)) return string.Empty;
+
+            try
+            {
+                var pointer = JsonUtil.Load<SettingsLocationPointer>(path);
+                return pointer == null ? string.Empty : pointer.DataFolder ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private void SaveDataFolderPointer(string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) return;
+            try
+            {
+                Directory.CreateDirectory(AppSettingsDirectory);
+                JsonUtil.SaveAtomic(Path.Combine(AppSettingsDirectory, PointerFileName), new SettingsLocationPointer { DataFolder = folder });
+            }
+            catch
+            {
+            }
+        }
+
+        private void PrepareSettingsDirectoryFor(AppSettings settings)
+        {
+            if (settings == null)
+            {
+                SetActiveSettingsDirectory(AppSettingsDirectory);
+                return;
+            }
+
+            if (settings.UseDefaultDatabasePath || string.IsNullOrWhiteSpace(settings.DatabasePath))
+            {
+                SetActiveSettingsDirectory(AppSettingsDirectory);
+                return;
+            }
+
+            try
+            {
+                var directory = Path.GetDirectoryName(Path.GetFullPath(settings.DatabasePath));
+                SetActiveSettingsDirectory(string.IsNullOrWhiteSpace(directory) ? AppSettingsDirectory : directory);
+            }
+            catch
+            {
+                SetActiveSettingsDirectory(AppSettingsDirectory);
+            }
+        }
+
+        private void SetActiveSettingsDirectory(string directory)
+        {
+            SettingsDirectory = string.IsNullOrWhiteSpace(directory) ? AppSettingsDirectory : directory;
+            SettingsPath = Path.Combine(SettingsDirectory, MachineSettingsFileName());
+        }
+
+        private bool SettingsFileContainsProperty(string settingsPath, string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(propertyName) || string.IsNullOrWhiteSpace(settingsPath) || !File.Exists(settingsPath))
             {
                 return false;
             }
 
             try
             {
-                var text = File.ReadAllText(SettingsPath);
+                var text = File.ReadAllText(settingsPath);
                 return text.IndexOf("\"" + propertyName + "\"", StringComparison.OrdinalIgnoreCase) >= 0;
             }
             catch
@@ -242,6 +344,28 @@ namespace Clipman
             }
 
             return safe;
+        }
+
+        private sealed class LoadedSettings
+        {
+            public string Path { get; private set; }
+            public AppSettings Settings { get; private set; }
+
+            public LoadedSettings(string path, AppSettings settings)
+            {
+                Path = path;
+                Settings = settings ?? new AppSettings();
+            }
+        }
+
+        private sealed class SettingsLocationPointer
+        {
+            public string DataFolder { get; set; }
+
+            public SettingsLocationPointer()
+            {
+                DataFolder = string.Empty;
+            }
         }
     }
 }

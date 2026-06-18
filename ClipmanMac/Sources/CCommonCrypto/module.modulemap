@@ -1,0 +1,4 @@
+module CCommonCrypto [system] {
+  header "include/common_crypto_shim.h"
+  export *
+}

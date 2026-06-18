@@ -2,6 +2,10 @@
 portable/
 release/
 dist/
+ClipmanMac/.build/
+ClipmanMac/.swiftpm/
+ClipmanMac/build/
+ClipmanMac/dist/
 *.zip
 *.7z
 *.exe
@@ -20,6 +24,7 @@ clipman-history.json
 clipman-settings.json
 
 # Editor and OS noise
+.DS_Store
 .vs/
 .vscode/
 bin/

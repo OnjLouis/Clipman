@@ -32,6 +32,20 @@ powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -LivePath D:
 
 That downloads the previous GitHub release ZIP into `%TEMP%`, starts it with startup/silent update settings, and verifies that it updates itself to `<version>`. Restart Andre's live copy afterwards if the test closed it.
 
+macOS tester builds live in `ClipmanMac` and are released from this same GitHub repository, not a separate repo. Before attaching a macOS artifact to a GitHub release, run:
+
+```bash
+cd ClipmanMac
+Scripts/package-release.sh
+```
+
+That produces `ClipmanMac/dist/ClipmanMac.zip`, runs the macOS codec/sync/file-history smoke tests, creates a drag-to-Applications `Clipman.app`, and ad-hoc signs the app. The generated bundle reads the Windows release version from `src/AssemblyInfo.cs`, so `CFBundleShortVersionString` must match `AssemblyInformationalVersion` and `CFBundleVersion` must match `AssemblyFileVersion`. The generated `dist` folder is ignored source noise and should not be committed.
+
+Future GitHub releases should attach both:
+
+- the Windows portable ZIP from `D:\Dropbox\backups\Clipman\Program Builds`
+- the Mac ZIP from `ClipmanMac/dist/ClipmanMac.zip`
+
 The clean portable output must contain only shipped app files:
 
 - `clipman.exe`
@@ -57,6 +71,7 @@ It must not contain:
 ## Source Layout
 
 - Source code lives in `src`.
+- macOS source lives in `ClipmanMac`.
 - Source sound assets live in `Assets\sounds`.
 - `portable` is generated output and should be treated as disposable.
 - `README.md` is for GitHub/source view only, not the portable runtime package.

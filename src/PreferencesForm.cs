@@ -120,7 +120,7 @@ namespace Clipman
             AddFullRow(hotkeyLayout, NewNote("Global hotkeys must use at least two keys and cannot be modifier-only."));
             hotkeys.Controls.Add(hotkeyLayout);
 
-            databasePath = NewTextBox(settings.DatabasePath);
+            databasePath = NewTextBox(DisplayDatabaseFolder(settings.DatabasePath));
             databasePath.Leave += (s, e) => ApplyNow();
             databasePassword = new TextBox
             {
@@ -172,8 +172,8 @@ namespace Clipman
             ignoredPanel.Controls.Add(addRunningApp);
 
             var storageLayout = NewRows();
-            AddRow(storageLayout, "&Database file:", dbPanel);
-            AddFullRow(storageLayout, NewNote("Put the database in a cloud service or network share if multiple computers should share clipboard history."));
+            AddRow(storageLayout, "&Data folder:", dbPanel);
+            AddFullRow(storageLayout, NewNote("Choose the folder that contains Clipman's settings and history files. Clipman uses clipman-history.clipdb inside this folder, plus machine-specific settings and file-history files."));
             AddRow(storageLayout, "History &password:", passwordPanel);
             AddRow(storageLayout, "&Confirm password:", passwordConfirmPanel);
             AddFullRow(storageLayout, passwordActionsPanel);
@@ -317,7 +317,7 @@ namespace Clipman
             {
                 settings.DatabaseEncryptionEnabled = !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
             }
-            settings.DatabasePath = databasePath.Text.Trim();
+            settings.DatabasePath = DatabasePathFromFolderOrFile(databasePath.Text);
             settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(settings.DatabasePath);
             settings.MaxHistoryEntries = (int)maxHistoryEntries.Value;
             settings.MaxHistoryDays = (int)maxHistoryDays.Value;
@@ -426,23 +426,20 @@ namespace Clipman
 
         private void BrowseDatabase()
         {
-            using (var dialog = new OpenFileDialog())
+            using (var dialog = new FolderBrowserDialog())
             {
-                dialog.Title = "Choose Clipman database file";
-                dialog.Filter = "Clipman compressed database|*.clipdb|All files|*.*";
-                dialog.CheckFileExists = false;
-                dialog.CheckPathExists = true;
-                dialog.FileName = Path.GetFileName(databasePath.Text);
-                var dir = Path.GetDirectoryName(databasePath.Text);
+                dialog.Description = "Choose the Clipman data folder. Clipman will use clipman-history.clipdb inside this folder.";
+                dialog.ShowNewFolderButton = true;
+                var dir = DisplayDatabaseFolder(databasePath.Text);
                 if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
                 {
-                    dialog.InitialDirectory = dir;
+                    dialog.SelectedPath = dir;
                 }
 
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    databasePath.Text = dialog.FileName;
-                    settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(dialog.FileName);
+                    databasePath.Text = dialog.SelectedPath;
+                    settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(DatabasePathFromFolderOrFile(dialog.SelectedPath));
                     ApplyNow();
                 }
             }
@@ -559,6 +556,52 @@ namespace Clipman
             {
                 return false;
             }
+        }
+
+        private static string DisplayDatabaseFolder(string path)
+        {
+            var resolved = DatabasePathFromFolderOrFile(path);
+            if (string.IsNullOrWhiteSpace(resolved))
+            {
+                return Path.Combine(AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), "Settings");
+            }
+
+            var fileName = Path.GetFileName(resolved);
+            if (string.Equals(Path.GetExtension(fileName), ".clipdb", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(fileName, "clipman-history.clipdb", StringComparison.OrdinalIgnoreCase))
+            {
+                return resolved;
+            }
+
+            if (Directory.Exists(resolved))
+            {
+                return resolved;
+            }
+
+            var directory = Path.GetDirectoryName(resolved);
+            return string.IsNullOrWhiteSpace(directory) ? resolved : directory;
+        }
+
+        private static string DatabasePathFromFolderOrFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+
+            var trimmed = path.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrWhiteSpace(trimmed)) return string.Empty;
+
+            if (Directory.Exists(trimmed))
+            {
+                return Path.Combine(trimmed, "clipman-history.clipdb");
+            }
+
+            var fileName = Path.GetFileName(trimmed);
+            if (string.Equals(fileName, "clipman-history.clipdb", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetExtension(fileName), ".clipdb", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed;
+            }
+
+            return Path.Combine(trimmed, "clipman-history.clipdb");
         }
 
         private static TableLayoutPanel NewRows()

@@ -73,7 +73,7 @@
   </ul>
 
   <h2 id="notes">Notes</h2>
-  <p>Clipman is intentionally portable. It does not require an installer. Machine-specific settings and the default shared database stay in the <code>Settings</code> folder near the executable unless you choose another database path.</p>
+  <p>Clipman is intentionally portable. It does not require an installer. Machine-specific settings and the default shared database stay in the <code>Settings</code> folder near the executable unless you choose another data folder.</p>
 
   <h2 id="basic-use">Basic Use</h2>
   <ul>
@@ -91,7 +91,7 @@
     <li>Press <code>F4</code> to view the full selected text in a read-only edit field.</li>
     <li>Press <code>Shift+Enter</code> to pin or unpin an entry. Pinned entries are protected from delete and cleanup.</li>
     <li>Select multiple entries to copy, delete, pin, unpin, or move them together.</li>
-    <li>Use the View menu to sort history by last used, added date, text, group, machine, or manual order. The same menu toggles the current sort between ascending and descending.</li>
+    <li>Use the View menu to sort history by last used, added date, text, group, machine, or manual order. The same menu toggles the current sort direction using plain labels such as oldest first, newest first, A first, or Z first.</li>
     <li>Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected entries in manual order.</li>
     <li>Press <code>Ctrl+1</code> through <code>Ctrl+0</code> to copy one of the first ten pinned entries and close history.</li>
     <li>Press <code>Alt+1</code> through <code>Alt+0</code> to jump to one of the first ten group filters.</li>
@@ -359,7 +359,7 @@
   <h2 id="preferences">Preferences</h2>
   <p>Open <strong>Options, Preferences</strong> from the history window. Preferences are split into tabs for General, File history, Hotkeys, Storage and Password, and Startup and updates. Changes apply immediately; use Close when finished. Clipman remembers the Preferences tab you used last. Press <code>Ctrl+1</code> through <code>Ctrl+5</code> to switch directly between the tabs.</p>
 
-  <p>Preferences can change the global hotkeys, sound behavior, duplicate handling, saved list position, active state, database path, history limits, File history cleanup and diagnostics detail, ignored applications, Send To integration, automatic URL-tracking removal, Windows startup registration, update checks, silent update installs, and whether Send To imports bring the history window to the front.</p>
+  <p>Preferences can change the global hotkeys, sound behavior, duplicate handling, saved list position, active state, data folder, history limits, File history cleanup and diagnostics detail, ignored applications, Send To integration, automatic URL-tracking removal, Windows startup registration, update checks, silent update installs, and whether Send To imports bring the history window to the front.</p>
 
   <p><strong>Automatically group new clips by source application</strong> is enabled by default for new installs. It places newly captured clipboard text into a group named after the application Clipman believes supplied the clipboard text, such as Chrome, Thunderbird, or Outlook. Disable it if you prefer all new entries to start ungrouped.</p>
 
@@ -369,7 +369,7 @@
 
   <p>Global hotkey fields accept only combinations with at least two modifiers and one real key, such as <code>Ctrl+Alt+\</code> or <code>Ctrl+Shift+H</code>. Modifier-only keys, single keys, and unsafe Windows shortcuts are rejected.</p>
 
-  <p><strong>Storage and Password:</strong> Use this tab to choose the shared history database path, set or change the history password, generate a random password, remove the saved password, and manage ignored applications. The password fields are intentionally blank when Preferences opens, even if a password is already saved. This prevents someone from opening Preferences and revealing the saved key with Show history password.</p>
+  <p><strong>Storage and Password:</strong> Use this tab to choose the shared Clipman data folder, set or change the history password, generate a random password, remove the saved password, and manage ignored applications. Clipman stores the shared text history as <code>clipman-history.clipdb</code> inside the chosen folder. The password fields are intentionally blank when Preferences opens, even if a password is already saved. This prevents someone from opening Preferences and revealing the saved key with Show history password.</p>
 
   <p>The Use no password button clears the saved history password and rewrites the current database without password encryption. It exists because blank password fields mean "keep the saved password" on a machine that already has one; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
 
@@ -400,7 +400,7 @@
   <h2 id="sorting-and-manual-order">Sorting and Manual Order</h2>
   <p>The Text history list includes the entry text, name, group, machine, added time, and last-used time. The machine column records the computer that added or most recently re-added the entry, which helps when several computers share the same database.</p>
 
-  <p>The View menu can sort normal Text history entries by last used, added date, text, group, machine, or manual order. On the File history tab, the same menu changes to file-oriented choices: time captured, file count, name, operation, source application, or manual order. The sort direction command in the same menu toggles the current tab's sort between ascending and descending; its label changes to show the action it will take next. When File history is sorted by time, the direction command says oldest first or newest first instead, because that wording is clearer for dated file events. Group sorting places grouped text entries together and leaves ungrouped entries after named groups. Machine sorting groups text entries by the computer that added or most recently re-added them. Pinned entries and pinned file events stay above normal entries and keep their own manual order regardless of the selected sort mode or direction. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected pinned entries within the pinned section, or selected normal entries within the normal history section. Move pinned and normal entries separately.</p>
+  <p>The View menu can sort normal Text history entries by last used, added date, text, group, machine, or manual order. On the File history tab, the same menu changes to file-oriented choices: time captured, file count, name, operation, source application, or manual order. The sort direction command in the same menu toggles the current tab's sort direction, and its label changes to name the next result plainly. Date sorts use oldest first or newest first. Text-like sorts use A first or Z first. File-count sorting uses fewest files first or most files first. Manual sorting uses top manual item first or bottom manual item first. Group sorting places grouped text entries together and leaves ungrouped entries after named groups. Machine sorting groups text entries by the computer that added or most recently re-added them. Pinned entries and pinned file events stay above normal entries and keep their own manual order regardless of the selected sort mode or direction. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected pinned entries within the pinned section, or selected normal entries within the normal history section. Move pinned and normal entries separately.</p>
 
   <h2 id="cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</h2>
   <p><code>Ctrl+C</code> and <code>Ctrl+X</code> put normal text on the Windows clipboard, so the text can be pasted into other applications. Clipman also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries.</p>
@@ -442,7 +442,7 @@
       </tr>
       <tr>
         <td>View</td>
-        <td>Sort Text history or File history entries from the Sort by submenu, toggle ascending or descending order, and move selected entries up or down in manual order. The sort fields change to match the active tab.</td>
+        <td>Sort Text history or File history entries from the Sort by submenu, toggle the sort direction with plain first-style labels such as oldest first or A first, and move selected entries up or down in manual order. The sort fields change to match the active tab.</td>
       </tr>
       <tr>
         <td>Options</td>
@@ -462,9 +462,10 @@
 
   <h2 id="database-and-sync">Database and Sync</h2>
   <p>By default Clipman stores user data in a <code>Settings</code> folder beside <code>clipman.exe</code>. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code> or <code>Settings\Laptop-settings.json</code>. This lets multiple computers run the same Clipman folder without fighting over hotkeys, monitoring state, startup choices, or window position. The default shared history database is <code>Settings\clipman-history.clipdb</code>.</p>
-  <p>If the default database path is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different database path, Clipman treats that path as explicit. If an explicit database path is missing at startup, Clipman asks whether to browse for the database in a new location, use the default database beside Clipman, or stop startup.</p>
+  <p>If you choose a different data folder, Clipman stores this machine's active settings in that folder beside <code>clipman-history.clipdb</code> and the machine-specific file-history database. A small <code>settings-location.json</code> pointer remains in the app's local <code>Settings</code> folder so Clipman can find the selected data folder on the next launch. This keeps shared or synced Clipman data self-contained without making passwords portable.</p>
+  <p>If the default data folder is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different data folder, Clipman stores the shared history as <code>clipman-history.clipdb</code> inside that folder. Existing explicit <code>.clipdb</code> file paths remain readable for compatibility. If an explicit data location is missing at startup, Clipman asks whether to browse for the data folder in a new location, use the default database beside Clipman, or stop startup.</p>
 
-  <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's database path to the same synced or network-shared <code>.clipdb</code> file.</p>
+  <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's data folder to the same synced or network-shared folder. Clipman uses the <code>clipman-history.clipdb</code> file inside that folder for shared text history.</p>
 
   <p>Multiple running Clipman instances can use the same history database. When one machine writes a new entry, the database is saved atomically and the other machines reload it when the changed file arrives. Each text entry stores the machine name that added or most recently re-added it, and the history list includes a Machine column and machine sort mode so shared setups can tell which computer supplied an entry.</p>
 
@@ -490,7 +491,7 @@
   <p>The Send To entry calls Clipman with the selected file path. If Clipman is already running, the file is imported into the configured database. Preferences can choose whether a successful Send To import also brings the history window to the front. If Clipman is not already running, it imports the file using the settings in the <code>Settings</code> folder beside <code>clipman.exe</code>. When automatic grouping is enabled, Send To imports are placed in a group named <strong>Send To</strong>.</p>
 
   <h2 id="file-history">File History</h2>
-  <p>The File history tab shows file, folder, and non-text clipboard events captured by Clipman. File history is stored separately from text history in a machine-specific database named like <code>Settings\Desktop-file-history.clipdb</code>. If you set a history password, file history uses the same password; there is not a second password to remember. File history stores paths and clipboard-format details only. It does not copy or preserve the actual file contents.</p>
+  <p>The File history tab shows file, folder, and non-text clipboard events captured by Clipman. File history is stored separately from text history in a machine-specific database named like <code>Settings\Desktop-file-history.clipdb</code>, or <code>Desktop-file-history.clipdb</code> inside a custom data folder. If you set a history password, file history uses the same password; there is not a second password to remember. File history stores paths and clipboard-format details only. It does not copy or preserve the actual file contents.</p>
 
   <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. File history rows start with the file or folder name, then show the operation and file count. The File history list supports buffered type-to-jump navigation by file name, so you can type several characters of a name to reach the matching file event. It also supports standard Windows multi-selection, so you can use <code>Shift+Up</code>, <code>Shift+Down</code>, <code>Ctrl+Up</code>, <code>Ctrl+Down</code>, and <code>Ctrl+Space</code> to build a selection before acting on it. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the Windows clipboard and close the history window, matching Text history behavior. Restored file events include both Windows file-drop data and a text version of the paths, so more file dialogs and edit fields can paste a path when they expect text. Press <code>Ctrl+C</code> to copy all selected file paths as text without closing. Use the View menu to sort normal file events by time captured, file count, name, operation, source application, or manual order. Press <code>Backspace</code> to jump to the first normal file event below pinned file events. Press <code>Shift+Enter</code> to pin or unpin selected file events, and press <code>Ctrl+Enter</code> to open Explorer at a single selected file or folder; this command requires one selected event containing exactly one path. Press <code>Alt+Up</code> or <code>Alt+Down</code> to move selected file events within the pinned or normal section. Moving file events switches File history back to manual order. Press <code>Del</code> to remove selected unpinned file-history events from the list.</p>
 
@@ -552,7 +553,7 @@
       </tr>
       <tr>
         <td><code>Settings</code></td>
-        <td>Created on first run. Stores machine-specific settings, the default shared text-history database, the machine-specific file-history database, optional custom sounds, logs, and shared update state.</td>
+        <td>Created on first run. By default it stores machine-specific settings, the shared text-history database, the machine-specific file-history database, optional custom sounds, logs, and shared update state. If you choose a custom data folder, this folder keeps a small <code>settings-location.json</code> pointer and the active data moves to the selected folder.</td>
       </tr>
     </tbody>
   </table>
@@ -620,6 +621,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.11</h3>
+  <ul>
+    <li>Changed the sort direction command wording to clearer first-style labels, such as oldest first, newest first, A first, Z first, fewest files first, or most files first depending on the active sort field.</li>
+    <li>Changed database selection in Preferences to choose a Clipman data folder instead of an individual <code>.clipdb</code> file. Clipman derives <code>clipman-history.clipdb</code> inside that folder while keeping existing explicit file paths compatible.</li>
+    <li>Changed custom data folders to keep this machine's active settings beside <code>clipman-history.clipdb</code>, with a small pointer in the app's local <code>Settings</code> folder so shared or synced Clipman data stays self-contained.</li>
+  </ul>
+
   <h3>1.5.10</h3>
   <ul>
     <li>Added File history sorting from the View menu. File history can now sort normal file events by time captured, file count, name, operation, source application, or manual order.</li>
@@ -723,7 +731,7 @@
 
   <h3>1.1.1</h3>
   <ul>
-    <li>Added a View menu command to toggle the current Text history sort between ascending and descending.</li>
+    <li>Added a View menu command to toggle the current Text history sort direction.</li>
     <li>Improved Preferences window activation so it appears more reliably the first time it is opened after Clipman starts.</li>
     <li>Improved live-copy smoke testing so a supplied live folder is rebuilt and refreshed in the same pass.</li>
   </ul>

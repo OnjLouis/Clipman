@@ -17,7 +17,7 @@ namespace Clipman
 
         private readonly string appDirectory;
         private readonly SettingsStore settingsStore;
-        private readonly SoundService sounds;
+        private SoundService sounds;
         private readonly MessageWindow messageWindow;
         private readonly Control invoker;
         private readonly NotifyIcon notifyIcon;
@@ -249,6 +249,7 @@ namespace Clipman
                 !string.Equals(settings.UpdateCheckFrequency, updated.UpdateCheckFrequency, StringComparison.OrdinalIgnoreCase) ||
                 settings.InstallUpdatesSilently != updated.InstallUpdatesSilently;
             var saveListPositionTurnedOff = settings.SaveListPosition && !updated.SaveListPosition;
+            var oldSettingsDirectory = settingsStore.SettingsDirectory;
             settings.ShowHistoryHotkey = updated.ShowHistoryHotkey;
             settings.ToggleActiveHotkey = updated.ToggleActiveHotkey;
             settings.RemoveDuplicates = updated.RemoveDuplicates;
@@ -281,6 +282,14 @@ namespace Clipman
                 settings.LastSelectedIndex = -1;
             }
             settingsStore.Save(settings);
+            var settingsDirectoryChanged = !string.Equals(oldSettingsDirectory, settingsStore.SettingsDirectory, StringComparison.OrdinalIgnoreCase);
+            if (settingsDirectoryChanged)
+            {
+                SharedUpdateStateStore.PublishCurrentBuild(settingsStore.SettingsDirectory);
+                RestartSharedUpdateWatchers();
+                sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
+                ReopenFileHistoryStore();
+            }
             if (sendToChanged)
             {
                 try
@@ -301,7 +310,10 @@ namespace Clipman
             {
                 ResolveDatabasePassword();
                 store.ChangeDatabasePassword();
-                fileEventStore.ChangeDatabasePassword();
+                if (!settingsDirectoryChanged)
+                {
+                    fileEventStore.ChangeDatabasePassword();
+                }
             }
             RegisterHotkeys();
             if (startupChanged)
@@ -1001,6 +1013,51 @@ namespace Clipman
             }
         }
 
+        private void RestartSharedUpdateWatchers()
+        {
+            try
+            {
+                if (sharedStateWatcher != null)
+                {
+                    sharedStateWatcher.Dispose();
+                    sharedStateWatcher = null;
+                }
+                if (executableWatcher != null)
+                {
+                    executableWatcher.Dispose();
+                    executableWatcher = null;
+                }
+                if (sharedStateTimer != null)
+                {
+                    sharedStateTimer.Dispose();
+                    sharedStateTimer = null;
+                }
+                StartSharedUpdateWatchers();
+                ScheduleSharedUpdateCheck(5000);
+            }
+            catch
+            {
+            }
+        }
+
+        private void ReopenFileHistoryStore()
+        {
+            try
+            {
+                if (fileEventStore != null)
+                {
+                    fileEventStore.Changed -= FileEventStoreChanged;
+                    fileEventStore.Dispose();
+                }
+            }
+            catch
+            {
+            }
+
+            fileEventStore = new FileClipboardEventStore(settingsStore.DefaultFileHistoryDatabasePath(), CurrentDatabasePassword);
+            fileEventStore.Changed += FileEventStoreChanged;
+        }
+
         private void ApplyStartupRegistration(bool showErrors)
         {
             try
@@ -1144,7 +1201,7 @@ namespace Clipman
                 settings.DatabasePath +
                 Environment.NewLine +
                 Environment.NewLine +
-                "Choose Yes to browse for the database in a new location." +
+                "Choose Yes to browse for the data folder that contains the database." +
                 Environment.NewLine +
                 "Choose No to use the default database beside Clipman." +
                 Environment.NewLine +
@@ -1163,25 +1220,22 @@ namespace Clipman
 
             if (choice == DialogResult.Yes)
             {
-                using (var dialog = new OpenFileDialog())
+                using (var dialog = new FolderBrowserDialog())
                 {
-                    dialog.Title = "Locate Clipman database";
-                    dialog.Filter = "Clipman compressed database|*.clipdb|All files|*.*";
-                    dialog.CheckFileExists = true;
-                    dialog.CheckPathExists = true;
+                    dialog.Description = "Choose the Clipman data folder. Clipman will use clipman-history.clipdb inside this folder.";
+                    dialog.ShowNewFolderButton = true;
                     var oldDir = Path.GetDirectoryName(settings.DatabasePath);
                     if (!string.IsNullOrWhiteSpace(oldDir) && Directory.Exists(oldDir))
                     {
-                        dialog.InitialDirectory = oldDir;
+                        dialog.SelectedPath = oldDir;
                     }
-                    dialog.FileName = Path.GetFileName(settings.DatabasePath);
 
                     if (dialog.ShowDialog() != DialogResult.OK)
                     {
                         throw new OperationCanceledException("Clipman database location was not selected.");
                     }
 
-                    settings.DatabasePath = dialog.FileName;
+                    settings.DatabasePath = Path.Combine(dialog.SelectedPath, "clipman-history.clipdb");
                     settings.UseDefaultDatabasePath = settingsStore.IsCurrentDefaultDatabasePath(settings.DatabasePath);
                     settingsStore.Save(settings);
                     return;

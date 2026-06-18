@@ -1276,7 +1276,7 @@ namespace Clipman
             settings.SortDescending = !settings.SortDescending;
             saveSettings();
             Reload();
-            statusText.Text = settings.SortDescending ? "Sorted descending." : "Sorted ascending.";
+            statusText.Text = SortDirectionStatusText(false);
         }
 
         private void RefreshGroupFilterItems()
@@ -2371,18 +2371,7 @@ namespace Clipman
             if (sortDirectionMenuItem != null)
             {
                 var descending = fileTabActive ? settings.FileHistorySortDescending : settings.SortDescending;
-                if (fileTabActive && IsFileSortMode("Time"))
-                {
-                    sortDirectionMenuItem.Text = descending ? "Sort file history &oldest first" : "Sort file history &newest first";
-                }
-                else if (fileTabActive)
-                {
-                    sortDirectionMenuItem.Text = descending ? "Sort file history &ascending" : "Sort file history de&scending";
-                }
-                else
-                {
-                    sortDirectionMenuItem.Text = descending ? "Sort text history &ascending" : "Sort text history de&scending";
-                }
+                sortDirectionMenuItem.Text = SortDirectionMenuText(fileTabActive, descending);
                 sortDirectionMenuItem.Checked = descending;
             }
             if (sortMenuItem != null)
@@ -2393,12 +2382,77 @@ namespace Clipman
 
         private string FileSortDirectionStatusText()
         {
-            if (IsFileSortMode("Time"))
+            return SortDirectionStatusText(true);
+        }
+
+        private string SortDirectionStatusText(bool fileTabActive)
+        {
+            if (fileTabActive)
             {
-                return settings.FileHistorySortDescending ? "Sorted file history newest first." : "Sorted file history oldest first.";
+                switch ((settings.FileHistorySortMode ?? "Manual").Trim().ToUpperInvariant())
+                {
+                    case "TIME":
+                        return settings.FileHistorySortDescending ? "Sorted file history newest first." : "Sorted file history oldest first.";
+                    case "FILES":
+                        return settings.FileHistorySortDescending ? "Sorted file history most files first." : "Sorted file history fewest files first.";
+                    case "NAME":
+                    case "OPERATION":
+                    case "SOURCE":
+                        return settings.FileHistorySortDescending ? "Sorted file history Z first." : "Sorted file history A first.";
+                    case "MANUAL":
+                    default:
+                        return settings.FileHistorySortDescending ? "Sorted file history bottom manual item first." : "Sorted file history top manual item first.";
+                }
             }
 
-            return settings.FileHistorySortDescending ? "Sorted file history descending." : "Sorted file history ascending.";
+            switch ((settings.SortMode ?? "LastUsed").Trim().ToUpperInvariant())
+            {
+                case "ADDED":
+                case "LASTUSED":
+                    return settings.SortDescending ? "Sorted text history newest first." : "Sorted text history oldest first.";
+                case "TEXT":
+                case "GROUP":
+                case "MACHINE":
+                    return settings.SortDescending ? "Sorted text history Z first." : "Sorted text history A first.";
+                case "MANUAL":
+                default:
+                    return settings.SortDescending ? "Sorted text history bottom manual item first." : "Sorted text history top manual item first.";
+            }
+        }
+
+        private string SortDirectionMenuText(bool fileTabActive, bool currentlyDescending)
+        {
+            if (fileTabActive)
+            {
+                switch ((settings.FileHistorySortMode ?? "Manual").Trim().ToUpperInvariant())
+                {
+                    case "TIME":
+                        return currentlyDescending ? "Sort file history oldest &first" : "Sort file history newest &first";
+                    case "FILES":
+                        return currentlyDescending ? "Sort file history fewest files &first" : "Sort file history most files &first";
+                    case "NAME":
+                    case "OPERATION":
+                    case "SOURCE":
+                        return currentlyDescending ? "Sort file history A &first" : "Sort file history Z &first";
+                    case "MANUAL":
+                    default:
+                        return currentlyDescending ? "Sort file history top manual item &first" : "Sort file history bottom manual item &first";
+                }
+            }
+
+            switch ((settings.SortMode ?? "LastUsed").Trim().ToUpperInvariant())
+            {
+                case "ADDED":
+                case "LASTUSED":
+                    return currentlyDescending ? "Sort text history oldest &first" : "Sort text history newest &first";
+                case "TEXT":
+                case "GROUP":
+                case "MACHINE":
+                    return currentlyDescending ? "Sort text history A &first" : "Sort text history Z &first";
+                case "MANUAL":
+                default:
+                    return currentlyDescending ? "Sort text history top manual item &first" : "Sort text history bottom manual item &first";
+            }
         }
 
         private void OpenManual()
