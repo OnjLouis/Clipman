@@ -58,6 +58,7 @@ Older Windows notes may show `D:\Dropbox\backups\Codex\current`; on macOS that m
 - macOS Preferences includes `Run Clipman at login`, implemented with a per-user LaunchAgent so unsigned tester builds can launch at startup without notarization.
 - macOS has `Scripts/package-release.sh`, which builds `dist/ClipmanMac.zip` containing a drag-to-Applications `Clipman.app` for testers.
 - macOS release and dev app bundles read the Windows release version from root `src/AssemblyInfo.cs` through `ClipmanMac/Scripts/shared-version.sh`. `CFBundleShortVersionString` matches `AssemblyInformationalVersion`; `CFBundleVersion` matches `AssemblyFileVersion`.
+- macOS bundled sounds are copied into `Clipman.app/Contents/Resources/sounds` by `Scripts/build-dev-app.sh` and `Scripts/package-release.sh`. `SoundService` must load them through `Bundle.main.resourceURL`, not `Bundle.module`; using SwiftPM resources here caused packaged apps to crash looking for `ClipmanMac_Clipman.bundle`.
 - Future GitHub releases attach the Windows portable ZIP and `ClipmanMac/dist/ClipmanMac.zip` to the same release. Windows remains the source of truth for Git history, release workflow, and version numbers.
 - macOS file history now uses a separate machine-specific `.clipdb` and no longer writes file clipboard events into shared text history.
 - macOS has in-window Text/File history switching, sorting, pinned shortcuts, and a bespoke Clipman menu.

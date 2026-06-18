@@ -30,8 +30,8 @@ let package = Package(
             dependencies: [
                 "ClipmanCore"
             ],
-            resources: [
-                .copy("Resources/sounds")
+            exclude: [
+                "Resources"
             ],
             linkerSettings: [
                 .linkedFramework("AppKit"),

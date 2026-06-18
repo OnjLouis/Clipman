@@ -21,7 +21,7 @@ BIN_DIR="$(swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --config
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Clipman" "$APP/Contents/MacOS/Clipman"
-cp -R "$BIN_DIR/ClipmanMac_Clipman.bundle" "$APP/Contents/Resources/ClipmanMac_Clipman.bundle"
+cp -R "$ROOT/Sources/Clipman/Resources/sounds" "$APP/Contents/Resources/sounds"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

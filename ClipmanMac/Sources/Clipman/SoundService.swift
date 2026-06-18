@@ -27,9 +27,13 @@ final class SoundService {
             return sound
         }
 
-        guard let bundledURL = Bundle.module.url(forResource: name.rawValue, withExtension: nil, subdirectory: "sounds") else {
+        guard let bundledURL = Bundle.main.resourceURL?
+            .appendingPathComponent("sounds", isDirectory: true)
+            .appendingPathComponent(name.rawValue)
+        else {
             return nil
         }
+        guard FileManager.default.fileExists(atPath: bundledURL.path) else { return nil }
         return NSSound(contentsOf: bundledURL, byReference: false)
     }
 }
