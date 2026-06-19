@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 
 @MainActor
 protocol HotkeyCaptureFieldDelegate: AnyObject {
@@ -15,6 +16,24 @@ final class HotkeyCaptureField: NSTextField {
     }
 
     override var acceptsFirstResponder: Bool { true }
+    override var needsPanelToBecomeKey: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureCaptureField()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureCaptureField()
+    }
+
+    private func configureCaptureField() {
+        isEditable = false
+        isSelectable = false
+        focusRingType = .default
+        setAccessibilityRole(.textField)
+    }
 
     override func becomeFirstResponder() -> Bool {
         let becameFirstResponder = super.becomeFirstResponder()
@@ -24,9 +43,12 @@ final class HotkeyCaptureField: NSTextField {
         return becameFirstResponder
     }
 
+    override func textShouldBeginEditing(_ textObject: NSText) -> Bool {
+        false
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        super.mouseDown(with: event)
     }
 
     override func accessibilityPerformPress() -> Bool {
@@ -39,19 +61,55 @@ final class HotkeyCaptureField: NSTextField {
     }
 
     override func keyDown(with event: NSEvent) {
+        if moveFocusIfNeeded(for: event) {
+            return
+        }
+
         let eventModifiers = HotkeyDescriptor.Modifiers(eventModifierFlags: event.modifierFlags)
         let modifiers = eventModifiers.union(trackedModifiers)
         let keyCode = UInt32(event.keyCode)
-        guard !modifiers.isEmpty, HotkeyDescriptor.isAllowedKeyCode(keyCode) else {
+        let candidate = HotkeyDescriptor(keyCode: keyCode, modifiers: modifiers)
+        guard candidate.isValid else {
             NSSound.beep()
             return
         }
-        descriptor = HotkeyDescriptor(keyCode: keyCode, modifiers: modifiers)
+        descriptor = candidate
         hotkeyDelegate?.hotkeyCaptureFieldDidChange(self)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        keyDown(with: event)
+        guard window?.firstResponder === self else {
+            return false
+        }
+        if moveFocusIfNeeded(for: event) {
+            return true
+        }
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            return false
+        }
+        let eventModifiers = HotkeyDescriptor.Modifiers(eventModifierFlags: event.modifierFlags)
+        let modifiers = eventModifiers.union(trackedModifiers)
+        let candidate = HotkeyDescriptor(keyCode: UInt32(event.keyCode), modifiers: modifiers)
+        guard candidate.isValid else {
+            if event.modifierFlags.contains(.command) {
+                return false
+            }
+            NSSound.beep()
+            return true
+        }
+        descriptor = candidate
+        hotkeyDelegate?.hotkeyCaptureFieldDidChange(self)
+        return true
+    }
+
+    private func moveFocusIfNeeded(for event: NSEvent) -> Bool {
+        guard event.keyCode == UInt16(kVK_Tab) else { return false }
+        if event.modifierFlags.contains(.shift) {
+            window?.selectPreviousKeyView(self)
+        } else {
+            window?.selectNextKeyView(self)
+        }
         return true
     }
 }

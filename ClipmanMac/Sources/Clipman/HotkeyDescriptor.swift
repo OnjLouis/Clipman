@@ -34,6 +34,15 @@ struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
             return flags
         }
 
+        var count: Int {
+            var total = 0
+            if contains(.control) { total += 1 }
+            if contains(.option) { total += 1 }
+            if contains(.command) { total += 1 }
+            if contains(.shift) { total += 1 }
+            return total
+        }
+
         init(eventModifierFlags: NSEvent.ModifierFlags) {
             var value: Modifiers = []
             if eventModifierFlags.contains(.control) { value.insert(.control) }
@@ -48,7 +57,12 @@ struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
     var modifiers: Modifiers
 
     var isValid: Bool {
-        Self.isAllowedKeyCode(keyCode) && !modifiers.isEmpty
+        guard Self.isAllowedKeyCode(keyCode) else { return false }
+        let modifierCount = modifiers.count
+        if Self.isFunctionKey(keyCode) {
+            return modifierCount >= 1
+        }
+        return modifierCount >= 2
     }
 
     var description: String {
@@ -171,18 +185,27 @@ struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
             UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
             UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
             UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12),
-            UInt32(kVK_ANSI_Backslash), UInt32(kVK_ANSI_Grave), UInt32(kVK_ISO_Section),
-            UInt32(kVK_Space), UInt32(kVK_Return)
+            UInt32(kVK_ANSI_Backslash), UInt32(kVK_ANSI_Grave), UInt32(kVK_ISO_Section)
         ]
         return allowed.contains(keyCode)
+    }
+
+    private static func isFunctionKey(_ keyCode: UInt32) -> Bool {
+        switch Int(keyCode) {
+        case kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6,
+             kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12:
+            true
+        default:
+            false
+        }
     }
 
     private static func keyCode(for name: String) -> UInt32? {
         if name == "\\" || name == "backslash" { return UInt32(kVK_ANSI_Backslash) }
         if name == "`" || name == "grave" { return UInt32(kVK_ANSI_Grave) }
         if name == "#" || name == "hash" || name == "iso section" || name == "section" || name == "iso `" { return UInt32(kVK_ISO_Section) }
-        if name == "space" { return UInt32(kVK_Space) }
-        if name == "return" || name == "enter" { return UInt32(kVK_Return) }
+        if name == "space" { return nil }
+        if name == "return" || name == "enter" { return nil }
         let digits: [String: Int] = [
             "0": kVK_ANSI_0, "1": kVK_ANSI_1, "2": kVK_ANSI_2, "3": kVK_ANSI_3,
             "4": kVK_ANSI_4, "5": kVK_ANSI_5, "6": kVK_ANSI_6, "7": kVK_ANSI_7,

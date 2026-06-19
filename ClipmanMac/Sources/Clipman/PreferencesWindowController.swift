@@ -148,11 +148,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
 
     @objc private func saveClicked() {
         guard let show = showHotkeyField.descriptor ?? HotkeyDescriptor.parse(showHotkeyField.stringValue), show.isValid else {
-            statusLabel.stringValue = "Show history hotkey must include a normal key and at least one modifier."
+            statusLabel.stringValue = "Show history hotkey must use at least two modifiers, or one modifier with F1-F12. Escape, Tab, Backspace, Return, and Space are not available."
             return
         }
         guard let toggle = toggleHotkeyField.descriptor ?? HotkeyDescriptor.parse(toggleHotkeyField.stringValue), toggle.isValid else {
-            statusLabel.stringValue = "Toggle monitoring hotkey must include a normal key and at least one modifier."
+            statusLabel.stringValue = "Toggle monitoring hotkey must use at least two modifiers, or one modifier with F1-F12. Escape, Tab, Backspace, Return, and Space are not available."
             return
         }
         guard show != toggle else {
