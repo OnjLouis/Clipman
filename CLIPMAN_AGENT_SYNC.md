@@ -2,7 +2,7 @@
 
 This is the day-to-day coordination file for Codex agents working on Windows Clipman and Clipman for macOS.
 
-Always read this file and `CLIPMAN_SHARED_CONTRACT.md` before changing either implementation. Treat `CLIPMAN_SHARED_CONTRACT.md` as the mandatory compatibility contract for database, settings, sync, password, and shared-history behavior. Use this file for product parity, keyboard/UI decisions, recent changes, and handoff notes.
+Always read `ClipmanShared.md`, this file, and `CLIPMAN_SHARED_CONTRACT.md` before changing either implementation. Treat `CLIPMAN_SHARED_CONTRACT.md` as the mandatory compatibility contract for database, settings, sync, password, and shared-history behavior. Use this file for product parity, keyboard/UI decisions, recent changes, and handoff notes.
 
 ## Repositories
 

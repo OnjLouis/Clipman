@@ -16,6 +16,24 @@ final class HotkeyCaptureField: NSTextField {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func becomeFirstResponder() -> Bool {
+        let becameFirstResponder = super.becomeFirstResponder()
+        if becameFirstResponder {
+            trackedModifiers = []
+        }
+        return becameFirstResponder
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        window?.makeFirstResponder(self)
+        return true
+    }
+
     override func flagsChanged(with event: NSEvent) {
         trackedModifiers = HotkeyDescriptor.Modifiers(eventModifierFlags: event.modifierFlags)
     }

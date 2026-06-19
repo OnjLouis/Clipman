@@ -80,13 +80,13 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         showHotkeyField.hotkeyDelegate = self
         toggleHotkeyField.hotkeyDelegate = self
 
-        monitoringCheckbox.target = self
-        monitoringCheckbox.action = #selector(saveClicked)
+        monitoringCheckbox.target = nil
+        monitoringCheckbox.action = nil
         monitoringCheckbox.setAccessibilityLabel("Monitoring enabled")
         grid.addRow(with: [NSGridCell.emptyContentView, monitoringCheckbox])
 
-        runAtStartupCheckbox.target = self
-        runAtStartupCheckbox.action = #selector(saveClicked)
+        runAtStartupCheckbox.target = nil
+        runAtStartupCheckbox.action = nil
         runAtStartupCheckbox.setAccessibilityLabel("Run Clipman at login")
         grid.addRow(with: [NSGridCell.emptyContentView, runAtStartupCheckbox])
 

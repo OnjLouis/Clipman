@@ -24,6 +24,13 @@ final class ClipboardMonitor: @unchecked Sendable {
         }
     }
 
+    func captureCurrentContents() {
+        let pasteboard = NSPasteboard.general
+        lastChangeCount = pasteboard.changeCount
+        ignoredChangeCount = nil
+        capture(from: pasteboard)
+    }
+
     func stop() {
         timer?.invalidate()
         timer = nil
@@ -58,6 +65,10 @@ final class ClipboardMonitor: @unchecked Sendable {
             ignoredChangeCount = nil
             return
         }
+        capture(from: pasteboard)
+    }
+
+    private func capture(from pasteboard: NSPasteboard) {
         guard isEnabled else { return }
         if let fileCapture = fileCapture(from: pasteboard) {
             delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil)

@@ -101,6 +101,16 @@ struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
         case kVK_ANSI_Backslash: "\\"
         case kVK_ANSI_Grave: "Grave"
         case kVK_ISO_Section: "ISO `"
+        case kVK_ANSI_0: "0"
+        case kVK_ANSI_1: "1"
+        case kVK_ANSI_2: "2"
+        case kVK_ANSI_3: "3"
+        case kVK_ANSI_4: "4"
+        case kVK_ANSI_5: "5"
+        case kVK_ANSI_6: "6"
+        case kVK_ANSI_7: "7"
+        case kVK_ANSI_8: "8"
+        case kVK_ANSI_9: "9"
         case kVK_ANSI_A: "A"
         case kVK_ANSI_B: "B"
         case kVK_ANSI_C: "C"
@@ -127,6 +137,18 @@ struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
         case kVK_ANSI_X: "X"
         case kVK_ANSI_Y: "Y"
         case kVK_ANSI_Z: "Z"
+        case kVK_F1: "F1"
+        case kVK_F2: "F2"
+        case kVK_F3: "F3"
+        case kVK_F4: "F4"
+        case kVK_F5: "F5"
+        case kVK_F6: "F6"
+        case kVK_F7: "F7"
+        case kVK_F8: "F8"
+        case kVK_F9: "F9"
+        case kVK_F10: "F10"
+        case kVK_F11: "F11"
+        case kVK_F12: "F12"
         case kVK_Space: "Space"
         case kVK_Return: "Return"
         case kVK_Escape: "Escape"
@@ -146,6 +168,9 @@ struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
             UInt32(kVK_ANSI_0), UInt32(kVK_ANSI_1), UInt32(kVK_ANSI_2), UInt32(kVK_ANSI_3),
             UInt32(kVK_ANSI_4), UInt32(kVK_ANSI_5), UInt32(kVK_ANSI_6), UInt32(kVK_ANSI_7),
             UInt32(kVK_ANSI_8), UInt32(kVK_ANSI_9),
+            UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
+            UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
+            UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12),
             UInt32(kVK_ANSI_Backslash), UInt32(kVK_ANSI_Grave), UInt32(kVK_ISO_Section),
             UInt32(kVK_Space), UInt32(kVK_Return)
         ]
@@ -158,6 +183,22 @@ struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
         if name == "#" || name == "hash" || name == "iso section" || name == "section" || name == "iso `" { return UInt32(kVK_ISO_Section) }
         if name == "space" { return UInt32(kVK_Space) }
         if name == "return" || name == "enter" { return UInt32(kVK_Return) }
+        let digits: [String: Int] = [
+            "0": kVK_ANSI_0, "1": kVK_ANSI_1, "2": kVK_ANSI_2, "3": kVK_ANSI_3,
+            "4": kVK_ANSI_4, "5": kVK_ANSI_5, "6": kVK_ANSI_6, "7": kVK_ANSI_7,
+            "8": kVK_ANSI_8, "9": kVK_ANSI_9
+        ]
+        if let keyCode = digits[name] {
+            return UInt32(keyCode)
+        }
+        let functionKeys: [String: Int] = [
+            "f1": kVK_F1, "f2": kVK_F2, "f3": kVK_F3, "f4": kVK_F4,
+            "f5": kVK_F5, "f6": kVK_F6, "f7": kVK_F7, "f8": kVK_F8,
+            "f9": kVK_F9, "f10": kVK_F10, "f11": kVK_F11, "f12": kVK_F12
+        ]
+        if let keyCode = functionKeys[name] {
+            return UInt32(keyCode)
+        }
         let letters: [String: Int] = [
             "a": kVK_ANSI_A, "b": kVK_ANSI_B, "c": kVK_ANSI_C, "d": kVK_ANSI_D,
             "e": kVK_ANSI_E, "f": kVK_ANSI_F, "g": kVK_ANSI_G, "h": kVK_ANSI_H,

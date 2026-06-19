@@ -40,6 +40,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.delegate = self
         monitor.isEnabled = settings.monitoringEnabled
         monitor.start()
+        monitor.captureCurrentContents()
         sounds.play(settings.monitoringEnabled ? .on : .off)
         applyStartupRegistration(showErrors: false)
 
