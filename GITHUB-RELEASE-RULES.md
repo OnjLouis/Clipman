@@ -14,6 +14,11 @@ Use only non-interactive authentication:
 
 If token-based authentication fails, stop and report it. Do not trigger an interactive login prompt.
 
+## GitHub Issue Gate
+
+Before publishing any Clipman release, release-asset refresh, or hotfix, read open GitHub issues and pull requests. Do not publish first and inspect issues afterward.
+
+If an open issue is fixed by the release, the user-facing changelog in `Manual.html` must say `Closes issue #N`, `Fixes issue #N`, or `Resolves issue #N` so the smoke test can prove the issue is covered. If an open issue is intentionally deferred, pass it explicitly to the smoke test as a reviewed issue and mention the reason in the release notes or handoff.
 ## Clean Portable Output
 
 Before pushing or publishing, run:

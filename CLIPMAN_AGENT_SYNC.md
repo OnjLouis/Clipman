@@ -20,9 +20,12 @@ Older Windows notes may show `D:\Dropbox\backups\Codex\current`; on macOS that m
 - Shared text history lives at `clipman-history.clipdb` inside that folder.
 - Machine settings live as `<MachineName>-settings.json` inside that folder.
 - Machine file history lives as `<MachineName>-file-history.clipdb` inside that folder.
-- Passwords are not shared in settings:
-  - Windows uses DPAPI-protected per-user/per-machine storage.
-  - macOS uses Keychain keyed by database path.
+- Database passwords are not stored in the shared `.clipdb` files.
+- Remembering the database password is optional and should default off on new installs:
+  - When remember is off, each platform prompts once per app session and keeps the password only in process memory.
+  - Windows may use DPAPI-protected per-user/per-machine storage only when remember is explicitly enabled.
+  - macOS may use Keychain keyed by database path only when remember is explicitly enabled.
+  - Remembered passwords are convenience, not protection from malware or tools running as the same signed-in user.
 
 ## Current macOS Keyboard/UI Decisions
 
@@ -51,6 +54,10 @@ Older Windows notes may show `D:\Dropbox\backups\Codex\current`; on macOS that m
   - `Escape`: hide history.
 - The macOS history window uses a bespoke `Clipman` menu button because the app is an accessory/status app and may not expose a reliable normal menu bar to VoiceOver users.
 - The Text/File history control should stay near the relevant table. Less-used sort and command actions belong in the bespoke Clipman menu.
+
+## Recent Cross-Platform Changes
+
+- Windows and macOS 1.5.12 hardening makes remembered database passwords explicit and optional. New settings default to remember off. Windows uses DPAPI only when remember is on; macOS uses Keychain only when remember is on. When remember is off, each platform prompts once per app session, keeps the password only in process memory, and clears saved platform password storage.
 
 ## Recent macOS Changes
 
@@ -85,6 +92,9 @@ ClipmanFileHistorySmoke
 
 Windows smoke path from the shared contract remains authoritative for Windows.
 
+## Release Gate: GitHub Issues
+
+Before publishing any Clipman release, release-asset refresh, or hotfix, the active agent must read GitHub issues and decide whether any open issue needs action. Do not ship first and check issues afterward.
 ## Coordination Rules
 
 - When either platform changes shared storage, settings-folder behavior, password behavior, sync behavior, or serialized fields, update `CLIPMAN_SHARED_CONTRACT.md`.

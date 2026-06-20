@@ -125,7 +125,10 @@ namespace Clipman
         public string UpdateCheckFrequency { get; set; }
         public bool InstallUpdatesSilently { get; set; }
         public bool DatabaseEncryptionEnabled { get; set; }
+        public bool RememberDatabasePassword { get; set; }
         public string ProtectedDatabasePassword { get; set; }
+        [ScriptIgnore]
+        public string PlainDatabasePassword { get; set; }
         public bool AutoRemoveUnavailableFileHistoryEvents { get; set; }
         public int DiagnosticsFileHistoryLimit { get; set; }
 
@@ -159,7 +162,9 @@ namespace Clipman
             UpdateCheckFrequency = "Never";
             InstallUpdatesSilently = false;
             DatabaseEncryptionEnabled = false;
+            RememberDatabasePassword = false;
             ProtectedDatabasePassword = string.Empty;
+            PlainDatabasePassword = string.Empty;
             AutoRemoveUnavailableFileHistoryEvents = false;
             DiagnosticsFileHistoryLimit = 20;
         }

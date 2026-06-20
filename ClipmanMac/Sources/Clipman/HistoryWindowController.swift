@@ -315,13 +315,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         searchField.delegate = self
         searchField.target = self
         searchField.action = #selector(searchChanged)
-        searchField.setAccessibilityLabel("Search history")
+        searchField.setAccessibilityLabel("Search history, Command+F")
         stack.addArrangedSubview(searchField)
 
         modeControl.selectedSegment = mode.rawValue
         modeControl.target = self
         modeControl.action = #selector(modeChanged)
-        modeControl.setAccessibilityLabel("History type")
+        modeControl.setAccessibilityLabel("History type. Text History, Control+1. File History, Control+2.")
         stack.addArrangedSubview(modeControl)
 
         configureToolbar()
@@ -353,13 +353,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         toolbarStack.spacing = 8
         toolbarStack.setAccessibilityLabel("Clipman toolbar")
 
-        configureToolbarButton(actionsButton, title: "Clipman", action: #selector(actionsClicked), tabbable: true, accessibilityLabel: "Clipman menu")
-        configureToolbarButton(groupButton, title: "Set Group...", action: #selector(groupToolbarClicked), accessibilityLabel: "Set selected entries group")
+        configureToolbarButton(actionsButton, title: "Clipman", action: #selector(actionsClicked), tabbable: true, accessibilityLabel: "Clipman menu, Option+M")
+        configureToolbarButton(groupButton, title: "Set Group...", action: #selector(groupToolbarClicked), accessibilityLabel: "Set selected entries group, Command+G")
         configureToolbarButton(setToFilterButton, title: "Set to Filter", action: #selector(setToFilterToolbarClicked), accessibilityLabel: "Set selected entries to current group filter")
-        configureToolbarButton(groupFilterButton, title: "Filter: All", action: #selector(groupFilterToolbarClicked), accessibilityLabel: "Filter by group")
+        configureToolbarButton(groupFilterButton, title: "Filter: All", action: #selector(groupFilterToolbarClicked), accessibilityLabel: "Filter by group, Option+G")
         configureToolbarButton(sortButton, title: "Sort: Last used", action: #selector(sortToolbarClicked), accessibilityLabel: "Sort history")
         configureToolbarButton(directionButton, title: "Newest first", action: #selector(directionToolbarClicked), accessibilityLabel: "Toggle sort direction")
-        configureToolbarButton(preferencesButton, title: "Preferences...", action: #selector(preferencesToolbarClicked), accessibilityLabel: "Preferences")
+        configureToolbarButton(preferencesButton, title: "Preferences...", action: #selector(preferencesToolbarClicked), accessibilityLabel: "Preferences, Command+,")
 
         toolbarStack.addArrangedSubview(actionsButton)
         toolbarStack.addArrangedSubview(groupButton)
@@ -390,7 +390,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         setToFilterButton.title = "Set to \(groupFilter)"
         setToFilterButton.setAccessibilityLabel("Set selected entries to \(groupFilter)")
         groupFilterButton.title = "Filter: \(groupFilter.isEmpty ? "All" : groupFilter)"
-        groupFilterButton.setAccessibilityLabel("Filter by group, current filter \(groupFilter.isEmpty ? "All" : groupFilter)")
+        groupFilterButton.setAccessibilityLabel("Filter by group, Option+G, current filter \(groupFilter.isEmpty ? "All" : groupFilter)")
         updateSelectedGroupStatus()
 
         let selectedSort = sortOptions().first {

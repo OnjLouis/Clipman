@@ -21,6 +21,16 @@ final class KeychainPasswordStore {
         return password
     }
 
+    func hasPassword(for databasePath: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: databasePath,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
+
     func save(password: String, for databasePath: String) throws {
         let data = Data(password.utf8)
         let base: [String: Any] = [
@@ -39,6 +49,18 @@ final class KeychainPasswordStore {
             return
         }
         throw KeychainError.status(status)
+    }
+
+    func delete(for databasePath: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: databasePath
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.status(status)
+        }
     }
 }
 

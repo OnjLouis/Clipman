@@ -4,6 +4,7 @@ import Carbon
 final class SettingsStore {
     let applicationSupportURL: URL
     let pointerURL: URL
+    private(set) var loadedSettingsHadRememberDatabasePassword = true
     private let machine: String
 
     init() {
@@ -18,13 +19,16 @@ final class SettingsStore {
         do {
             try FileManager.default.createDirectory(at: applicationSupportURL, withIntermediateDirectories: true)
             let candidates = settingsCandidates()
-            var settings = candidates
-                .compactMap { url -> ClipmanSettings? in
+            let loaded = candidates
+                .compactMap { url -> (settings: ClipmanSettings, url: URL)? in
                     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-                    return try? loadSettings(from: url)
+                    guard let settings = try? loadSettings(from: url) else { return nil }
+                    return (settings, url)
                 }
-                .sorted { score($0) > score($1) }
-                .first ?? ClipmanSettings.defaults(applicationSupport: applicationSupportURL)
+                .sorted { score($0.settings) > score($1.settings) }
+                .first
+            loadedSettingsHadRememberDatabasePassword = loaded.map { settingsFileContainsProperty($0.url, "rememberDatabasePassword") } ?? true
+            var settings = loaded?.settings ?? ClipmanSettings.defaults(applicationSupport: applicationSupportURL)
             if repairInvalidHotkeys(&settings) || normalize(&settings) {
                 try? save(settings)
             }
@@ -113,6 +117,13 @@ final class SettingsStore {
     private func loadSettings(from url: URL) throws -> ClipmanSettings {
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(ClipmanSettings.self, from: data)
+    }
+
+    private func settingsFileContainsProperty(_ url: URL, _ property: String) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return object.keys.contains { $0.caseInsensitiveCompare(property) == .orderedSame }
     }
 
     private func settingsURL(in folder: URL) -> URL {

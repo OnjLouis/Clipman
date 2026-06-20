@@ -31,6 +31,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let databasePathField = NSTextField()
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
+    private let rememberPasswordCheckbox = NSButton(checkboxWithTitle: "Remember history password in Keychain", target: nil, action: nil)
     private let showHotkeyField = HotkeyCaptureField()
     private let toggleHotkeyField = HotkeyCaptureField()
     private let passwordField = NSSecureTextField()
@@ -74,9 +75,13 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         ])
 
         addRow("Settings folder", databasePathField, button(title: "Choose...", action: #selector(chooseSettingsFolder)))
+        databasePathField.setAccessibilityHelp("Choose the Clipman data/settings folder. Clipman will use clipman-history.clipdb inside that folder.")
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("History password", passwordField)
+        rememberPasswordCheckbox.setAccessibilityLabel("Remember history password in Keychain")
+        rememberPasswordCheckbox.setAccessibilityHelp("When checked, Clipman stores the history password in this Mac user's Keychain. When unchecked, Clipman asks for the password each app session and keeps it only in memory.")
+        grid.addRow(with: [NSGridCell.emptyContentView, rememberPasswordCheckbox])
         showHotkeyField.hotkeyDelegate = self
         toggleHotkeyField.hotkeyDelegate = self
 
@@ -126,13 +131,16 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     }
 
     private func loadFields() {
-        databasePathField.stringValue = settings.databasePath
+        databasePathField.stringValue = settingsFolderPath(fromDatabasePath: settings.databasePath)
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
+        rememberPasswordCheckbox.state = settings.rememberDatabasePassword ? .on : .off
         showHotkeyField.descriptor = settings.showHistoryHotkey
         toggleHotkeyField.descriptor = settings.toggleMonitoringHotkey
         passwordField.stringValue = ""
-        statusLabel.stringValue = "Leave password blank to keep the saved Keychain password."
+        statusLabel.stringValue = settings.rememberDatabasePassword
+            ? "Leave password blank to keep the current Keychain password."
+            : "Leave password blank to keep the current session password. The password will not be stored."
     }
 
     @objc private func chooseSettingsFolder() {
@@ -142,7 +150,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            databasePathField.stringValue = url.appendingPathComponent("clipman-history.clipdb").path
+            databasePathField.stringValue = url.path
         }
     }
 
@@ -162,6 +170,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.databasePath = normalizedDatabasePath(databasePathField.stringValue)
         settings.monitoringEnabled = monitoringCheckbox.state == .on
         settings.runAtStartup = runAtStartupCheckbox.state == .on
+        settings.rememberDatabasePassword = rememberPasswordCheckbox.state == .on
         settings.showHistoryHotkey = show
         settings.toggleMonitoringHotkey = toggle
         let password = passwordField.stringValue.isEmpty ? nil : passwordField.stringValue
@@ -183,6 +192,19 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         }
         if url.lastPathComponent.lowercased() == "settings" || url.pathExtension.isEmpty {
             return url.appendingPathComponent("clipman-history.clipdb").path
+        }
+        return trimmed
+    }
+
+    private func settingsFolderPath(fromDatabasePath value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        let url = URL(fileURLWithPath: trimmed)
+        if url.lastPathComponent.lowercased() == "clipman-history.clipdb" {
+            return url.deletingLastPathComponent().path
+        }
+        if url.pathExtension.lowercased() == "clipdb" {
+            return url.deletingLastPathComponent().path
         }
         return trimmed
     }

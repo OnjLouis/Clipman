@@ -16,10 +16,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var historyWindow: HistoryWindowController!
     private var preferencesWindow: PreferencesWindowController?
     private weak var previousFrontmostApplication: NSRunningApplication?
+    private var sessionDatabasePassword = ""
+    private var sessionPasswordDatabasePath = ""
+    private var cancelledPasswordPaths = Set<String>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings = settingsStore.load()
-        let initialPassword = keychain.password(for: settings.databasePath)
+        migrateLegacyKeychainPasswordIfNeeded()
+        let initialPassword = initialDatabasePassword()
         store = ClipStore(databaseURL: URL(fileURLWithPath: settings.databasePath), machineName: settings.machineName)
         store.delegate = self
         store.setDatabaseURL(URL(fileURLWithPath: settings.databasePath), password: initialPassword)
@@ -172,6 +176,19 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipStoreNeedsPassword(for path: String) -> String? {
+        if let password = sessionPassword(for: path), !password.isEmpty {
+            return password
+        }
+        guard !cancelledPasswordPaths.contains(path) else { return nil }
+        guard let password = promptForDatabasePassword(path: path) else {
+            cancelledPasswordPaths.insert(path)
+            return nil
+        }
+        applyDatabasePassword(password, for: path)
+        return password
+    }
+
+    private func promptForDatabasePassword(path: String) -> String? {
         let alert = NSAlert()
         alert.messageText = "History Password Required"
         alert.informativeText = "Enter the password for \(path)."
@@ -183,10 +200,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         let result = alert.runModal()
         guard result == .alertFirstButtonReturn else { return nil }
         let password = field.stringValue
-        if !password.isEmpty {
-            try? keychain.save(password: password, for: path)
-        }
-        return password
+        return password.isEmpty ? nil : password
     }
 
     func clipStoreDidFail(error: Error) {
@@ -340,15 +354,24 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) {
+        let previousDatabasePath = self.settings.databasePath
         self.settings = settings
-        if let passwordToSave {
-            try? keychain.save(password: passwordToSave, for: settings.databasePath)
+        if let passwordToSave, !passwordToSave.isEmpty {
+            applyDatabasePassword(passwordToSave, for: settings.databasePath)
+        } else if settings.rememberDatabasePassword,
+                  let password = sessionPassword(for: settings.databasePath),
+                  !password.isEmpty {
+            try? keychain.save(password: password, for: settings.databasePath)
+        }
+        if !settings.rememberDatabasePassword {
+            try? keychain.delete(for: settings.databasePath)
+            try? keychain.delete(for: previousDatabasePath)
         }
         try? settingsStore.save(settings)
         monitor.isEnabled = settings.monitoringEnabled
         applyStartupRegistration(showErrors: true)
         hotkeys.register(showHistory: settings.showHistoryHotkey, toggleMonitoring: settings.toggleMonitoringHotkey)
-        let password = passwordToSave ?? keychain.password(for: settings.databasePath)
+        let password = currentDatabasePassword(for: settings.databasePath)
         store.setDatabaseURL(URL(fileURLWithPath: settings.databasePath), password: password)
         fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.machineName, password: password)
         fileStore.delegate = self
@@ -387,6 +410,70 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             .joined(separator: "-")
         let fileName = "\(safeMachine.isEmpty ? "Mac" : safeMachine)-file-history.clipdb"
         return URL(fileURLWithPath: settings.databasePath).deletingLastPathComponent().appendingPathComponent(fileName)
+    }
+
+    private func migrateLegacyKeychainPasswordIfNeeded() {
+        guard !settingsStore.loadedSettingsHadRememberDatabasePassword,
+              keychain.hasPassword(for: settings.databasePath) else {
+            if !settings.rememberDatabasePassword {
+                try? keychain.delete(for: settings.databasePath)
+            }
+            return
+        }
+        settings.rememberDatabasePassword = true
+        try? settingsStore.save(settings)
+    }
+
+    private func initialDatabasePassword() -> String {
+        let password = currentDatabasePassword(for: settings.databasePath)
+        if !password.isEmpty {
+            return password
+        }
+        guard encryptedHistoryExists(for: settings),
+              !cancelledPasswordPaths.contains(settings.databasePath)
+        else { return "" }
+        guard let entered = promptForDatabasePassword(path: settings.databasePath) else {
+            cancelledPasswordPaths.insert(settings.databasePath)
+            return ""
+        }
+        applyDatabasePassword(entered, for: settings.databasePath)
+        return entered
+    }
+
+    private func currentDatabasePassword(for path: String) -> String {
+        if settings.rememberDatabasePassword {
+            let remembered = keychain.password(for: path)
+            if !remembered.isEmpty {
+                sessionDatabasePassword = remembered
+                sessionPasswordDatabasePath = path
+            }
+            return remembered
+        }
+        return sessionPassword(for: path) ?? ""
+    }
+
+    private func sessionPassword(for path: String) -> String? {
+        guard sessionPasswordDatabasePath == path else { return nil }
+        return sessionDatabasePassword
+    }
+
+    private func applyDatabasePassword(_ password: String, for path: String) {
+        sessionDatabasePassword = password
+        sessionPasswordDatabasePath = path
+        cancelledPasswordPaths.remove(path)
+        if settings.rememberDatabasePassword {
+            try? keychain.save(password: password, for: path)
+        } else {
+            try? keychain.delete(for: path)
+        }
+        if fileStore != nil {
+            fileStore.setPassword(password)
+        }
+    }
+
+    private func encryptedHistoryExists(for settings: ClipmanSettings) -> Bool {
+        ClipDatabaseFile.isEncryptedFile(URL(fileURLWithPath: settings.databasePath))
+            || ClipDatabaseFile.isEncryptedFile(fileHistoryURL(for: settings))
     }
 
     private func rememberPreviousFrontmostApplication() {

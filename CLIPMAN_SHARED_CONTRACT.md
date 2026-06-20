@@ -132,12 +132,14 @@ Machine naming may differ by platform, but it should be stable and human-readabl
 
 The database password is not stored in the shared `.clipdb` file.
 
-Platform-specific password storage:
+Password remembering is optional and must be explicit. New settings should default to not remembering the database password. In session-only mode, an implementation prompts for the password when it needs to open an encrypted database, keeps the password only in process memory for the current run, and clears any saved platform-specific password from settings or key storage.
 
-- Windows: DPAPI-protected per-user/per-machine settings.
-- macOS: Keychain entry keyed by database path.
+Platform-specific remembered-password storage:
 
-Copying settings from one machine to another must not silently grant access to an encrypted database unless that platform explicitly stores the password for that user/machine.
+- Windows: DPAPI-protected per-user/per-machine settings, only when `RememberDatabasePassword` is true.
+- macOS: Keychain entry keyed by database path, only when the matching remember-password preference is true.
+
+Copying settings from one machine to another must not silently grant access to an encrypted database unless that platform explicitly stores the password for that user/machine. Remembered-password storage is a convenience feature, not protection from malware already running as the same user. Same-user malware can usually ask the OS to unprotect the stored secret or read process memory while the database is unlocked.
 
 ## File History Is Not Shared By Default
 

@@ -15,10 +15,12 @@ struct ClipmanSettings: Codable, Equatable {
     var lastSelectedTab: Int
     var groupFilter: String
     var runAtStartup: Bool
+    var rememberDatabasePassword: Bool
 
     enum CodingKeys: String, CodingKey {
         case machineName, databasePath, monitoringEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, groupFilter, runAtStartup
+        case rememberDatabasePassword
     }
 
     init(
@@ -34,7 +36,8 @@ struct ClipmanSettings: Codable, Equatable {
         fileHistorySortDescending: Bool,
         lastSelectedTab: Int,
         groupFilter: String,
-        runAtStartup: Bool
+        runAtStartup: Bool,
+        rememberDatabasePassword: Bool
     ) {
         self.machineName = machineName
         self.databasePath = databasePath
@@ -49,6 +52,7 @@ struct ClipmanSettings: Codable, Equatable {
         self.lastSelectedTab = lastSelectedTab
         self.groupFilter = groupFilter
         self.runAtStartup = runAtStartup
+        self.rememberDatabasePassword = rememberDatabasePassword
     }
 
     init(from decoder: Decoder) throws {
@@ -67,6 +71,7 @@ struct ClipmanSettings: Codable, Equatable {
         lastSelectedTab = try container.decodeIfPresent(Int.self, forKey: .lastSelectedTab) ?? 0
         groupFilter = try container.decodeIfPresent(String.self, forKey: .groupFilter) ?? "All"
         runAtStartup = try container.decodeIfPresent(Bool.self, forKey: .runAtStartup) ?? false
+        rememberDatabasePassword = try container.decodeIfPresent(Bool.self, forKey: .rememberDatabasePassword) ?? false
     }
 
     static func defaults(applicationSupport: URL) -> ClipmanSettings {
@@ -83,7 +88,8 @@ struct ClipmanSettings: Codable, Equatable {
             fileHistorySortDescending: false,
             lastSelectedTab: 0,
             groupFilter: "All",
-            runAtStartup: false
+            runAtStartup: false,
+            rememberDatabasePassword: false
         )
     }
 }

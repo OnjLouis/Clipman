@@ -632,6 +632,8 @@ function Assert-HandoverParity([string]$releaseVersion) {
     Assert-TextMatches $handover 'Ctrl\+Enter goes to one selected file or folder' 'Private handover file-history go-to-file context'
     Assert-TextMatches $handover 'Shift\+Enter pins or unpins selected file-history events' 'Private handover file-history pin context'
     Assert-TextDoesNotMatch $handover 'File history is session-only and held in RAM|Current public release: 1\.5\.1(?!\d)|Current development version: 1\.5\.1(?!\d)|Current development version: 1\.5\.4(?!\d)|Current development version: 1\.5\.5(?!\d)|Current development version: 1\.5\.6(?!\d)' 'Private handover stale facts'
+    Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'GitHub Issue Gate' 'Release rules GitHub issue gate section'
+    Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'Do not publish first and inspect issues afterward' 'Release rules no-publish-before-issues wording'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'Private Handover Parity' 'Release rules handover parity section'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'D:\\Dropbox\\txt\\codex\\Clipman\.txt' 'Release rules handover path'
 }
@@ -670,6 +672,10 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Ctrl\+Shift\+1' 'Manual pinned file path shortcut documentation'
     Assert-TextMatches $manual 'Use no password button clears the saved history password' 'Manual no-password button documentation'
     Assert-TextMatches $manual 'History password' 'Manual encryption documentation'
+    Assert-TextMatches $manual '<h3>1\.5\.12</h3>' 'Manual 1.5.12 changelog'
+    Assert-TextMatches $manual 'history password remembering to be explicit and optional' 'Manual 1.5.12 password remembering changelog'
+    Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/5">issue #5</a>' 'Manual issue #5 closure'
+    Assert-TextMatches $manual 'Mac VoiceOver labels' 'Manual 1.5.12 Mac VoiceOver changelog'
     Assert-TextMatches $manual '<h3>1\.5\.11</h3>' 'Manual 1.5.11 changelog'
     Assert-TextMatches $manual 'oldest first, newest first, A first, Z first' 'Manual 1.5.11 sort direction wording'
     Assert-TextMatches $manual 'choose a Clipman data folder instead of an individual <code>\.clipdb</code> file' 'Manual 1.5.11 data-folder changelog'
@@ -730,6 +736,10 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Ctrl\+A' 'Manual select-all/viewer shortcut'
     Assert-TextMatches $manual 'Tyler Spivey' 'Manual credits'
     Assert-TextMatches $readme 'Project page: <https://github.com/OnjLouis/Clipman>' 'README project page link'
+    Assert-TextMatches $readme '### 1\.5\.12' 'README 1.5.12 changelog'
+    Assert-TextMatches $readme 'history password remembering to be explicit and optional' 'README 1.5.12 password remembering changelog'
+    Assert-TextMatches $readme 'Closes issue #5' 'README issue #5 closure'
+    Assert-TextMatches $readme 'Mac VoiceOver labels' 'README 1.5.12 Mac VoiceOver changelog'
     Assert-TextMatches $readme '### 1\.5\.11' 'README 1.5.11 changelog'
     Assert-TextMatches $readme 'oldest first, newest first, A first, Z first' 'README 1.5.11 sort direction wording'
     Assert-TextMatches $readme 'choose a Clipman data folder instead of an individual `\.clipdb` file' 'README 1.5.11 data-folder changelog'
@@ -1105,6 +1115,28 @@ internal static class ClipmanSmokeHarness
         var reloadedExplicitSettings = reloadedExplicitStore.Load();
         Assert(reloadedExplicitSettings.DatabasePath == explicitDb, "Settings location pointer did not reload the explicit database path.");
         Assert(reloadedExplicitStore.SettingsDirectory == explicitSettingsFolder, "Settings location pointer did not reload the explicit data folder.");
+
+        var sessionOnlySettings = new AppSettings
+        {
+            DatabasePath = explicitDb,
+            UseDefaultDatabasePath = false,
+            DatabaseEncryptionEnabled = true,
+            RememberDatabasePassword = false,
+            ProtectedDatabasePassword = "should-not-survive",
+            PlainDatabasePassword = "session-only-secret"
+        };
+        JsonUtil.SaveAtomic(reloadedExplicitStore.SettingsPath, sessionOnlySettings);
+        var sessionOnlyJson = File.ReadAllText(reloadedExplicitStore.SettingsPath, Encoding.UTF8);
+        Assert(!sessionOnlyJson.Contains("PlainDatabasePassword"), "Session-only database password was serialized to settings.");
+        var normalizedSessionOnly = reloadedExplicitStore.Load();
+        Assert(normalizedSessionOnly.DatabaseEncryptionEnabled, "Session-only encrypted settings did not keep encryption enabled.");
+        Assert(!normalizedSessionOnly.RememberDatabasePassword, "Session-only encrypted settings incorrectly enabled password remembering.");
+        Assert(string.IsNullOrEmpty(normalizedSessionOnly.ProtectedDatabasePassword), "Session-only encrypted settings kept a protected password.");
+
+        var legacyJson = "{\"DatabasePath\":\"" + EscapeJson(explicitDb) + "\",\"UseDefaultDatabasePath\":false,\"DatabaseEncryptionEnabled\":true,\"ProtectedDatabasePassword\":\"legacy-protected-placeholder\"}";
+        File.WriteAllText(reloadedExplicitStore.SettingsPath, legacyJson, Encoding.UTF8);
+        var legacyLoaded = reloadedExplicitStore.Load();
+        Assert(legacyLoaded.RememberDatabasePassword, "Legacy protected settings were not treated as remembered-password settings.");
 
         var stateDir = Path.Combine(conflictDir, "state");
         Directory.CreateDirectory(stateDir);

@@ -45,6 +45,7 @@ namespace Clipman
         private bool toggleHotkeyRegistered;
         private bool toggleAlternateHotkeyRegistered;
         private string lastHandledCloseRequestId = string.Empty;
+        private string databasePassword = string.Empty;
 
         public ClipmanApplicationContext()
         {
@@ -243,7 +244,9 @@ namespace Clipman
             var sendToChanged = settings.SendToEnabled != updated.SendToEnabled;
             var encryptionChanged =
                 settings.DatabaseEncryptionEnabled != updated.DatabaseEncryptionEnabled ||
-                !string.Equals(settings.ProtectedDatabasePassword, updated.ProtectedDatabasePassword, StringComparison.Ordinal);
+                settings.RememberDatabasePassword != updated.RememberDatabasePassword ||
+                !string.Equals(settings.ProtectedDatabasePassword, updated.ProtectedDatabasePassword, StringComparison.Ordinal) ||
+                !string.IsNullOrEmpty(updated.PlainDatabasePassword);
             var startupChanged = settings.RunAtStartup != updated.RunAtStartup;
             var updatePolicyChanged =
                 !string.Equals(settings.UpdateCheckFrequency, updated.UpdateCheckFrequency, StringComparison.OrdinalIgnoreCase) ||
@@ -275,7 +278,26 @@ namespace Clipman
             settings.UpdateCheckFrequency = updated.UpdateCheckFrequency;
             settings.InstallUpdatesSilently = updated.InstallUpdatesSilently;
             settings.DatabaseEncryptionEnabled = updated.DatabaseEncryptionEnabled;
+            settings.RememberDatabasePassword = updated.RememberDatabasePassword;
+            if (!string.IsNullOrEmpty(updated.PlainDatabasePassword))
+            {
+                databasePassword = updated.PlainDatabasePassword;
+            }
             settings.ProtectedDatabasePassword = updated.ProtectedDatabasePassword;
+            if (!settings.DatabaseEncryptionEnabled)
+            {
+                databasePassword = string.Empty;
+                settings.ProtectedDatabasePassword = string.Empty;
+                settings.RememberDatabasePassword = false;
+            }
+            else if (settings.RememberDatabasePassword && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword) && !string.IsNullOrEmpty(databasePassword))
+            {
+                settings.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(databasePassword);
+            }
+            else if (!settings.RememberDatabasePassword)
+            {
+                settings.ProtectedDatabasePassword = string.Empty;
+            }
             settings.LastPreferencesTab = updated.LastPreferencesTab;
             if (saveListPositionTurnedOff)
             {
@@ -1140,28 +1162,48 @@ namespace Clipman
             {
             }
 
-            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !settings.DatabaseEncryptionEnabled && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
+                databasePassword = string.Empty;
                 settings.DatabaseEncryptionEnabled = false;
+                settings.RememberDatabasePassword = false;
+                settings.ProtectedDatabasePassword = string.Empty;
                 return;
             }
 
             if (!string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 settings.DatabaseEncryptionEnabled = true;
+                settings.RememberDatabasePassword = true;
                 try
                 {
                     var password = settingsStore.DatabasePassword(settings);
-                    if (!string.IsNullOrEmpty(password)) return;
+                    if (!string.IsNullOrEmpty(password))
+                    {
+                        databasePassword = password;
+                        return;
+                    }
                 }
                 catch
                 {
                 }
             }
 
+            if (!string.IsNullOrEmpty(databasePassword))
+            {
+                settings.DatabaseEncryptionEnabled = true;
+                if (settings.RememberDatabasePassword && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+                {
+                    settings.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(databasePassword);
+                    settingsStore.Save(settings);
+                }
+                return;
+            }
+
             if (!databaseIsEncrypted && !fileHistoryIsEncrypted)
             {
                 settings.DatabaseEncryptionEnabled = false;
+                settings.RememberDatabasePassword = false;
                 settings.ProtectedDatabasePassword = string.Empty;
                 settingsStore.Save(settings);
                 return;
@@ -1174,8 +1216,16 @@ namespace Clipman
             {
                 throw new OperationCanceledException("Clipman history password was not provided.");
             }
+            databasePassword = entered;
             settings.DatabaseEncryptionEnabled = true;
-            settings.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(entered);
+            if (settings.RememberDatabasePassword)
+            {
+                settings.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(entered);
+            }
+            else
+            {
+                settings.ProtectedDatabasePassword = string.Empty;
+            }
             settingsStore.Save(settings);
         }
 
@@ -1249,7 +1299,7 @@ namespace Clipman
 
         private string CurrentDatabasePassword()
         {
-            return settingsStore.DatabasePassword(settings);
+            return databasePassword ?? string.Empty;
         }
 
         private IWin32Window UpdateWindowOwner()

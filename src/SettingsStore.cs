@@ -30,7 +30,12 @@ namespace Clipman
             var hadSortDescending = SettingsFileContainsProperty(SettingsPath, "SortDescending");
             var hadFileHistorySortDescending = SettingsFileContainsProperty(SettingsPath, "FileHistorySortDescending");
             var hadUseDefaultDatabasePath = SettingsFileContainsProperty(SettingsPath, "UseDefaultDatabasePath");
+            var hadRememberDatabasePassword = SettingsFileContainsProperty(SettingsPath, "RememberDatabasePassword");
             var settings = loaded.Settings;
+            if (!hadRememberDatabasePassword && !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            {
+                settings.RememberDatabasePassword = true;
+            }
             if (!hadUseDefaultDatabasePath)
             {
                 settings.UseDefaultDatabasePath = ShouldTreatAsDefaultDatabasePath(settings.DatabasePath);
@@ -116,7 +121,24 @@ namespace Clipman
             {
                 settings.DiagnosticsFileHistoryLimit = 200;
             }
-            settings.DatabaseEncryptionEnabled = !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
+            if (!string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            {
+                settings.DatabaseEncryptionEnabled = true;
+                if (!settings.RememberDatabasePassword)
+                {
+                    settings.ProtectedDatabasePassword = string.Empty;
+                }
+            }
+            if (!settings.DatabaseEncryptionEnabled)
+            {
+                settings.RememberDatabasePassword = false;
+                settings.ProtectedDatabasePassword = string.Empty;
+            }
+            if (!settings.RememberDatabasePassword)
+            {
+                settings.ProtectedDatabasePassword = string.Empty;
+            }
+            settings.PlainDatabasePassword = string.Empty;
         }
 
         private LoadedSettings LoadBestSettings()

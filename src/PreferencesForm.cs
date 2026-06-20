@@ -28,6 +28,7 @@ namespace Clipman
         private readonly TextBox databasePassword;
         private readonly TextBox databasePasswordConfirm;
         private readonly CheckBox showDatabasePassword;
+        private readonly CheckBox rememberDatabasePassword;
         private readonly Action<string> copySensitiveText;
         private readonly ShortcutButton closeButton;
         private readonly NumericUpDown maxHistoryEntries;
@@ -127,7 +128,7 @@ namespace Clipman
                 Width = 260,
                 UseSystemPasswordChar = true,
                 AccessibleName = "History database password",
-                AccessibleDescription = "Password used to encrypt the shared Clipman history database. It is protected by Windows for this user account."
+                AccessibleDescription = "Password used to encrypt the shared Clipman history database. Leave blank to keep the current password."
             };
             databasePasswordConfirm = new TextBox
             {
@@ -137,6 +138,8 @@ namespace Clipman
                 AccessibleDescription = "Retype the history database password. The password and confirmation must match before Clipman saves it."
             };
             showDatabasePassword = NewCheckBox("Sho&w history password", false);
+            rememberDatabasePassword = NewCheckBox("&Remember history password on this computer", settings.RememberDatabasePassword);
+            rememberDatabasePassword.AccessibleDescription = "When checked, Clipman stores the history password with Windows user protection. When unchecked, Clipman asks for the password when it starts and keeps it only for the current session.";
             ignoredProcesses = new TextBox
             {
                 Width = 455,
@@ -176,8 +179,9 @@ namespace Clipman
             AddFullRow(storageLayout, NewNote("Choose the folder that contains Clipman's settings and history files. Clipman uses clipman-history.clipdb inside this folder, plus machine-specific settings and file-history files."));
             AddRow(storageLayout, "History &password:", passwordPanel);
             AddRow(storageLayout, "&Confirm password:", passwordConfirmPanel);
+            AddFullRow(storageLayout, rememberDatabasePassword);
             AddFullRow(storageLayout, passwordActionsPanel);
-            AddFullRow(storageLayout, NewNote("Leave the password fields blank for no password on a new database. To change or add encryption, type the same password in both fields. To remove a saved password, choose Use no password. The password is protected by Windows per user and machine, so copying a settings file to another computer does not carry a working key."));
+            AddFullRow(storageLayout, NewNote("Leave the password fields blank to keep the current password. To change or add encryption, type the same password in both fields. When Remember is unchecked, Clipman does not save an unlockable password in settings and will ask for it when it starts. To remove encryption, choose Use no password."));
             AddRow(storageLayout, "Ignored &applications:", ignoredPanel);
             AddFullRow(storageLayout, NewNote("One process name per line, such as keepass, chrome, or passwordmanager.exe."));
             storage.Controls.Add(storageLayout);
@@ -272,6 +276,7 @@ namespace Clipman
             runAtStartup.CheckedChanged += (s, e) => ApplyNow();
             updateCheckFrequency.SelectedIndexChanged += (s, e) => ApplyNow();
             installUpdatesSilently.CheckedChanged += (s, e) => ApplyNow();
+            rememberDatabasePassword.CheckedChanged += (s, e) => ApplyNow();
             maxHistoryEntries.ValueChanged += (s, e) => ApplyNow();
             maxHistoryDays.ValueChanged += (s, e) => ApplyNow();
             showDatabasePassword.CheckedChanged += (s, e) => ToggleDatabasePasswordVisibility();
@@ -308,14 +313,21 @@ namespace Clipman
             settings.UpdateCheckFrequency = StoredUpdateFrequency(Convert.ToString(updateCheckFrequency.SelectedItem));
             settings.InstallUpdatesSilently = installUpdatesSilently.Checked;
             settings.LastPreferencesTab = preferencesTabs == null ? 0 : preferencesTabs.SelectedIndex;
+            settings.RememberDatabasePassword = rememberDatabasePassword.Checked;
+            settings.PlainDatabasePassword = string.Empty;
             if (databasePassword.Text.Length > 0)
             {
-                settings.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(databasePassword.Text);
+                settings.PlainDatabasePassword = databasePassword.Text;
+                settings.ProtectedDatabasePassword = settings.RememberDatabasePassword ? DatabasePasswordProtector.Protect(databasePassword.Text) : string.Empty;
                 settings.DatabaseEncryptionEnabled = true;
             }
             else
             {
-                settings.DatabaseEncryptionEnabled = !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
+                if (!settings.RememberDatabasePassword)
+                {
+                    settings.ProtectedDatabasePassword = string.Empty;
+                }
+                settings.DatabaseEncryptionEnabled = settings.DatabaseEncryptionEnabled || !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
             }
             settings.DatabasePath = DatabasePathFromFolderOrFile(databasePath.Text);
             settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(settings.DatabasePath);
@@ -483,7 +495,7 @@ namespace Clipman
 
         private void UseNoDatabasePassword()
         {
-            if (!string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            if (settings.DatabaseEncryptionEnabled || !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 var result = MessageBox.Show(this, "Remove the saved history password and rewrite the Clipman database without password encryption?", "Clipman history password", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
                 if (result != DialogResult.Yes) return;
@@ -492,6 +504,9 @@ namespace Clipman
             databasePassword.Text = string.Empty;
             databasePasswordConfirm.Text = string.Empty;
             settings.ProtectedDatabasePassword = string.Empty;
+            settings.PlainDatabasePassword = string.Empty;
+            settings.RememberDatabasePassword = false;
+            rememberDatabasePassword.Checked = false;
             settings.DatabaseEncryptionEnabled = false;
             ApplyNow();
             MessageBox.Show(this, "Clipman will use this database without a history password.", "Clipman history password", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -538,7 +553,9 @@ namespace Clipman
                 UpdateCheckFrequency = current.UpdateCheckFrequency,
                 InstallUpdatesSilently = current.InstallUpdatesSilently,
                 DatabaseEncryptionEnabled = current.DatabaseEncryptionEnabled,
+                RememberDatabasePassword = current.RememberDatabasePassword,
                 ProtectedDatabasePassword = current.ProtectedDatabasePassword,
+                PlainDatabasePassword = string.Empty,
                 UseDefaultDatabasePath = current.UseDefaultDatabasePath
             };
         }

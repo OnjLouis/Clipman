@@ -369,9 +369,9 @@
 
   <p>Global hotkey fields accept only combinations with at least two modifiers and one real key, such as <code>Ctrl+Alt+\</code> or <code>Ctrl+Shift+H</code>. Modifier-only keys, single keys, and unsafe Windows shortcuts are rejected.</p>
 
-  <p><strong>Storage and Password:</strong> Use this tab to choose the shared Clipman data folder, set or change the history password, generate a random password, remove the saved password, and manage ignored applications. Clipman stores the shared text history as <code>clipman-history.clipdb</code> inside the chosen folder. The password fields are intentionally blank when Preferences opens, even if a password is already saved. This prevents someone from opening Preferences and revealing the saved key with Show history password.</p>
+  <p><strong>Storage and Password:</strong> Use this tab to choose the shared Clipman data folder, set or change the history password, generate a random password, choose whether this computer remembers the password, remove password encryption, and manage ignored applications. Clipman stores the shared text history as <code>clipman-history.clipdb</code> inside the chosen folder. The password fields are intentionally blank when Preferences opens, even if the database is encrypted. This prevents someone from opening Preferences and revealing the saved or session password with Show history password.</p>
 
-  <p>The Use no password button clears the saved history password and rewrites the current database without password encryption. It exists because blank password fields mean "keep the saved password" on a machine that already has one; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
+  <p>The Remember history password on this computer checkbox controls convenience versus exposure. When unchecked, Clipman asks for the history password when it starts and keeps the password only for the current run. When checked, Clipman stores an unlockable password protected by Windows for the current user and machine. That is convenient for automatic startup and command-line import/export, but it cannot protect against malware already running as the same Windows user. The Use no password button clears the saved history password, clears any session-only password, and rewrites the current database without password encryption. It exists because blank password fields mean "keep the current password"; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
 
   <h2 id="startup-state">Startup State</h2>
   <p>Clipman remembers whether monitoring was on or off. When sounds are enabled, it plays the on or off sound at launch so you know the app is running and which state it restored.</p>
@@ -471,11 +471,13 @@
 
   <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
 
-  <p><strong>History password:</strong> Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed <code>.clipdb</code> storage without password encryption. If you enter and confirm a history password, the database is encrypted with AES and checked with a message authentication code before loading. The history password is protected by Windows for the current user account and machine. Copying a settings file to another computer does not copy a working key; that computer must be given the same history password through its own Preferences window.</p>
+  <p><strong>History password:</strong> Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed <code>.clipdb</code> storage without password encryption. If you enter and confirm a history password, the database is encrypted with AES and checked with a message authentication code before loading. The password is not stored inside the shared <code>.clipdb</code> file.</p>
 
-  <p>The Generate password button creates a random history password, fills both password fields, copies it to the Windows clipboard, and saves it for this Windows user. Clipman deliberately ignores that generated password copy, so it is not added to clipboard history. You are responsible for saving that password somewhere safe and entering it on each computer that shares the encrypted history. If the password is lost, Clipman cannot recover the encrypted history.</p>
+  <p>New settings do not remember the history password by default. In that mode, Clipman prompts for the password when it starts, keeps it only while Clipman is running, and clears any saved Windows-protected password from settings. If you check Remember history password on this computer, Clipman stores the password using Windows user protection for this account and machine. Copying a settings file to another computer does not copy a working key; that computer must be given the same history password through its own Preferences window. Remembered passwords are still recoverable by software already running as the same Windows user, so leave Remember unchecked if you prefer startup prompts over same-user recoverability.</p>
 
-  <p>When typing a history password manually, enter it in both password fields. The Show history password checkbox temporarily reveals both fields so you can verify what you typed. Leave both password fields blank to keep the password already saved on this machine. Use the Use no password button if you want to remove the saved password and rewrite the current database without password encryption.</p>
+  <p>The Generate password button creates a random history password, fills both password fields, and copies it to the Windows clipboard. Clipman deliberately ignores that generated password copy, so it is not added to clipboard history. You are responsible for saving that password somewhere safe and entering it on each computer that shares the encrypted history. If the password is lost, Clipman cannot recover the encrypted history.</p>
+
+  <p>When typing a history password manually, enter it in both password fields. The Show history password checkbox temporarily reveals both fields so you can verify what you typed. Leave both password fields blank to keep the current encrypted database password. Use the Use no password button if you want to remove password encryption and rewrite the current database without a history password. Command-line import, export, and Send To operations can open encrypted databases only when this computer is set to remember the password; the already-running Clipman window can use a session-only password.</p>
 
   <p>If a sync service creates conflict copies of Clipman's settings or history database, Clipman attempts to tidy them automatically when it next loads the affected file. History database conflicts are merged by entry, then the conflict copies are removed. Machine settings conflicts use the newest copy for that machine, then remove the extra files. This is intended only for Clipman's own settings and <code>.clipdb</code> files.</p>
 
@@ -621,6 +623,15 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.5.12</h3>
+  <ul>
+    <li>Changed history password remembering to be explicit and optional. Encrypted databases can now be unlocked for the current Clipman session without saving an unlockable password in settings.</li>
+    <li>Clarified the password security model in the manual: remembered passwords are protected for the current user and machine only when Remember is enabled, and same-user malware can potentially recover them.</li>
+    <li>Improved the Mac build so database password remembering follows the same explicit, optional model as Windows, using Keychain only when Remember is enabled.</li>
+    <li>Fixed Mac Preferences so the history location is presented as a Clipman data/settings folder rather than a direct <code>.clipdb</code> file path. Closes <a href="https://github.com/OnjLouis/Clipman/issues/5">issue #5</a>.</li>
+    <li>Improved Mac VoiceOver labels on the main History window controls so useful shortcut hints are announced without adding visible text.</li>
+  </ul>
+
   <h3>1.5.11</h3>
   <ul>
     <li>Changed the sort direction command wording to clearer first-style labels, such as oldest first, newest first, A first, Z first, fewest files first, or most files first depending on the active sort field.</li>
@@ -747,7 +758,7 @@
     <li>Added machine attribution for text history entries, with a Machine column and machine sort mode for shared database setups.</li>
     <li>Added a File history tab for recent file copy/cut events captured while Clipman is running, with Enter to restore those files to the Windows clipboard, Ctrl+C to copy paths, F4 for details, and a separate file-event context menu.</li>
     <li>Uses a compressed <code>.clipdb</code> history database so the live clipboard history is not stored as plain searchable text.</li>
-    <li>Added optional password-based history database encryption, with the password protected by Windows per user and machine.</li>
+    <li>Added optional password-based history database encryption, with remembered passwords available as a per-user convenience when explicitly enabled.</li>
     <li>Added automatic cleanup for common sync-conflict copies of Clipman's settings and history database.</li>
     <li>Added shared update-state detection so synced-folder instances can restart after another machine publishes a newer build.</li>
     <li>Added cooperative shared-folder update handling so instances on other computers can close briefly while a network-shared executable is replaced, then restart from the updated copy.</li>

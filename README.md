@@ -32,7 +32,7 @@ macOS tester builds are produced from `ClipmanMac` and attached to releases in t
 - Optional ignored application list for sensitive apps.
 - Import and export clipboard history for backup, including text imports from old Clipman `clipman.db` and Ditto SQLite databases.
 - Compressed Clipman database can live in a cloud service, synced folder, or network share.
-- Optional history password encryption, with the password protected by Windows per user and machine.
+- Optional history password encryption. By default the unlock password is session-only; users can explicitly choose to remember it on a computer with Windows user protection.
 - The app watches the database file inside the configured data folder and reloads when another machine or process replaces it.
 - Tray and app menus show the configured global hotkeys.
 - Help menu links to the GitHub project, release history, update checker, contact page, and donate page.
@@ -81,7 +81,7 @@ If the shared database file is missing but its folder is available, Clipman crea
 
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
 
-Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. Clipman protects saved passwords with Windows for the current user and machine, so copying a settings file to another computer does not copy a working key. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
+Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, which is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
 
 When a history password is saved, `.clipdb` imports and exports use the current history password. JSON and text exports are readable backup formats, so use `.clipdb` for private encrypted backups.
 
@@ -98,6 +98,14 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.5.12
+
+- Changed history password remembering to be explicit and optional. Encrypted databases can now be unlocked for the current Clipman session without saving an unlockable password in settings.
+- Clarified the password security model: remembered passwords are protected for the current user and machine only when Remember is enabled, and same-user malware can potentially recover them.
+- Improved the Mac build so database password remembering follows the same explicit, optional model as Windows, using Keychain only when Remember is enabled.
+- Fixed Mac Preferences so the history location is presented as a Clipman data/settings folder rather than a direct `.clipdb` file path. Closes issue #5.
+- Improved Mac VoiceOver labels on the main History window controls so useful shortcut hints are announced without adding visible text.
 
 ### 1.5.11
 
