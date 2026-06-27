@@ -1,28 +1,31 @@
 # Clipman: Accessible Clipboard Management Tool
 
-Clipman is a small portable accessible clipboard management tool designed for fast keyboard and screen-reader use. The main implementation is Windows; the `ClipmanMac` folder contains the native macOS/AppKit implementation that shares the same text-history database contract.
+Clipman is a small portable accessible clipboard management tool for Windows and macOS, designed for fast keyboard and screen-reader use. The Windows app and the native macOS/AppKit app can share the same text-history database, so copied text can follow you between machines when they use the same synced or network-shared data folder. Add, remove, move, rename, group, pin, or edit text entries on one machine, and other machines watching that shared database can pick up those changes automatically.
 
 For the full manual, open `Manual.html` from the Clipman folder or press `F1` in the history window.
 
 Project page: <https://github.com/OnjLouis/Clipman>
 
-macOS tester builds are produced from `ClipmanMac` and attached to releases in this same repository so Windows and Mac downloads appear together.
+Windows and macOS downloads are attached to releases in this repository.
 
 ## Features
 
 - Runs from its folder with no installer.
-- Lives in the notification area.
+- Lives in the Windows notification area or the macOS status menu.
 - Tray icon and tooltip show whether clipboard monitoring is on or off.
-- Plays copy/on/off/skip sounds when enabled.
+- Plays copy/remote-sync/on/off/skip sounds when enabled.
 - Lets custom sounds live in `Settings\sounds` so updates do not overwrite them.
 - Global hotkeys for showing history and toggling monitoring.
 - User-configurable hotkeys.
+- Optional per-entry Quick Copy global hotkeys that copy chosen text entries from anywhere without opening history.
 - Press Enter on a history entry to copy it back to the clipboard and close history.
 - Press Ctrl+C to copy without closing the history window.
 - Press Shift+Enter to pin or unpin an entry. Pinned entries are protected from delete and cleanup.
+- The first ten pinned entries are numbered in the history list to match their Ctrl+number quick-copy shortcuts.
 - Application key menus show pinned quick-copy shortcuts when the selected pinned text entry or file-history event is one of the first ten pinned items.
 - Press Backspace in the history list to jump to the first normal entry below pinned entries.
-- Press F2 to edit an entry name and stored clipboard text.
+- Use Home, End, Page Up, and Page Down for larger list jumps. Page size follows the visible list height.
+- Press F2 to open Entry Properties for a selected entry, including name, group, Quick Copy assignment, and stored clipboard text.
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
 - Sort direction uses clearer first-style labels from the View menu, such as oldest first, newest first, A first, or Z first depending on the active sort field.
@@ -34,6 +37,7 @@ macOS tester builds are produced from `ClipmanMac` and attached to releases in t
 - Compressed Clipman database can live in a cloud service, synced folder, or network share.
 - Optional history password encryption. By default the unlock password is session-only; users can explicitly choose to remember it on a computer with Windows user protection.
 - The app watches the database file inside the configured data folder and reloads when another machine or process replaces it.
+- Optional setting to put newly created text entries received from another machine onto this machine's clipboard.
 - Tray and app menus show the configured global hotkeys.
 - Help menu links to the GitHub project, release history, update checker, contact page, and donate page.
 - Optional per-user Windows startup entry.
@@ -43,6 +47,7 @@ macOS tester builds are produced from `ClipmanMac` and attached to releases in t
 
 - Show clipboard history: `Ctrl+Alt+\`
 - Toggle monitoring on/off: <code>Ctrl+Alt+`</code>
+- Quick Copy: user-assigned per entry from Entry Properties.
 - Preferences: `Ctrl+,` in the history window only.
 - Import clipboard entries: `Ctrl+I`
 - Export clipboard entries: `Ctrl+E`
@@ -59,7 +64,7 @@ macOS tester builds are produced from `ClipmanMac` and attached to releases in t
 - Copy paths from pinned file event: `Ctrl+Shift+1` to `Ctrl+Shift+0` on the File history tab.
 - Copy without closing history: `Ctrl+C`
 - Search: `Ctrl+F`, then `F3` or `Shift+F3`
-- Edit entry name and text: `F2`
+- Open Entry Properties: `F2`
 
 Hotkeys can be changed from Options > Preferences.
 
@@ -81,6 +86,10 @@ If the shared database file is missing but its folder is available, Clipman crea
 
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
 
+Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman first baselines the current newest remote entry, so turning the option on does not unexpectedly copy older history. Reusing or Quick Copying an older entry on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry.
+
+Quick Copy is machine-specific. Use Entry properties or the entry menu to assign a global Quick Copy hotkey to a text entry, then press that hotkey from anywhere to copy that specific entry without showing the history window. Several entries can each have their own Quick Copy hotkey on the same machine.
+
 Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, which is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
 
 When a history password is saved, `.clipdb` imports and exports use the current history password. JSON and text exports are readable backup formats, so use `.clipdb` for private encrypted backups.
@@ -98,6 +107,17 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.6.0
+
+- Updated the Windows and Mac builds together so shared clipboard databases, Quick Copy, remote clipboard receive, pinned rows, file history, sounds, packaging, and updates follow the same 1.6.0 behavior.
+- Added per-entry Quick Copy global hotkeys. Assign a hotkey to any text entry from Entry Properties, then press that hotkey from anywhere to copy that specific entry without opening the history window.
+- Changed Entry Properties to use F2 as the single shortcut on Windows and Mac. Windows no longer uses Alt+Enter for this command.
+- Quick Copy assignments made from Entry Properties now take effect immediately when global hotkeys are added, changed, or cleared.
+- Fixed Windows Alt+number group-filter shortcuts so they jump to the selected group without also moving focus to the menu bar.
+- Added an opt-in setting to put newly created text entries received from another machine onto this machine's clipboard. The setting is off by default, baselines current history when enabled, and ignores older entries that are merely reused on another machine.
+- Improved cross-platform parity with the Mac build: Quick Copy and latest-remote-text behavior are stored in machine-specific settings, not in the shared clipboard database.
+- Updated Mac packaging and release rules so macOS release assets use a versioned ZIP name while the app inside remains `Clipman.app`.
 
 ### 1.5.12
 
@@ -130,7 +150,7 @@ Clipman also writes a small shared update-state file in the `Settings` folder. I
 
 During an update, Clipman downloads the release ZIP to a temporary folder, publishes a short close request so other instances running from the same shared folder stand down, replaces app files while preserving `Settings`, then restarts. The updated copy publishes the new shared state so other machines restart after the updated executable reaches them through a cloud service or network share.
 
-Custom sounds can be placed in `Settings\sounds` using the same file names as the bundled sounds: `copy.wav`, `on.wav`, `off.wav`, and `skip.wav`. Clipman uses those first and falls back to the bundled defaults for any missing sound.
+Custom sounds can be placed in `Settings\sounds` using the same file names as the bundled sounds: `copy.wav`, `remote.wav`, `on.wav`, `off.wav`, and `skip.wav`. Clipman uses those first and falls back to the bundled defaults for any missing sound.
 
 Bundled sounds in the root `sounds` folder are factory files. Updates replace them without backing them up, and only user-provided sounds in `Settings\sounds` are treated as custom data.
 
@@ -138,7 +158,7 @@ If Clipman is already running and you start a copy from the same folder, the exi
 
 Questions and feedback can be sent through `Help` > `Contact` in the app or <https://onj.me/contact>.
 
-Clipman is free software. If you want to support Andre's work, use `Help` > `Donate` in the app or visit <https://www.paypal.me/AndreLouis>.
+Clipman is free software. If you want to support Andre's work, use `Help` > `Donate` in the app or visit <https://onj.me/donate>.
 
 Clipman is based on earlier Clipman work by Tyler Spivey. SQLite import support uses the public-domain SQLite runtime from the SQLite project.
 

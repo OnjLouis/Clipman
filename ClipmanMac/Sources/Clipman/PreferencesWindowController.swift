@@ -8,6 +8,10 @@ protocol PreferencesWindowControllerDelegate: AnyObject {
 }
 
 final class PreferencesWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) {
+        close()
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.keyCode == UInt16(kVK_Escape) {
             close()
@@ -32,16 +36,20 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
     private let rememberPasswordCheckbox = NSButton(checkboxWithTitle: "Remember history password in Keychain", target: nil, action: nil)
+    private let autoCopyRemoteCheckbox = NSButton(checkboxWithTitle: "Copy latest remote text to this Mac clipboard", target: nil, action: nil)
+    private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
+    private let updateFrequencyPopup = NSPopUpButton()
     private let showHotkeyField = HotkeyCaptureField()
     private let toggleHotkeyField = HotkeyCaptureField()
     private let passwordField = NSSecureTextField()
+    private let ignoredApplicationsView = NSTextView()
     private let statusLabel = NSTextField(labelWithString: "")
 
     init(settings: ClipmanSettings) {
         self.settings = settings
         let window = PreferencesWindow(
-            contentRect: NSRect(x: 140, y: 140, width: 620, height: 380),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 140, y: 140, width: 760, height: 660),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -82,6 +90,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         rememberPasswordCheckbox.setAccessibilityLabel("Remember history password in Keychain")
         rememberPasswordCheckbox.setAccessibilityHelp("When checked, Clipman stores the history password in this Mac user's Keychain. When unchecked, Clipman asks for the password each app session and keeps it only in memory.")
         grid.addRow(with: [NSGridCell.emptyContentView, rememberPasswordCheckbox])
+        addIgnoredApplicationsRow(to: grid)
         showHotkeyField.hotkeyDelegate = self
         toggleHotkeyField.hotkeyDelegate = self
 
@@ -95,7 +104,23 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         runAtStartupCheckbox.setAccessibilityLabel("Run Clipman at login")
         grid.addRow(with: [NSGridCell.emptyContentView, runAtStartupCheckbox])
 
-        let saveButton = button(title: "Save", action: #selector(saveClicked))
+        autoCopyRemoteCheckbox.target = nil
+        autoCopyRemoteCheckbox.action = nil
+        autoCopyRemoteCheckbox.setAccessibilityLabel("Copy latest remote text to this Mac clipboard")
+        autoCopyRemoteCheckbox.setAccessibilityHelp("When enabled, new text copied on another machine sharing this database is placed on this Mac clipboard. This is off by default.")
+        grid.addRow(with: [NSGridCell.emptyContentView, autoCopyRemoteCheckbox])
+
+        updateFrequencyPopup.addItems(withTitles: ["Never", "At startup", "Hourly", "Daily"])
+        updateFrequencyPopup.setAccessibilityLabel("Check for updates")
+        addRow("Check for updates", updateFrequencyPopup)
+
+        installUpdatesSilentlyCheckbox.target = nil
+        installUpdatesSilentlyCheckbox.action = nil
+        installUpdatesSilentlyCheckbox.setAccessibilityLabel("Install updates silently")
+        installUpdatesSilentlyCheckbox.setAccessibilityHelp("When checked, Clipman installs available Mac updates in the background and relaunches itself.")
+        grid.addRow(with: [NSGridCell.emptyContentView, installUpdatesSilentlyCheckbox])
+
+        let saveButton = button(title: "Save and Close", action: #selector(saveClicked))
         let buttonStack = NSStackView(views: [saveButton])
         buttonStack.orientation = .horizontal
         buttonStack.alignment = .trailing
@@ -135,9 +160,13 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
         rememberPasswordCheckbox.state = settings.rememberDatabasePassword ? .on : .off
+        autoCopyRemoteCheckbox.state = settings.autoCopyLatestRemoteText ? .on : .off
+        installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
+        updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
         showHotkeyField.descriptor = settings.showHistoryHotkey
         toggleHotkeyField.descriptor = settings.toggleMonitoringHotkey
         passwordField.stringValue = ""
+        ignoredApplicationsView.string = settings.ignoredApplications.joined(separator: "\n")
         statusLabel.stringValue = settings.rememberDatabasePassword
             ? "Leave password blank to keep the current Keychain password."
             : "Leave password blank to keep the current session password. The password will not be stored."
@@ -171,8 +200,12 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.monitoringEnabled = monitoringCheckbox.state == .on
         settings.runAtStartup = runAtStartupCheckbox.state == .on
         settings.rememberDatabasePassword = rememberPasswordCheckbox.state == .on
+        settings.autoCopyLatestRemoteText = autoCopyRemoteCheckbox.state == .on
+        settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on
+        settings.updateCheckFrequency = storedUpdateFrequency(updateFrequencyPopup.titleOfSelectedItem ?? "Never")
         settings.showHistoryHotkey = show
         settings.toggleMonitoringHotkey = toggle
+        settings.ignoredApplications = normalizedIgnoredApplications(ignoredApplicationsView.string)
         let password = passwordField.stringValue.isEmpty ? nil : passwordField.stringValue
         preferencesDelegate?.preferencesWindow(self, didUpdate: settings, passwordToSave: password)
         statusLabel.stringValue = "Preferences saved."
@@ -207,5 +240,62 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             return url.deletingLastPathComponent().path
         }
         return trimmed
+    }
+
+    private func displayUpdateFrequency(_ value: String) -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "startup", "atstartup", "at startup": return "At startup"
+        case "hourly": return "Hourly"
+        case "daily": return "Daily"
+        default: return "Never"
+        }
+    }
+
+    private func storedUpdateFrequency(_ value: String) -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "at startup": return "AtStartup"
+        case "hourly": return "Hourly"
+        case "daily": return "Daily"
+        default: return "Never"
+        }
+    }
+
+    private func addIgnoredApplicationsRow(to grid: NSGridView) {
+        let labelView = NSTextField(labelWithString: "Ignored applications")
+        labelView.alignment = .right
+        ignoredApplicationsView.isRichText = false
+        ignoredApplicationsView.isAutomaticQuoteSubstitutionEnabled = false
+        ignoredApplicationsView.isAutomaticDashSubstitutionEnabled = false
+        ignoredApplicationsView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        ignoredApplicationsView.setAccessibilityLabel("Ignored applications")
+        ignoredApplicationsView.setAccessibilityHelp("One Mac app name, bundle identifier, or executable name per line, such as Safari, com.apple.TextEdit, or KeePassXC.")
+
+        let scroll = NSScrollView()
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.documentView = ignoredApplicationsView
+        scroll.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 430).isActive = true
+        grid.addRow(with: [labelView, scroll])
+
+        let note = NSTextField(labelWithString: "One Mac app name, bundle identifier, or executable name per line. Examples: Safari, com.apple.TextEdit, KeePassXC.")
+        note.textColor = .secondaryLabelColor
+        note.lineBreakMode = .byWordWrapping
+        note.maximumNumberOfLines = 2
+        grid.addRow(with: [NSGridCell.emptyContentView, note])
+    }
+
+    private func normalizedIgnoredApplications(_ value: String) -> [String] {
+        var seen = Set<String>()
+        return value
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { item in
+                let key = item.lowercased()
+                guard !seen.contains(key) else { return false }
+                seen.insert(key)
+                return true
+            }
     }
 }

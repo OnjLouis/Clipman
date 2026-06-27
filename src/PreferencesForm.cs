@@ -17,6 +17,7 @@ namespace Clipman
         private readonly ComboBox duplicateMode;
         private readonly CheckBox soundsEnabled;
         private readonly CheckBox autoGroupByApp;
+        private readonly CheckBox autoCopyLatestRemoteText;
         private readonly CheckBox autoRemoveUrlTracking;
         private readonly CheckBox saveListPosition;
         private readonly CheckBox active;
@@ -83,6 +84,8 @@ namespace Clipman
             active = NewCheckBox("Clipboard monitoring &active", settings.Active);
             soundsEnabled = NewCheckBox("Play &sounds", settings.SoundsEnabled);
             autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
+            autoCopyLatestRemoteText = NewCheckBox("Put new text received from another &machine on the clipboard", settings.AutoCopyLatestRemoteText);
+            autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another machine onto this machine's clipboard. Reusing an older entry on another machine does not trigger this. This is off by default.";
             autoRemoveUrlTracking = NewCheckBox("Automatically remove URL &tracking from copied text", settings.AutoRemoveUrlTracking);
             saveListPosition = NewCheckBox("Save list &position", settings.SaveListPosition);
             removeDuplicates = NewCheckBox("&Remove duplicate entries", settings.RemoveDuplicates);
@@ -95,6 +98,7 @@ namespace Clipman
             AddFullRow(generalLayout, active);
             AddFullRow(generalLayout, soundsEnabled);
             AddFullRow(generalLayout, autoGroupByApp);
+            AddFullRow(generalLayout, autoCopyLatestRemoteText);
             AddFullRow(generalLayout, autoRemoveUrlTracking);
             AddFullRow(generalLayout, saveListPosition);
             AddFullRow(generalLayout, removeDuplicates);
@@ -268,6 +272,7 @@ namespace Clipman
             };
             soundsEnabled.CheckedChanged += (s, e) => ApplyNow();
             autoGroupByApp.CheckedChanged += (s, e) => ApplyNow();
+            autoCopyLatestRemoteText.CheckedChanged += (s, e) => ApplyNow();
             autoRemoveUrlTracking.CheckedChanged += (s, e) => ApplyNow();
             saveListPosition.CheckedChanged += (s, e) => ApplyNow();
             active.CheckedChanged += (s, e) => ApplyNow();
@@ -291,6 +296,7 @@ namespace Clipman
             HotkeyDefinition parsed;
             if (!HotkeyDefinition.TryParse(showHotkey.Text, out parsed) ||
                 !HotkeyDefinition.TryParse(toggleHotkey.Text, out parsed) ||
+                HotkeysConflict(showHotkey.Text, toggleHotkey.Text) ||
                 string.IsNullOrWhiteSpace(databasePath.Text))
             {
                 return;
@@ -304,6 +310,7 @@ namespace Clipman
             settings.RemoveDuplicates = !string.Equals(settings.DuplicateMode, "KeepBoth", StringComparison.OrdinalIgnoreCase);
             settings.SoundsEnabled = soundsEnabled.Checked;
             settings.AutoGroupByApp = autoGroupByApp.Checked;
+            settings.AutoCopyLatestRemoteText = autoCopyLatestRemoteText.Checked;
             settings.AutoRemoveUrlTracking = autoRemoveUrlTracking.Checked;
             settings.SaveListPosition = saveListPosition.Checked;
             settings.Active = active.Checked;
@@ -526,6 +533,10 @@ namespace Clipman
             {
                 ShowHistoryHotkey = current.ShowHistoryHotkey,
                 ToggleActiveHotkey = current.ToggleActiveHotkey,
+                QuickCopyHotkeys = current.QuickCopyHotkeys == null
+                    ? new List<QuickCopyBinding>()
+                    : current.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey }).ToList(),
+                AutoCopyLatestRemoteText = current.AutoCopyLatestRemoteText,
                 RemoveDuplicates = current.RemoveDuplicates,
                 SoundsEnabled = current.SoundsEnabled,
                 SaveListPosition = current.SaveListPosition,
@@ -736,6 +747,18 @@ namespace Clipman
             if (string.Equals(value, "Hourly", StringComparison.OrdinalIgnoreCase)) return "Hourly";
             if (string.Equals(value, "Daily", StringComparison.OrdinalIgnoreCase)) return "Daily";
             return "Never";
+        }
+
+        private static bool HotkeysConflict(params string[] hotkeys)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var hotkey in hotkeys ?? Enumerable.Empty<string>())
+            {
+                var normalized = (hotkey ?? string.Empty).Trim();
+                if (normalized.Length == 0) continue;
+                if (!seen.Add(normalized)) return true;
+            }
+            return false;
         }
 
         private static void HotkeyBoxKeyDown(object sender, KeyEventArgs e)

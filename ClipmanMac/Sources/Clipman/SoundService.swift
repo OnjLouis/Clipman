@@ -5,6 +5,7 @@ final class SoundService {
         case copy = "copy.wav"
         case on = "on.wav"
         case off = "off.wav"
+        case remote = "remote.wav"
         case skip = "skip.wav"
     }
 

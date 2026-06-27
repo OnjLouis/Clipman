@@ -2,14 +2,16 @@ import AppKit
 
 @MainActor
 protocol ClipboardMonitorDelegate: AnyObject {
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, sourceApplication: String)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool)
+    func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor)
 }
 
 @MainActor
 final class ClipboardMonitor: @unchecked Sendable {
     weak var delegate: ClipboardMonitorDelegate?
     var isEnabled = true
+    var ignoredApplications: [String] = []
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var ignoredChangeCount: Int?
@@ -28,7 +30,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         let pasteboard = NSPasteboard.general
         lastChangeCount = pasteboard.changeCount
         ignoredChangeCount = nil
-        capture(from: pasteboard)
+        capture(from: pasteboard, playSkipSound: false)
     }
 
     func stop() {
@@ -65,17 +67,64 @@ final class ClipboardMonitor: @unchecked Sendable {
             ignoredChangeCount = nil
             return
         }
-        capture(from: pasteboard)
+        capture(from: pasteboard, playSkipSound: true)
     }
 
-    private func capture(from pasteboard: NSPasteboard) {
+    private func capture(from pasteboard: NSPasteboard, playSkipSound: Bool) {
         guard isEnabled else { return }
+        guard !isIgnoredForegroundApplication() else {
+            if playSkipSound {
+                delegate?.clipboardMonitorDidSkipIgnoredApplication(self)
+            }
+            return
+        }
         if let fileCapture = fileCapture(from: pasteboard) {
             delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil)
             return
         }
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
-        delegate?.clipboardMonitor(self, didCapture: text)
+        delegate?.clipboardMonitor(self, didCapture: text, sourceApplication: sourceApplicationName())
+    }
+
+    private func sourceApplicationName() -> String {
+        guard let application = NSWorkspace.shared.frontmostApplication,
+              application.processIdentifier != NSRunningApplication.current.processIdentifier
+        else { return "" }
+        return application.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func isIgnoredForegroundApplication() -> Bool {
+        let ignored = ignoredApplications
+            .map { normalizeIgnoredApplicationName($0) }
+            .filter { !$0.isEmpty }
+        guard !ignored.isEmpty,
+              let application = NSWorkspace.shared.frontmostApplication,
+              application.processIdentifier != NSRunningApplication.current.processIdentifier
+        else { return false }
+
+        let candidates = [
+            application.localizedName,
+            application.bundleIdentifier,
+            application.executableURL?.lastPathComponent,
+            application.executableURL?.deletingPathExtension().lastPathComponent,
+            application.bundleURL?.lastPathComponent,
+            application.bundleURL?.deletingPathExtension().lastPathComponent
+        ]
+            .compactMap { $0 }
+            .map { normalizeIgnoredApplicationName($0) }
+            .filter { !$0.isEmpty }
+
+        return candidates.contains { candidate in
+            ignored.contains(candidate)
+        }
+    }
+
+    private func normalizeIgnoredApplicationName(_ value: String) -> String {
+        var trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().hasSuffix(".app") || trimmed.lowercased().hasSuffix(".exe") {
+            trimmed = URL(fileURLWithPath: trimmed).deletingPathExtension().lastPathComponent
+        }
+        return trimmed.lowercased()
     }
 
     private func fileCapture(from pasteboard: NSPasteboard) -> (files: [String], formats: [String])? {
@@ -110,22 +159,5 @@ final class ClipboardMonitor: @unchecked Sendable {
         }
 
         return Array(Set(paths)).sorted()
-    }
-
-    private func pasteboardContainsFiles(_ pasteboard: NSPasteboard) -> Bool {
-        let fileTypes = Set([
-            NSPasteboard.PasteboardType.fileURL.rawValue,
-            "public.file-url",
-            "com.apple.pasteboard.promised-file-url",
-            "NSFilenamesPboardType"
-        ])
-
-        if pasteboard.types?.contains(where: { fileTypes.contains($0.rawValue) }) == true {
-            return true
-        }
-
-        return pasteboard.pasteboardItems?.contains { item in
-            item.types.contains { fileTypes.contains($0.rawValue) }
-        } ?? false
     }
 }

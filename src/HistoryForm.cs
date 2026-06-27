@@ -16,6 +16,7 @@ namespace Clipman
         private readonly ClipStore store;
         private readonly AppSettings settings;
         private readonly Action saveSettings;
+        private readonly Action refreshHotkeys;
         private readonly Action<ClipEntry> copyEntry;
         private readonly Action<List<ClipEntry>> copyEntries;
         private readonly Func<List<ClipboardEventSummary>> recentClipboardEvents;
@@ -59,11 +60,12 @@ namespace Clipman
         private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
             this.saveSettings = saveSettings;
+            this.refreshHotkeys = refreshHotkeys;
             this.copyEntry = copyEntry;
             this.copyEntries = copyEntries;
             this.recentClipboardEvents = recentClipboardEvents;
@@ -266,6 +268,7 @@ namespace Clipman
             fileEventsList.BeginUpdate();
             fileEventsList.Items.Clear();
             var insertedSeparator = false;
+            var pinnedEventPosition = 0;
             foreach (var item in events)
             {
                 if (!item.Pinned && !insertedSeparator && events.Any(e => e.Pinned))
@@ -283,13 +286,13 @@ namespace Clipman
                 }
 
                 NormalizeFileClipboardEvent(item);
-                var text = FileEventDisplayText(item);
+                var text = item.Pinned ? NumberedPinnedDisplayText(FileEventDisplayText(item), pinnedEventPosition++) : FileEventDisplayText(item);
                 var row = new ListViewItem(text);
                 row.SubItems.Add(NormalizeDropEffectText(item.Operation));
                 row.SubItems.Add(item.FileCount > 0 ? item.FileCount.ToString() : string.Empty);
                 row.SubItems.Add(item.Source ?? string.Empty);
                 row.SubItems.Add(item.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss"));
-                row.SubItems.Add(item.Pinned ? "Yes" : string.Empty);
+                row.SubItems.Add(item.Pinned ? "Pinned" : string.Empty);
                 row.Tag = item;
                 fileEventsList.Items.Add(row);
             }
@@ -319,6 +322,7 @@ namespace Clipman
             list.BeginUpdate();
             list.Items.Clear();
             var insertedSeparator = false;
+            var pinnedEntryPosition = 0;
             foreach (var entry in entries)
             {
                 if (!entry.Pinned && !insertedSeparator && entries.Any(e => e.Pinned))
@@ -335,12 +339,12 @@ namespace Clipman
                     insertedSeparator = true;
                 }
 
-                var item = new ListViewItem(DisplayText(entry));
+                var item = new ListViewItem(entry.Pinned ? NumberedPinnedDisplayText(DisplayText(entry), pinnedEntryPosition++) : DisplayText(entry));
                 item.SubItems.Add(entry.Group ?? string.Empty);
                 item.SubItems.Add(entry.SourceMachine ?? string.Empty);
                 item.SubItems.Add(TimeUtil.FromUnixMs(entry.LastUsedUnixMs).ToString("yyyy-MM-dd HH:mm:ss"));
                 item.SubItems.Add(TimeUtil.FromUnixMs(entry.CreatedUnixMs).ToString("yyyy-MM-dd HH:mm:ss"));
-                item.SubItems.Add(entry.Pinned ? "Yes" : string.Empty);
+                item.SubItems.Add(entry.Pinned ? "Pinned" : string.Empty);
                 item.Tag = entry;
                 list.Items.Add(item);
             }
@@ -527,10 +531,10 @@ namespace Clipman
             edit.DropDownItems.Add("&Copy\tCtrl+C", null, (s, e) => CopySelected(false));
             edit.DropDownItems.Add("Cu&t\tCtrl+X", null, (s, e) => CutSelected());
             edit.DropDownItems.Add("Paste &after selected\tCtrl+V", null, (s, e) => PasteAfterSelected());
-            edit.DropDownItems.Add("&Edit entry...\tF2", null, (s, e) => NameSelectedEntry());
             groupEntryMenuItem = new ToolStripMenuItem("&Group entry...\tCtrl+G", null, (s, e) => GroupSelectedEntries());
             edit.DropDownItems.Add(groupEntryMenuItem);
-            edit.DropDownItems.Add("Entry &properties...\tAlt+Enter", null, (s, e) => ShowEntryProperties());
+            edit.DropDownItems.Add("Entry &properties...\tF2", null, (s, e) => ShowEntryProperties());
+            edit.DropDownItems.Add("Set as &quick-copy target...", null, (s, e) => ShowEntryProperties(true));
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
             edit.DropDownItems.Add("Pin or &unpin\tShift+Enter", null, (s, e) => TogglePinned());
             edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelected());
@@ -563,9 +567,9 @@ namespace Clipman
             menu.Items.Add("&Copy\tCtrl+C", null, (sender, args) => CopySelected(false));
             menu.Items.Add("Cu&t\tCtrl+X", null, (sender, args) => CutSelected());
             menu.Items.Add("Paste &after selected\tCtrl+V", null, (sender, args) => PasteAfterSelected());
-            menu.Items.Add("&Edit entry...\tF2", null, (sender, args) => NameSelectedEntry());
             menu.Items.Add("&Group entry...\tCtrl+G", null, (sender, args) => GroupSelectedEntries());
-            menu.Items.Add("Entry &properties...\tAlt+Enter", null, (sender, args) => ShowEntryProperties());
+            menu.Items.Add("Entry &properties...\tF2", null, (sender, args) => ShowEntryProperties());
+            menu.Items.Add("Set as &quick-copy target...", null, (sender, args) => ShowEntryProperties(true));
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
             menu.Items.Add(PinMenuText(), null, (sender, args) => TogglePinned());
             var pinnedShortcutPosition = SelectedPinnedEntryShortcutPosition();
@@ -672,7 +676,8 @@ namespace Clipman
             if (e.Alt && e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
-                ShowEntryProperties();
+                e.SuppressKeyPress = true;
+                statusText.Text = "Use F2 for Entry Properties.";
             }
             else if (e.KeyCode == Keys.Enter)
             {
@@ -774,7 +779,7 @@ namespace Clipman
             else if (e.KeyCode == Keys.F2)
             {
                 e.Handled = true;
-                NameSelectedEntry();
+                ShowEntryProperties();
             }
             else if (e.Modifiers == Keys.None && e.KeyCode == Keys.F4)
             {
@@ -799,11 +804,13 @@ namespace Clipman
             else if (e.Alt && e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D9)
             {
                 e.Handled = true;
+                e.SuppressKeyPress = true;
                 JumpToGroupByPosition(e.KeyCode - Keys.D1);
             }
             else if (e.Alt && e.KeyCode == Keys.D0)
             {
                 e.Handled = true;
+                e.SuppressKeyPress = true;
                 JumpToGroupByPosition(9);
             }
             else if (e.Shift && e.KeyCode == Keys.F1)
@@ -1005,6 +1012,16 @@ namespace Clipman
             if ((keyData & Keys.Alt) == Keys.Alt)
             {
                 var key = keyData & Keys.KeyCode;
+                if (key >= Keys.D1 && key <= Keys.D9)
+                {
+                    JumpToGroupByPosition(key - Keys.D1);
+                    return true;
+                }
+                if (key == Keys.D0)
+                {
+                    JumpToGroupByPosition(9);
+                    return true;
+                }
                 if (IsFileClipboardTabActive() && key == Keys.Delete)
                 {
                     RemoveUnavailableFileClipboardEvents();
@@ -1599,15 +1616,20 @@ namespace Clipman
         {
             if (fileEventsList == null || fileEventsList.SelectedItems.Count == 0) return;
             var preferredIndex = fileEventsList.SelectedItems[0].Index;
-            var requested = SelectedFileClipboardEvents().Count;
+            var requested = SelectedFileClipboardEvents();
             var ids = fileEventsList.SelectedItems.Cast<ListViewItem>()
                 .Select(i => i.Tag as ClipboardEventSummary)
-                .Where(e => e != null && !string.IsNullOrWhiteSpace(e.Id))
+                .Where(e => e != null && !e.Pinned && !string.IsNullOrWhiteSpace(e.Id))
                 .Select(e => e.Id)
                 .ToList();
+            if (ids.Count == 0 && requested.Count > 0)
+            {
+                statusText.Text = "Pinned file-history events are protected. Unpin before deleting.";
+                return;
+            }
             var removed = deleteRecentClipboardEvents == null ? 0 : deleteRecentClipboardEvents(ids);
             RefreshFileClipboardEvents(preferredIndex);
-            if (removed == 0 && requested > 0)
+            if (removed == 0 && requested.Count > 0)
             {
                 statusText.Text = "Pinned file-history events are protected. Unpin before deleting.";
             }
@@ -1956,6 +1978,7 @@ namespace Clipman
         private void DeleteSelected()
         {
             if (list.SelectedItems.Count == 0) return;
+            var selectedEntries = SelectedEntries();
             var preferredIndex = list.SelectedItems.Cast<ListViewItem>()
                 .Where(i => i.Tag is ClipEntry)
                 .Select(i => i.Index)
@@ -1968,6 +1991,11 @@ namespace Clipman
                 })
                 .Where(id => !string.IsNullOrEmpty(id))
                 .ToList();
+            if (ids.Count == 0 && selectedEntries.Count > 0)
+            {
+                statusText.Text = "Pinned entries are protected. Unpin before deleting.";
+                return;
+            }
             SaveListPositionIndex(preferredIndex);
             store.DeleteMany(ids);
             Reload(null, preferredIndex);
@@ -2078,26 +2106,6 @@ namespace Clipman
                 : "Toggled pinned state for " + selected.Count + " entries.";
         }
 
-        private void NameSelectedEntry()
-        {
-            var selected = SelectedEntries();
-            if (selected.Count == 0) return;
-            if (selected.Count > 1)
-            {
-                statusText.Text = "Select one entry to name it.";
-                return;
-            }
-
-            var entry = selected[0];
-            using (var dialog = new EntryNameForm(entry.Name, entry.Text))
-            {
-                if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                store.SetNameAndText(entry.Id, dialog.EntryName, dialog.EntryText);
-                Reload(entry.Id, -1);
-                statusText.Text = "Updated selected clipboard entry.";
-            }
-        }
-
         private void GroupSelectedEntries()
         {
             var selected = SelectedEntries();
@@ -2121,6 +2129,11 @@ namespace Clipman
 
         private void ShowEntryProperties()
         {
+            ShowEntryProperties(false);
+        }
+
+        private void ShowEntryProperties(bool forceQuickCopyTarget)
+        {
             var selected = SelectedEntries();
             if (selected.Count == 0) return;
             if (selected.Count > 1)
@@ -2131,7 +2144,13 @@ namespace Clipman
 
             var entry = selected[0];
             var preferredIndex = list.SelectedIndices.Count > 0 ? list.SelectedIndices[0] : -1;
-            using (var dialog = new EntryPropertiesForm(entry))
+            var existingQuickCopyHotkey = QuickCopyHotkeyForEntry(entry.Id);
+            var wasQuickCopyTarget = existingQuickCopyHotkey.Length > 0;
+            using (var dialog = new EntryPropertiesForm(
+                entry,
+                forceQuickCopyTarget || existingQuickCopyHotkey.Length > 0,
+                existingQuickCopyHotkey,
+                forceQuickCopyTarget))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 if (dialog.DeleteRequested)
@@ -2149,13 +2168,95 @@ namespace Clipman
                     return;
                 }
 
-                store.SetName(entry.Id, dialog.EntryName);
+                if (!ValidateQuickCopySettings(dialog.EntryIsQuickCopyTarget, dialog.EntryQuickCopyHotkey))
+                {
+                    return;
+                }
+
+                store.SetNameAndText(entry.Id, dialog.EntryName, dialog.EntryText);
                 store.SetGroup(new[] { entry.Id }, dialog.EntryGroup);
                 store.SetPinned(entry.Id, dialog.EntryPinned);
+                if (dialog.EntryIsQuickCopyTarget)
+                {
+                    SetQuickCopyHotkeyForEntry(entry.Id, dialog.EntryQuickCopyHotkey);
+                }
+                else
+                {
+                    RemoveQuickCopyHotkeyForEntry(entry.Id);
+                }
+                if (saveSettings != null) saveSettings();
+                if (QuickCopyAssignmentChanged(wasQuickCopyTarget, existingQuickCopyHotkey, dialog.EntryIsQuickCopyTarget, dialog.EntryQuickCopyHotkey) &&
+                    refreshHotkeys != null)
+                {
+                    refreshHotkeys();
+                }
                 RefreshGroupFilterItems();
                 Reload(entry.Id, -1);
                 statusText.Text = "Updated clipboard entry properties.";
             }
+        }
+
+        private static bool QuickCopyAssignmentChanged(bool wasQuickCopyTarget, string oldHotkey, bool isQuickCopyTarget, string newHotkey)
+        {
+            if (wasQuickCopyTarget != isQuickCopyTarget) return true;
+            return !string.Equals((oldHotkey ?? string.Empty).Trim(), (newHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool ValidateQuickCopySettings(bool isQuickCopyTarget, string quickCopyHotkey)
+        {
+            if (!isQuickCopyTarget)
+            {
+                return true;
+            }
+
+            HotkeyDefinition parsed;
+            if (!HotkeyDefinition.TryParse(quickCopyHotkey, out parsed))
+            {
+                MessageBox.Show(this, "Choose a valid Quick Copy hotkey before saving this Quick Copy assignment.", "Clipman Quick Copy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ShowHistoryHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ToggleActiveHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this, "The Quick Copy hotkey must be different from the Show History and Toggle Monitoring hotkeys.", "Clipman Quick Copy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            var currentEntry = SelectedEntries().FirstOrDefault();
+            var currentEntryId = currentEntry == null ? string.Empty : currentEntry.Id;
+            if ((settings.QuickCopyHotkeys ?? new List<QuickCopyBinding>()).Any(b =>
+                b != null &&
+                !string.Equals(b.EntryId, currentEntryId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals((b.Hotkey ?? string.Empty).Trim(), (quickCopyHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show(this, "Another Quick Copy entry already uses this hotkey.", "Clipman Quick Copy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            return true;
+        }
+
+        private string QuickCopyHotkeyForEntry(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || settings.QuickCopyHotkeys == null) return string.Empty;
+            var binding = settings.QuickCopyHotkeys.FirstOrDefault(b =>
+                b != null && string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+            return binding == null ? string.Empty : (binding.Hotkey ?? string.Empty).Trim();
+        }
+
+        private void SetQuickCopyHotkeyForEntry(string entryId, string hotkey)
+        {
+            if (string.IsNullOrWhiteSpace(entryId)) return;
+            if (settings.QuickCopyHotkeys == null) settings.QuickCopyHotkeys = new List<QuickCopyBinding>();
+            settings.QuickCopyHotkeys.RemoveAll(b => b == null || string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+            settings.QuickCopyHotkeys.Add(new QuickCopyBinding { EntryId = entryId, Hotkey = (hotkey ?? string.Empty).Trim() });
+        }
+
+        private void RemoveQuickCopyHotkeyForEntry(string entryId)
+        {
+            if (settings.QuickCopyHotkeys == null) settings.QuickCopyHotkeys = new List<QuickCopyBinding>();
+            settings.QuickCopyHotkeys.RemoveAll(b => b == null || string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
         }
 
         private void TransformSelected(Func<string, string> transform, string statusMessage)
@@ -2829,6 +2930,12 @@ namespace Clipman
             var text = Summarize(entry.Text);
             var name = (entry.Name ?? string.Empty).Trim();
             return name.Length == 0 ? text : name + ": " + text;
+        }
+
+        private static string NumberedPinnedDisplayText(string text, int zeroBasedPosition)
+        {
+            if (zeroBasedPosition < 0 || zeroBasedPosition > 9) return text ?? string.Empty;
+            return ShortcutDisplayNumber(zeroBasedPosition) + ". " + (text ?? string.Empty);
         }
 
         private static string Summarize(string text)

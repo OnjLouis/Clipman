@@ -8,14 +8,22 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didTogglePin entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didDelete entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didEdit entry: ClipEntry, name: String, text: String)
+    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?)
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry])
+    func historyWindow(_ controller: HistoryWindowController, didMove entries: [ClipEntry], direction: Int)
     func historyWindowDidRequestPaste(_ controller: HistoryWindowController, after entry: ClipEntry?)
+    func historyWindowDidRequestImport(_ controller: HistoryWindowController)
+    func historyWindowDidRequestExport(_ controller: HistoryWindowController)
+    func historyWindow(_ controller: HistoryWindowController, didCleanURLTracking entries: [ClipEntry])
+    func historyWindow(_ controller: HistoryWindowController, didCleanLinksForSharing entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didSetGroup group: String, for entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didChooseFileEvent event: FileClipboardEvent)
     func historyWindow(_ controller: HistoryWindowController, didTogglePinFileEvent event: FileClipboardEvent)
     func historyWindow(_ controller: HistoryWindowController, didDeleteFileEvent event: FileClipboardEvent)
     func historyWindow(_ controller: HistoryWindowController, didCopyFilePaths events: [FileClipboardEvent])
+    func historyWindow(_ controller: HistoryWindowController, didRequestGoToFileEvent event: FileClipboardEvent)
+    func historyWindow(_ controller: HistoryWindowController, didMoveFileEvents events: [FileClipboardEvent], direction: Int)
     func historyWindowDidRequestClearNormalFileHistory(_ controller: HistoryWindowController)
     func historyWindowDidRequestRemoveUnavailableFileHistory(_ controller: HistoryWindowController)
     func historyWindow(_ controller: HistoryWindowController, didChangeModeToFileHistory isFileHistory: Bool)
@@ -23,6 +31,12 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindowDidToggleSortDirection(_ controller: HistoryWindowController, fileHistory: Bool)
     func historyWindow(_ controller: HistoryWindowController, didChangeGroupFilter groupFilter: String)
     func historyWindowDidRequestPreferences(_ controller: HistoryWindowController)
+    func historyWindowDidRequestManual(_ controller: HistoryWindowController)
+    func historyWindowDidRequestUpdateCheck(_ controller: HistoryWindowController)
+    func historyWindowDidRequestProjectPage(_ controller: HistoryWindowController)
+    func historyWindowDidRequestContact(_ controller: HistoryWindowController)
+    func historyWindowDidRequestDonate(_ controller: HistoryWindowController)
+    func historyWindowDidRequestDiagnostics(_ controller: HistoryWindowController)
     func historyWindowDidHide(_ controller: HistoryWindowController)
 }
 
@@ -31,18 +45,36 @@ final class HistoryWindow: NSWindow {
     var onShiftEnter: (() -> Void)?
     var onEscape: (() -> Void)?
     var onFind: (() -> Void)?
+    var onFindNext: (() -> Void)?
+    var onFindPrevious: (() -> Void)?
     var onBackspace: (() -> Void)?
     var onCommandBackspace: (() -> Void)?
     var onEdit: (() -> Void)?
     var onCopy: (() -> Void)?
     var onCut: (() -> Void)?
     var onPaste: (() -> Void)?
+    var onImport: (() -> Void)?
+    var onExport: (() -> Void)?
+    var onCleanTracking: (() -> Void)?
+    var onCleanForSharing: (() -> Void)?
     var onGroup: (() -> Void)?
     var onGroupFilter: (() -> Void)?
     var onGroupFilterPosition: ((Int) -> Void)?
+    var onGoToFile: (() -> Void)?
+    var onMoveUp: (() -> Void)?
+    var onMoveDown: (() -> Void)?
     var onSwitchMode: ((Int) -> Void)?
     var onPinnedShortcut: ((Int) -> Void)?
     var onActionsMenu: (() -> Void)?
+    var onView: (() -> Void)?
+    var onManual: (() -> Void)?
+    var onUpdateCheck: (() -> Void)?
+    var onProjectPage: (() -> Void)?
+    var onDiagnostics: (() -> Void)?
+    var onFirstRow: (() -> Void)?
+    var onLastRow: (() -> Void)?
+    var onPageUp: (() -> Void)?
+    var onPageDown: (() -> Void)?
     var onHide: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
@@ -53,35 +85,104 @@ final class HistoryWindow: NSWindow {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if handleClipmanShortcut(event) { return true }
+        if handleListNavigationShortcut(event) { return true }
+        if handleFunctionKeyShortcut(event) { return true }
         return super.performKeyEquivalent(with: event)
     }
 
     private func handleClipmanShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if let digitIndex = Self.digitIndex(for: event.keyCode) {
-            if event.modifierFlags.contains(.command) {
-                guard !event.modifierFlags.contains(.shift) else { return false }
+            if modifiers == [.command] {
                 onPinnedShortcut?(digitIndex)
                 return true
             }
-            if event.modifierFlags.contains(.control), digitIndex == 0 || digitIndex == 1 {
+            if modifiers == [.control], digitIndex == 0 || digitIndex == 1 {
                 onSwitchMode?(digitIndex)
                 return true
             }
-            if event.modifierFlags.contains(.option) {
+            if modifiers == [.option] {
                 onGroupFilterPosition?(digitIndex)
                 return true
             }
         }
-        if event.keyCode == UInt16(kVK_ANSI_M), event.modifierFlags.contains(.option) {
+        if event.keyCode == UInt16(kVK_ANSI_M), modifiers == [.option] {
             onActionsMenu?()
             return true
         }
-        if event.keyCode == UInt16(kVK_ANSI_G), event.modifierFlags.contains(.command) {
+        if event.keyCode == UInt16(kVK_ANSI_G), modifiers == [.command] {
             onGroup?()
             return true
         }
-        if event.keyCode == UInt16(kVK_ANSI_G), event.modifierFlags.contains(.option) {
+        if event.keyCode == UInt16(kVK_ANSI_G), modifiers == [.option] {
             onGroupFilter?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_UpArrow), modifiers == [.option] {
+            onMoveUp?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_DownArrow), modifiers == [.option] {
+            onMoveDown?()
+            return true
+        }
+        return false
+    }
+
+    private func handleListNavigationShortcut(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else {
+            return false
+        }
+        if event.keyCode == UInt16(kVK_Home) {
+            onFirstRow?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_End) {
+            onLastRow?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_PageUp) {
+            onPageUp?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_PageDown) {
+            onPageDown?()
+            return true
+        }
+        return false
+    }
+
+    private func handleFunctionKeyShortcut(_ event: NSEvent) -> Bool {
+        if event.keyCode == UInt16(kVK_F1) {
+            let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            if modifiers == [.command] || modifiers == [.control] {
+                onProjectPage?()
+            } else if modifiers == [.option] {
+                onDiagnostics?()
+            } else if modifiers == [.shift] {
+                onUpdateCheck?()
+            } else if modifiers.isEmpty {
+                onManual?()
+            } else {
+                return false
+            }
+            return true
+        }
+        if event.keyCode == UInt16(kVK_F3) {
+            let commandModifiers = event.modifierFlags.intersection([.command, .control, .option])
+            guard commandModifiers.isEmpty else { return false }
+            if event.modifierFlags.contains(.shift) {
+                onFindPrevious?()
+            } else {
+                onFindNext?()
+            }
+            return true
+        }
+        if event.keyCode == UInt16(kVK_F4) {
+            guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else {
+                return false
+            }
+            onView?()
             return true
         }
         return false
@@ -96,10 +197,18 @@ final class HistoryWindow: NSWindow {
     }
 
     private func handleWindowCommand(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if event.keyCode == UInt16(kVK_Return) {
-            if event.modifierFlags.contains(.shift) {
+            if modifiers == [.shift] {
                 onShiftEnter?()
                 return true
+            }
+            if modifiers == [.command] {
+                onGoToFile?()
+                return true
+            }
+            guard modifiers.isEmpty else {
+                return false
             }
             onEnter?()
             return true
@@ -108,38 +217,60 @@ final class HistoryWindow: NSWindow {
             onEscape?()
             return true
         }
-        if event.keyCode == UInt16(kVK_ANSI_F), event.modifierFlags.contains(.command) {
+        if event.keyCode == UInt16(kVK_ANSI_F), modifiers == [.command] {
             onFind?()
             return true
         }
+        if event.keyCode == UInt16(kVK_ANSI_I), modifiers == [.command] {
+            onImport?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_ANSI_E), modifiers == [.command] {
+            onExport?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_ANSI_R), modifiers == [.command, .shift] {
+            onCleanTracking?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_ANSI_S), modifiers == [.command, .shift] {
+            onCleanForSharing?()
+            return true
+        }
+        if handleFunctionKeyShortcut(event) { return true }
         if event.keyCode == UInt16(kVK_Delete) {
-            if event.modifierFlags.contains(.command) {
+            if modifiers == [.command] || modifiers == [.control] || modifiers == [.option] {
                 onCommandBackspace?()
-            } else {
+            } else if modifiers.isEmpty {
                 onBackspace?()
+            } else {
+                return false
             }
             return true
         }
         if event.keyCode == UInt16(kVK_ForwardDelete) {
+            guard modifiers.isEmpty || modifiers == [.command] else { return false }
             onCommandBackspace?()
             return true
         }
-        if event.keyCode == UInt16(kVK_F2) {
+        if event.keyCode == UInt16(kVK_F2),
+           modifiers.isEmpty {
             onEdit?()
             return true
         }
-        if event.keyCode == UInt16(kVK_ANSI_C), event.modifierFlags.contains(.command) {
+        if event.keyCode == UInt16(kVK_ANSI_C), modifiers == [.command] {
             onCopy?()
             return true
         }
-        if event.keyCode == UInt16(kVK_ANSI_X), event.modifierFlags.contains(.command) {
+        if event.keyCode == UInt16(kVK_ANSI_X), modifiers == [.command] {
             onCut?()
             return true
         }
-        if event.keyCode == UInt16(kVK_ANSI_V), event.modifierFlags.contains(.command) {
+        if event.keyCode == UInt16(kVK_ANSI_V), modifiers == [.command] {
             onPaste?()
             return true
         }
+        if handleListNavigationShortcut(event) { return true }
         return false
     }
 
@@ -209,6 +340,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var filteredFileEvents: [FileClipboardEvent] = []
     private var rows: [Row] = []
     private var preferredRowAfterReload: Int?
+    private var rememberedTextSelectionID: String?
+    private var rememberedTextSelectionRow: Int?
+    private var rememberedFileSelectionID: String?
+    private var rememberedFileSelectionRow: Int?
+    private var showHistoryHotkey: HotkeyDescriptor?
+    private var toggleMonitoringHotkey: HotkeyDescriptor?
+    private var quickCopyHotkeys: [String: HotkeyDescriptor] = [:]
     private var keyMonitor: Any?
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -230,18 +368,48 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.onShiftEnter = { [weak self] in self?.toggleSelectedPin() }
         window.onEscape = { [weak self] in (self?.window as? HistoryWindow)?.hide() }
         window.onFind = { [weak self] in self?.focusSearch() }
+        window.onFindNext = { [weak self] in self?.selectSearchResult(direction: 1) }
+        window.onFindPrevious = { [weak self] in self?.selectSearchResult(direction: -1) }
         window.onBackspace = { [weak self] in self?.jumpToFirstNormalEntry() }
         window.onCommandBackspace = { [weak self] in self?.deleteSelectedEntry() }
         window.onEdit = { [weak self] in self?.editSelectedEntry() }
+        window.onView = { [weak self] in self?.viewSelectedItem() }
         window.onCopy = { [weak self] in self?.copySelectedEntries() }
         window.onCut = { [weak self] in self?.cutSelectedEntries() }
         window.onPaste = { [weak self] in self?.pasteAfterSelectedEntry() }
+        window.onImport = { [weak self] in self?.requestImport() }
+        window.onExport = { [weak self] in self?.requestExport() }
+        window.onCleanTracking = { [weak self] in self?.cleanSelectedEntriesForTracking() }
+        window.onCleanForSharing = { [weak self] in self?.cleanSelectedEntriesForSharing() }
         window.onGroup = { [weak self] in self?.groupSelectedEntries() }
         window.onGroupFilter = { [weak self] in self?.showGroupFilterMenu() }
         window.onGroupFilterPosition = { [weak self] index in self?.applyGroupFilter(at: index) }
+        window.onGoToFile = { [weak self] in self?.goToSelectedFileEvent() }
+        window.onMoveUp = { [weak self] in self?.moveSelectedItems(direction: -1) }
+        window.onMoveDown = { [weak self] in self?.moveSelectedItems(direction: 1) }
         window.onSwitchMode = { [weak self] index in self?.setMode(index == 1 ? .files : .text, notify: true) }
         window.onPinnedShortcut = { [weak self] index in self?.activatePinnedShortcut(index: index) }
         window.onActionsMenu = { [weak self] in self?.showActionsMenu() }
+        window.onManual = { [weak self] in
+            guard let self else { return }
+            self.historyDelegate?.historyWindowDidRequestManual(self)
+        }
+        window.onUpdateCheck = { [weak self] in
+            guard let self else { return }
+            self.historyDelegate?.historyWindowDidRequestUpdateCheck(self)
+        }
+        window.onProjectPage = { [weak self] in
+            guard let self else { return }
+            self.historyDelegate?.historyWindowDidRequestProjectPage(self)
+        }
+        window.onDiagnostics = { [weak self] in
+            guard let self else { return }
+            self.historyDelegate?.historyWindowDidRequestDiagnostics(self)
+        }
+        window.onFirstRow = { [weak self] in self?.selectBoundaryRow(first: true) }
+        window.onLastRow = { [weak self] in self?.selectBoundaryRow(first: false) }
+        window.onPageUp = { [weak self] in self?.selectPage(direction: -1) }
+        window.onPageDown = { [weak self] in self?.selectPage(direction: 1) }
         window.onHide = { [weak self] in
             guard let self else { return }
             self.historyDelegate?.historyWindowDidHide(self)
@@ -254,18 +422,24 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         (window as? HistoryWindow)?.hide()
     }
 
+    var isHistoryVisible: Bool {
+        window?.isVisible == true
+    }
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     func update(entries: [ClipEntry]) {
-        let selectedID = selectedID()
+        rememberSelectionForCurrentMode()
+        let selectedID = mode == .text ? selectedID() : rememberedTextSelectionID
         allEntries = entries
         applyFilter(preferredSelectedID: selectedID)
     }
 
     func update(fileEvents: [FileClipboardEvent]) {
-        let selectedID = selectedID()
+        rememberSelectionForCurrentMode()
+        let selectedID = mode == .files ? selectedID() : rememberedFileSelectionID
         allFileEvents = fileEvents
         applyFilter(preferredSelectedID: selectedID)
     }
@@ -283,17 +457,55 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         mode = selectedTab == 1 ? .files : .text
         modeControl.selectedSegment = mode.rawValue
         updateToolbarState()
-        applyFilter(preferredSelectedID: selectedID())
+        applyFilter(preferredSelectedID: rememberedSelectionID(for: mode))
+    }
+
+    func configureQuickCopy(showHistoryHotkey: HotkeyDescriptor, toggleMonitoringHotkey: HotkeyDescriptor, quickCopyHotkeys: [String: HotkeyDescriptor]) {
+        self.showHistoryHotkey = showHistoryHotkey
+        self.toggleMonitoringHotkey = toggleMonitoringHotkey
+        self.quickCopyHotkeys = quickCopyHotkeys
     }
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
-        window?.makeKeyAndOrderFront(sender)
-        NSApp.activate(ignoringOtherApps: true)
-        tableView.window?.makeFirstResponder(tableView)
+        focusHistoryWindow(sender)
         if tableView.selectedRow < 0 && !filteredEntries.isEmpty {
             tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         }
+    }
+
+    func focusHistoryWindow(_ sender: Any?) {
+        guard let window else { return }
+        window.orderFrontRegardless()
+        window.makeKeyAndOrderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
+        focusHistoryTable()
+        beginDelayedFocusAttempts()
+    }
+
+    private func beginDelayedFocusAttempts() {
+        for delay in [0.08, 0.25, 0.6] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      let window = self.window,
+                      window.isVisible
+                else { return }
+                NSApp.activate(ignoringOtherApps: true)
+                window.orderFrontRegardless()
+                window.makeKeyAndOrderFront(nil)
+                self.focusHistoryTable()
+            }
+        }
+    }
+
+    private func focusHistoryTable() {
+        guard let window else { return }
+        window.makeFirstResponder(tableView)
+        if tableView.selectedRow < 0,
+           let row = firstSelectableRow(startingAt: 0) {
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        NSAccessibility.post(element: tableView, notification: .focusedUIElementChanged)
     }
 
     private func buildUI() {
@@ -423,6 +635,21 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         applyFilter(preferredSelectedID: nil)
     }
 
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === searchField else { return false }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            focusHistoryTable()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            searchField.stringValue = ""
+            searchChanged()
+            focusHistoryTable()
+            return true
+        }
+        return false
+    }
+
     @objc private func modeChanged() {
         setMode(Mode(rawValue: modeControl.selectedSegment) ?? .text, notify: true)
     }
@@ -460,11 +687,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func setMode(_ newMode: Mode, notify: Bool) {
+        guard newMode != mode else {
+            tableView.window?.makeFirstResponder(tableView)
+            return
+        }
+        rememberSelectionForCurrentMode()
         mode = newMode
         modeControl.selectedSegment = newMode.rawValue
         updateTableAccessibility()
         updateToolbarState()
-        applyFilter(preferredSelectedID: nil)
+        applyFilter(preferredSelectedID: rememberedSelectionID(for: newMode))
         if notify {
             historyDelegate?.historyWindow(self, didChangeModeToFileHistory: mode == .files)
         }
@@ -506,6 +738,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                }
            }) {
             tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+            tableView.scrollRowToVisible(index)
         } else if let preferredRowAfterReload {
             self.preferredRowAfterReload = nil
             let clamped = max(0, min(preferredRowAfterReload, rows.count - 1))
@@ -513,10 +746,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 tableView.selectRowIndexes(IndexSet(integer: selectable), byExtendingSelection: false)
                 tableView.scrollRowToVisible(selectable)
             }
-        } else if rows.contains(where: { if case .separator = $0 { return false }; return true }) {
+        } else if let rememberedRow = rememberedSelectionRow(for: mode), !rows.isEmpty {
+            let clamped = max(0, min(rememberedRow, rows.count - 1))
+            let selectedRow = firstSelectableRow(startingAt: clamped) ?? firstSelectableRow(startingAt: 0) ?? 0
+            tableView.selectRowIndexes(IndexSet(integer: selectedRow), byExtendingSelection: false)
+            tableView.scrollRowToVisible(selectedRow)
+        } else if !rows.isEmpty {
             let selectedRow = firstSelectableRow(startingAt: min(max(tableView.selectedRow, 0), rows.count - 1)) ?? firstSelectableRow(startingAt: 0) ?? 0
             tableView.selectRowIndexes(IndexSet(integer: selectedRow), byExtendingSelection: false)
         }
+        rememberSelectionForCurrentMode()
     }
 
     private func filterEntriesByGroup(_ entries: [ClipEntry]) -> [ClipEntry] {
@@ -564,6 +803,33 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
 
+    private func rememberSelectionForCurrentMode() {
+        let row = tableView.selectedRow
+        let id = selectedID()
+        switch mode {
+        case .text:
+            rememberedTextSelectionID = id
+            rememberedTextSelectionRow = row >= 0 ? row : nil
+        case .files:
+            rememberedFileSelectionID = id
+            rememberedFileSelectionRow = row >= 0 ? row : nil
+        }
+    }
+
+    private func rememberedSelectionID(for mode: Mode) -> String? {
+        switch mode {
+        case .text: return rememberedTextSelectionID
+        case .files: return rememberedFileSelectionID
+        }
+    }
+
+    private func rememberedSelectionRow(for mode: Mode) -> Int? {
+        switch mode {
+        case .text: return rememberedTextSelectionRow
+        case .files: return rememberedFileSelectionRow
+        }
+    }
+
     private func sortDirectionTitle(descending: Bool) -> String {
         if mode == .files {
             switch fileSortMode.uppercased() {
@@ -592,12 +858,27 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if mode == .text {
             addMenuItem("Cut Selected", action: #selector(menuCutSelected), to: menu, shortcut: "Command+X")
             addMenuItem("Paste After Selected", action: #selector(menuPasteAfterSelected), to: menu, shortcut: "Command+V")
-            addMenuItem("Edit Selected", action: #selector(menuEditSelected), to: menu, shortcut: "F2")
+            addMenuItem("Entry Properties", action: #selector(menuEditSelected), to: menu, shortcut: "F2")
+            addMenuItem("View Selected Text", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
+            addMenuItem("Set As Quick Copy Target...", action: #selector(menuSetQuickCopyTarget), to: menu)
+        } else {
+            addMenuItem("View File Event Details", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
         }
         addMenuItem("Pin or Unpin Selected", action: #selector(menuTogglePin), to: menu, shortcut: "Shift+Enter")
         addMenuItem("Delete Selected", action: #selector(menuDeleteSelected), to: menu, shortcut: "Command+Backspace")
+        addMenuItem("Move Up", action: #selector(menuMoveUp), to: menu, shortcut: "Option+Up")
+        addMenuItem("Move Down", action: #selector(menuMoveDown), to: menu, shortcut: "Option+Down")
+        menu.addItem(.separator())
+        addMenuItem("Import Clipboard Entries...", action: #selector(menuImport), to: menu, shortcut: "Command+I")
+        addMenuItem("Export Clipboard Entries...", action: #selector(menuExport), to: menu, shortcut: "Command+E")
+        if mode == .files {
+            addMenuItem("Go To File", action: #selector(menuGoToFile), to: menu, shortcut: "Command+Enter")
+        }
         menu.addItem(.separator())
         if mode == .text {
+            addMenuItem("Remove URL Tracking", action: #selector(menuCleanTracking), to: menu, shortcut: "Command+Shift+R")
+            addMenuItem("Clean Link For Sharing", action: #selector(menuCleanForSharing), to: menu, shortcut: "Command+Shift+S")
+            menu.addItem(.separator())
             addMenuItem("Group Selected...", action: #selector(menuGroupSelected), to: menu, shortcut: "Command+G")
             if !isReservedGroupFilter(groupFilter) {
                 addMenuItem("Set Selected to \(groupFilter)", action: #selector(menuGroupSelectedToCurrentFilter), to: menu)
@@ -623,7 +904,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         menu.addItem(.separator())
         addMenuItem("Jump To Normal Entries", action: #selector(menuJumpToNormal), to: menu, shortcut: "Backspace")
         addMenuItem("Find", action: #selector(menuFind), to: menu, shortcut: "Command+F")
+        addMenuItem("Find Next", action: #selector(menuFindNext), to: menu, shortcut: "F3")
+        addMenuItem("Find Previous", action: #selector(menuFindPrevious), to: menu, shortcut: "Shift+F3")
         addMenuItem("Preferences...", action: #selector(menuPreferences), to: menu, shortcut: "Command+,")
+        addMenuItem("Manual", action: #selector(menuManual), to: menu, shortcut: "F1")
+        addMenuItem("Check for Updates...", action: #selector(menuCheckForUpdates), to: menu, shortcut: "Shift+F1")
+        addMenuItem("Project Page", action: #selector(menuProjectPage), to: menu, shortcut: "Command+F1")
+        addMenuItem("Contact", action: #selector(menuContact), to: menu)
+        addMenuItem("Donate", action: #selector(menuDonate), to: menu)
+        addMenuItem("Diagnostics", action: #selector(menuDiagnostics), to: menu, shortcut: "Option+F1")
         menu.addItem(.separator())
         addPinnedShortcutItems(to: menu)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: actionsButton.bounds.height + 2), in: actionsButton)
@@ -645,16 +934,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return
         }
         let menu = NSMenu(title: "Group Filter")
-        for group in reservedGroupFilterItems() {
-            let item = addMenuItem(group, action: #selector(menuGroupFilterChanged(_:)), to: menu)
-            item.representedObject = group
-            item.state = group.caseInsensitiveCompare(groupFilter) == .orderedSame ? .on : .off
-        }
-        let groups = numberedGroupFilterItems()
-        if !groups.isEmpty {
-            menu.addItem(.separator())
-        }
-        for (index, group) in groups.enumerated() {
+        for (index, group) in groupFilterItems().enumerated() {
+            if index == reservedGroupFilterItems().count {
+                menu.addItem(.separator())
+            }
             let shortcut = groupShortcutLabel(index: index)
             let item = addMenuItem(group, action: #selector(menuGroupFilterChanged(_:)), to: menu, shortcut: shortcut)
             item.representedObject = group
@@ -665,16 +948,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func addGroupFilterItems(to menu: NSMenu) {
         let groupMenu = NSMenu(title: "Group Filter")
-        for group in reservedGroupFilterItems() {
-            let item = addMenuItem(group, action: #selector(menuGroupFilterChanged(_:)), to: groupMenu)
-            item.representedObject = group
-            item.state = group.caseInsensitiveCompare(groupFilter) == .orderedSame ? .on : .off
-        }
-        let groups = numberedGroupFilterItems()
-        if !groups.isEmpty {
-            groupMenu.addItem(.separator())
-        }
-        for (index, group) in groups.enumerated() {
+        for (index, group) in groupFilterItems().enumerated() {
+            if index == reservedGroupFilterItems().count {
+                groupMenu.addItem(.separator())
+            }
             let shortcut = groupShortcutLabel(index: index)
             let item = addMenuItem(group, action: #selector(menuGroupFilterChanged(_:)), to: groupMenu, shortcut: shortcut)
             item.representedObject = group
@@ -762,16 +1039,33 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuCopySelected() { copySelectedEntries() }
     @objc private func menuCutSelected() { cutSelectedEntries() }
     @objc private func menuPasteAfterSelected() { pasteAfterSelectedEntry() }
+    @objc private func menuImport() { requestImport() }
+    @objc private func menuExport() { requestExport() }
+    @objc private func menuCleanTracking() { cleanSelectedEntriesForTracking() }
+    @objc private func menuCleanForSharing() { cleanSelectedEntriesForSharing() }
+    @objc private func menuGoToFile() { goToSelectedFileEvent() }
     @objc private func menuEditSelected() { editSelectedEntry() }
+    @objc private func menuViewSelected() { viewSelectedItem() }
+    @objc private func menuSetQuickCopyTarget() { setQuickCopyTarget() }
     @objc private func menuGroupSelected() { groupSelectedEntries() }
     @objc private func menuGroupSelectedToCurrentFilter() { groupSelectedEntriesToCurrentFilter() }
     @objc private func menuTogglePin() { toggleSelectedPin() }
     @objc private func menuDeleteSelected() { deleteSelectedEntry() }
+    @objc private func menuMoveUp() { moveSelectedItems(direction: -1) }
+    @objc private func menuMoveDown() { moveSelectedItems(direction: 1) }
     @objc private func menuTextHistory() { setMode(.text, notify: true) }
     @objc private func menuFileHistory() { setMode(.files, notify: true) }
     @objc private func menuJumpToNormal() { jumpToFirstNormalEntry() }
     @objc private func menuFind() { focusSearch() }
+    @objc private func menuFindNext() { selectSearchResult(direction: 1) }
+    @objc private func menuFindPrevious() { selectSearchResult(direction: -1) }
     @objc private func menuPreferences() { historyDelegate?.historyWindowDidRequestPreferences(self) }
+    @objc private func menuManual() { historyDelegate?.historyWindowDidRequestManual(self) }
+    @objc private func menuCheckForUpdates() { historyDelegate?.historyWindowDidRequestUpdateCheck(self) }
+    @objc private func menuProjectPage() { historyDelegate?.historyWindowDidRequestProjectPage(self) }
+    @objc private func menuContact() { historyDelegate?.historyWindowDidRequestContact(self) }
+    @objc private func menuDonate() { historyDelegate?.historyWindowDidRequestDonate(self) }
+    @objc private func menuDiagnostics() { historyDelegate?.historyWindowDidRequestDiagnostics(self) }
     @objc private func menuToggleDirection() {
         if mode == .files {
             fileSortDescending.toggle()
@@ -808,7 +1102,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             setMode(.text, notify: true)
             return
         }
-        let groups = numberedGroupFilterItems()
+        let groups = groupFilterItems()
         guard index >= 0 && index < groups.count else {
             NSSound.beep()
             return
@@ -841,6 +1135,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        rememberSelectionForCurrentMode()
         updateSelectedGroupStatus()
     }
 
@@ -914,15 +1209,120 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func editSelectedEntry() {
         guard let entry = selectedEntry() else { return }
+        showEntryProperties(entry: entry, quickCopyOnly: false)
+    }
+
+    private func viewSelectedItem() {
+        if let entry = selectedEntry() {
+            var lines: [String] = []
+            if !entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Name: \(entry.Name)")
+            }
+            if !entry.Group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Group: \(entry.Group)")
+            }
+            if !entry.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Machine: \(entry.SourceMachine)")
+            }
+            if entry.CreatedUnixMs > 0 {
+                let date = Date(timeIntervalSince1970: TimeInterval(entry.CreatedUnixMs) / 1000.0)
+                lines.append("Created: \(dateFormatter.string(from: date))")
+            }
+            if entry.LastUsedUnixMs > 0 {
+                let date = Date(timeIntervalSince1970: TimeInterval(entry.LastUsedUnixMs) / 1000.0)
+                lines.append("Last used: \(dateFormatter.string(from: date))")
+            }
+            if entry.Pinned {
+                lines.append("Pinned: Yes")
+            }
+            if !lines.isEmpty {
+                lines.append("")
+            }
+            lines.append(entry.Text)
+            showReadOnlyText(title: "Clipboard Entry Text", accessibilityLabel: "Selected clipboard entry text", text: lines.joined(separator: "\n"))
+            return
+        }
+
+        if let event = selectedFileEvent() {
+            var lines: [String] = [
+                "Operation: \(event.Operation.isEmpty ? "Copy" : event.Operation)",
+                "File count: \(event.FileCount)",
+                "Contains text: \(event.ContainsText ? "Yes" : "No")"
+            ]
+            if !event.Source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Source: \(event.Source)")
+            }
+            if !event.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Machine: \(event.SourceMachine)")
+            }
+            if event.CapturedUnixMs > 0 {
+                let date = Date(timeIntervalSince1970: TimeInterval(event.CapturedUnixMs) / 1000.0)
+                lines.append("Captured: \(dateFormatter.string(from: date))")
+            }
+            if event.Pinned {
+                lines.append("Pinned: Yes")
+            }
+            if !event.Formats.isEmpty {
+                lines.append("")
+                lines.append("Formats:")
+                lines.append(contentsOf: event.Formats.map { "- \($0)" })
+            }
+            if !event.Files.isEmpty {
+                lines.append("")
+                lines.append("Files:")
+                lines.append(contentsOf: event.Files.map { "- \($0)" })
+            }
+            showReadOnlyText(title: "File Event Details", accessibilityLabel: "Selected file history event details", text: lines.joined(separator: "\n"))
+            return
+        }
+
+        NSSound.beep()
+    }
+
+    private func showReadOnlyText(title: String, accessibilityLabel: String, text: String) {
         let alert = NSAlert()
-        alert.messageText = "Edit Clipboard Entry"
-        alert.informativeText = "Edit the entry name and stored clipboard text."
+        alert.messageText = title
+        let closeButton = alert.addButton(withTitle: "Close")
+        closeButton.keyEquivalent = "\u{1b}"
+        closeButton.keyEquivalentModifierMask = []
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 560, height: 280))
+        textView.string = text
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.setAccessibilityLabel(accessibilityLabel)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 560, height: 280))
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.documentView = textView
+        alert.accessoryView = scroll
+        alert.runModal()
+    }
+
+    private func setQuickCopyTarget() {
+        guard mode == .text, let entry = selectedEntry() else {
+            NSSound.beep()
+            return
+        }
+        showEntryProperties(entry: entry, quickCopyOnly: true)
+    }
+
+    private func showEntryProperties(entry: ClipEntry, quickCopyOnly: Bool) {
+        let alert = NSAlert()
+        alert.messageText = quickCopyOnly ? "Set Quick Copy Target" : "Clipboard Entry Properties"
+        alert.informativeText = quickCopyOnly
+            ? "Choose whether this entry is copied by the global Quick Copy hotkey, and set the hotkey if needed."
+            : "Edit the entry and choose whether it is copied by the global Quick Copy hotkey."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
 
         let nameField = NSTextField(string: entry.Name)
         nameField.placeholderString = "Name"
         nameField.setAccessibilityLabel("Entry name")
+        let groupField = NSTextField(string: entry.Group)
+        groupField.placeholderString = "Group"
+        groupField.setAccessibilityLabel("Entry group")
         let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 180))
         textView.string = entry.Text
         textView.isRichText = false
@@ -932,14 +1332,57 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         scroll.borderType = .bezelBorder
         scroll.hasVerticalScroller = true
         scroll.documentView = textView
-        let stack = NSStackView(views: [nameField, scroll])
+        let quickCopyCheckbox = NSButton(checkboxWithTitle: "Use this entry for Quick Copy", target: nil, action: nil)
+        let existingHotkey = quickCopyHotkeys[entry.Id]
+        quickCopyCheckbox.state = quickCopyOnly || existingHotkey != nil ? .on : .off
+        quickCopyCheckbox.setAccessibilityLabel("Use this entry for Quick Copy")
+        let hotkeyField = HotkeyCaptureField()
+        hotkeyField.descriptor = existingHotkey
+        hotkeyField.setAccessibilityLabel("Quick copy hotkey")
+        let hotkeyLabel = NSTextField(labelWithString: "Quick copy hotkey")
+        let hotkeyRow = NSStackView(views: [hotkeyLabel, hotkeyField])
+        hotkeyRow.orientation = .horizontal
+        hotkeyRow.spacing = 8
+        hotkeyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+
+        let views = quickCopyOnly
+            ? [quickCopyCheckbox, hotkeyRow]
+            : [nameField, groupField, scroll, quickCopyCheckbox, hotkeyRow]
+        let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 520, height: 220)
+        stack.frame = NSRect(x: 0, y: 0, width: 520, height: quickCopyOnly ? 76 : 286)
         alert.accessoryView = stack
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        historyDelegate?.historyWindow(self, didEdit: entry, name: nameField.stringValue, text: textView.string)
+        let useQuickCopy = quickCopyCheckbox.state == .on
+        let capturedHotkey = hotkeyField.descriptor ?? HotkeyDescriptor.parse(hotkeyField.stringValue)
+        if useQuickCopy {
+            guard let capturedHotkey, capturedHotkey.isValid else {
+                showPropertyError("Quick Copy needs a valid hotkey.")
+                return
+            }
+            if capturedHotkey == showHistoryHotkey || capturedHotkey == toggleMonitoringHotkey {
+                showPropertyError("Quick Copy must use a different hotkey from Show History and Toggle Monitoring.")
+                return
+            }
+            if quickCopyHotkeys.contains(where: { $0.key != entry.Id && $0.value == capturedHotkey }) {
+                showPropertyError("Another Quick Copy entry already uses \(capturedHotkey).")
+                return
+            }
+        }
+        if quickCopyOnly {
+            historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: entry.Name, group: entry.Group, text: entry.Text, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey)
+            return
+        }
+        historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: nameField.stringValue, group: groupField.stringValue, text: textView.string, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey)
+    }
+
+    private func showPropertyError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Could Not Save Entry Properties"
+        alert.informativeText = message
+        alert.runModal()
     }
 
     private func copySelectedEntries() {
@@ -952,6 +1395,37 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             let events = selectedFileEvents()
             guard !events.isEmpty else { return }
             historyDelegate?.historyWindow(self, didCopyFilePaths: events)
+        }
+    }
+
+    private func moveSelectedItems(direction: Int) {
+        switch mode {
+        case .text:
+            let entries = selectedEntries()
+            guard !entries.isEmpty else {
+                NSSound.beep()
+                return
+            }
+            guard let pinned = entries.first?.Pinned,
+                  !entries.contains(where: { $0.Pinned != pinned }) else {
+                NSSound.beep()
+                return
+            }
+            preferredRowAfterReload = tableView.selectedRowIndexes.min()
+            historyDelegate?.historyWindow(self, didMove: entries, direction: direction)
+        case .files:
+            let events = selectedFileEvents()
+            guard !events.isEmpty else {
+                NSSound.beep()
+                return
+            }
+            guard let pinned = events.first?.Pinned,
+                  !events.contains(where: { $0.Pinned != pinned }) else {
+                NSSound.beep()
+                return
+            }
+            preferredRowAfterReload = tableView.selectedRowIndexes.min()
+            historyDelegate?.historyWindow(self, didMoveFileEvents: events, direction: direction)
         }
     }
 
@@ -1022,6 +1496,48 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         historyDelegate?.historyWindowDidRequestPaste(self, after: selectedEntry())
     }
 
+    private func requestImport() {
+        historyDelegate?.historyWindowDidRequestImport(self)
+    }
+
+    private func requestExport() {
+        historyDelegate?.historyWindowDidRequestExport(self)
+    }
+
+    private func cleanSelectedEntriesForTracking() {
+        guard mode == .text else {
+            NSSound.beep()
+            return
+        }
+        let entries = selectedEntries()
+        guard !entries.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        historyDelegate?.historyWindow(self, didCleanURLTracking: entries)
+    }
+
+    private func cleanSelectedEntriesForSharing() {
+        guard mode == .text else {
+            NSSound.beep()
+            return
+        }
+        let entries = selectedEntries()
+        guard !entries.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        historyDelegate?.historyWindow(self, didCleanLinksForSharing: entries)
+    }
+
+    private func goToSelectedFileEvent() {
+        guard mode == .files, let event = selectedFileEvent() else {
+            NSSound.beep()
+            return
+        }
+        historyDelegate?.historyWindow(self, didRequestGoToFileEvent: event)
+    }
+
     private func jumpToFirstNormalEntry() {
         guard let index = rows.firstIndex(where: {
             if case .entry(let entry) = $0 { return !entry.Pinned }
@@ -1034,6 +1550,53 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func focusSearch() {
         window?.makeFirstResponder(searchField)
+    }
+
+    private func selectSearchResult(direction: Int) {
+        guard !searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            focusSearch()
+            return
+        }
+        guard !rows.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let current = tableView.selectedRow >= 0 ? tableView.selectedRow : (direction > 0 ? -1 : rows.count)
+        var index = current
+        for _ in 0..<rows.count {
+            index += direction > 0 ? 1 : -1
+            if index >= rows.count { index = 0 }
+            if index < 0 { index = rows.count - 1 }
+            tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+            tableView.scrollRowToVisible(index)
+            tableView.window?.makeFirstResponder(tableView)
+            return
+        }
+    }
+
+    private func selectBoundaryRow(first: Bool) {
+        guard !rows.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let index = first ? 0 : rows.count - 1
+        tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        tableView.scrollRowToVisible(index)
+        tableView.window?.makeFirstResponder(tableView)
+    }
+
+    private func selectPage(direction: Int) {
+        guard !rows.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let rowHeight = max(tableView.rowHeight, 1)
+        let visibleRows = max(1, Int(scrollView.contentView.bounds.height / rowHeight) - 1)
+        let current = tableView.selectedRow >= 0 ? tableView.selectedRow : (direction > 0 ? 0 : rows.count - 1)
+        let target = max(0, min(rows.count - 1, current + (direction > 0 ? visibleRows : -visibleRows)))
+        tableView.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
+        tableView.scrollRowToVisible(target)
+        tableView.window?.makeFirstResponder(tableView)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -1066,16 +1629,18 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case .entry(let entry):
             textField.font = .systemFont(ofSize: NSFont.systemFontSize)
             textField.textColor = .labelColor
-            let label = entry.Name.isEmpty ? entry.Text : "\(entry.Name): \(entry.Text)"
+            let baseLabel = entry.Name.isEmpty ? entry.Text : "\(entry.Name): \(entry.Text)"
+            let label = pinnedShortcutNumber(for: entry).map { "\($0). \(baseLabel)" } ?? baseLabel
             let metadata = metadataText(for: entry)
-            textField.stringValue = metadata.isEmpty ? label : "\(entry.Pinned ? "Pinned, " : "")\(label)\n\(metadata)"
+            textField.stringValue = metadata.isEmpty ? label : "\(label)\n\(metadata)"
             cell.setAccessibilityLabel(textField.stringValue.replacingOccurrences(of: "\n", with: ", "))
         case .fileEvent(let event):
             textField.font = .systemFont(ofSize: NSFont.systemFontSize)
             textField.textColor = .labelColor
-            let label = fileEventLabel(event)
+            let baseLabel = fileEventLabel(event)
+            let label = pinnedShortcutNumber(for: event).map { "\($0). \(baseLabel)" } ?? baseLabel
             let metadata = fileEventMetadata(event)
-            textField.stringValue = metadata.isEmpty ? label : "\(event.Pinned ? "Pinned, " : "")\(label)\n\(metadata)"
+            textField.stringValue = metadata.isEmpty ? label : "\(label)\n\(metadata)"
             cell.setAccessibilityLabel(textField.stringValue.replacingOccurrences(of: "\n", with: ", "))
         }
         return cell
@@ -1087,19 +1652,36 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        if case .separator = rows[row] { return false }
         return true
     }
 
     private func firstSelectableRow(startingAt start: Int) -> Int? {
         guard !rows.isEmpty else { return nil }
         for index in start..<rows.count {
-            if case .separator = rows[index] {} else { return index }
+            return index
         }
         for index in stride(from: start, through: 0, by: -1) {
-            if case .separator = rows[index] {} else { return index }
+            return index
         }
         return nil
+    }
+
+    private func pinnedShortcutNumber(for entry: ClipEntry) -> String? {
+        guard entry.Pinned,
+              let index = filteredEntries.filter(\.Pinned).firstIndex(where: { $0.Id == entry.Id }),
+              index < 10 else {
+            return nil
+        }
+        return index == 9 ? "0" : "\(index + 1)"
+    }
+
+    private func pinnedShortcutNumber(for event: FileClipboardEvent) -> String? {
+        guard event.Pinned,
+              let index = filteredFileEvents.filter(\.Pinned).firstIndex(where: { $0.Id == event.Id }),
+              index < 10 else {
+            return nil
+        }
+        return index == 9 ? "0" : "\(index + 1)"
     }
 
     private func groupFilterItems() -> [String] {
@@ -1167,6 +1749,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             let date = Date(timeIntervalSince1970: TimeInterval(entry.LastUsedUnixMs) / 1000.0)
             parts.append("Last used: \(dateFormatter.string(from: date))")
         }
+        if entry.Pinned {
+            parts.append("Pinned: Yes")
+        }
         return parts.joined(separator: " - ")
     }
 
@@ -1188,6 +1773,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if event.CapturedUnixMs > 0 {
             let date = Date(timeIntervalSince1970: TimeInterval(event.CapturedUnixMs) / 1000.0)
             parts.append("Captured: \(dateFormatter.string(from: date))")
+        }
+        if event.Pinned {
+            parts.append("Pinned: Yes")
         }
         return parts.joined(separator: " - ")
     }

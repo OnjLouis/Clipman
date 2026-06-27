@@ -16,11 +16,22 @@ struct ClipmanSettings: Codable, Equatable {
     var groupFilter: String
     var runAtStartup: Bool
     var rememberDatabasePassword: Bool
+    var autoCopyLatestRemoteText: Bool
+    var updateCheckFrequency: String
+    var installUpdatesSilently: Bool
+    var lastUpdateCheckUnixMs: Int64
+    var quickCopyHotkeys: [String: HotkeyDescriptor]
+    var ignoredApplications: [String]
 
     enum CodingKeys: String, CodingKey {
         case machineName, databasePath, monitoringEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, groupFilter, runAtStartup
         case rememberDatabasePassword
+        case autoCopyLatestRemoteText, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys
+        case ignoredApplications
+        case ignoredProcesses = "IgnoredProcesses"
+        case legacyQuickCopyHotkey = "quickCopyHotkey"
+        case legacyQuickCopyEntryID = "quickCopyEntryID"
     }
 
     init(
@@ -37,7 +48,13 @@ struct ClipmanSettings: Codable, Equatable {
         lastSelectedTab: Int,
         groupFilter: String,
         runAtStartup: Bool,
-        rememberDatabasePassword: Bool
+        rememberDatabasePassword: Bool,
+        autoCopyLatestRemoteText: Bool,
+        updateCheckFrequency: String,
+        installUpdatesSilently: Bool,
+        lastUpdateCheckUnixMs: Int64,
+        quickCopyHotkeys: [String: HotkeyDescriptor],
+        ignoredApplications: [String]
     ) {
         self.machineName = machineName
         self.databasePath = databasePath
@@ -53,6 +70,12 @@ struct ClipmanSettings: Codable, Equatable {
         self.groupFilter = groupFilter
         self.runAtStartup = runAtStartup
         self.rememberDatabasePassword = rememberDatabasePassword
+        self.autoCopyLatestRemoteText = autoCopyLatestRemoteText
+        self.updateCheckFrequency = updateCheckFrequency
+        self.installUpdatesSilently = installUpdatesSilently
+        self.lastUpdateCheckUnixMs = lastUpdateCheckUnixMs
+        self.quickCopyHotkeys = quickCopyHotkeys
+        self.ignoredApplications = ignoredApplications
     }
 
     init(from decoder: Decoder) throws {
@@ -72,6 +95,44 @@ struct ClipmanSettings: Codable, Equatable {
         groupFilter = try container.decodeIfPresent(String.self, forKey: .groupFilter) ?? "All"
         runAtStartup = try container.decodeIfPresent(Bool.self, forKey: .runAtStartup) ?? false
         rememberDatabasePassword = try container.decodeIfPresent(Bool.self, forKey: .rememberDatabasePassword) ?? false
+        autoCopyLatestRemoteText = try container.decodeIfPresent(Bool.self, forKey: .autoCopyLatestRemoteText) ?? false
+        updateCheckFrequency = try container.decodeIfPresent(String.self, forKey: .updateCheckFrequency) ?? "Never"
+        installUpdatesSilently = try container.decodeIfPresent(Bool.self, forKey: .installUpdatesSilently) ?? false
+        lastUpdateCheckUnixMs = try container.decodeIfPresent(Int64.self, forKey: .lastUpdateCheckUnixMs) ?? 0
+        ignoredApplications = try container.decodeIfPresent([String].self, forKey: .ignoredApplications)
+            ?? container.decodeIfPresent([String].self, forKey: .ignoredProcesses)
+            ?? []
+        let legacyQuickCopyHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .legacyQuickCopyHotkey)
+            ?? HotkeyDescriptor(keyCode: UInt32(kVK_F2), modifiers: [.option, .shift])
+        let legacyQuickCopyEntryID = try container.decodeIfPresent(String.self, forKey: .legacyQuickCopyEntryID) ?? ""
+        quickCopyHotkeys = try container.decodeIfPresent([String: HotkeyDescriptor].self, forKey: .quickCopyHotkeys) ?? [:]
+        if quickCopyHotkeys.isEmpty, !legacyQuickCopyEntryID.isEmpty, legacyQuickCopyHotkey.isValid {
+            quickCopyHotkeys[legacyQuickCopyEntryID] = legacyQuickCopyHotkey
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(machineName, forKey: .machineName)
+        try container.encode(databasePath, forKey: .databasePath)
+        try container.encode(monitoringEnabled, forKey: .monitoringEnabled)
+        try container.encode(showHistoryHotkey, forKey: .showHistoryHotkey)
+        try container.encode(toggleMonitoringHotkey, forKey: .toggleMonitoringHotkey)
+        try container.encode(windowFrame, forKey: .windowFrame)
+        try container.encode(sortMode, forKey: .sortMode)
+        try container.encode(sortDescending, forKey: .sortDescending)
+        try container.encode(fileHistorySortMode, forKey: .fileHistorySortMode)
+        try container.encode(fileHistorySortDescending, forKey: .fileHistorySortDescending)
+        try container.encode(lastSelectedTab, forKey: .lastSelectedTab)
+        try container.encode(groupFilter, forKey: .groupFilter)
+        try container.encode(runAtStartup, forKey: .runAtStartup)
+        try container.encode(rememberDatabasePassword, forKey: .rememberDatabasePassword)
+        try container.encode(autoCopyLatestRemoteText, forKey: .autoCopyLatestRemoteText)
+        try container.encode(updateCheckFrequency, forKey: .updateCheckFrequency)
+        try container.encode(installUpdatesSilently, forKey: .installUpdatesSilently)
+        try container.encode(lastUpdateCheckUnixMs, forKey: .lastUpdateCheckUnixMs)
+        try container.encode(quickCopyHotkeys, forKey: .quickCopyHotkeys)
+        try container.encode(ignoredApplications, forKey: .ignoredApplications)
     }
 
     static func defaults(applicationSupport: URL) -> ClipmanSettings {
@@ -89,7 +150,13 @@ struct ClipmanSettings: Codable, Equatable {
             lastSelectedTab: 0,
             groupFilter: "All",
             runAtStartup: false,
-            rememberDatabasePassword: false
+            rememberDatabasePassword: false,
+            autoCopyLatestRemoteText: false,
+            updateCheckFrequency: "Never",
+            installUpdatesSilently: false,
+            lastUpdateCheckUnixMs: 0,
+            quickCopyHotkeys: [:],
+            ignoredApplications: []
         )
     }
 }

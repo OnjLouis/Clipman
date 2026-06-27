@@ -68,6 +68,19 @@ final class SettingsStore {
             settings.toggleMonitoringHotkey = defaults.toggleMonitoringHotkey
             changed = true
         }
+        var seenQuickCopyHotkeys = Set<HotkeyDescriptor>()
+        for (entryID, hotkey) in Array(settings.quickCopyHotkeys) {
+            if entryID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !hotkey.isValid
+                || hotkey == settings.showHistoryHotkey
+                || hotkey == settings.toggleMonitoringHotkey
+                || seenQuickCopyHotkeys.contains(hotkey) {
+                settings.quickCopyHotkeys.removeValue(forKey: entryID)
+                changed = true
+            } else {
+                seenQuickCopyHotkeys.insert(hotkey)
+            }
+        }
         if settings.showHistoryHotkey.keyCode == UInt32(kVK_ISO_Section),
            settings.toggleMonitoringHotkey.keyCode == UInt32(kVK_ANSI_Grave) {
             settings.showHistoryHotkey = defaults.showHistoryHotkey
@@ -109,6 +122,11 @@ final class SettingsStore {
         }
         if settings.groupFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             settings.groupFilter = "All"
+            changed = true
+        }
+        let normalizedIgnored = normalizedIgnoredApplications(settings.ignoredApplications)
+        if normalizedIgnored != settings.ignoredApplications {
+            settings.ignoredApplications = normalizedIgnored
             changed = true
         }
         return changed
@@ -206,6 +224,20 @@ final class SettingsStore {
         case "SOURCE": return "Source"
         default: return "Manual"
         }
+    }
+
+    private func normalizedIgnoredApplications(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = trimmed.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(trimmed)
+        }
+        return result
     }
 
     private func safeMachineName(_ value: String) -> String {

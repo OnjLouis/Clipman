@@ -9,15 +9,20 @@ namespace Clipman
         private readonly TextBox nameBox;
         private readonly TextBox groupBox;
         private readonly CheckBox pinnedBox;
+        private readonly CheckBox quickCopyTargetBox;
+        private readonly TextBox quickCopyHotkeyBox;
         private readonly TextBox textBox;
         private bool deleteRequested;
 
         public string EntryName { get { return nameBox.Text; } }
         public string EntryGroup { get { return groupBox.Text; } }
+        public string EntryText { get { return textBox.Text; } }
         public bool EntryPinned { get { return pinnedBox.Checked; } }
+        public bool EntryIsQuickCopyTarget { get { return quickCopyTargetBox.Checked; } }
+        public string EntryQuickCopyHotkey { get { return quickCopyHotkeyBox.Text.Trim(); } }
         public bool DeleteRequested { get { return deleteRequested; } }
 
-        public EntryPropertiesForm(ClipEntry entry)
+        public EntryPropertiesForm(ClipEntry entry, bool isQuickCopyTarget, string quickCopyHotkey, bool focusQuickCopy)
         {
             Text = "Clipboard Entry Properties";
             StartPosition = FormStartPosition.CenterParent;
@@ -25,7 +30,7 @@ namespace Clipman
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(700, 430);
+            ClientSize = new Size(700, 488);
             KeyPreview = true;
 
             var nameLabel = new Label { Text = "&Name:", Location = new Point(12, 14), AutoSize = true };
@@ -56,33 +61,57 @@ namespace Clipman
             {
                 Text = "&Pinned",
                 Location = new Point(90, 78),
-                Width = 200,
+                Width = 120,
                 Checked = entry != null && entry.Pinned
             };
             Controls.Add(pinnedBox);
 
-            var textLabel = new Label { Text = "&Clipboard text:", Location = new Point(12, 110), AutoSize = true };
+            quickCopyTargetBox = new CheckBox
+            {
+                Text = "Use as &quick-copy target",
+                Location = new Point(220, 78),
+                Width = 260,
+                Checked = isQuickCopyTarget,
+                AccessibleName = "Use as quick-copy target",
+                AccessibleDescription = "When checked, this entry is copied by the quick-copy global hotkey shown below."
+            };
+            Controls.Add(quickCopyTargetBox);
+
+            var quickCopyHotkeyLabel = new Label { Text = "&Quick Copy hotkey:", Location = new Point(12, 116), AutoSize = true };
+            Controls.Add(quickCopyHotkeyLabel);
+            quickCopyHotkeyBox = new TextBox
+            {
+                Location = new Point(150, 112),
+                Width = 180,
+                ReadOnly = true,
+                Text = quickCopyHotkey ?? string.Empty,
+                AccessibleName = "Quick Copy hotkey",
+                AccessibleDescription = "Global hotkey that copies this entry. Press a valid key combination with at least two modifiers."
+            };
+            quickCopyHotkeyBox.KeyDown += QuickCopyHotkeyBoxKeyDown;
+            Controls.Add(quickCopyHotkeyBox);
+
+            var textLabel = new Label { Text = "&Clipboard text:", Location = new Point(12, 148), AutoSize = true };
             Controls.Add(textLabel);
             textBox = new TextBox
             {
-                Location = new Point(15, 134),
+                Location = new Point(15, 172),
                 Width = 665,
                 Height = 210,
                 Multiline = true,
-                ReadOnly = true,
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
                 Text = entry == null ? string.Empty : entry.Text ?? string.Empty,
                 AccessibleName = "Clipboard text",
-                AccessibleDescription = "Read-only clipboard text."
+                AccessibleDescription = "Clipboard text stored for this entry. Editing this field changes what Clipman copies for this entry."
             };
             Controls.Add(textBox);
 
-            var copy = new Button { Text = "&Copy text", Location = new Point(15, 362), Width = 95 };
+            var copy = new Button { Text = "&Copy text", Location = new Point(15, 414), Width = 95 };
             copy.Click += (s, e) => Clipboard.SetText(textBox.Text ?? string.Empty, TextDataFormat.UnicodeText);
             Controls.Add(copy);
 
-            var delete = new Button { Text = "&Delete", Location = new Point(120, 362), Width = 85 };
+            var delete = new Button { Text = "&Delete", Location = new Point(120, 414), Width = 85 };
             delete.Click += (s, e) =>
             {
                 deleteRequested = true;
@@ -91,21 +120,57 @@ namespace Clipman
             };
             Controls.Add(delete);
 
-            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(500, 362), Width = 85 };
+            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(500, 414), Width = 85 };
             Controls.Add(ok);
 
-            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 362), Width = 85 };
+            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 414), Width = 85 };
             Controls.Add(cancel);
 
             AcceptButton = ok;
             CancelButton = cancel;
+            if (focusQuickCopy)
+            {
+                Shown += (s, e) => quickCopyHotkeyBox.Focus();
+            }
         }
 
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            if (quickCopyHotkeyBox.Focused) return;
             nameBox.Focus();
             nameBox.SelectAll();
         }
+
+        private static void QuickCopyHotkeyBoxKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Tab || e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            if (e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete)
+            {
+                return;
+            }
+
+            if (HotkeyDefinition.IsModifierOnly(e.KeyData))
+            {
+                return;
+            }
+
+            var text = HotkeyDefinition.FromKeys(e.KeyData);
+            HotkeyDefinition parsed;
+            if (!string.IsNullOrWhiteSpace(text) && HotkeyDefinition.TryParse(text, out parsed))
+            {
+                ((TextBox)sender).Text = text;
+                return;
+            }
+
+            System.Media.SystemSounds.Beep.Play();
+        }
+
     }
 }

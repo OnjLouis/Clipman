@@ -58,6 +58,8 @@ The active machine settings file also lives in the selected data folder:
 
 macOS keeps only a small Application Support pointer so it can find that folder again on launch.
 
+Ignored applications are machine-specific settings. Add one Mac app name, bundle identifier, or executable name per line in Preferences, such as `Safari`, `com.apple.TextEdit`, or `KeePassXC`. When the foreground app matches that list, Clipman does not capture text or file clipboard changes from it.
+
 ## Smoke Test
 
 Run:
@@ -85,17 +87,24 @@ The history window includes an accessible toolbar after the history type control
 - `Option+M`: Open the Clipman actions menu.
 - `Command+G`: group selected text entries.
 - `Option+G`: open the group filter menu.
-- `Option+1` through `Option+0`: apply one of the first ten real groups; reserved filters such as All and Ungrouped stay menu-only.
+- `Option+1` through `Option+0`: apply one of the first ten group filters in menu order: All, Pinned, Named, Ungrouped, then custom groups.
 - `Command+1` through `Command+0`: choose one of the first ten pinned items in the active history.
 - `Enter`: choose the selected text entry or restore the selected file event.
 - `Shift+Enter`: pin or unpin the selected item.
 - `Command+C`: copy selected text entries or selected file paths.
 - `Command+X`: cut selected text entries.
 - `Command+V`: paste clipboard text after the selected text entry.
+- `Command+I`: import clipboard entries from `.clipdb`, JSON, or text.
+- `Command+E`: export clipboard entries to `.clipdb`, JSON, or text.
+- `Command+Shift+R`: remove URL tracking from selected text entries.
+- `Command+Shift+S`: clean selected links for sharing.
+- `Command+Enter`: go to the selected file-history file or folder in Finder.
 - `Command+Backspace`: delete selected unpinned items.
 - `Backspace`: jump to the first normal item below pinned items.
 - `Command+F`: focus search.
 - `Escape`: hide the history window.
+
+For VoiceOver users, `Option+M` opens the history window's Clipman command menu directly. If macOS reports a new Clipman window but focus lands badly, press the Show History global hotkey once to dismiss the window and again to reopen it with a fresh focus attempt.
 
 ## Development App Build
 
@@ -130,9 +139,9 @@ Scripts/package-release.sh
 The zip is created at:
 
 ```text
-dist/ClipmanMac.zip
+dist/ClipmanMac-<version>.zip
 ```
 
-Testers should unzip it, drag `Clipman.app` into `/Applications`, then open it with Control-click or Option-click and choose Open if macOS Gatekeeper blocks the unsigned app on first launch.
+Testers should unzip it, move or drag `Clipman.app` into `/Applications`, then open it with Control-click or Option-click and choose Open if macOS Gatekeeper blocks the unsigned app on first launch. VoiceOver users can use `VO+Shift+M` on the app in Finder to open the same context menu, then choose Open.
 
 In Preferences, enable `Run Clipman at login` after the app is in `/Applications`. This writes a per-user LaunchAgent pointing at the current app bundle path, so if the app is moved later, save Preferences again to refresh the login item.

@@ -44,12 +44,12 @@ cd ClipmanMac
 Scripts/package-release.sh
 ```
 
-That produces `ClipmanMac/dist/ClipmanMac.zip`, runs the macOS codec/sync/file-history smoke tests, creates a drag-to-Applications `Clipman.app`, and ad-hoc signs the app. The generated bundle reads the Windows release version from `src/AssemblyInfo.cs`, so `CFBundleShortVersionString` must match `AssemblyInformationalVersion` and `CFBundleVersion` must match `AssemblyFileVersion`. The generated `dist` folder is ignored source noise and should not be committed.
+That produces `ClipmanMac/dist/ClipmanMac-<version>.zip`, runs the macOS codec/sync/file-history smoke tests, creates a drag-to-Applications `Clipman.app`, and ad-hoc signs the app. The generated bundle reads the Windows release version from `src/AssemblyInfo.cs`, so `CFBundleShortVersionString` must match `AssemblyInformationalVersion` and `CFBundleVersion` must match `AssemblyFileVersion`. The generated `dist` folder is ignored source noise and should not be committed.
 
 Future GitHub releases should attach both:
 
 - the Windows portable ZIP from `D:\Dropbox\backups\Clipman\Program Builds`
-- the Mac ZIP from `ClipmanMac/dist/ClipmanMac.zip`
+- the versioned Mac ZIP from `ClipmanMac/dist/ClipmanMac-<version>.zip`
 
 The clean portable output must contain only shipped app files:
 
@@ -60,6 +60,7 @@ The clean portable output must contain only shipped app files:
 - `sounds\copy.wav`
 - `sounds\on.wav`
 - `sounds\off.wav`
+- `sounds\remote.wav`
 - `sounds\skip.wav`
 
 It must not contain:
@@ -81,6 +82,20 @@ It must not contain:
 - `portable` is generated output and should be treated as disposable.
 - `README.md` is for GitHub/source view only, not the portable runtime package.
 - `Manual.html` is the user-facing manual shipped with the app.
+
+For a normal release, commit and push the complete intended source state from the repository root, not a hand-picked subset from old handoff notes. Use `git status` to review all modified and newly added source/documentation/asset files across both implementations. Include new source files and assets as well as modified files. For example, a Mac feature may require both a new Swift source file under `ClipmanMac/Sources` and a new bundled resource under `ClipmanMac/Sources/Clipman/Resources`.
+
+Do not commit generated or local runtime output:
+
+- `portable`
+- `ClipmanMac/.build`
+- `ClipmanMac/.swiftpm`
+- `ClipmanMac/build`
+- `ClipmanMac/dist`
+- `Settings`
+- `Logs`
+- private handoff files
+- local machine settings or local history databases
 
 ## Documentation
 

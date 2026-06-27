@@ -13,6 +13,7 @@ final class FileHistoryStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "Clipman.FileHistoryStore")
     private var database = FileClipboardDatabase()
     private var password = ""
+    private var passwordLocked = false
     private let databaseURL: URL
     private let machineName: String
     private let maxEvents = 200
@@ -26,15 +27,17 @@ final class FileHistoryStore: @unchecked Sendable {
     func setPassword(_ password: String) {
         queue.async {
             self.password = password
-            self.loadLocked()
-            DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidChange() }
+            if self.loadLocked() {
+                DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidChange() }
+            }
         }
     }
 
     func load() {
         queue.async {
-            self.loadLocked()
-            DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidChange() }
+            if self.loadLocked() {
+                DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidChange() }
+            }
         }
     }
 
@@ -46,6 +49,10 @@ final class FileHistoryStore: @unchecked Sendable {
         queue.sync { sortedEventsLocked(sortMode: sortMode, descending: descending) }
     }
 
+    func eventCount() -> Int {
+        queue.sync { database.Events.count }
+    }
+
     func add(files: [String], formats: [String], containsText: Bool) {
         let cleanFiles = files
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -53,7 +60,7 @@ final class FileHistoryStore: @unchecked Sendable {
         guard !cleanFiles.isEmpty else { return }
 
         queue.async {
-            self.loadLocked()
+            guard self.loadLocked() else { return }
             let now = TimeUtil.nowUnixMs()
             var event = FileClipboardEvent(
                 CapturedUnixMs: now,
@@ -85,7 +92,7 @@ final class FileHistoryStore: @unchecked Sendable {
 
     func togglePinned(_ id: String) {
         queue.async {
-            self.loadLocked()
+            guard self.loadLocked() else { return }
             guard let index = self.database.Events.firstIndex(where: { $0.Id == id }) else { return }
             self.database.Events[index].Pinned.toggle()
             if self.database.Events[index].ManualOrder <= 0 {
@@ -98,7 +105,7 @@ final class FileHistoryStore: @unchecked Sendable {
 
     func delete(_ id: String) {
         queue.async {
-            self.loadLocked()
+            guard self.loadLocked() else { return }
             guard let index = self.database.Events.firstIndex(where: { $0.Id == id }),
                   !self.database.Events[index].Pinned else {
                 return
@@ -111,7 +118,7 @@ final class FileHistoryStore: @unchecked Sendable {
 
     func clearNormal() {
         queue.async {
-            self.loadLocked()
+            guard self.loadLocked() else { return }
             self.database.Events.removeAll { !$0.Pinned }
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidChange() }
@@ -120,7 +127,7 @@ final class FileHistoryStore: @unchecked Sendable {
 
     func removeUnavailable() {
         queue.async {
-            self.loadLocked()
+            guard self.loadLocked() else { return }
             self.database.Events.removeAll { event in
                 !event.Pinned && (event.Files.isEmpty || event.Files.allSatisfy { path in
                     path.isEmpty || (!FileManager.default.fileExists(atPath: path))
@@ -131,18 +138,66 @@ final class FileHistoryStore: @unchecked Sendable {
         }
     }
 
-    private func loadLocked() {
+    func moveEvents(ids: [String], direction: Int) {
+        let idSet = Set(ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        guard !idSet.isEmpty, direction != 0 else { return }
+        queue.async {
+            guard self.loadLocked() else { return }
+            self.normalizeLocked()
+            let selected = self.database.Events.filter { idSet.contains($0.Id) }
+            guard let first = selected.first,
+                  !selected.contains(where: { $0.Pinned != first.Pinned }) else {
+                return
+            }
+
+            var section = self.database.Events
+                .filter { $0.Pinned == first.Pinned }
+                .sorted {
+                    if $0.ManualOrder == $1.ManualOrder { return $0.CapturedUnixMs < $1.CapturedUnixMs }
+                    return $0.ManualOrder < $1.ManualOrder
+                }
+            let indexes = section.indices.filter { idSet.contains(section[$0].Id) }
+            guard let firstIndex = indexes.first, let lastIndex = indexes.last else { return }
+            if direction < 0, firstIndex == 0 { return }
+            if direction > 0, lastIndex >= section.count - 1 { return }
+
+            let moving = section.filter { idSet.contains($0.Id) }
+            section.removeAll { idSet.contains($0.Id) }
+            let insertionIndex: Int
+            if direction < 0 {
+                insertionIndex = max(0, firstIndex - 1)
+            } else {
+                insertionIndex = min(section.count, lastIndex + 1 - moving.count + 1)
+            }
+            section.insert(contentsOf: moving, at: insertionIndex)
+
+            for (offset, event) in section.enumerated() {
+                guard let index = self.database.Events.firstIndex(where: { $0.Id == event.Id }) else { continue }
+                self.database.Events[index].ManualOrder = Int64(offset + 1)
+            }
+            self.saveLocked()
+            DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidChange() }
+        }
+    }
+
+    private func loadLocked() -> Bool {
         do {
             database = try ClipDatabaseFile.loadCodable(databaseURL, password: password, defaultValue: FileClipboardDatabase())
             normalizeLocked()
+            passwordLocked = false
+            return true
         } catch ClipDatabaseError.passwordRequired, ClipDatabaseError.incorrectPassword {
             database = FileClipboardDatabase()
+            passwordLocked = true
+            return false
         } catch {
             DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidFail(error: error) }
+            return false
         }
     }
 
     private func saveLocked() {
+        guard !passwordLocked else { return }
         do {
             database.UpdatedUnixMs = TimeUtil.nowUnixMs()
             try ClipDatabaseFile.saveAtomicCodable(databaseURL, value: database, password: password)

@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRATCH="${CLIPMAN_MAC_RELEASE_BUILD_DIR:-/tmp/ClipmanMac-release-build}"
 DIST="${CLIPMAN_MAC_DIST_DIR:-$ROOT/dist}"
 APP="$DIST/Clipman.app"
-ZIP="$DIST/ClipmanMac.zip"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
+ZIP="$DIST/ClipmanMac-$VERSION.zip"
 
 rm -rf "$DIST"
 mkdir -p "$DIST"
@@ -22,6 +22,8 @@ BIN_DIR="$(swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --config
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Clipman" "$APP/Contents/MacOS/Clipman"
 cp -R "$ROOT/Sources/Clipman/Resources/sounds" "$APP/Contents/Resources/sounds"
+cp "$ROOT/../Manual.html" "$APP/Contents/Resources/Manual.html"
+cp "$ROOT/../LICENSE.txt" "$APP/Contents/Resources/LICENSE.txt"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

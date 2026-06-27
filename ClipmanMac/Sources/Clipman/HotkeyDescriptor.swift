@@ -2,8 +2,8 @@ import Foundation
 import Carbon
 import AppKit
 
-struct HotkeyDescriptor: Codable, Equatable, CustomStringConvertible {
-    struct Modifiers: OptionSet, Codable, Equatable {
+struct HotkeyDescriptor: Codable, Equatable, Hashable, CustomStringConvertible {
+    struct Modifiers: OptionSet, Codable, Equatable, Hashable {
         let rawValue: UInt32
 
         static let control = Modifiers(rawValue: 1 << 0)

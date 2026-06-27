@@ -1,5 +1,6 @@
 import AppKit
 import ClipmanCore
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, FileHistoryStoreDelegate, ClipboardMonitorDelegate, HistoryWindowControllerDelegate, PreferencesWindowControllerDelegate {
@@ -8,6 +9,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private let monitor = ClipboardMonitor()
     private let hotkeys = HotkeyManager()
     private let startup = StartupService()
+    private let updates = UpdateService()
     private lazy var sounds = SoundService(applicationSupportURL: settingsStore.applicationSupportURL)
     private var settings: ClipmanSettings!
     private var store: ClipStore!
@@ -19,6 +21,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var sessionDatabasePassword = ""
     private var sessionPasswordDatabasePath = ""
     private var cancelledPasswordPaths = Set<String>()
+    private var remoteClipboardBaseline: (id: String, stamp: Int64)?
+    private var updateTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings = settingsStore.load()
@@ -41,8 +45,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             selectedTab: settings.lastSelectedTab,
             groupFilter: settings.groupFilter
         )
+        configureHistoryQuickCopyState()
         monitor.delegate = self
         monitor.isEnabled = settings.monitoringEnabled
+        monitor.ignoredApplications = settings.ignoredApplications
         monitor.start()
         monitor.captureCurrentContents()
         sounds.play(settings.monitoringEnabled ? .on : .off)
@@ -51,18 +57,21 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         buildStatusItem()
         hotkeys.handler = { [weak self] action in
             switch action {
-            case .showHistory: self?.showHistory(nil)
+            case .showHistory: self?.toggleHistoryFromHotkey()
             case .toggleMonitoring: self?.toggleMonitoring(nil)
+            case .quickCopy(let entryID): self?.quickCopyEntry(id: entryID)
             }
         }
-        hotkeys.register(showHistory: settings.showHistoryHotkey, toggleMonitoring: settings.toggleMonitoringHotkey)
+        registerHotkeys()
         NSApp.setActivationPolicy(.accessory)
         buildMainMenu()
+        scheduleUpdateChecks()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor.stop()
         hotkeys.unregisterAll()
+        updateTimer?.invalidate()
     }
 
     private func buildStatusItem() {
@@ -80,6 +89,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         appMenu.addItem(NSMenuItem(title: "Show History", action: #selector(showHistory(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Toggle Monitoring", action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Open Manual", action: #selector(openManual(_:)), keyEquivalent: ""))
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Version History...", action: #selector(openVersionHistory(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Project Page", action: #selector(openProjectPage(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Contact", action: #selector(openContactPage(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Donate", action: #selector(openDonatePage(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Diagnostics...", action: #selector(showDiagnostics(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ","))
         appMenu.addItem(NSMenuItem(title: "About Clipman", action: #selector(showAbout(_:)), keyEquivalent: ""))
@@ -99,6 +116,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         menu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
         let monitorTitle = settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On"
         menu.addItem(NSMenuItem(title: monitorTitle, action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Open Manual", action: #selector(openManual(_:)), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Version History...", action: #selector(openVersionHistory(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Project Page", action: #selector(openProjectPage(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Contact", action: #selector(openContactPage(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Donate", action: #selector(openDonatePage(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Diagnostics...", action: #selector(showDiagnostics(_:)), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "About Clipman", action: #selector(showAbout(_:)), keyEquivalent: ""))
@@ -114,6 +139,15 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         rememberPreviousFrontmostApplication()
         refreshHistoryWindow()
         historyWindow.showWindow(nil)
+        historyWindow.focusHistoryWindow(nil)
+    }
+
+    private func toggleHistoryFromHotkey() {
+        if historyWindow.isHistoryVisible {
+            historyWindow.hide()
+            return
+        }
+        showHistory(nil)
     }
 
     @objc private func showFileHistory(_ sender: Any?) {
@@ -127,6 +161,98 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         try? settingsStore.save(settings)
         sounds.play(settings.monitoringEnabled ? .on : .off)
         rebuildMenu()
+    }
+
+    private func quickCopyEntry(id: String) {
+        guard let entry = store.entry(id: id) else {
+            NSSound.beep()
+            return
+        }
+        monitor.writeInternalText(entry.Text)
+        sounds.play(.copy)
+        store.markUsed(entry.Id)
+    }
+
+    @objc private func openManual(_ sender: Any?) {
+        let bundled = Bundle.main.resourceURL?.appendingPathComponent("Manual.html")
+        if let bundled, FileManager.default.fileExists(atPath: bundled.path) {
+            NSWorkspace.shared.open(bundled)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Clipman Manual Not Found"
+            alert.informativeText = "Manual.html was not found in the app bundle."
+            alert.runModal()
+        }
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        runUpdateCheck(manual: true)
+    }
+
+    @objc private func openVersionHistory(_ sender: Any?) {
+        updates.openVersionHistory()
+    }
+
+    @objc private func openProjectPage(_ sender: Any?) {
+        if let url = URL(string: "https://github.com/OnjLouis/Clipman") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func openContactPage(_ sender: Any?) {
+        if let url = URL(string: "https://onj.me/contact") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func openDonatePage(_ sender: Any?) {
+        if let url = URL(string: "https://onj.me/donate") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func showDiagnostics(_ sender: Any?) {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let dataFolder = URL(fileURLWithPath: settings.databasePath).deletingLastPathComponent().path
+        let report = [
+            "Clipman diagnostics",
+            "",
+            "Version: \(version)",
+            "Build: \(build)",
+            "Machine: \(settings.machineName)",
+            "Monitoring: \(settings.monitoringEnabled ? "On" : "Off")",
+            "Data folder: \(dataFolder)",
+            "Text history: \(settings.databasePath)",
+            "Text entries: \(store.entryCount())",
+            "File history: \(fileHistoryURL(for: settings).path)",
+            "File events: \(fileStore.eventCount())",
+            "Text sort: \(settings.sortMode), \(settings.sortDescending ? "descending" : "ascending")",
+            "File sort: \(settings.fileHistorySortMode), \(settings.fileHistorySortDescending ? "descending" : "ascending")",
+            "Group filter: \(settings.groupFilter)",
+            "Remember password: \(settings.rememberDatabasePassword ? "On" : "Off")",
+            "Run at login: \(settings.runAtStartup ? "On" : "Off")",
+            "Auto-copy latest remote text: \(settings.autoCopyLatestRemoteText ? "On" : "Off")",
+            "Update checks: \(settings.updateCheckFrequency)",
+            "Ignored applications: \(settings.ignoredApplications.isEmpty ? "None" : settings.ignoredApplications.joined(separator: ", "))"
+        ].joined(separator: "\n")
+
+        let alert = NSAlert()
+        alert.messageText = "Clipman Diagnostics"
+        alert.addButton(withTitle: "Close")
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 620, height: 320))
+        textView.string = report
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.setAccessibilityLabel("Clipman diagnostics report")
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 620, height: 320))
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.documentView = textView
+        alert.accessoryView = scroll
+        alert.runModal()
     }
 
     @objc private func showPreferences(_ sender: Any?) {
@@ -151,8 +277,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         NSApp.terminate(nil)
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String) {
-        store.addText(text)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, sourceApplication: String) {
+        store.addText(text, group: sourceApplication)
         sounds.play(.copy)
     }
 
@@ -161,8 +287,13 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         sounds.play(.copy)
     }
 
+    func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor) {
+        sounds.play(.skip)
+    }
+
     func clipStoreDidChange() {
         historyWindow.update(entries: sortedTextEntries())
+        copyLatestRemoteTextIfNeeded()
     }
 
     func fileHistoryStoreDidChange() {
@@ -228,6 +359,22 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         store.setNameAndText(id: entry.Id, name: name, text: text)
     }
 
+    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?) {
+        store.setNameAndText(id: entry.Id, name: name, text: text)
+        store.setGroup(ids: [entry.Id], group: group)
+        if useQuickCopy {
+            if let quickCopyHotkey {
+                settings.quickCopyHotkeys[entry.Id] = quickCopyHotkey
+            }
+        } else {
+            settings.quickCopyHotkeys.removeValue(forKey: entry.Id)
+        }
+        try? settingsStore.save(settings)
+        configureHistoryQuickCopyState()
+        registerHotkeys()
+        sounds.play(.copy)
+    }
+
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry]) {
         let text = entries.map(\.Text).joined(separator: "\n---\n")
         monitor.writeInternalText(text)
@@ -241,6 +388,21 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
     }
 
+    func historyWindow(_ controller: HistoryWindowController, didMove entries: [ClipEntry], direction: Int) {
+        settings.sortMode = "Manual"
+        settings.sortDescending = false
+        try? settingsStore.save(settings)
+        historyWindow.configureSort(
+            textSortMode: settings.sortMode,
+            textDescending: settings.sortDescending,
+            fileSortMode: settings.fileHistorySortMode,
+            fileDescending: settings.fileHistorySortDescending,
+            selectedTab: settings.lastSelectedTab,
+            groupFilter: settings.groupFilter
+        )
+        store.moveEntries(ids: entries.map(\.Id), direction: direction)
+    }
+
     func historyWindowDidRequestPaste(_ controller: HistoryWindowController, after entry: ClipEntry?) {
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
             NSSound.beep()
@@ -252,6 +414,57 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             .filter { !$0.isEmpty }
             .map { ClipEntry(Text: $0, SourceMachine: settings.machineName) }
         store.insertTextsAfterSelected(pasted, afterID: entry?.Id)
+    }
+
+    func historyWindowDidRequestImport(_ controller: HistoryWindowController) {
+        let panel = NSOpenPanel()
+        panel.title = "Import Clipboard Entries"
+        panel.prompt = "Import"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = supportedImportExportTypes()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.importEntries(from: url) { [weak self] result in
+            Task { @MainActor in
+                switch result {
+                case .success(let count):
+                    self?.showInformationalAlert(
+                        title: "Import Complete",
+                        message: count == 1 ? "Imported one clipboard entry." : "Imported \(count) clipboard entries."
+                    )
+                case .failure:
+                    break
+                }
+            }
+        }
+    }
+
+    func historyWindowDidRequestExport(_ controller: HistoryWindowController) {
+        let panel = NSSavePanel()
+        panel.title = "Export Clipboard Entries"
+        panel.prompt = "Export"
+        panel.nameFieldStringValue = "clipman-export.clipdb"
+        panel.allowedContentTypes = supportedImportExportTypes()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.exportDatabase(to: url) { [weak self] result in
+            Task { @MainActor in
+                switch result {
+                case .success:
+                    self?.showInformationalAlert(title: "Export Complete", message: "Exported clipboard entries.")
+                case .failure:
+                    break
+                }
+            }
+        }
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didCleanURLTracking entries: [ClipEntry]) {
+        transformSelectedEntries(entries, transform: URLTrackingCleaner.cleanText(_:))
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didCleanLinksForSharing entries: [ClipEntry]) {
+        transformSelectedEntries(entries, transform: URLTrackingCleaner.cleanForSharing(_:))
     }
 
     func historyWindow(_ controller: HistoryWindowController, didSetGroup group: String, for entries: [ClipEntry]) {
@@ -285,6 +498,46 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         monitor.writeInternalText(paths.joined(separator: "\n"))
         sounds.play(.copy)
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didRequestGoToFileEvent event: FileClipboardEvent) {
+        guard event.Files.count == 1,
+              let path = event.Files.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty
+        else {
+            NSSound.beep()
+            showInformationalAlert(title: "Go To File", message: "Select one file-history event containing exactly one file or folder.")
+            return
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            NSSound.beep()
+            showInformationalAlert(title: "Go To File", message: "That file or folder no longer exists.")
+            return
+        }
+
+        let url = URL(fileURLWithPath: path)
+        if isDirectory.boolValue {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didMoveFileEvents events: [FileClipboardEvent], direction: Int) {
+        settings.fileHistorySortMode = "Manual"
+        settings.fileHistorySortDescending = false
+        try? settingsStore.save(settings)
+        historyWindow.configureSort(
+            textSortMode: settings.sortMode,
+            textDescending: settings.sortDescending,
+            fileSortMode: settings.fileHistorySortMode,
+            fileDescending: settings.fileHistorySortDescending,
+            selectedTab: settings.lastSelectedTab,
+            groupFilter: settings.groupFilter
+        )
+        fileStore.moveEvents(ids: events.map(\.Id), direction: direction)
     }
 
     func historyWindowDidRequestClearNormalFileHistory(_ controller: HistoryWindowController) {
@@ -349,6 +602,30 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         showPreferences(nil)
     }
 
+    func historyWindowDidRequestManual(_ controller: HistoryWindowController) {
+        openManual(nil)
+    }
+
+    func historyWindowDidRequestUpdateCheck(_ controller: HistoryWindowController) {
+        checkForUpdates(nil)
+    }
+
+    func historyWindowDidRequestProjectPage(_ controller: HistoryWindowController) {
+        openProjectPage(nil)
+    }
+
+    func historyWindowDidRequestContact(_ controller: HistoryWindowController) {
+        openContactPage(nil)
+    }
+
+    func historyWindowDidRequestDonate(_ controller: HistoryWindowController) {
+        openDonatePage(nil)
+    }
+
+    func historyWindowDidRequestDiagnostics(_ controller: HistoryWindowController) {
+        showDiagnostics(nil)
+    }
+
     func historyWindowDidHide(_ controller: HistoryWindowController) {
         restorePreviousFrontmostApplication()
     }
@@ -369,8 +646,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         try? settingsStore.save(settings)
         monitor.isEnabled = settings.monitoringEnabled
+        monitor.ignoredApplications = settings.ignoredApplications
         applyStartupRegistration(showErrors: true)
-        hotkeys.register(showHistory: settings.showHistoryHotkey, toggleMonitoring: settings.toggleMonitoringHotkey)
+        registerHotkeys()
+        configureHistoryQuickCopyState()
+        resetRemoteClipboardBaseline()
+        scheduleUpdateChecks()
         let password = currentDatabasePassword(for: settings.databasePath)
         store.setDatabaseURL(URL(fileURLWithPath: settings.databasePath), password: password)
         fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.machineName, password: password)
@@ -382,6 +663,123 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private func refreshHistoryWindow() {
         historyWindow.update(entries: sortedTextEntries())
         historyWindow.update(fileEvents: sortedFileEvents())
+    }
+
+    private func supportedImportExportTypes() -> [UTType] {
+        [
+            UTType(filenameExtension: "clipdb"),
+            .json,
+            .plainText
+        ].compactMap { $0 }
+    }
+
+    private func transformSelectedEntries(_ entries: [ClipEntry], transform: (String) -> String) {
+        let transformed = entries.map { entry in
+            (entry.Id, transform(entry.Text))
+        }
+        guard !transformed.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        store.replaceTexts(transformed.map { (id: $0.0, text: $0.1) })
+        monitor.writeInternalText(transformed.map { $0.1 }.joined(separator: "\n\n"))
+        sounds.play(.copy)
+    }
+
+    private func showInformationalAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func configureHistoryQuickCopyState() {
+        historyWindow?.configureQuickCopy(
+            showHistoryHotkey: settings.showHistoryHotkey,
+            toggleMonitoringHotkey: settings.toggleMonitoringHotkey,
+            quickCopyHotkeys: settings.quickCopyHotkeys
+        )
+    }
+
+    private func registerHotkeys() {
+        hotkeys.register(
+            showHistory: settings.showHistoryHotkey,
+            toggleMonitoring: settings.toggleMonitoringHotkey,
+            quickCopies: settings.quickCopyHotkeys
+        )
+    }
+
+    private func copyLatestRemoteTextIfNeeded() {
+        guard settings.autoCopyLatestRemoteText,
+              let entry = store.newestRemoteCreatedEntry(excluding: settings.machineName)
+        else {
+            remoteClipboardBaseline = nil
+            return
+        }
+
+        let stamp = entry.CreatedUnixMs
+        guard let baseline = remoteClipboardBaseline else {
+            remoteClipboardBaseline = (entry.Id, stamp)
+            return
+        }
+        guard stamp > baseline.stamp || (stamp == baseline.stamp && entry.Id != baseline.id) else { return }
+        remoteClipboardBaseline = (entry.Id, stamp)
+        monitor.writeInternalText(entry.Text)
+        sounds.play(.remote)
+    }
+
+    private func resetRemoteClipboardBaseline() {
+        guard settings.autoCopyLatestRemoteText,
+              let entry = store?.newestRemoteCreatedEntry(excluding: settings.machineName)
+        else {
+            remoteClipboardBaseline = nil
+            return
+        }
+        remoteClipboardBaseline = (entry.Id, entry.CreatedUnixMs)
+    }
+
+    private func scheduleUpdateChecks() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+        switch settings.updateCheckFrequency.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "atstartup":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.runUpdateCheck(manual: false)
+            }
+        case "hourly":
+            updateTimer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.runUpdateCheck(manual: false) }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.runUpdateCheckIfDue(intervalSeconds: 60 * 60)
+            }
+        case "daily":
+            updateTimer = Timer.scheduledTimer(withTimeInterval: 60 * 60 * 24, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.runUpdateCheck(manual: false) }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.runUpdateCheckIfDue(intervalSeconds: 60 * 60 * 24)
+            }
+        default:
+            break
+        }
+    }
+
+    private func runUpdateCheckIfDue(intervalSeconds: Int64) {
+        let now = TimeUtil.nowUnixMs()
+        guard settings.lastUpdateCheckUnixMs == 0 || now - settings.lastUpdateCheckUnixMs >= intervalSeconds * 1000 else { return }
+        runUpdateCheck(manual: false)
+    }
+
+    private func runUpdateCheck(manual: Bool) {
+        settings.lastUpdateCheckUnixMs = TimeUtil.nowUnixMs()
+        try? settingsStore.save(settings)
+        updates.check(
+            currentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0",
+            manual: manual,
+            installSilently: !manual && settings.installUpdatesSilently
+        )
     }
 
     private func sortedTextEntries() -> [ClipEntry] {

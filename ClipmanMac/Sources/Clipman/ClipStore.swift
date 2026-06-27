@@ -51,17 +51,50 @@ final class ClipStore: @unchecked Sendable {
         queue.sync { sortedEntriesLocked(sortMode: sortMode, descending: descending) }
     }
 
-    func addText(_ text: String, maxEntries: Int = 1000) {
+    func entryCount() -> Int {
+        queue.sync { database.Entries.count }
+    }
+
+    func newestRemoteCreatedEntry(excluding sourceMachine: String) -> ClipEntry? {
+        queue.sync {
+            database.Entries
+                .filter {
+                    !$0.Text.isEmpty
+                    && $0.CreatedUnixMs > 0
+                    && !$0.SourceMachine.isEmpty
+                    && $0.SourceMachine.caseInsensitiveCompare(sourceMachine) != .orderedSame
+                }
+                .max {
+                    if $0.CreatedUnixMs == $1.CreatedUnixMs { return $0.Id < $1.Id }
+                    return $0.CreatedUnixMs < $1.CreatedUnixMs
+                }
+        }
+    }
+
+    func entry(id: String) -> ClipEntry? {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return queue.sync {
+            database.Entries.first { $0.Id == trimmed }
+        }
+    }
+
+    func addText(_ text: String, group: String = "", maxEntries: Int = 1000) {
         guard !text.isEmpty else { return }
+        let trimmedGroup = group.trimmingCharacters(in: .whitespacesAndNewlines)
         queue.async {
-            self.mergeLatestBeforeWriteLocked()
+            guard self.mergeLatestBeforeWriteLocked() else { return }
             let now = TimeUtil.nowUnixMs()
             if let index = self.database.Entries.firstIndex(where: { $0.Text == text }) {
                 self.database.Entries[index].LastUsedUnixMs = now
                 self.database.Entries[index].SourceMachine = self.machineName
+                if !trimmedGroup.isEmpty {
+                    self.database.Entries[index].Group = trimmedGroup
+                }
             } else {
                 self.database.Entries.append(ClipEntry(
                     Text: text,
+                    Group: trimmedGroup,
                     SourceMachine: self.machineName,
                     CreatedUnixMs: now,
                     LastUsedUnixMs: now,
@@ -76,7 +109,7 @@ final class ClipStore: @unchecked Sendable {
 
     func markUsed(_ id: String) {
         queue.async {
-            self.mergeLatestBeforeWriteLocked()
+            guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
             self.database.Entries[index].LastUsedUnixMs = TimeUtil.nowUnixMs()
             self.saveLocked()
@@ -85,7 +118,7 @@ final class ClipStore: @unchecked Sendable {
 
     func togglePinned(_ id: String) {
         queue.async {
-            self.mergeLatestBeforeWriteLocked()
+            guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
             self.database.Entries[index].Pinned.toggle()
             self.saveLocked()
@@ -95,7 +128,7 @@ final class ClipStore: @unchecked Sendable {
 
     func delete(_ id: String) {
         queue.async {
-            self.mergeLatestBeforeWriteLocked()
+            guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }),
                   !self.database.Entries[index].Pinned else {
                 return
@@ -108,7 +141,7 @@ final class ClipStore: @unchecked Sendable {
 
     func setNameAndText(id: String, name: String, text: String) {
         queue.async {
-            self.mergeLatestBeforeWriteLocked()
+            guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
             self.database.Entries[index].Name = name.trimmingCharacters(in: .whitespacesAndNewlines)
             self.database.Entries[index].Text = text
@@ -123,7 +156,7 @@ final class ClipStore: @unchecked Sendable {
         let trimmed = group.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !idSet.isEmpty else { return }
         queue.async {
-            self.mergeLatestBeforeWriteLocked()
+            guard self.mergeLatestBeforeWriteLocked() else { return }
             var changed = false
             for index in self.database.Entries.indices where idSet.contains(self.database.Entries[index].Id) {
                 self.database.Entries[index].Group = trimmed
@@ -136,11 +169,53 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
+    func moveEntries(ids: [String], direction: Int) {
+        let idSet = Set(ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        guard !idSet.isEmpty, direction != 0 else { return }
+        queue.async {
+            guard self.mergeLatestBeforeWriteLocked() else { return }
+            self.normalizeManualOrderLocked()
+            let selected = self.database.Entries.filter { idSet.contains($0.Id) }
+            guard let first = selected.first,
+                  !selected.contains(where: { $0.Pinned != first.Pinned }) else {
+                return
+            }
+
+            var ordered = self.database.Entries
+                .filter { $0.Pinned == first.Pinned }
+                .sorted {
+                    if $0.ManualOrder == $1.ManualOrder { return $0.CreatedUnixMs < $1.CreatedUnixMs }
+                    return $0.ManualOrder < $1.ManualOrder
+                }
+            let indexes = ordered.indices.filter { idSet.contains(ordered[$0].Id) }
+            guard let firstIndex = indexes.first, let lastIndex = indexes.last else { return }
+            if direction < 0, firstIndex == 0 { return }
+            if direction > 0, lastIndex >= ordered.count - 1 { return }
+
+            let moving = ordered.filter { idSet.contains($0.Id) }
+            ordered.removeAll { idSet.contains($0.Id) }
+            let insertionIndex: Int
+            if direction < 0 {
+                insertionIndex = max(0, firstIndex - 1)
+            } else {
+                insertionIndex = min(ordered.count, lastIndex + 1 - moving.count + 1)
+            }
+            ordered.insert(contentsOf: moving, at: insertionIndex)
+
+            for (offset, entry) in ordered.enumerated() {
+                guard let index = self.database.Entries.firstIndex(where: { $0.Id == entry.Id }) else { continue }
+                self.database.Entries[index].ManualOrder = Int64(offset + 1)
+            }
+            self.saveLocked()
+            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+        }
+    }
+
     func insertTextsAfterSelected(_ entries: [ClipEntry], afterID: String?) {
         queue.async {
             let source = entries.filter { !$0.Text.isEmpty }
             guard !source.isEmpty else { return }
-            self.mergeLatestBeforeWriteLocked()
+            guard self.mergeLatestBeforeWriteLocked() else { return }
             let now = TimeUtil.nowUnixMs()
             let order: Int64
             if let afterID,
@@ -171,8 +246,128 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
+    func importEntries(from url: URL, completion: @escaping @Sendable (Result<Int, Error>) -> Void) {
+        queue.async {
+            do {
+                guard self.mergeLatestBeforeWriteLocked() else {
+                    DispatchQueue.main.async { completion(.failure(ClipDatabaseError.passwordRequired)) }
+                    return
+                }
+                let imported = try self.loadImportedEntriesLocked(from: url)
+                var added = 0
+                for var entry in imported where !entry.Text.isEmpty {
+                    if self.database.Entries.contains(where: { $0.Text == entry.Text }) { continue }
+                    if entry.Id.isEmpty {
+                        entry.Id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                    }
+                    if entry.CreatedUnixMs == 0 {
+                        entry.CreatedUnixMs = TimeUtil.nowUnixMs()
+                    }
+                    if entry.LastUsedUnixMs == 0 {
+                        entry.LastUsedUnixMs = entry.CreatedUnixMs
+                    }
+                    if entry.ManualOrder <= 0 {
+                        entry.ManualOrder = self.nextManualOrderLocked()
+                    }
+                    if entry.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        entry.SourceMachine = self.machineName
+                    }
+                    self.database.Entries.append(entry)
+                    added += 1
+                }
+                if added > 0 {
+                    SyncConflictResolver.normalize(&self.database)
+                    self.saveLocked()
+                }
+                DispatchQueue.main.async {
+                    self.delegate?.clipStoreDidChange()
+                    completion(.success(added))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.delegate?.clipStoreDidFail(error: error)
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func exportDatabase(to url: URL, completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
+        queue.async {
+            do {
+                guard self.mergeLatestBeforeWriteLocked() else {
+                    DispatchQueue.main.async { completion(.failure(ClipDatabaseError.passwordRequired)) }
+                    return
+                }
+                if url.pathExtension.caseInsensitiveCompare("txt") == .orderedSame {
+                    let text = self.sortedEntriesLocked().map(\.Text).joined(separator: "\n---\n")
+                    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try text.write(to: url, atomically: true, encoding: .utf8)
+                } else {
+                    var snapshot = self.database
+                    snapshot.UpdatedUnixMs = TimeUtil.nowUnixMs()
+                    try ClipDatabaseFile.saveAtomic(url, database: snapshot, password: self.exportPassword(for: url))
+                }
+                DispatchQueue.main.async { completion(.success(())) }
+            } catch {
+                DispatchQueue.main.async {
+                    self.delegate?.clipStoreDidFail(error: error)
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func replaceTexts(_ updates: [(id: String, text: String)]) {
+        let updateMap = Dictionary(uniqueKeysWithValues: updates.map { ($0.id, $0.text) })
+        guard !updateMap.isEmpty else { return }
+        queue.async {
+            guard self.mergeLatestBeforeWriteLocked() else { return }
+            var changed = false
+            let now = TimeUtil.nowUnixMs()
+            for index in self.database.Entries.indices {
+                guard let text = updateMap[self.database.Entries[index].Id],
+                      self.database.Entries[index].Text != text
+                else { continue }
+                self.database.Entries[index].Text = text
+                self.database.Entries[index].LastUsedUnixMs = now
+                changed = true
+            }
+            guard changed else { return }
+            self.saveLocked()
+            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+        }
+    }
+
     func currentPassword() -> String {
         queue.sync { password }
+    }
+
+    private func loadImportedEntriesLocked(from url: URL) throws -> [ClipEntry] {
+        if url.pathExtension.caseInsensitiveCompare("txt") == .orderedSame {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            return content
+                .components(separatedBy: "\n---\n")
+                .flatMap { $0.components(separatedBy: "\r\n---\r\n") }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map {
+                    ClipEntry(
+                        Text: $0,
+                        SourceMachine: machineName,
+                        CreatedUnixMs: TimeUtil.nowUnixMs(),
+                        LastUsedUnixMs: TimeUtil.nowUnixMs(),
+                        ManualOrder: nextManualOrderLocked()
+                    )
+                }
+        }
+
+        let imported = try ClipDatabaseFile.load(url, password: exportPassword(for: url))
+        return imported.Entries.filter { !$0.Text.isEmpty }
+    }
+
+    private func exportPassword(for url: URL) -> String {
+        url.pathExtension.caseInsensitiveCompare("clipdb") == .orderedSame ? password : ""
     }
 
     private func loadLocked() {
@@ -197,14 +392,16 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    private func mergeLatestBeforeWriteLocked() {
+    private func mergeLatestBeforeWriteLocked() -> Bool {
         do {
             _ = try SyncConflictResolver.resolveDatabaseConflicts(databaseURL: databaseURL, password: password)
             let latest = try loadDatabaseWithPasswordLocked()
             SyncConflictResolver.merge(into: &database, source: latest)
             SyncConflictResolver.normalize(&database)
+            return true
         } catch {
             DispatchQueue.main.async { self.delegate?.clipStoreDidFail(error: error) }
+            return false
         }
     }
 

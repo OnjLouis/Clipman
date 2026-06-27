@@ -99,6 +99,8 @@ namespace Clipman
     {
         public string ShowHistoryHotkey { get; set; }
         public string ToggleActiveHotkey { get; set; }
+        public List<QuickCopyBinding> QuickCopyHotkeys { get; set; }
+        public bool AutoCopyLatestRemoteText { get; set; }
         public bool RemoveDuplicates { get; set; }
         public bool SoundsEnabled { get; set; }
         public bool SaveListPosition { get; set; }
@@ -136,6 +138,8 @@ namespace Clipman
         {
             ShowHistoryHotkey = "Ctrl+Alt+\\";
             ToggleActiveHotkey = "Ctrl+Alt+`";
+            QuickCopyHotkeys = new List<QuickCopyBinding>();
+            AutoCopyLatestRemoteText = false;
             RemoveDuplicates = true;
             SoundsEnabled = true;
             SaveListPosition = true;
@@ -167,6 +171,18 @@ namespace Clipman
             PlainDatabasePassword = string.Empty;
             AutoRemoveUnavailableFileHistoryEvents = false;
             DiagnosticsFileHistoryLimit = 20;
+        }
+    }
+
+    public sealed class QuickCopyBinding
+    {
+        public string EntryId { get; set; }
+        public string Hotkey { get; set; }
+
+        public QuickCopyBinding()
+        {
+            EntryId = string.Empty;
+            Hotkey = string.Empty;
         }
     }
 

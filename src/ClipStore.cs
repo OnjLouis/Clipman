@@ -14,11 +14,22 @@ namespace Clipman
         private ClipDatabase database = new ClipDatabase();
         private Func<string> passwordProvider;
         private bool storageUnavailable;
+        private bool lastChangeWasExternal;
 
         public event EventHandler Changed;
 
         public string DatabasePath { get; private set; }
         public string LastStorageError { get; private set; }
+        public bool LastChangeWasExternal
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return lastChangeWasExternal;
+                }
+            }
+        }
 
         public ClipStore(string databasePath) : this(databasePath, string.Empty)
         {
@@ -99,6 +110,31 @@ namespace Clipman
                 var normal = SortNormalEntries(filtered.Where(e => !e.Pinned), sortMode, descending);
 
                 return pinned.Concat(normal).Select(Clone).ToList();
+            }
+        }
+
+        public ClipEntry GetEntryById(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return null;
+            lock (sync)
+            {
+                var entry = database.Entries.FirstOrDefault(e => string.Equals(e.Id, id, StringComparison.Ordinal));
+                return entry == null ? null : Clone(entry);
+            }
+        }
+
+        public ClipEntry GetNewestRemoteEntry(string localMachineName)
+        {
+            var local = (localMachineName ?? string.Empty).Trim();
+            lock (sync)
+            {
+                var entry = database.Entries
+                    .Where(e => e != null &&
+                        !string.IsNullOrEmpty(e.Text) &&
+                        !string.Equals((e.SourceMachine ?? string.Empty).Trim(), local, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(e => e.CreatedUnixMs)
+                    .FirstOrDefault();
+                return entry == null ? null : Clone(entry);
             }
         }
 
@@ -733,7 +769,7 @@ namespace Clipman
                 }
             }
 
-            OnChanged();
+            OnChanged(true);
         }
 
         private static ClipEntry Clone(ClipEntry entry)
@@ -817,6 +853,15 @@ namespace Clipman
 
         private void OnChanged()
         {
+            OnChanged(false);
+        }
+
+        private void OnChanged(bool external)
+        {
+            lock (sync)
+            {
+                lastChangeWasExternal = external;
+            }
             var handler = Changed;
             if (handler != null)
             {

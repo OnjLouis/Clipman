@@ -17,6 +17,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Clipman" "$APP/Contents/MacOS/Clipman"
 cp -R "$ROOT/Sources/Clipman/Resources/sounds" "$APP/Contents/Resources/sounds"
+cp "$ROOT/../Manual.html" "$APP/Contents/Resources/Manual.html"
+cp "$ROOT/../LICENSE.txt" "$APP/Contents/Resources/LICENSE.txt"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

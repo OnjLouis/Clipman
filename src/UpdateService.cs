@@ -173,7 +173,7 @@ namespace Clipman
 
         public static void OpenDonatePage()
         {
-            OpenUrl("https://www.paypal.me/AndreLouis");
+            OpenUrl("https://onj.me/donate");
         }
 
         private static void ShowUpdateAvailableDialog(IWin32Window owner, GitHubReleaseInfo release, IEnumerable<GitHubReleaseInfo> releases, Version current, Version remote, Action exitApp)

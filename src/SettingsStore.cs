@@ -76,6 +76,29 @@ namespace Clipman
                 settings.DatabasePath = DefaultDatabasePath();
                 settings.UseDefaultDatabasePath = true;
             }
+            if (string.IsNullOrWhiteSpace(settings.ShowHistoryHotkey))
+            {
+                settings.ShowHistoryHotkey = "Ctrl+Alt+\\";
+            }
+            if (string.IsNullOrWhiteSpace(settings.ToggleActiveHotkey))
+            {
+                settings.ToggleActiveHotkey = "Ctrl+Alt+`";
+            }
+            if (settings.QuickCopyHotkeys == null)
+            {
+                settings.QuickCopyHotkeys = new List<QuickCopyBinding>();
+            }
+            settings.QuickCopyHotkeys = settings.QuickCopyHotkeys
+                .Where(b => b != null && !string.IsNullOrWhiteSpace(b.EntryId) && !string.IsNullOrWhiteSpace(b.Hotkey))
+                .GroupBy(b => b.EntryId.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g => new QuickCopyBinding
+                {
+                    EntryId = g.First().EntryId.Trim(),
+                    Hotkey = g.First().Hotkey.Trim()
+                })
+                .GroupBy(b => b.Hotkey, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
             if (settings.MaxHistoryEntries < 0)
             {
                 settings.MaxHistoryEntries = 0;

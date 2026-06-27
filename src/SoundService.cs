@@ -24,6 +24,7 @@ namespace Clipman
         public void Copy(bool enabled) { Play("copy.wav", enabled); }
         public void On(bool enabled) { Play("on.wav", enabled); }
         public void Off(bool enabled) { Play("off.wav", enabled); }
+        public void Remote(bool enabled) { Play("remote.wav", enabled); }
         public void Skip(bool enabled) { Play("skip.wav", enabled); }
 
         private void Play(string fileName, bool enabled)

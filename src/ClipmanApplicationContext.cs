@@ -14,6 +14,7 @@ namespace Clipman
         private const int ShowHotkeyId = 1001;
         private const int ToggleHotkeyId = 1002;
         private const int ToggleHotkeyAlternateId = 1004;
+        private const int QuickCopyHotkeyBaseId = 2000;
 
         private readonly string appDirectory;
         private readonly SettingsStore settingsStore;
@@ -44,7 +45,11 @@ namespace Clipman
         private bool showHotkeyRegistered;
         private bool toggleHotkeyRegistered;
         private bool toggleAlternateHotkeyRegistered;
+        private readonly Dictionary<int, string> quickCopyHotkeyEntryIds = new Dictionary<int, string>();
+        private int quickCopyHotkeysRegistered;
         private string lastHandledCloseRequestId = string.Empty;
+        private string lastAutoCopiedRemoteEntryId = string.Empty;
+        private long lastAutoCopiedRemoteEntryStamp;
         private string databasePassword = string.Empty;
 
         public ClipmanApplicationContext()
@@ -58,6 +63,7 @@ namespace Clipman
             sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
             store = new ClipStore(settings.DatabasePath, CurrentDatabasePassword);
             store.Changed += StoreChanged;
+            ResetRemoteAutoCopyBaseline();
             fileEventStore = new FileClipboardEventStore(settingsStore.DefaultFileHistoryDatabasePath(), CurrentDatabasePassword);
             fileEventStore.Changed += FileEventStoreChanged;
 
@@ -105,7 +111,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
                 created = true;
             }
 
@@ -251,10 +257,15 @@ namespace Clipman
             var updatePolicyChanged =
                 !string.Equals(settings.UpdateCheckFrequency, updated.UpdateCheckFrequency, StringComparison.OrdinalIgnoreCase) ||
                 settings.InstallUpdatesSilently != updated.InstallUpdatesSilently;
+            var autoRemoteCopyTurnedOn = !settings.AutoCopyLatestRemoteText && updated.AutoCopyLatestRemoteText;
             var saveListPositionTurnedOff = settings.SaveListPosition && !updated.SaveListPosition;
             var oldSettingsDirectory = settingsStore.SettingsDirectory;
             settings.ShowHistoryHotkey = updated.ShowHistoryHotkey;
             settings.ToggleActiveHotkey = updated.ToggleActiveHotkey;
+            settings.QuickCopyHotkeys = updated.QuickCopyHotkeys == null
+                ? new List<QuickCopyBinding>()
+                : updated.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey }).ToList();
+            settings.AutoCopyLatestRemoteText = updated.AutoCopyLatestRemoteText;
             settings.RemoveDuplicates = updated.RemoveDuplicates;
             settings.SoundsEnabled = updated.SoundsEnabled;
             settings.SaveListPosition = updated.SaveListPosition;
@@ -327,6 +338,7 @@ namespace Clipman
             {
                 ResolveDatabasePassword();
                 store.SetDatabasePath(settings.DatabasePath, CurrentDatabasePassword);
+                ResetRemoteAutoCopyBaseline();
             }
             else if (encryptionChanged)
             {
@@ -345,6 +357,10 @@ namespace Clipman
             if (updatePolicyChanged)
             {
                 ScheduleUpdateChecks();
+            }
+            if (autoRemoteCopyTurnedOn)
+            {
+                ResetRemoteAutoCopyBaseline();
             }
             UpdateTray();
             if (activeChanged)
@@ -395,6 +411,10 @@ namespace Clipman
             {
                 ToggleActive();
             }
+            else if (quickCopyHotkeyEntryIds.ContainsKey(id))
+            {
+                CopyQuickCopyEntryToClipboard(quickCopyHotkeyEntryIds[id]);
+            }
         }
 
         internal void HandleClipboardUpdate()
@@ -415,6 +435,11 @@ namespace Clipman
             if (string.IsNullOrWhiteSpace(sourceProcessName))
             {
                 sourceProcessName = ForegroundProcessName();
+            }
+
+            if (IsClipmanProcess(sourceProcessName))
+            {
+                return;
             }
 
             if (IsIgnoredProcess(sourceProcessName))
@@ -668,9 +693,15 @@ namespace Clipman
             NativeMethods.UnregisterHotKey(messageWindow.Handle, ShowHotkeyId);
             NativeMethods.UnregisterHotKey(messageWindow.Handle, ToggleHotkeyId);
             NativeMethods.UnregisterHotKey(messageWindow.Handle, ToggleHotkeyAlternateId);
+            foreach (var hotkeyId in quickCopyHotkeyEntryIds.Keys.ToList())
+            {
+                NativeMethods.UnregisterHotKey(messageWindow.Handle, hotkeyId);
+            }
+            quickCopyHotkeyEntryIds.Clear();
             showHotkeyRegistered = false;
             toggleHotkeyRegistered = false;
             toggleAlternateHotkeyRegistered = false;
+            quickCopyHotkeysRegistered = 0;
 
             HotkeyDefinition show;
             if (HotkeyDefinition.TryParse(settings.ShowHistoryHotkey, out show))
@@ -686,6 +717,31 @@ namespace Clipman
                 {
                     toggleAlternateHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, ToggleHotkeyAlternateId, toggle.Modifiers, Keys.Oem8);
                 }
+            }
+
+            var quickCopyId = QuickCopyHotkeyBaseId;
+            var usedHotkeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var binding in (settings.QuickCopyHotkeys ?? new List<QuickCopyBinding>())
+                .Where(b => b != null && !string.IsNullOrWhiteSpace(b.EntryId) && !string.IsNullOrWhiteSpace(b.Hotkey))
+                .OrderBy(b => b.EntryId, StringComparer.OrdinalIgnoreCase))
+            {
+                var normalizedHotkey = binding.Hotkey.Trim();
+                if (!usedHotkeys.Add(normalizedHotkey)) continue;
+
+                HotkeyDefinition quickCopy;
+                if (!HotkeyDefinition.TryParse(normalizedHotkey, out quickCopy)) continue;
+
+                while (quickCopyHotkeyEntryIds.ContainsKey(quickCopyId))
+                {
+                    quickCopyId++;
+                }
+
+                if (NativeMethods.RegisterHotKey(messageWindow.Handle, quickCopyId, quickCopy.Modifiers, quickCopy.Key))
+                {
+                    quickCopyHotkeyEntryIds[quickCopyId] = binding.EntryId.Trim();
+                    quickCopyHotkeysRegistered++;
+                }
+                quickCopyId++;
             }
         }
 
@@ -747,10 +803,15 @@ namespace Clipman
         private bool IsIgnoredProcess(string processName)
         {
             processName = NormalizeProcessName(processName);
-            if (string.Equals(processName, "clipman", StringComparison.OrdinalIgnoreCase)) return true;
+            if (IsClipmanProcess(processName)) return true;
             if (settings.IgnoredProcesses == null || settings.IgnoredProcesses.Count == 0) return false;
             return settings.IgnoredProcesses.Any(p =>
                 string.Equals(NormalizeProcessName(p), processName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsClipmanProcess(string processName)
+        {
+            return string.Equals(NormalizeProcessName(processName), "clipman", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string NormalizeProcessName(string processName)
@@ -791,6 +852,8 @@ namespace Clipman
                 "Show history hotkey: " + settings.ShowHistoryHotkey + " (" + (showHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle hotkey: " + settings.ToggleActiveHotkey + " (" + (toggleHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle alternate UK key: " + (toggleAlternateHotkeyRegistered ? "registered" : "not registered or not needed") + "\r\n" +
+                "Quick copy bindings: " + ((settings.QuickCopyHotkeys == null ? 0 : settings.QuickCopyHotkeys.Count) + " configured, " + quickCopyHotkeysRegistered + " registered") + "\r\n" +
+                "Auto-copy latest remote text: " + (settings.AutoCopyLatestRemoteText ? "on" : "off") + "\r\n" +
                 "Build stamp: " + BuildInfo.BuildStampUtcMs + "\r\n" +
                 "Executable hash: " + SharedUpdateStateStore.CurrentExeHash() + "\r\n" +
                 "Shared update state path: " + SharedUpdateStateStore.StatePath(settingsStore.SettingsDirectory) + "\r\n" +
@@ -877,10 +940,71 @@ namespace Clipman
 
         private void StoreChanged(object sender, EventArgs e)
         {
+            if (store.LastChangeWasExternal)
+            {
+                if (invoker != null && invoker.IsHandleCreated)
+                {
+                    invoker.BeginInvoke(new Action(MaybeAutoCopyLatestRemoteEntry));
+                }
+            }
             if (historyForm != null && !historyForm.IsDisposed)
             {
                 historyForm.BeginInvoke(new Action(() => historyForm.Reload()));
             }
+        }
+
+        private void CopyQuickCopyEntryToClipboard(string entryId)
+        {
+            var entry = store.GetEntryById(entryId);
+            if (entry == null || string.IsNullOrEmpty(entry.Text))
+            {
+                sounds.Skip(settings.SoundsEnabled);
+                return;
+            }
+
+            ignoreNextClipboardChange = true;
+            Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+            store.MarkUsed(entry.Id);
+            sounds.Copy(settings.SoundsEnabled);
+        }
+
+        private void ResetRemoteAutoCopyBaseline()
+        {
+            var entry = store == null ? null : store.GetNewestRemoteEntry(Environment.MachineName);
+            if (entry == null)
+            {
+                lastAutoCopiedRemoteEntryId = string.Empty;
+                lastAutoCopiedRemoteEntryStamp = 0;
+                return;
+            }
+
+            lastAutoCopiedRemoteEntryId = entry.Id ?? string.Empty;
+            lastAutoCopiedRemoteEntryStamp = entry.CreatedUnixMs;
+        }
+
+        private void MaybeAutoCopyLatestRemoteEntry()
+        {
+            if (!settings.AutoCopyLatestRemoteText) return;
+
+            var entry = store.GetNewestRemoteEntry(Environment.MachineName);
+            if (entry == null || string.IsNullOrEmpty(entry.Text)) return;
+
+            var stamp = entry.CreatedUnixMs;
+            if (stamp < lastAutoCopiedRemoteEntryStamp)
+            {
+                return;
+            }
+            if (stamp == lastAutoCopiedRemoteEntryStamp &&
+                string.Equals(entry.Id ?? string.Empty, lastAutoCopiedRemoteEntryId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastAutoCopiedRemoteEntryId = entry.Id ?? string.Empty;
+            lastAutoCopiedRemoteEntryStamp = stamp;
+            ignoreNextClipboardChange = true;
+            Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+            sounds.Remote(settings.SoundsEnabled);
         }
 
         private void FileEventStoreChanged(object sender, EventArgs e)
@@ -921,6 +1045,10 @@ namespace Clipman
                 NativeMethods.UnregisterHotKey(messageWindow.Handle, ShowHotkeyId);
                 NativeMethods.UnregisterHotKey(messageWindow.Handle, ToggleHotkeyId);
                 NativeMethods.UnregisterHotKey(messageWindow.Handle, ToggleHotkeyAlternateId);
+                foreach (var hotkeyId in quickCopyHotkeyEntryIds.Keys.ToList())
+                {
+                    NativeMethods.UnregisterHotKey(messageWindow.Handle, hotkeyId);
+                }
                 notifyIcon.Visible = false;
                 notifyIcon.Dispose();
                 store.Dispose();

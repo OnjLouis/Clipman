@@ -48,6 +48,10 @@ Machine-specific settings also live in the selected data/settings folder and are
 
 macOS may keep a small pointer under Application Support so it can find the selected data folder on launch, but the active machine settings JSON belongs beside `clipman-history.clipdb`, matching Windows behavior.
 
+Machine-specific settings own local-only behavior such as global hotkeys, per-entry Quick Copy assignments, and whether this machine copies the newest remote text entry onto its local clipboard. These fields must not be added to shared text entries, because different computers sharing one database may want different targets, shortcuts, and clipboard handoff behavior.
+
+The optional newest-remote-text clipboard handoff must be driven by newly created remote entries only. Use `CreatedUnixMs` to decide whether a remote entry is new after the local baseline. Do not use `LastUsedUnixMs` for this handoff, because choosing or reusing an old pinned/history item on one machine is an action for that machine and must not cause other opted-in machines to copy that old text onto their clipboards.
+
 ## Database Format
 
 The `.clipdb` file has two supported binary forms:
@@ -128,6 +132,12 @@ Each platform must write the machine/source name into `SourceMachine` when addin
 
 Machine naming may differ by platform, but it should be stable and human-readable.
 
+## Text Entry Groups
+
+The shared `Group` field is used for text-entry grouping. When text is captured from another foreground application, platforms should put the source application name into `Group` where available, so app-created groups such as Logic or TextEdit are interoperable across Windows and macOS.
+
+Manual group changes still write the same `Group` field. Do not add a separate source-application grouping field without a cross-platform migration plan.
+
 ## Password Storage
 
 The database password is not stored in the shared `.clipdb` file.
@@ -164,6 +174,12 @@ Both implementations must:
 - Preserve entries added by another machine.
 
 Current Windows behavior includes conflict cleanup and merge logic. If Mac adds similar conflict handling, keep it compatible with Windows rather than inventing a conflicting file scheme.
+
+## Remote Auto-Copy Trigger
+
+The optional setting that puts remote text onto the local clipboard must trigger only for newly created remote text entries. It must not trigger when another machine merely reuses an existing entry, marks it used, Quick Copies it, or otherwise updates `LastUsedUnixMs`.
+
+Use `CreatedUnixMs` to decide whether a remote entry is new for this client. Do not use `LastUsedUnixMs`, or `max(LastUsedUnixMs, CreatedUnixMs)`, for this trigger. This keeps an old pinned entry copied on one machine from being pushed onto every other opted-in machine.
 
 ## Required Compatibility Tests
 
