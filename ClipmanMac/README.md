@@ -7,19 +7,19 @@ Native macOS implementation of Clipman, sharing the same text-history `.clipdb` 
 Before changing database, settings, sync, password, or shared-history behavior, read:
 
 ```text
-D:\Dropbox\backups\Codex\current\clipman\CLIPMAN_SHARED_CONTRACT.md
+<repo root>\CLIPMAN_SHARED_CONTRACT.md
 ```
 
 Before changing product parity, keyboard behavior, menus, or cross-platform workflow, also read:
 
 ```text
-D:\Dropbox\backups\Codex\current\clipman\CLIPMAN_AGENT_SYNC.md
+<repo root>\CLIPMAN_AGENT_SYNC.md
 ```
 
 On the Mac, the same file should be reachable from the sibling folder under Dropbox, for example:
 
 ```text
-~/Dropbox/backups/Codex/current/clipman/CLIPMAN_SHARED_CONTRACT.md
+<repo root>/CLIPMAN_SHARED_CONTRACT.md
 ```
 
 Both Windows and macOS implementations must stay compatible with that contract. If a shared behavior changes, update both implementations and the contract document in the same work cycle, or clearly mark the feature as platform-specific.

@@ -24,7 +24,8 @@ If an open issue is fixed by the release, the user-facing changelog in `Manual.h
 Before pushing or publishing, run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -LivePath D:\Dropbox\SOFTWARE\clipman
+powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -LivePath <live Clipman folder>
+powershell -ExecutionPolicy Bypass -File .\Test-ReleasePrivacy.ps1 -ReleaseZip <path-to-release-or-source-zip>
 ```
 
 The normal smoke test also stages a disposable portable copy in `%TEMP%`, applies the freshly built ZIP with Clipman's updater command line, and verifies that runtime folders such as `Settings` and `Logs` survive while stale update folders are removed.
@@ -32,7 +33,7 @@ The normal smoke test also stages a disposable portable copy in `%TEMP%`, applie
 After publishing a GitHub release, run the post-publish updater smoke test:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -LivePath D:\Dropbox\SOFTWARE\clipman -Version <version> -RunPostPublishUpdateSmoke
+powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -LivePath <live Clipman folder> -Version <version> -RunPostPublishUpdateSmoke
 ```
 
 That downloads the previous GitHub release ZIP into `%TEMP%`, starts it with startup/silent update settings, and verifies that it updates itself to `<version>`. Restart Andre's live copy afterwards if the test closed it.
@@ -48,7 +49,7 @@ That produces `ClipmanMac/dist/ClipmanMac-<version>.zip`, runs the macOS codec/s
 
 Future GitHub releases should attach both:
 
-- the Windows portable ZIP from `D:\Dropbox\backups\Clipman\Program Builds`
+- the Windows portable ZIP from the local Program Builds archive
 - the versioned Mac ZIP from `ClipmanMac/dist/ClipmanMac-<version>.zip`
 
 The clean portable output must contain only shipped app files:
@@ -97,6 +98,8 @@ Do not commit generated or local runtime output:
 - private handoff files
 - local machine settings or local history databases
 
+Do not include maintainer-only local paths, token-file loading snippets, private handover paths, local machine names, or Codex workspace paths in public source files or source snapshot ZIPs. `Test-ReleasePrivacy.ps1` is a hard release blocker for this.
+
 ## Documentation
 
 Update `Manual.html` for user-facing behavior changes.
@@ -107,8 +110,8 @@ Do not include user-specific paths, private clipboard contents, personal setting
 
 ## Private Handover Parity
 
-Andre's private Clipman handover lives at `D:\Dropbox\txt\codex\Clipman.txt`. It is not part of the source package, portable build, GitHub repository, or release ZIP.
+The private Clipman handover is not part of the source package, portable build, GitHub repository, or release ZIP.
 
 When changing source, release rules, updater behavior, storage behavior, accessibility behavior, packaging rules, smoke-test expectations, or other facts a future Clipman thread must know, update that handover in the same pass.
 
-`SmokeTest.ps1` checks the private handover when it exists on Andre's machine. Do not bypass that failure by deleting or shipping the handover file.
+Set `CLIPMAN_PRIVATE_HANDOVER` to the private handover path when running smoke locally if you want parity checks. `SmokeTest.ps1` checks that file when the variable points to it. Do not bypass that failure by deleting or shipping the handover file.

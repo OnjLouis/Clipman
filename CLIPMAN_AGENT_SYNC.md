@@ -7,12 +7,12 @@ Always read `ClipmanShared.md`, this file, and `CLIPMAN_SHARED_CONTRACT.md` befo
 ## Repositories
 
 ```text
-Repository: /Users/andrelouis/Dropbox/backups/Codex/current/clipman
-Windows:    /Users/andrelouis/Dropbox/backups/Codex/current/clipman/src
-macOS:      /Users/andrelouis/Dropbox/backups/Codex/current/clipman/ClipmanMac
+Repository: <Codex workspace root>/clipman
+Windows:    <Codex workspace root>/clipman/src
+macOS:      <Codex workspace root>/clipman/ClipmanMac
 ```
 
-Older Windows notes may show `D:\Dropbox\backups\Codex\current`; on macOS that maps to `/Users/andrelouis/Dropbox/backups/Codex/current`.
+Older Windows notes may show `<Codex workspace root>`; on macOS that maps to `<Codex workspace root>`.
 
 ## Current Shared Storage Model
 
@@ -105,7 +105,7 @@ Older Windows notes may show `D:\Dropbox\backups\Codex\current`; on macOS that m
 macOS:
 
 ```bash
-cd /Users/andrelouis/Dropbox/backups/Codex/current/clipman/ClipmanMac
+cd <Codex workspace root>/clipman/ClipmanMac
 Scripts/build-dev-app.sh --restart
 ```
 

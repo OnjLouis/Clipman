@@ -12,13 +12,9 @@ function Get-GitHubHeaders {
         $token = $env:GITHUB_TOKEN
     }
     if ([string]::IsNullOrWhiteSpace($token)) {
-        $tokenFile = Join-Path $repoRoot 'token.txt'
-        if (Test-Path -LiteralPath $tokenFile) {
-            $token = (Get-Content -LiteralPath $tokenFile -Raw).Trim()
-        }
-        $sharedTokenFile = 'D:\Dropbox\backups\Codex\current\token.txt'
-        if ([string]::IsNullOrWhiteSpace($token) -and (Test-Path -LiteralPath $sharedTokenFile)) {
-            $token = (Get-Content -LiteralPath $sharedTokenFile -Raw).Trim()
+        $candidate = $env:CODEX_GITHUB_TOKEN_FILE
+        if (![string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+            $token = (Get-Content -LiteralPath $candidate -Raw).Trim()
         }
     }
 

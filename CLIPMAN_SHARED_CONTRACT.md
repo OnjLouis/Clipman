@@ -16,7 +16,7 @@ As of 2026-06-18, the Mac implementation can write a clipboard entry into the sh
 The combined project lives in:
 
 ```text
-D:\Dropbox\backups\Codex\current\clipman
+<repo root>
 ```
 
 Expected folders:
@@ -196,13 +196,13 @@ Before pushing or release-building changes that touch database format, password 
 Windows smoke test:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\Dropbox\backups\Codex\current\clipman\SmokeTest.ps1 -LivePath D:\Dropbox\SOFTWARE\clipman
+powershell -ExecutionPolicy Bypass -File <repo root>\SmokeTest.ps1 -LivePath <live Clipman folder>
 ```
 
 Mac codec smoke test:
 
 ```bash
-cd ~/Dropbox/backups/Codex/current/clipman/ClipmanMac
+cd <repo root>/ClipmanMac
 swift run ClipmanCodecSmoke
 ```
 
@@ -213,7 +213,7 @@ Adjust paths on macOS if the Dropbox folder differs, but keep the source-tree re
 When this contract changes, update:
 
 - This file.
-- Windows handover: `D:\Dropbox\txt\codex\Clipman.txt`
+- Windows handover: `<private Clipman handover>`
 - Windows `README.md` / `Manual.html` if user-facing behavior changed.
 - Mac project notes/readme/handover if present.
 - Any smoke tests that should guard the behavior.

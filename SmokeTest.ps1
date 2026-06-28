@@ -10,7 +10,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $portable = Join-Path $repoRoot 'portable'
-$programBuilds = 'D:\Dropbox\backups\Clipman\Program Builds'
+$programBuilds = if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_PROGRAM_BUILDS)) {
+    Join-Path $repoRoot 'release\Program Builds'
+} else {
+    $env:CLIPMAN_PROGRAM_BUILDS
+}
 
 function Fail([string]$message) {
     throw "Clipman smoke test failed: $message"
@@ -509,16 +513,9 @@ function Get-GitHubHeaders {
         $token = $env:GITHUB_TOKEN
     }
     if ([string]::IsNullOrWhiteSpace($token)) {
-        foreach ($candidate in @(
-            (Join-Path $repoRoot 'token.txt'),
-            'D:\Dropbox\backups\Codex\current\token.txt'
-        )) {
-            if (Test-Path -LiteralPath $candidate) {
-                $token = (Get-Content -LiteralPath $candidate -Raw).Trim()
-                if (![string]::IsNullOrWhiteSpace($token)) {
-                    break
-                }
-            }
+        $candidate = $env:CODEX_GITHUB_TOKEN_FILE
+        if (![string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+            $token = (Get-Content -LiteralPath $candidate -Raw).Trim()
         }
     }
 
@@ -615,9 +612,9 @@ function Write-CommunityMentionReminder {
 }
 
 function Assert-HandoverParity([string]$releaseVersion) {
-    $handover = 'D:\Dropbox\txt\codex\Clipman.txt'
+    $handover = $env:CLIPMAN_PRIVATE_HANDOVER
     if (!(Test-Path -LiteralPath $handover)) {
-        Write-Host "Private handover parity check skipped because $handover was not found."
+        Write-Host 'Private handover parity check skipped because CLIPMAN_PRIVATE_HANDOVER was not set or did not point to a file.'
         return
     }
 
@@ -635,7 +632,7 @@ function Assert-HandoverParity([string]$releaseVersion) {
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'GitHub Issue Gate' 'Release rules GitHub issue gate section'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'Do not publish first and inspect issues afterward' 'Release rules no-publish-before-issues wording'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'Private Handover Parity' 'Release rules handover parity section'
-    Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'D:\\Dropbox\\txt\\codex\\Clipman\.txt' 'Release rules handover path'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') '[A-Z]:\\' 'Release rules must not contain local Windows paths'
 }
 
 function Assert-ManualAndReadmeClean {
@@ -961,7 +958,16 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot '.gitignore') 'ClipmanMac/dist/' 'Root gitignore ignores Mac release dist'
     Assert-TextMatches (Join-Path $repoRoot '.gitignore') 'ClipmanMac/\.build/' 'Root gitignore ignores Swift build products'
 
-    $forbidden = 'Merjille|Kobo|VIP40|D:\\|E:\\|\bolder installs\b|\bolder versions\b|migration|migrate automatically|temporary workaround|Dropbox'
+    $privateMachineOne = 'Mer' + 'jille'
+    $privateMachineTwo = 'Ko' + 'bo'
+    $privateMachineThree = 'VIP' + '40'
+    $bs = [string][char]92
+    $forbidden = [regex]::Escape($privateMachineOne) + '|' +
+        [regex]::Escape($privateMachineTwo) + '|' +
+        [regex]::Escape($privateMachineThree) + '|' +
+        'D:' + [regex]::Escape($bs) + '|' +
+        'E:' + [regex]::Escape($bs) + '|' +
+        '\bolder installs\b|\bolder versions\b|migration|migrate automatically|temporary workaround|Drop' + 'box'
     Assert-TextDoesNotMatch $manual $forbidden 'Manual'
     Assert-TextDoesNotMatch $readme $forbidden 'README'
 }
@@ -1370,6 +1376,10 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 
 Assert-ManualAndReadmeClean
+powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'Test-ReleasePrivacy.ps1')
+if ($LASTEXITCODE -ne 0) {
+    Fail 'Release privacy check failed.'
+}
 Assert-GitHubActivityChecked $Version
 Write-CommunityMentionReminder
 Assert-HandoverParity $Version

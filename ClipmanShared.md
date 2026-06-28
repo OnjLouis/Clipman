@@ -70,6 +70,62 @@ Do not commit generated or local runtime output, including `portable`, `ClipmanM
 
 Older dated notes that say “include exactly these files” describe the narrow hotfix state at that time. They must not be used as a filter for a later full release. For a full release, use `git status` from the repository root and include the complete intended source set, then build and smoke from that exact tree before publishing.
 
+## Local Release Archive Layout
+
+Andre keeps local release copies under:
+
+```text
+<local Clipman backup archive>
+```
+
+The intended layout is:
+
+- `Program Builds`: user-installable/tester ZIPs for both platforms, such as `Clipman-1.6.zip` and `ClipmanMac-1.6.zip`.
+- `Source Snapshots`: source ZIPs made from the released Git tree, such as `Clipman-source-1.6.zip`.
+- `Community Searches`: saved community/search notes when they need to be retained.
+
+Do not recreate a separate `Source Builds` folder. That older duplicate folder has been removed; source archives belong in `Source Snapshots`.
+
+After each release or local release-asset refresh:
+
+1. Copy the Windows portable ZIP into `<local Clipman backup archive>\Program Builds`.
+2. Copy the Mac release ZIP from `ClipmanMac\dist\ClipmanMac-<version>.zip` into the same `Program Builds` folder.
+3. Create or refresh `<local Clipman backup archive>\Source Snapshots\Clipman-source-<version>.zip` from the released Git commit.
+4. Verify the source snapshot includes both Windows source and `ClipmanMac` source.
+
+For 1.6, the local archive now contains:
+
+- `<local Clipman backup archive>\Program Builds\Clipman-1.6.zip`
+- `<local Clipman backup archive>\Program Builds\ClipmanMac-1.6.zip`
+- `<local Clipman backup archive>\Source Snapshots\Clipman-source-1.6.zip`
+
+`Clipman-source-1.6.zip` was created from Git `HEAD` and includes both Windows and Mac source.
+
+## Clipman 1.6 Feature Story Draft - 2026-06-27
+
+Andre asked the Mac and Windows agents to collaborate on a shared writeup in the style of `<private Codex notes folder>/SensorReadout-ProcessWatcher-FeatureStory.html`.
+
+Mac created the canonical shared draft here:
+
+```text
+<private Codex notes folder>/Clipman-1.6-FeatureStory.html
+```
+
+Draft structure:
+
+- Same basic HTML style and rhythm as the Sensor Readout Process Watcher story.
+- Narrative sections cover the move from a small update pass to Mac parity, shared sync, password model, keyboard and VoiceOver work, file history, groups, Quick Copy, remote clipboard receive, manual cleanup, release coordination, and final release checks.
+- The file includes an HTML comment asking both agents to edit this canonical file rather than creating competing drafts.
+
+Verification:
+
+- `xmllint --html --noout <private Codex notes folder>/Clipman-1.6-FeatureStory.html` passed with no output.
+- Basic structure check: 14 `h2` sections, 8 conversation blocks, and matching paragraph open/close counts.
+
+Windows next action:
+
+- Read the draft file directly, then edit the same file to add or refine the Windows-side narrative. Preserve the shared story tone rather than turning it into a changelog.
+
 ## Mac Empty-Search F3 Parity - 2026-06-27
 
 Andre requested one final Mac parity fix before 1.6: when search text is empty, `F3` and `Shift+F3` should focus the search field instead of moving to the next or previous history row, matching Windows.
@@ -153,7 +209,7 @@ Changed files:
 Windows verification:
 
 - `SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck` passed.
-- Updated `Manual.html` was copied to Andre's live Windows Clipman folder at `D:\Dropbox\SOFTWARE\clipman\Manual.html` for review.
+- Updated `Manual.html` was copied to Andre's live Windows Clipman folder at `<live Clipman folder>\Manual.html` for review.
 
 Mac verification:
 
@@ -466,7 +522,7 @@ Changed files on Windows:
 - `Manual.html`
 - `CLIPMAN_SHARED_CONTRACT.md`
 - `ClipmanShared.md`
-- Private handover: `D:\Dropbox\txt\codex\Clipman.txt`
+- Private handover: `<private Clipman handover>`
 
 Behavior changed:
 
@@ -489,19 +545,19 @@ Mac next action required:
 Windows verification:
 
 - Build passed locally for candidate version `1.5.12`.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\Dropbox\backups\Codex\current\clipman\SmokeTest.ps1 -SkipBuild -Version 1.5.12 -SkipGitHubActivityCheck` passed.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <repo root>\SmokeTest.ps1 -SkipBuild -Version 1.5.12 -SkipGitHubActivityCheck` passed.
 
 ## Windows Live Copy Refreshed - 2026-06-20
 
-Windows agent mirrored the local 1.5.12 password-remembering hardening candidate to Andre's live daily-driver copy at `D:\Dropbox\SOFTWARE\clipman`.
+Windows agent mirrored the local 1.5.12 password-remembering hardening candidate to Andre's live daily-driver copy at `<live Clipman folder>`.
 
 Live-copy actions:
 
-- Preserved `D:\Dropbox\SOFTWARE\clipman\Settings` and all clipboard/history databases.
+- Preserved `<live Clipman folder>\Settings` and all clipboard/history databases.
 - Copied the candidate `clipman.exe`, `Manual.html`, `LICENSE.txt`, `sqlite3.dll`, and factory `sounds` folder from `portable`.
-- Restarted the live Clipman process from `D:\Dropbox\SOFTWARE\clipman\clipman.exe`.
+- Restarted the live Clipman process from `<live Clipman folder>\clipman.exe`.
 - Ran the live-path smoke test:
-  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\Dropbox\backups\Codex\current\clipman\SmokeTest.ps1 -SkipBuild -Version 1.5.12 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman`
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <repo root>\SmokeTest.ps1 -SkipBuild -Version 1.5.12 -SkipGitHubActivityCheck -LivePath <live Clipman folder>`
   - Result: passed.
 
 Mac next action: read `ClipmanShared.md`, `CLIPMAN_AGENT_SYNC.md`, and `CLIPMAN_SHARED_CONTRACT.md`, then mirror the 1.5.12 password remembering model: remember off by default, session-only unlock when remember is off, Keychain only when remember is explicitly enabled, and delete any Keychain item when remember is disabled.
@@ -829,7 +885,7 @@ Changed Windows files:
 - `CLIPMAN_AGENT_SYNC.md`
 - `CLIPMAN_SHARED_CONTRACT.md`
 - `ClipmanShared.md`
-- Private handover: `D:\Dropbox\txt\codex\Clipman.txt`
+- Private handover: `<private Clipman handover>`
 
 Behavior changed:
 
@@ -845,8 +901,8 @@ Windows verification:
 
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1` passed and built `portable\clipman.exe`.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -Version 1.5.13` passed, including GitHub issue and PR gate. There were no open GitHub issues or pull requests.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman` passed and deployed the candidate to Andre's live Dropbox Clipman copy.
-- Live process restarted from `D:\Dropbox\SOFTWARE\clipman\clipman.exe`.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath <live Clipman folder>` passed and deployed the candidate to Andre's live Dropbox Clipman copy.
+- Live process restarted from `<live Clipman folder>\clipman.exe`.
 - Follow-up cleanup removed the Windows Preferences-level/default Quick Copy hotkey and the earlier single-target compatibility bridge before publication. `QuickCopyHotkeys` is the only Windows Quick Copy settings model. `Build.ps1`, full `SmokeTest.ps1 -Version 1.5.13`, and live deployment smoke all passed again after this cleanup.
 
 Next action before any release:
@@ -1090,7 +1146,7 @@ Windows next action: use this Mac package result when preparing the shared 1.5.1
 
 Andre asked for remote clipboard sync to play its own sound. Windows now treats incoming latest-remote-text auto-copy as a separate sound event:
 
-- `D:\projects\Forge\Remote.wav` was moved into Windows source assets as `Assets/sounds/remote.wav`.
+- `<local Remote.wav source asset>` was moved into Windows source assets as `Assets/sounds/remote.wav`.
 - The same `remote.wav` asset was copied into `ClipmanMac/Sources/Clipman/Resources/sounds/remote.wav` so the Mac package can bundle it.
 - Windows `SoundService` now exposes `Remote(bool enabled)` and `MaybeAutoCopyLatestRemoteEntry()` calls `sounds.Remote(settings.SoundsEnabled)` instead of the normal copy sound.
 - Windows clipboard-monitor self writes from Clipman are ignored before the ignored-app/skip-sound path, so the remote sync write should not play `skip.wav` after `remote.wav`.
@@ -1102,7 +1158,7 @@ Windows verification:
 
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1` passed.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -Version 1.5.13` passed.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman` passed and deployed Andre's live Windows copy.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath <live Clipman folder>` passed and deployed Andre's live Windows copy.
 
 Mac next action:
 
@@ -1129,7 +1185,7 @@ Windows verification:
 
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1` passed.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -Version 1.5.13` passed.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman` passed and redeployed Andre's live Windows copy.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath <live Clipman folder>` passed and redeployed Andre's live Windows copy.
 
 ## Remote Auto-Copy Created-Only Rule - 2026-06-27
 
@@ -1152,7 +1208,7 @@ Windows verification:
 
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1` passed.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -Version 1.5.13` passed, including GitHub issue and PR gate. There were no open GitHub issues or pull requests.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman` passed and redeployed Andre's live Windows copy.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.5.13 -SkipGitHubActivityCheck -LivePath <live Clipman folder>` passed and redeployed Andre's live Windows copy.
 
 ## Mac History Shortcut Polish - 2026-06-27
 
@@ -1202,7 +1258,7 @@ Changed files:
 - `Manual.html`
 - `CLIPMAN_AGENT_SYNC.md`
 - `ClipmanShared.md`
-- `D:\Dropbox\txt\codex\Clipman.txt`
+- `<private Clipman handover>`
 
 Behavior/release state:
 
@@ -1223,7 +1279,7 @@ Windows verification:
 
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1` passed.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -Version 1.6` passed, including the GitHub issue and PR gate. There were no open GitHub issues or pull requests.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman` passed and deployed Andre's live Windows copy.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck -LivePath <live Clipman folder>` passed and deployed Andre's live Windows copy.
 - The deployed Windows executable reports `ProductVersion=1.6` and `FileVersion=1.6.0.0`.
 
 ## Mac 1.6 Candidate Packaging - 2026-06-27
@@ -1324,7 +1380,7 @@ Verification:
 
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1` passed.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -Version 1.6` passed, including the GitHub issue and PR gate. There were no open GitHub issues or pull requests.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman` passed and redeployed Andre's live Windows copy.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck -LivePath <live Clipman folder>` passed and redeployed Andre's live Windows copy.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\CommunitySearch.ps1` completed. The generated checklist only surfaced the existing GitHub issue history/search links and was removed afterward so generated output is not committed.
 - `git diff --check` passed, with only normal line-ending warnings from Git.
 - Stale-code scans found no remaining shipping-source/docs references to `NameSelectedEntry`, `EntryNameForm`, or `Read-only clipboard text`.
@@ -1347,16 +1403,16 @@ Behavior changed:
 
 - `Alt+1` through `Alt+0` are now consumed at form command-key level before the menu bar receives them.
 - The list-level handler also suppresses those keypresses after jumping group filters.
-- The live Windows `LICENSE.txt` in `D:\Dropbox\SOFTWARE\clipman` was refreshed from source because it still contained the old Sensor Readout copyright text.
+- The live Windows `LICENSE.txt` in `<live Clipman folder>` was refreshed from source because it still contained the old Sensor Readout copyright text.
 - `Manual.html` now includes a keyboard-shortcut table row for `Backspace` jumping to the first normal item below pinned items, matching the existing text/file history behavior and current smoke expectations.
 
 Windows verification:
 
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1` passed.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck` passed.
-- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck -LivePath D:\Dropbox\SOFTWARE\clipman` passed and redeployed Andre's live Windows copy.
-- Live `D:\Dropbox\SOFTWARE\clipman\clipman.exe` reports product version `1.6`, file version `1.6.0.0`, company `Andre Louis`.
-- Live `D:\Dropbox\SOFTWARE\clipman\LICENSE.txt` now starts with `Copyright (c) 2026 Clipman contributors`.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmokeTest.ps1 -SkipBuild -Version 1.6 -SkipGitHubActivityCheck -LivePath <live Clipman folder>` passed and redeployed Andre's live Windows copy.
+- Live `<live Clipman folder>\clipman.exe` reports product version `1.6`, file version `1.6.0.0`, company `Andre Louis`.
+- Live `<live Clipman folder>\LICENSE.txt` now starts with `Copyright (c) 2026 Clipman contributors`.
 
 Windows next action:
 
