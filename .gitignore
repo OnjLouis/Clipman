@@ -23,6 +23,11 @@ Backups/
 clipman-history.json
 clipman-settings.json
 
+# Private coordination notes
+ClipmanShared.md
+CLIPMAN_AGENT_SYNC.md
+CLIPMAN_SHARED_CONTRACT.md
+
 # Editor and OS noise
 .DS_Store
 .vs/

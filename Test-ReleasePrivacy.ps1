@@ -11,6 +11,23 @@ function Fail([string]$message) {
     exit 1
 }
 
+function Test-PrivateCoordinationFilesAreUntracked {
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $git) {
+        return
+    }
+
+    $privateFiles = @(
+        'ClipmanShared.md',
+        'CLIPMAN_AGENT_SYNC.md',
+        'CLIPMAN_SHARED_CONTRACT.md'
+    )
+    $tracked = @(& git -C $repoRoot ls-files -- $privateFiles 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $tracked.Count -gt 0) {
+        Fail ("Private coordination files must not be tracked or shipped: " + ($tracked -join ', '))
+    }
+}
+
 function Get-RelativePath([string]$root, [string]$path) {
     $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     $pathFull = [IO.Path]::GetFullPath($path)
@@ -145,4 +162,5 @@ if ($AllHistory) {
     Test-AllHistory
 }
 
+Test-PrivateCoordinationFilesAreUntracked
 Write-Host 'Clipman release privacy check passed.'

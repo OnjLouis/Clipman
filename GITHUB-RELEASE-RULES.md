@@ -96,6 +96,7 @@ Do not commit generated or local runtime output:
 - `Settings`
 - `Logs`
 - private handoff files
+- private coordination files such as `ClipmanShared.md`, `CLIPMAN_AGENT_SYNC.md`, and `CLIPMAN_SHARED_CONTRACT.md`
 - local machine settings or local history databases
 
 Do not include maintainer-only local paths, token-file loading snippets, private handover paths, local machine names, or Codex workspace paths in public source files or source snapshot ZIPs. `Test-ReleasePrivacy.ps1` is a hard release blocker for this.
@@ -111,6 +112,8 @@ Do not include user-specific paths, private clipboard contents, personal setting
 ## Private Handover Parity
 
 The private Clipman handover is not part of the source package, portable build, GitHub repository, or release ZIP.
+
+The local coordination files `ClipmanShared.md`, `CLIPMAN_AGENT_SYNC.md`, and `CLIPMAN_SHARED_CONTRACT.md` are also private handoff/state files. They may exist in the working folder for Windows/Mac coordination, but they must remain ignored, untracked, and absent from all public source trees and release assets.
 
 When changing source, release rules, updater behavior, storage behavior, accessibility behavior, packaging rules, smoke-test expectations, or other facts a future Clipman thread must know, update that handover in the same pass.
 
