@@ -17,15 +17,15 @@ Windows and macOS downloads are attached to releases in this repository.
 - Lets custom sounds live in `Settings\sounds` so updates do not overwrite them.
 - Global hotkeys for showing history and toggling monitoring.
 - User-configurable hotkeys.
-- Optional per-entry Quick Copy global hotkeys that copy chosen text entries from anywhere without opening history.
+- Optional per-entry Quick Paste global hotkeys that paste chosen text entries into the active app from anywhere without opening history.
 - Press Enter on a history entry to copy it back to the clipboard and close history.
 - Press Ctrl+C to copy without closing the history window.
 - Press Shift+Enter to pin or unpin an entry. Pinned entries are protected from delete and cleanup.
-- The first ten pinned entries are numbered in the history list to match their Ctrl+number quick-copy shortcuts.
-- Application key menus show pinned quick-copy shortcuts when the selected pinned text entry or file-history event is one of the first ten pinned items.
+- The first ten pinned entries are numbered in the history list to match their Ctrl+number copy shortcuts.
+- Application key menus show pinned copy shortcuts when the selected pinned text entry or file-history event is one of the first ten pinned items.
 - Press Backspace in the history list to jump to the first normal entry below pinned entries.
 - Use Home, End, Page Up, and Page Down for larger list jumps. Page size follows the visible list height.
-- Press F2 to open Entry Properties for a selected entry, including name, group, Quick Copy assignment, and stored clipboard text.
+- Press F2 to open Entry Properties for a selected entry, including name, group, Quick Paste assignment, and stored clipboard text.
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
 - Sort direction uses clearer first-style labels from the View menu, such as oldest first, newest first, A first, or Z first depending on the active sort field.
@@ -47,7 +47,7 @@ Windows and macOS downloads are attached to releases in this repository.
 
 - Show clipboard history: `Ctrl+Alt+\`
 - Toggle monitoring on/off: <code>Ctrl+Alt+`</code>
-- Quick Copy: user-assigned per entry from Entry Properties.
+- Quick Paste: user-assigned per entry from Entry Properties.
 - Preferences: `Ctrl+,` in the history window only.
 - Import clipboard entries: `Ctrl+I`
 - Export clipboard entries: `Ctrl+E`
@@ -86,9 +86,11 @@ If the shared database file is missing but its folder is available, Clipman crea
 
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
 
-Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman first baselines the current newest remote entry, so turning the option on does not unexpectedly copy older history. Reusing or Quick Copying an older entry on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry.
+Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman first baselines the current newest remote entry, so turning the option on does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry.
 
-Quick Copy is machine-specific. Use Entry properties or the entry menu to assign a global Quick Copy hotkey to a text entry, then press that hotkey from anywhere to copy that specific entry without showing the history window. Several entries can each have their own Quick Copy hotkey on the same machine.
+Quick Paste is machine-specific. Use Entry Properties or the entry menu to assign a global Quick Paste hotkey to a text entry, then press that hotkey from anywhere without showing the history window. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture. Each target has its own mode: paste and restore the previous clipboard, paste and keep the target on the clipboard, or copy to clipboard only. Several entries can each have their own Quick Paste hotkey and mode on the same machine.
+
+Use the Quick Paste menu on Windows, or Quick Paste Targets from the Mac `Option+M` Clipman menu, to review every entry that currently has a Quick Paste hotkey. Choosing a target moves focus to that entry so the hotkey or mode can be edited or removed with Entry Properties. Entries with Quick Paste targets show the assigned hotkey and mode in the row text.
 
 Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, which is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
 
@@ -108,15 +110,22 @@ If a sync service creates conflict copies of Clipman's own settings or history d
 
 ## Changelog
 
+### 1.6.1
+
+- Changed per-entry global hotkeys from Quick Copy to Quick Paste. Pressing an assigned hotkey can paste the entry into the active app, paste and leave the target on the clipboard, or copy the target to the clipboard only.
+- Added Quick Paste target discovery: Windows has a Quick Paste menu and Mac has a Quick Paste Targets submenu in the Clipman menu. Assigned targets also show their hotkey and mode in the row text.
+- Added a Windows Groups menu so group filters and their numbered shortcuts are discoverable from the menu bar.
+- Added the missing Play sounds preference to the Mac build.
+
 ### 1.6.0
 
-- Updated the Windows and Mac builds together so shared clipboard databases, Quick Copy, remote clipboard receive, pinned rows, file history, sounds, packaging, and updates follow the same 1.6.0 behavior.
-- Added per-entry Quick Copy global hotkeys. Assign a hotkey to any text entry from Entry Properties, then press that hotkey from anywhere to copy that specific entry without opening the history window.
+- Updated the Windows and Mac builds together so shared clipboard databases, Quick Paste, remote clipboard receive, pinned rows, file history, sounds, packaging, and updates follow the same 1.6.0 behavior.
+- Added per-entry global hotkeys for chosen text entries from Entry Properties.
 - Changed Entry Properties to use F2 as the single shortcut on Windows and Mac. Windows no longer uses Alt+Enter for this command.
-- Quick Copy assignments made from Entry Properties now take effect immediately when global hotkeys are added, changed, or cleared.
+- Quick Paste assignments made from Entry Properties now take effect immediately when global hotkeys are added, changed, or cleared.
 - Fixed Windows Alt+number group-filter shortcuts so they jump to the selected group without also moving focus to the menu bar.
 - Added an opt-in setting to put newly created text entries received from another machine onto this machine's clipboard. The setting is off by default, baselines current history when enabled, and ignores older entries that are merely reused on another machine.
-- Improved cross-platform parity with the Mac build: Quick Copy and latest-remote-text behavior are stored in machine-specific settings, not in the shared clipboard database.
+- Improved cross-platform parity with the Mac build: Quick Paste and latest-remote-text behavior are stored in machine-specific settings, not in the shared clipboard database.
 - Updated Mac packaging and release rules so macOS release assets use a versioned ZIP name while the app inside remains `Clipman.app`.
 
 ### 1.5.12
@@ -139,7 +148,7 @@ If a sync service creates conflict copies of Clipman's own settings or history d
 - Added `Backspace` on the File history tab to jump to the first normal file event below pinned file events, matching Text history navigation.
 - Added Clean link for sharing with `Ctrl+Shift+S`. It removes tracking parameters and YouTube share-state parameters such as timestamps, so shared video links can open from the start instead of the copied playback position.
 - Improved File history restore so restored file events also place file paths on the clipboard as text, and added `Ctrl+Shift+1` through `Ctrl+Shift+0` to copy pinned file-event paths as text.
-- Improved Application key menus so selected pinned text entries and file events show their matching quick-copy shortcuts when they are in the first ten pinned items.
+- Improved Application key menus so selected pinned text entries and file events show their matching copy shortcuts when they are in the first ten pinned items.
 
 ### 1.5.9
 

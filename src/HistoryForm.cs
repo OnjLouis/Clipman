@@ -42,6 +42,8 @@ namespace Clipman
         private ToolStripMenuItem preferencesMenuItem;
         private ToolStripMenuItem optionsMenuItem;
         private ToolStripMenuItem toggleMenuItem;
+        private ToolStripMenuItem groupMenuItem;
+        private ToolStripMenuItem quickPasteMenuItem;
         private ToolStripMenuItem sortMenuItem;
         private ToolStripMenuItem sortLastUsedMenuItem;
         private ToolStripMenuItem sortAddedMenuItem;
@@ -144,12 +146,11 @@ namespace Clipman
                 AccessibleDescription = "Clipboard entries. Press Enter to copy the selected entry to the clipboard.",
                 TabIndex = 0
             };
-            list.Columns.Add("Item", 620);
+            list.Columns.Add(string.Empty, 730);
             list.Columns.Add("Group", 130);
             list.Columns.Add("Machine", 120);
             list.Columns.Add("Last used", 170);
             list.Columns.Add("Added", 170);
-            list.Columns.Add("Pinned", 70);
             list.KeyDown += ListKeyDown;
             list.KeyPress += ListKeyPress;
             list.DoubleClick += (s, e) => CopySelected();
@@ -332,19 +333,17 @@ namespace Clipman
                     separator.SubItems.Add(string.Empty);
                     separator.SubItems.Add(string.Empty);
                     separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
                     separator.Tag = null;
                     separator.ForeColor = SystemColors.GrayText;
                     list.Items.Add(separator);
                     insertedSeparator = true;
                 }
 
-                var item = new ListViewItem(entry.Pinned ? NumberedPinnedDisplayText(DisplayText(entry), pinnedEntryPosition++) : DisplayText(entry));
+                var item = new ListViewItem(EntryDisplayText(entry, ref pinnedEntryPosition));
                 item.SubItems.Add(entry.Group ?? string.Empty);
                 item.SubItems.Add(entry.SourceMachine ?? string.Empty);
                 item.SubItems.Add(TimeUtil.FromUnixMs(entry.LastUsedUnixMs).ToString("yyyy-MM-dd HH:mm:ss"));
                 item.SubItems.Add(TimeUtil.FromUnixMs(entry.CreatedUnixMs).ToString("yyyy-MM-dd HH:mm:ss"));
-                item.SubItems.Add(entry.Pinned ? "Pinned" : string.Empty);
                 item.Tag = entry;
                 list.Items.Add(item);
             }
@@ -440,6 +439,14 @@ namespace Clipman
             actions.DropDownItems.Add("URL &decode", null, (s, e) => TransformSelected(Uri.UnescapeDataString, "URL-decoded selected entry or entries."));
             actions.DropDownOpening += (s, e) => SetMenuItemsEnabled(actions, !IsFileClipboardTabActive());
 
+            groupMenuItem = new ToolStripMenuItem("Grou&ps");
+            groupMenuItem.DropDownOpening += (s, e) => PopulateGroupMenu();
+            PopulateGroupMenu();
+
+            quickPasteMenuItem = new ToolStripMenuItem("&Quick Paste");
+            quickPasteMenuItem.DropDownOpening += (s, e) => PopulateQuickPasteMenu();
+            PopulateQuickPasteMenu();
+
             var options = new ToolStripMenuItem("&Options");
             optionsMenuItem = options;
             preferencesMenuItem = new ToolStripMenuItem("&Preferences...\tCtrl+,", null, (s, e) => showPreferences());
@@ -482,12 +489,163 @@ namespace Clipman
 
             menu.Items.Add(file);
             menu.Items.Add(edit);
+            menu.Items.Add(groupMenuItem);
+            menu.Items.Add(quickPasteMenuItem);
             menu.Items.Add(actions);
             menu.Items.Add(view);
             menu.Items.Add(options);
             menu.Items.Add(help);
             UpdateMenuHotkeys();
             return menu;
+        }
+
+        private void PopulateQuickPasteMenu()
+        {
+            if (quickPasteMenuItem == null) return;
+            quickPasteMenuItem.DropDownItems.Clear();
+            quickPasteMenuItem.Enabled = !IsFileClipboardTabActive();
+
+            var targets = QuickPasteTargets().ToList();
+            if (targets.Count == 0)
+            {
+                var none = new ToolStripMenuItem("No Quick Paste targets assigned");
+                none.Enabled = false;
+                quickPasteMenuItem.DropDownItems.Add(none);
+                return;
+            }
+
+            foreach (var target in targets)
+            {
+                var item = new ToolStripMenuItem(QuickPasteTargetMenuText(target.Entry, target.Hotkey, target.Mode), null, (s, e) =>
+                {
+                    var selected = ((ToolStripMenuItem)s).Tag as ClipEntry;
+                    FocusEntry(selected);
+                })
+                {
+                    Tag = target.Entry
+                };
+                quickPasteMenuItem.DropDownItems.Add(item);
+            }
+        }
+
+        private void PopulateGroupMenu()
+        {
+            if (groupMenuItem == null) return;
+            groupMenuItem.DropDownItems.Clear();
+            groupMenuItem.Enabled = !IsFileClipboardTabActive();
+
+            var groups = GroupFilterItems();
+            var reservedCount = 4;
+            for (var index = 0; index < groups.Count; index++)
+            {
+                if (index == reservedCount)
+                {
+                    groupMenuItem.DropDownItems.Add("-");
+                }
+
+                var group = groups[index];
+                var label = GroupFilterMenuText(group, index);
+                var item = new ToolStripMenuItem(label, null, (s, e) =>
+                {
+                    var selected = Convert.ToString(((ToolStripMenuItem)s).Tag);
+                    SetGroupFilter(selected);
+                })
+                {
+                    Tag = group,
+                    Checked = string.Equals(CurrentGroupFilter(), group, StringComparison.CurrentCultureIgnoreCase)
+                };
+                groupMenuItem.DropDownItems.Add(item);
+            }
+        }
+
+        private static string GroupFilterMenuText(string group, int index)
+        {
+            if (index < 0 || index > 9)
+            {
+                return group ?? string.Empty;
+            }
+
+            var shortcutNumber = index == 9 ? "0" : (index + 1).ToString(CultureInfo.InvariantCulture);
+            return "&" + shortcutNumber + " " + (group ?? string.Empty) + "\tAlt+" + shortcutNumber;
+        }
+
+        private IEnumerable<QuickPasteTarget> QuickPasteTargets()
+        {
+            if (settings.QuickCopyHotkeys == null || settings.QuickCopyHotkeys.Count == 0)
+            {
+                return Enumerable.Empty<QuickPasteTarget>();
+            }
+
+            var allEntries = store.GetEntries("Manual", "All", false)
+                .ToDictionary(e => e.Id ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+
+            return settings.QuickCopyHotkeys
+                .Where(b => b != null && !string.IsNullOrWhiteSpace(b.EntryId) && !string.IsNullOrWhiteSpace(b.Hotkey))
+                .Select(b =>
+                {
+                    ClipEntry entry;
+                    return allEntries.TryGetValue(b.EntryId.Trim(), out entry)
+                        && entry != null
+                        && !string.IsNullOrEmpty(entry.Text)
+                        ? new QuickPasteTarget(entry, b.Hotkey.Trim(), QuickPasteModes.Normalize(b.Mode))
+                        : null;
+                })
+                .Where(t => t != null)
+                .OrderBy(t => t.Hotkey, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(t => DisplayText(t.Entry), StringComparer.CurrentCultureIgnoreCase);
+        }
+
+        private void FocusEntry(ClipEntry entry)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.Id)) return;
+            SelectMainTab();
+            if (FindListIndexByEntryId(entry.Id) < 0 && !string.Equals(CurrentGroupFilter(), "All", StringComparison.CurrentCultureIgnoreCase))
+            {
+                settings.GroupFilter = "All";
+                saveSettings();
+                RefreshGroupFilterItems();
+            }
+            Reload(entry.Id, -1);
+            FocusHistoryList();
+            statusText.Text = "Selected Quick Paste target. Press F2 to edit or remove the Quick Paste hotkey.";
+        }
+
+        private string QuickPasteDisplayText(string entryId)
+        {
+            var binding = QuickCopyBindingForEntry(entryId);
+            if (binding == null || string.IsNullOrWhiteSpace(binding.Hotkey)) return string.Empty;
+            return "Quick Paste " + binding.Hotkey.Trim() + ", " + QuickPasteModeDisplayText(binding.Mode);
+        }
+
+        private string EntryDisplayText(ClipEntry entry, ref int pinnedEntryPosition)
+        {
+            var text = entry.Pinned ? NumberedPinnedDisplayText(DisplayText(entry), pinnedEntryPosition++) : DisplayText(entry);
+            var quickPaste = QuickPasteDisplayText(entry.Id);
+            return string.IsNullOrWhiteSpace(quickPaste) ? text : quickPaste + "; " + text;
+        }
+
+        private static string QuickPasteTargetMenuText(ClipEntry entry, string hotkey, string mode)
+        {
+            var text = DisplayText(entry);
+            if (text.Length > 60)
+            {
+                text = text.Substring(0, 57) + "...";
+            }
+            return (hotkey ?? string.Empty).Trim() + ", " + QuickPasteModeDisplayText(mode) + ": " + text;
+        }
+
+        private sealed class QuickPasteTarget
+        {
+            public QuickPasteTarget(ClipEntry entry, string hotkey, string mode)
+            {
+                Entry = entry;
+                Hotkey = hotkey ?? string.Empty;
+                Mode = QuickPasteModes.Normalize(mode);
+            }
+
+            public ClipEntry Entry { get; private set; }
+            public string Hotkey { get; private set; }
+            public string Mode { get; private set; }
         }
 
         private ContextMenuStrip BuildContextMenu()
@@ -534,7 +692,7 @@ namespace Clipman
             groupEntryMenuItem = new ToolStripMenuItem("&Group entry...\tCtrl+G", null, (s, e) => GroupSelectedEntries());
             edit.DropDownItems.Add(groupEntryMenuItem);
             edit.DropDownItems.Add("Entry &properties...\tF2", null, (s, e) => ShowEntryProperties());
-            edit.DropDownItems.Add("Set as &quick-copy target...", null, (s, e) => ShowEntryProperties(true));
+            edit.DropDownItems.Add("Set as &quick-paste target...", null, (s, e) => ShowEntryProperties(true));
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
             edit.DropDownItems.Add("Pin or &unpin\tShift+Enter", null, (s, e) => TogglePinned());
             edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelected());
@@ -569,7 +727,7 @@ namespace Clipman
             menu.Items.Add("Paste &after selected\tCtrl+V", null, (sender, args) => PasteAfterSelected());
             menu.Items.Add("&Group entry...\tCtrl+G", null, (sender, args) => GroupSelectedEntries());
             menu.Items.Add("Entry &properties...\tF2", null, (sender, args) => ShowEntryProperties());
-            menu.Items.Add("Set as &quick-copy target...", null, (sender, args) => ShowEntryProperties(true));
+            menu.Items.Add("Set as &quick-paste target...", null, (sender, args) => ShowEntryProperties(true));
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
             menu.Items.Add(PinMenuText(), null, (sender, args) => TogglePinned());
             var pinnedShortcutPosition = SelectedPinnedEntryShortcutPosition();
@@ -1299,7 +1457,7 @@ namespace Clipman
         private void RefreshGroupFilterItems()
         {
             if (groupFilter == null) return;
-            var current = string.IsNullOrWhiteSpace(settings.GroupFilter) ? "All" : settings.GroupFilter;
+            var current = CurrentGroupFilter();
             var groups = GroupFilterItems();
 
             var existing = groupFilter.Items.Cast<object>().Select(Convert.ToString).ToList();
@@ -1333,6 +1491,11 @@ namespace Clipman
             var groups = new List<string> { "All", "Pinned", "Named", "Ungrouped" };
             groups.AddRange(store.GetGroups().Where(g => !groups.Contains(g, StringComparer.CurrentCultureIgnoreCase)));
             return groups;
+        }
+
+        private string CurrentGroupFilter()
+        {
+            return string.IsNullOrWhiteSpace(settings.GroupFilter) ? "All" : settings.GroupFilter;
         }
 
         private void FileEventsListKeyDown(object sender, KeyEventArgs e)
@@ -1851,10 +2014,18 @@ namespace Clipman
         {
             if (updatingGroupFilter || groupFilter == null || groupFilter.SelectedItem == null) return;
             var selected = Convert.ToString(groupFilter.SelectedItem);
-            if (string.Equals(settings.GroupFilter, selected, StringComparison.CurrentCultureIgnoreCase)) return;
+            SetGroupFilter(selected);
+        }
+
+        private void SetGroupFilter(string selected)
+        {
+            selected = string.IsNullOrWhiteSpace(selected) ? "All" : selected;
+            if (string.Equals(CurrentGroupFilter(), selected, StringComparison.CurrentCultureIgnoreCase)) return;
             settings.GroupFilter = selected;
             saveSettings();
+            RefreshGroupFilterItems();
             Reload(null, 0);
+            statusText.Text = "Showing group filter " + selected + ".";
         }
 
         private bool IsSortMode(string sortMode)
@@ -1968,11 +2139,7 @@ namespace Clipman
                 return;
             }
 
-            settings.GroupFilter = groups[position];
-            saveSettings();
-            RefreshGroupFilterItems();
-            Reload(null, 0);
-            statusText.Text = "Showing group filter " + groups[position] + ".";
+            SetGroupFilter(groups[position]);
         }
 
         private void DeleteSelected()
@@ -2145,11 +2312,13 @@ namespace Clipman
             var entry = selected[0];
             var preferredIndex = list.SelectedIndices.Count > 0 ? list.SelectedIndices[0] : -1;
             var existingQuickCopyHotkey = QuickCopyHotkeyForEntry(entry.Id);
+            var existingQuickPasteMode = QuickPasteModeForEntry(entry.Id);
             var wasQuickCopyTarget = existingQuickCopyHotkey.Length > 0;
             using (var dialog = new EntryPropertiesForm(
                 entry,
                 forceQuickCopyTarget || existingQuickCopyHotkey.Length > 0,
                 existingQuickCopyHotkey,
+                existingQuickPasteMode,
                 forceQuickCopyTarget))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
@@ -2178,14 +2347,14 @@ namespace Clipman
                 store.SetPinned(entry.Id, dialog.EntryPinned);
                 if (dialog.EntryIsQuickCopyTarget)
                 {
-                    SetQuickCopyHotkeyForEntry(entry.Id, dialog.EntryQuickCopyHotkey);
+                    SetQuickCopyHotkeyForEntry(entry.Id, dialog.EntryQuickCopyHotkey, dialog.EntryQuickPasteMode);
                 }
                 else
                 {
                     RemoveQuickCopyHotkeyForEntry(entry.Id);
                 }
                 if (saveSettings != null) saveSettings();
-                if (QuickCopyAssignmentChanged(wasQuickCopyTarget, existingQuickCopyHotkey, dialog.EntryIsQuickCopyTarget, dialog.EntryQuickCopyHotkey) &&
+                if (QuickCopyAssignmentChanged(wasQuickCopyTarget, existingQuickCopyHotkey, existingQuickPasteMode, dialog.EntryIsQuickCopyTarget, dialog.EntryQuickCopyHotkey, dialog.EntryQuickPasteMode) &&
                     refreshHotkeys != null)
                 {
                     refreshHotkeys();
@@ -2196,10 +2365,11 @@ namespace Clipman
             }
         }
 
-        private static bool QuickCopyAssignmentChanged(bool wasQuickCopyTarget, string oldHotkey, bool isQuickCopyTarget, string newHotkey)
+        private static bool QuickCopyAssignmentChanged(bool wasQuickCopyTarget, string oldHotkey, string oldMode, bool isQuickCopyTarget, string newHotkey, string newMode)
         {
             if (wasQuickCopyTarget != isQuickCopyTarget) return true;
-            return !string.Equals((oldHotkey ?? string.Empty).Trim(), (newHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+            return !string.Equals((oldHotkey ?? string.Empty).Trim(), (newHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
+                   !string.Equals(QuickPasteModes.Normalize(oldMode), QuickPasteModes.Normalize(newMode), StringComparison.OrdinalIgnoreCase);
         }
 
         private bool ValidateQuickCopySettings(bool isQuickCopyTarget, string quickCopyHotkey)
@@ -2212,14 +2382,14 @@ namespace Clipman
             HotkeyDefinition parsed;
             if (!HotkeyDefinition.TryParse(quickCopyHotkey, out parsed))
             {
-                MessageBox.Show(this, "Choose a valid Quick Copy hotkey before saving this Quick Copy assignment.", "Clipman Quick Copy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Choose a valid Quick Paste hotkey before saving this Quick Paste assignment.", "Clipman Quick Paste", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ShowHistoryHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
                 string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ToggleActiveHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase))
             {
-                MessageBox.Show(this, "The Quick Copy hotkey must be different from the Show History and Toggle Monitoring hotkeys.", "Clipman Quick Copy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "The Quick Paste hotkey must be different from the Show History and Toggle Monitoring hotkeys.", "Clipman Quick Paste", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
@@ -2230,7 +2400,7 @@ namespace Clipman
                 !string.Equals(b.EntryId, currentEntryId, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals((b.Hotkey ?? string.Empty).Trim(), (quickCopyHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase)))
             {
-                MessageBox.Show(this, "Another Quick Copy entry already uses this hotkey.", "Clipman Quick Copy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Another Quick Paste entry already uses this hotkey.", "Clipman Quick Paste", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
@@ -2239,18 +2409,37 @@ namespace Clipman
 
         private string QuickCopyHotkeyForEntry(string entryId)
         {
-            if (string.IsNullOrWhiteSpace(entryId) || settings.QuickCopyHotkeys == null) return string.Empty;
-            var binding = settings.QuickCopyHotkeys.FirstOrDefault(b =>
-                b != null && string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+            var binding = QuickCopyBindingForEntry(entryId);
             return binding == null ? string.Empty : (binding.Hotkey ?? string.Empty).Trim();
         }
 
-        private void SetQuickCopyHotkeyForEntry(string entryId, string hotkey)
+        private string QuickPasteModeForEntry(string entryId)
+        {
+            var binding = QuickCopyBindingForEntry(entryId);
+            return binding == null ? QuickPasteModes.PasteRestore : QuickPasteModes.Normalize(binding.Mode);
+        }
+
+        private QuickCopyBinding QuickCopyBindingForEntry(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || settings.QuickCopyHotkeys == null) return null;
+            return settings.QuickCopyHotkeys.FirstOrDefault(b =>
+                b != null && string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string QuickPasteModeDisplayText(string mode)
+        {
+            mode = QuickPasteModes.Normalize(mode);
+            if (mode == QuickPasteModes.PasteKeep) return "paste and keep target on clipboard";
+            if (mode == QuickPasteModes.CopyOnly) return "copy to clipboard only";
+            return "paste and restore clipboard";
+        }
+
+        private void SetQuickCopyHotkeyForEntry(string entryId, string hotkey, string mode)
         {
             if (string.IsNullOrWhiteSpace(entryId)) return;
             if (settings.QuickCopyHotkeys == null) settings.QuickCopyHotkeys = new List<QuickCopyBinding>();
             settings.QuickCopyHotkeys.RemoveAll(b => b == null || string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
-            settings.QuickCopyHotkeys.Add(new QuickCopyBinding { EntryId = entryId, Hotkey = (hotkey ?? string.Empty).Trim() });
+            settings.QuickCopyHotkeys.Add(new QuickCopyBinding { EntryId = entryId, Hotkey = (hotkey ?? string.Empty).Trim(), Mode = QuickPasteModes.Normalize(mode) });
         }
 
         private void RemoveQuickCopyHotkeyForEntry(string entryId)

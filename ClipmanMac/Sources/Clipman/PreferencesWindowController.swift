@@ -34,6 +34,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private var settings: ClipmanSettings
     private let databasePathField = NSTextField()
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
+    private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds", target: nil, action: nil)
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
     private let rememberPasswordCheckbox = NSButton(checkboxWithTitle: "Remember history password in Keychain", target: nil, action: nil)
     private let autoCopyRemoteCheckbox = NSButton(checkboxWithTitle: "Copy latest remote text to this Mac clipboard", target: nil, action: nil)
@@ -99,6 +100,12 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         monitoringCheckbox.setAccessibilityLabel("Monitoring enabled")
         grid.addRow(with: [NSGridCell.emptyContentView, monitoringCheckbox])
 
+        soundsCheckbox.target = nil
+        soundsCheckbox.action = nil
+        soundsCheckbox.setAccessibilityLabel("Play sounds")
+        soundsCheckbox.setAccessibilityHelp("When checked, Clipman plays sounds for copy, remote sync, monitoring on, monitoring off, and skipped clipboard events.")
+        grid.addRow(with: [NSGridCell.emptyContentView, soundsCheckbox])
+
         runAtStartupCheckbox.target = nil
         runAtStartupCheckbox.action = nil
         runAtStartupCheckbox.setAccessibilityLabel("Run Clipman at login")
@@ -158,6 +165,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private func loadFields() {
         databasePathField.stringValue = settingsFolderPath(fromDatabasePath: settings.databasePath)
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
+        soundsCheckbox.state = settings.soundsEnabled ? .on : .off
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
         rememberPasswordCheckbox.state = settings.rememberDatabasePassword ? .on : .off
         autoCopyRemoteCheckbox.state = settings.autoCopyLatestRemoteText ? .on : .off
@@ -198,6 +206,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         }
         settings.databasePath = normalizedDatabasePath(databasePathField.stringValue)
         settings.monitoringEnabled = monitoringCheckbox.state == .on
+        settings.soundsEnabled = soundsCheckbox.state == .on
         settings.runAtStartup = runAtStartupCheckbox.state == .on
         settings.rememberDatabasePassword = rememberPasswordCheckbox.state == .on
         settings.autoCopyLatestRemoteText = autoCopyRemoteCheckbox.state == .on

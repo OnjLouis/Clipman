@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import ClipmanCore
 import UniformTypeIdentifiers
 
@@ -46,6 +47,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             groupFilter: settings.groupFilter
         )
         configureHistoryQuickCopyState()
+        sounds.isEnabled = settings.soundsEnabled
         monitor.delegate = self
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
@@ -59,7 +61,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             switch action {
             case .showHistory: self?.toggleHistoryFromHotkey()
             case .toggleMonitoring: self?.toggleMonitoring(nil)
-            case .quickCopy(let entryID): self?.quickCopyEntry(id: entryID)
+            case .quickCopy(let entryID): self?.quickPasteEntry(id: entryID)
             }
         }
         registerHotkeys()
@@ -163,14 +165,35 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         rebuildMenu()
     }
 
-    private func quickCopyEntry(id: String) {
+    private func quickPasteEntry(id: String) {
         guard let entry = store.entry(id: id) else {
             NSSound.beep()
             return
         }
-        monitor.writeInternalText(entry.Text)
+        let mode = QuickPasteMode.normalize(settings.quickPasteModes[id])
+        switch mode {
+        case .pasteRestore:
+            monitor.writeTemporaryInternalText(entry.Text, restoreAfter: 0.35) {
+                self.sendPasteKeystroke()
+            }
+        case .pasteKeep:
+            monitor.writeInternalText(entry.Text)
+            sendPasteKeystroke()
+        case .copyOnly:
+            monitor.writeInternalText(entry.Text)
+        }
         sounds.play(.copy)
         store.markUsed(entry.Id)
+    }
+
+    private func sendPasteKeystroke() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+        keyDown?.flags = .maskCommand
+        keyUp?.flags = .maskCommand
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
     }
 
     @objc private func openManual(_ sender: Any?) {
@@ -184,7 +207,6 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             alert.runModal()
         }
     }
-
     @objc private func checkForUpdates(_ sender: Any?) {
         runUpdateCheck(manual: true)
     }
@@ -359,15 +381,17 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         store.setNameAndText(id: entry.Id, name: name, text: text)
     }
 
-    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?) {
+    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode) {
         store.setNameAndText(id: entry.Id, name: name, text: text)
         store.setGroup(ids: [entry.Id], group: group)
         if useQuickCopy {
             if let quickCopyHotkey {
                 settings.quickCopyHotkeys[entry.Id] = quickCopyHotkey
+                settings.quickPasteModes[entry.Id] = quickPasteMode.rawValue
             }
         } else {
             settings.quickCopyHotkeys.removeValue(forKey: entry.Id)
+            settings.quickPasteModes.removeValue(forKey: entry.Id)
         }
         try? settingsStore.save(settings)
         configureHistoryQuickCopyState()
@@ -645,6 +669,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             try? keychain.delete(for: previousDatabasePath)
         }
         try? settingsStore.save(settings)
+        sounds.isEnabled = settings.soundsEnabled
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
         applyStartupRegistration(showErrors: true)
@@ -698,7 +723,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         historyWindow?.configureQuickCopy(
             showHistoryHotkey: settings.showHistoryHotkey,
             toggleMonitoringHotkey: settings.toggleMonitoringHotkey,
-            quickCopyHotkeys: settings.quickCopyHotkeys
+            quickCopyHotkeys: settings.quickCopyHotkeys,
+            quickPasteModes: settings.quickPasteModes
         )
     }
 

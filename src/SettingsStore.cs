@@ -94,7 +94,8 @@ namespace Clipman
                 .Select(g => new QuickCopyBinding
                 {
                     EntryId = g.First().EntryId.Trim(),
-                    Hotkey = g.First().Hotkey.Trim()
+                    Hotkey = g.First().Hotkey.Trim(),
+                    Mode = QuickPasteModes.Normalize(g.First().Mode)
                 })
                 .GroupBy(b => b.Hotkey, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())

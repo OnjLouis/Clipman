@@ -98,7 +98,7 @@
     <tbody>
       <tr><td>Show or hide clipboard history</td><td><code>Ctrl+Alt+\</code></td><td><code>Option+Shift+`</code></td></tr>
       <tr><td>Toggle monitoring on or off</td><td><code>Ctrl+Alt+`</code></td><td><code>Option+Shift+\</code></td></tr>
-      <tr><td>Copy an entry assigned to Quick Copy</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
+      <tr><td>Paste an entry assigned to Quick Paste</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
       <tr><td>Switch to Text history</td><td><code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code></td><td><code>Control+1</code></td></tr>
       <tr><td>Switch to File history</td><td><code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code></td><td><code>Control+2</code></td></tr>
       <tr><td>Open Preferences</td><td><code>Ctrl+,</code></td><td><code>Command+,</code></td></tr>
@@ -147,7 +147,11 @@
   <h2 id="preferences">Preferences</h2>
   <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, startup, update checks, and shared-database behavior.</p>
 
-  <p><strong>Quick Copy:</strong> Assign Quick Copy from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Copy assignments even when several computers share the same clipboard database.</p>
+  <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
+
+  <p>Each Quick Paste target has a mode. <strong>Paste and restore previous clipboard</strong> temporarily places the entry on the system clipboard, sends the normal paste command to the active app, and then restores the previous clipboard contents where possible. <strong>Paste and keep target on clipboard</strong> pastes the entry and leaves that entry on the clipboard. <strong>Copy to clipboard only</strong> places the entry on the clipboard without sending a paste command.</p>
+
+  <p>Use the <strong>Quick Paste</strong> menu on Windows, or <strong>Quick Paste Targets</strong> from the Mac <code>Option+M</code> Clipman menu, to review all entries that currently have Quick Paste hotkeys. Choosing one of those menu items moves focus to the matching entry so you can press <code>F2</code> to edit or remove its Quick Paste assignment. Entries with Quick Paste targets include the assigned hotkey and mode in the row text; entries without Quick Paste targets do not carry that extra wording.</p>
 
   <p><strong>Automatically group new clips by source application</strong> is enabled by default for new installs where the setting is exposed. It places newly captured clipboard text into a group named after the application Clipman believes supplied the clipboard text, such as Chrome, Thunderbird, Outlook, Safari, TextEdit, or Logic. Disable it if you prefer all new entries to start ungrouped.</p>
 
@@ -182,7 +186,7 @@
   <p>Pinned entries are protected from normal cleanup: Delete skips them, and history size or age limits do not remove them. Use <code>Shift+Enter</code> or the menu command to change the pinned state. Use the pinned-entry shortcuts in the Keyboard Shortcuts table to copy one of the first ten pinned entries and close history.</p>
 
   <h2 id="entry-names-and-text">Entry Names and Text</h2>
-  <p>Use <code>F2</code> to open Entry Properties for the selected entry. You can add a short name or hint, assign a group, configure a Quick Copy hotkey, and edit the stored clipboard text itself. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
+  <p>Use <code>F2</code> to open Entry Properties for the selected entry. You can add a short name or hint, assign a group, configure a Quick Paste hotkey, and edit the stored clipboard text itself. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
 
   <p>For example, an entry containing <code>1234</code> can be shown as <code>Test: 1234</code>. The name is metadata only: copying, cutting, exporting to text, and viewing full text use the clipboard text without the name.</p>
 
@@ -192,6 +196,8 @@
 
   <h2 id="groups">Groups</h2>
   <p>Use <code>Ctrl+G</code> on Windows, <code>Command+G</code> on Mac, or the group command in the history window to assign selected entries to a group. Type a new group name, or choose an existing group from the list and press <code>Enter</code> or OK. Choose No group, or leave the group name blank, to remove the group. The Group filter can show all entries, pinned entries, named entries, ungrouped entries, or one of your custom groups.</p>
+
+  <p>On Windows, the <strong>Groups</strong> menu lists the same filters as the Group field. The first ten filters show their <code>Alt+1</code> through <code>Alt+0</code> shortcuts in the menu; additional groups appear by name without a numbered shortcut. The top-level Groups menu deliberately does not use <code>Alt+G</code>, because <code>Alt+G</code> moves focus directly to the Group field.</p>
 
   <p>Use <code>Alt+1</code> through <code>Alt+0</code> on Windows, or <code>Option+1</code> through <code>Option+0</code> on Mac, to jump to one of the first ten group filters. These follow the same order as the Group filter field: All, Pinned, Named, Ungrouped, then custom groups.</p>
 
@@ -271,7 +277,7 @@
 
   <p>Multiple running Clipman instances can use the same history database. When one machine writes a new entry, the database is saved atomically and the other machines reload it when the changed file arrives. Each text entry stores the machine name that added or most recently re-added it, and the history list includes a Machine column and machine sort mode so shared setups can tell which computer supplied an entry.</p>
 
-  <p>Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing or Quick Copying an older entry on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. This preference is machine-specific and does not change the shared database format.</p>
+  <p>Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. This preference is machine-specific and does not change the shared database format.</p>
 
   <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
 
@@ -432,15 +438,23 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.6.1</h3>
+  <ul>
+    <li>Changed per-entry global hotkeys from Quick Copy to Quick Paste. Pressing an assigned hotkey can paste the entry into the active app, paste and leave the target on the clipboard, or copy the target to the clipboard only.</li>
+    <li>Added Quick Paste target discovery: Windows has a Quick Paste menu and Mac has a Quick Paste Targets submenu in the Clipman menu. Assigned targets also show their hotkey and mode in the row text.</li>
+    <li>Added a Windows Groups menu so group filters and their numbered shortcuts are discoverable from the menu bar.</li>
+    <li>Added the missing Play sounds preference to the Mac build.</li>
+  </ul>
+
   <h3>1.6.0</h3>
   <ul>
-    <li>Updated the Windows and Mac builds together so shared clipboard databases, Quick Copy, remote clipboard receive, pinned rows, file history, sounds, packaging, and updates follow the same 1.6.0 behavior.</li>
-    <li>Added per-entry Quick Copy global hotkeys. Assign a hotkey to any text entry from Entry Properties, then press that hotkey from anywhere to copy that specific entry without opening the history window.</li>
+    <li>Updated the Windows and Mac builds together so shared clipboard databases, Quick Paste, remote clipboard receive, pinned rows, file history, sounds, packaging, and updates follow the same 1.6.0 behavior.</li>
+    <li>Added per-entry global hotkeys for chosen text entries from Entry Properties.</li>
     <li>Changed Entry Properties to use F2 as the single shortcut on Windows and Mac. Windows no longer uses Alt+Enter for this command.</li>
-    <li>Quick Copy assignments made from Entry Properties now take effect immediately when global hotkeys are added, changed, or cleared.</li>
+    <li>Quick Paste assignments made from Entry Properties now take effect immediately when global hotkeys are added, changed, or cleared.</li>
     <li>Fixed Windows Alt+number group-filter shortcuts so they jump to the selected group without also moving focus to the menu bar.</li>
     <li>Added an opt-in setting to put newly created text entries received from another machine onto this machine's clipboard. The setting is off by default, baselines current history when enabled, and ignores older entries that are merely reused on another machine.</li>
-    <li>Improved cross-platform parity with the Mac build: Quick Copy and latest-remote-text behavior are stored in machine-specific settings, not in the shared clipboard database.</li>
+    <li>Improved cross-platform parity with the Mac build: Quick Paste and latest-remote-text behavior are stored in machine-specific settings, not in the shared clipboard database.</li>
     <li>Updated Mac packaging and release rules so macOS release assets use a versioned ZIP name while the app inside remains <code>Clipman.app</code>.</li>
   </ul>
 
@@ -466,7 +480,7 @@
     <li>Added <code>Backspace</code> on the File history tab to jump to the first normal file event below pinned file events, matching Text history navigation.</li>
     <li>Added Clean link for sharing with <code>Ctrl+Shift+S</code>. It removes tracking parameters and YouTube share-state parameters such as timestamps, so shared video links can open from the start instead of the copied playback position.</li>
     <li>Improved File history restore so restored file events also place the file paths on the clipboard as text, and added <code>Ctrl+Shift+1</code> through <code>Ctrl+Shift+0</code> to copy pinned file-event paths as text.</li>
-    <li>Improved Application key menus so selected pinned text entries and file events show their matching quick-copy shortcuts when they are in the first ten pinned items.</li>
+    <li>Improved Application key menus so selected pinned text entries and file events show their matching copy shortcuts when they are in the first ten pinned items.</li>
   </ul>
 
   <h3>1.5.9</h3>
@@ -575,7 +589,7 @@
     <li>Added entry editing with <code>F2</code>, where names display before entries but are not copied with clipboard text, and stored clipboard text can be cleaned up in place.</li>
     <li>Added Send To support for text-oriented files.</li>
     <li>Added a running-process picker for ignored applications.</li>
-    <li>Added groups, group filtering, quick named lookup, text cleanup actions, first-ten quick copy keys, diagnostics copy support, and command-line pause/resume/toggle/add/import/export options.</li>
+    <li>Added groups, group filtering, quick named lookup, text cleanup actions, first-ten pinned-entry copy keys, diagnostics copy support, and command-line pause/resume/toggle/add/import/export options.</li>
     <li>Added machine attribution for text history entries, with a Machine column and machine sort mode for shared database setups.</li>
     <li>Added a File history tab for recent file copy/cut events captured while Clipman is running, with Enter to restore those files to the Windows clipboard, Ctrl+C to copy paths, F4 for details, and a separate file-event context menu.</li>
     <li>Uses a compressed <code>.clipdb</code> history database so the live clipboard history is not stored as plain searchable text.</li>

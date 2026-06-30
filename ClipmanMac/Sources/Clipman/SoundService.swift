@@ -11,12 +11,14 @@ final class SoundService {
 
     private let userSoundsDirectory: URL
     private var currentSound: NSSound?
+    var isEnabled = true
 
     init(applicationSupportURL: URL) {
         userSoundsDirectory = applicationSupportURL.appendingPathComponent("sounds", isDirectory: true)
     }
 
     func play(_ name: SoundName) {
+        guard isEnabled else { return }
         currentSound?.stop()
         currentSound = loadSound(name)
         currentSound?.play()

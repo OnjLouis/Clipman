@@ -11,6 +11,9 @@ namespace Clipman
         private readonly CheckBox pinnedBox;
         private readonly CheckBox quickCopyTargetBox;
         private readonly TextBox quickCopyHotkeyBox;
+        private readonly RadioButton pasteRestoreMode;
+        private readonly RadioButton pasteKeepMode;
+        private readonly RadioButton copyOnlyMode;
         private readonly TextBox textBox;
         private bool deleteRequested;
 
@@ -20,9 +23,18 @@ namespace Clipman
         public bool EntryPinned { get { return pinnedBox.Checked; } }
         public bool EntryIsQuickCopyTarget { get { return quickCopyTargetBox.Checked; } }
         public string EntryQuickCopyHotkey { get { return quickCopyHotkeyBox.Text.Trim(); } }
+        public string EntryQuickPasteMode
+        {
+            get
+            {
+                if (copyOnlyMode.Checked) return QuickPasteModes.CopyOnly;
+                if (pasteKeepMode.Checked) return QuickPasteModes.PasteKeep;
+                return QuickPasteModes.PasteRestore;
+            }
+        }
         public bool DeleteRequested { get { return deleteRequested; } }
 
-        public EntryPropertiesForm(ClipEntry entry, bool isQuickCopyTarget, string quickCopyHotkey, bool focusQuickCopy)
+        public EntryPropertiesForm(ClipEntry entry, bool isQuickCopyTarget, string quickCopyHotkey, string quickPasteMode, bool focusQuickCopy)
         {
             Text = "Clipboard Entry Properties";
             StartPosition = FormStartPosition.CenterParent;
@@ -30,7 +42,7 @@ namespace Clipman
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(700, 488);
+            ClientSize = new Size(700, 548);
             KeyPreview = true;
 
             var nameLabel = new Label { Text = "&Name:", Location = new Point(12, 14), AutoSize = true };
@@ -68,16 +80,16 @@ namespace Clipman
 
             quickCopyTargetBox = new CheckBox
             {
-                Text = "Use as &quick-copy target",
+                Text = "Use as &quick-paste target",
                 Location = new Point(220, 78),
                 Width = 260,
                 Checked = isQuickCopyTarget,
-                AccessibleName = "Use as quick-copy target",
-                AccessibleDescription = "When checked, this entry is copied by the quick-copy global hotkey shown below."
+                AccessibleName = "Use as quick-paste target",
+                AccessibleDescription = "When checked, this entry is pasted by the quick-paste global hotkey shown below."
             };
             Controls.Add(quickCopyTargetBox);
 
-            var quickCopyHotkeyLabel = new Label { Text = "&Quick Copy hotkey:", Location = new Point(12, 116), AutoSize = true };
+            var quickCopyHotkeyLabel = new Label { Text = "&Quick Paste hotkey:", Location = new Point(12, 116), AutoSize = true };
             Controls.Add(quickCopyHotkeyLabel);
             quickCopyHotkeyBox = new TextBox
             {
@@ -85,19 +97,53 @@ namespace Clipman
                 Width = 180,
                 ReadOnly = true,
                 Text = quickCopyHotkey ?? string.Empty,
-                AccessibleName = "Quick Copy hotkey",
-                AccessibleDescription = "Global hotkey that copies this entry. Press a valid key combination with at least two modifiers."
+                AccessibleName = "Quick Paste hotkey",
+                AccessibleDescription = "Global hotkey that pastes this entry into the active app. Press a valid key combination with at least two modifiers."
             };
             quickCopyHotkeyBox.KeyDown += QuickCopyHotkeyBoxKeyDown;
             Controls.Add(quickCopyHotkeyBox);
 
-            var textLabel = new Label { Text = "&Clipboard text:", Location = new Point(12, 148), AutoSize = true };
+            var modeBox = new GroupBox
+            {
+                Text = "Quick Paste &mode",
+                Location = new Point(15, 146),
+                Size = new Size(665, 80),
+                AccessibleName = "Quick Paste mode",
+                AccessibleDescription = "Controls what the Quick Paste hotkey does with the clipboard."
+            };
+            pasteRestoreMode = new RadioButton
+            {
+                Text = "Paste and &restore previous clipboard",
+                Location = new Point(12, 22),
+                Width = 230,
+                Checked = QuickPasteModes.Normalize(quickPasteMode) == QuickPasteModes.PasteRestore
+            };
+            pasteKeepMode = new RadioButton
+            {
+                Text = "Paste and &keep target on clipboard",
+                Location = new Point(250, 22),
+                Width = 235,
+                Checked = QuickPasteModes.Normalize(quickPasteMode) == QuickPasteModes.PasteKeep
+            };
+            copyOnlyMode = new RadioButton
+            {
+                Text = "Copy to clipboard &only",
+                Location = new Point(12, 48),
+                Width = 180,
+                Checked = QuickPasteModes.Normalize(quickPasteMode) == QuickPasteModes.CopyOnly
+            };
+            modeBox.Controls.Add(pasteRestoreMode);
+            modeBox.Controls.Add(pasteKeepMode);
+            modeBox.Controls.Add(copyOnlyMode);
+            Controls.Add(modeBox);
+
+            var textLabel = new Label { Text = "&Clipboard text:", Location = new Point(12, 238), AutoSize = true };
             Controls.Add(textLabel);
             textBox = new TextBox
             {
-                Location = new Point(15, 172),
+                Location = new Point(15, 262),
                 Width = 665,
-                Height = 210,
+                Height = 150,
                 Multiline = true,
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
@@ -107,11 +153,11 @@ namespace Clipman
             };
             Controls.Add(textBox);
 
-            var copy = new Button { Text = "&Copy text", Location = new Point(15, 414), Width = 95 };
+            var copy = new Button { Text = "&Copy text", Location = new Point(15, 474), Width = 95 };
             copy.Click += (s, e) => Clipboard.SetText(textBox.Text ?? string.Empty, TextDataFormat.UnicodeText);
             Controls.Add(copy);
 
-            var delete = new Button { Text = "&Delete", Location = new Point(120, 414), Width = 85 };
+            var delete = new Button { Text = "&Delete", Location = new Point(120, 474), Width = 85 };
             delete.Click += (s, e) =>
             {
                 deleteRequested = true;
@@ -120,10 +166,10 @@ namespace Clipman
             };
             Controls.Add(delete);
 
-            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(500, 414), Width = 85 };
+            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(500, 474), Width = 85 };
             Controls.Add(ok);
 
-            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 414), Width = 85 };
+            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 474), Width = 85 };
             Controls.Add(cancel);
 
             AcceptButton = ok;

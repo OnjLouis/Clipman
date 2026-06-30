@@ -3,12 +3,50 @@ import Carbon
 import ClipmanCore
 
 @MainActor
+private final class QuickPasteModeRadioGroup: NSObject {
+    private let pasteRestoreButton: NSButton
+    private let pasteKeepButton: NSButton
+    private let copyOnlyButton: NSButton
+    private(set) var selectedMode: QuickPasteMode
+
+    init(pasteRestoreButton: NSButton, pasteKeepButton: NSButton, copyOnlyButton: NSButton, selectedMode: QuickPasteMode) {
+        self.pasteRestoreButton = pasteRestoreButton
+        self.pasteKeepButton = pasteKeepButton
+        self.copyOnlyButton = copyOnlyButton
+        self.selectedMode = selectedMode
+        super.init()
+        for button in [pasteRestoreButton, pasteKeepButton, copyOnlyButton] {
+            button.target = self
+            button.action = #selector(modeChanged(_:))
+        }
+        applySelection()
+    }
+
+    @objc private func modeChanged(_ sender: NSButton) {
+        if sender === pasteKeepButton {
+            selectedMode = .pasteKeep
+        } else if sender === copyOnlyButton {
+            selectedMode = .copyOnly
+        } else {
+            selectedMode = .pasteRestore
+        }
+        applySelection()
+    }
+
+    private func applySelection() {
+        pasteRestoreButton.state = selectedMode == .pasteRestore ? .on : .off
+        pasteKeepButton.state = selectedMode == .pasteKeep ? .on : .off
+        copyOnlyButton.state = selectedMode == .copyOnly ? .on : .off
+    }
+}
+
+@MainActor
 protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didTogglePin entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didDelete entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didEdit entry: ClipEntry, name: String, text: String)
-    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?)
+    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode)
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didMove entries: [ClipEntry], direction: Int)
@@ -347,6 +385,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var showHistoryHotkey: HotkeyDescriptor?
     private var toggleMonitoringHotkey: HotkeyDescriptor?
     private var quickCopyHotkeys: [String: HotkeyDescriptor] = [:]
+    private var quickPasteModes: [String: String] = [:]
     private var keyMonitor: Any?
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -460,10 +499,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         applyFilter(preferredSelectedID: rememberedSelectionID(for: mode))
     }
 
-    func configureQuickCopy(showHistoryHotkey: HotkeyDescriptor, toggleMonitoringHotkey: HotkeyDescriptor, quickCopyHotkeys: [String: HotkeyDescriptor]) {
+    func configureQuickCopy(showHistoryHotkey: HotkeyDescriptor, toggleMonitoringHotkey: HotkeyDescriptor, quickCopyHotkeys: [String: HotkeyDescriptor], quickPasteModes: [String: String]) {
         self.showHistoryHotkey = showHistoryHotkey
         self.toggleMonitoringHotkey = toggleMonitoringHotkey
         self.quickCopyHotkeys = quickCopyHotkeys
+        self.quickPasteModes = quickPasteModes
     }
 
     override func showWindow(_ sender: Any?) {
@@ -860,7 +900,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             addMenuItem("Paste After Selected", action: #selector(menuPasteAfterSelected), to: menu, shortcut: "Command+V")
             addMenuItem("Entry Properties", action: #selector(menuEditSelected), to: menu, shortcut: "F2")
             addMenuItem("View Selected Text", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
-            addMenuItem("Set As Quick Copy Target...", action: #selector(menuSetQuickCopyTarget), to: menu)
+            addMenuItem("Set As Quick Paste Target...", action: #selector(menuSetQuickCopyTarget), to: menu)
+            addQuickPasteTargetItems(to: menu)
         } else {
             addMenuItem("View File Event Details", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
         }
@@ -962,6 +1003,24 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         menu.addItem(root)
     }
 
+    private func addQuickPasteTargetItems(to menu: NSMenu) {
+        let targetMenu = NSMenu(title: "Quick Paste Targets")
+        let targets = quickPasteTargets()
+        if targets.isEmpty {
+            let empty = NSMenuItem(title: "No Quick Paste targets assigned", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            targetMenu.addItem(empty)
+        } else {
+            for target in targets {
+                let item = addMenuItem(quickPasteTargetMenuTitle(entry: target.entry, hotkey: target.hotkey, mode: target.mode), action: #selector(menuQuickPasteTargetSelected(_:)), to: targetMenu)
+                item.representedObject = target.entry.Id
+            }
+        }
+        let root = NSMenuItem(title: "Quick Paste Targets", action: nil, keyEquivalent: "")
+        root.submenu = targetMenu
+        menu.addItem(root)
+    }
+
     @discardableResult
     private func addMenuItem(_ title: String, action: Selector, to menu: NSMenu, shortcut: String? = nil) -> NSMenuItem {
         let displayTitle = shortcut.map { "\(title)\t\($0)" } ?? title
@@ -1047,6 +1106,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuEditSelected() { editSelectedEntry() }
     @objc private func menuViewSelected() { viewSelectedItem() }
     @objc private func menuSetQuickCopyTarget() { setQuickCopyTarget() }
+    @objc private func menuQuickPasteTargetSelected(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        focusEntry(id: id)
+    }
     @objc private func menuGroupSelected() { groupSelectedEntries() }
     @objc private func menuGroupSelectedToCurrentFilter() { groupSelectedEntriesToCurrentFilter() }
     @objc private func menuTogglePin() { toggleSelectedPin() }
@@ -1310,10 +1373,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func showEntryProperties(entry: ClipEntry, quickCopyOnly: Bool) {
         let alert = NSAlert()
-        alert.messageText = quickCopyOnly ? "Set Quick Copy Target" : "Clipboard Entry Properties"
+        alert.messageText = quickCopyOnly ? "Set Quick Paste Target" : "Clipboard Entry Properties"
         alert.informativeText = quickCopyOnly
-            ? "Choose whether this entry is copied by the global Quick Copy hotkey, and set the hotkey if needed."
-            : "Edit the entry and choose whether it is copied by the global Quick Copy hotkey."
+            ? "Choose whether this entry is pasted by the global Quick Paste hotkey, and set the hotkey if needed."
+            : "Edit the entry and choose whether it is pasted by the global Quick Paste hotkey."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
 
@@ -1332,50 +1395,66 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         scroll.borderType = .bezelBorder
         scroll.hasVerticalScroller = true
         scroll.documentView = textView
-        let quickCopyCheckbox = NSButton(checkboxWithTitle: "Use this entry for Quick Copy", target: nil, action: nil)
+        let quickCopyCheckbox = NSButton(checkboxWithTitle: "Use this entry for Quick Paste", target: nil, action: nil)
         let existingHotkey = quickCopyHotkeys[entry.Id]
+        let existingMode = QuickPasteMode.normalize(quickPasteModes[entry.Id])
         quickCopyCheckbox.state = quickCopyOnly || existingHotkey != nil ? .on : .off
-        quickCopyCheckbox.setAccessibilityLabel("Use this entry for Quick Copy")
+        quickCopyCheckbox.setAccessibilityLabel("Use this entry for Quick Paste")
         let hotkeyField = HotkeyCaptureField()
         hotkeyField.descriptor = existingHotkey
-        hotkeyField.setAccessibilityLabel("Quick copy hotkey")
-        let hotkeyLabel = NSTextField(labelWithString: "Quick copy hotkey")
+        hotkeyField.setAccessibilityLabel("Quick Paste hotkey")
+        let hotkeyLabel = NSTextField(labelWithString: "Quick Paste hotkey")
         let hotkeyRow = NSStackView(views: [hotkeyLabel, hotkeyField])
         hotkeyRow.orientation = .horizontal
         hotkeyRow.spacing = 8
         hotkeyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+        let modeLabel = NSTextField(labelWithString: "Quick Paste mode")
+        let pasteRestoreButton = NSButton(radioButtonWithTitle: "Paste and restore previous clipboard", target: nil, action: nil)
+        let pasteKeepButton = NSButton(radioButtonWithTitle: "Paste and keep target on clipboard", target: nil, action: nil)
+        let copyOnlyButton = NSButton(radioButtonWithTitle: "Copy to clipboard only", target: nil, action: nil)
+        let modeRadioGroup = QuickPasteModeRadioGroup(
+            pasteRestoreButton: pasteRestoreButton,
+            pasteKeepButton: pasteKeepButton,
+            copyOnlyButton: copyOnlyButton,
+            selectedMode: existingMode
+        )
+        let modeStack = NSStackView(views: [modeLabel, pasteRestoreButton, pasteKeepButton, copyOnlyButton])
+        modeStack.orientation = .vertical
+        modeStack.spacing = 4
+        modeStack.setAccessibilityLabel("Quick Paste mode")
 
         let views = quickCopyOnly
-            ? [quickCopyCheckbox, hotkeyRow]
-            : [nameField, groupField, scroll, quickCopyCheckbox, hotkeyRow]
+            ? [quickCopyCheckbox, hotkeyRow, modeStack]
+            : [nameField, groupField, scroll, quickCopyCheckbox, hotkeyRow, modeStack]
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 520, height: quickCopyOnly ? 76 : 286)
+        stack.frame = NSRect(x: 0, y: 0, width: 520, height: quickCopyOnly ? 162 : 372)
         alert.accessoryView = stack
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let useQuickCopy = quickCopyCheckbox.state == .on
+        let selectedMode = modeRadioGroup.selectedMode
         let capturedHotkey = hotkeyField.descriptor ?? HotkeyDescriptor.parse(hotkeyField.stringValue)
         if useQuickCopy {
             guard let capturedHotkey, capturedHotkey.isValid else {
-                showPropertyError("Quick Copy needs a valid hotkey.")
+                showPropertyError("Quick Paste needs a valid hotkey.")
                 return
             }
             if capturedHotkey == showHistoryHotkey || capturedHotkey == toggleMonitoringHotkey {
-                showPropertyError("Quick Copy must use a different hotkey from Show History and Toggle Monitoring.")
+                showPropertyError("Quick Paste must use a different hotkey from Show History and Toggle Monitoring.")
                 return
             }
             if quickCopyHotkeys.contains(where: { $0.key != entry.Id && $0.value == capturedHotkey }) {
-                showPropertyError("Another Quick Copy entry already uses \(capturedHotkey).")
+                showPropertyError("Another Quick Paste entry already uses \(capturedHotkey).")
                 return
             }
         }
         if quickCopyOnly {
-            historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: entry.Name, group: entry.Group, text: entry.Text, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey)
+            historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: entry.Name, group: entry.Group, text: entry.Text, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
             return
         }
-        historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: nameField.stringValue, group: groupField.stringValue, text: textView.string, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey)
+        historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: nameField.stringValue, group: groupField.stringValue, text: textView.string, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
     }
 
     private func showPropertyError(_ message: String) {
@@ -1629,7 +1708,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case .entry(let entry):
             textField.font = .systemFont(ofSize: NSFont.systemFontSize)
             textField.textColor = .labelColor
-            let baseLabel = entry.Name.isEmpty ? entry.Text : "\(entry.Name): \(entry.Text)"
+            var baseLabel = displayText(for: entry)
+            let quickPaste = quickPasteLabel(for: entry)
+            if !quickPaste.isEmpty {
+                baseLabel = "\(quickPaste): \(baseLabel)"
+            }
             let label = pinnedShortcutNumber(for: entry).map { "\($0). \(baseLabel)" } ?? baseLabel
             let metadata = metadataText(for: entry)
             textField.stringValue = metadata.isEmpty ? label : "\(label)\n\(metadata)"
@@ -1753,6 +1836,47 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             parts.append("Pinned: Yes")
         }
         return parts.joined(separator: " - ")
+    }
+
+    private func quickPasteLabel(for entry: ClipEntry) -> String {
+        guard let hotkey = quickCopyHotkeys[entry.Id] else { return "" }
+        return "Quick Paste \(hotkey.description), \(QuickPasteMode.normalize(quickPasteModes[entry.Id]).displayText)"
+    }
+
+    private func quickPasteTargets() -> [(entry: ClipEntry, hotkey: HotkeyDescriptor, mode: QuickPasteMode)] {
+        quickCopyHotkeys.compactMap { id, hotkey in
+            guard let entry = allEntries.first(where: { $0.Id == id }) else { return nil }
+            return (entry, hotkey, QuickPasteMode.normalize(quickPasteModes[id]))
+        }
+        .sorted {
+            let hotkeyOrder = $0.hotkey.description.localizedCaseInsensitiveCompare($1.hotkey.description)
+            if hotkeyOrder != .orderedSame { return hotkeyOrder == .orderedAscending }
+            return displayText(for: $0.entry).localizedCaseInsensitiveCompare(displayText(for: $1.entry)) == .orderedAscending
+        }
+    }
+
+    private func quickPasteTargetMenuTitle(entry: ClipEntry, hotkey: HotkeyDescriptor, mode: QuickPasteMode) -> String {
+        var text = displayText(for: entry)
+        if text.count > 60 {
+            text = String(text.prefix(57)) + "..."
+        }
+        return "\(hotkey.description), \(mode.displayText): \(text)"
+    }
+
+    private func focusEntry(id: String) {
+        setMode(.text, notify: true)
+        if !rows.contains(where: {
+            if case .entry(let entry) = $0 { return entry.Id == id }
+            return false
+        }), groupFilter.caseInsensitiveCompare("All") != .orderedSame {
+            setGroupFilter("All")
+        }
+        applyFilter(preferredSelectedID: id)
+        focusHistoryTable()
+    }
+
+    private func displayText(for entry: ClipEntry) -> String {
+        entry.Name.isEmpty ? entry.Text : "\(entry.Name): \(entry.Text)"
     }
 
     private func fileEventLabel(_ event: FileClipboardEvent) -> String {

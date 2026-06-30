@@ -535,7 +535,7 @@ namespace Clipman
                 ToggleActiveHotkey = current.ToggleActiveHotkey,
                 QuickCopyHotkeys = current.QuickCopyHotkeys == null
                     ? new List<QuickCopyBinding>()
-                    : current.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey }).ToList(),
+                    : current.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey, Mode = QuickPasteModes.Normalize(b.Mode) }).ToList(),
                 AutoCopyLatestRemoteText = current.AutoCopyLatestRemoteText,
                 RemoveDuplicates = current.RemoveDuplicates,
                 SoundsEnabled = current.SoundsEnabled,

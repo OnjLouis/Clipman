@@ -178,11 +178,27 @@ namespace Clipman
     {
         public string EntryId { get; set; }
         public string Hotkey { get; set; }
+        public string Mode { get; set; }
 
         public QuickCopyBinding()
         {
             EntryId = string.Empty;
             Hotkey = string.Empty;
+            Mode = QuickPasteModes.PasteRestore;
+        }
+    }
+
+    public static class QuickPasteModes
+    {
+        public const string PasteRestore = "PasteRestore";
+        public const string PasteKeep = "PasteKeep";
+        public const string CopyOnly = "CopyOnly";
+
+        public static string Normalize(string mode)
+        {
+            if (string.Equals(mode, PasteKeep, StringComparison.OrdinalIgnoreCase)) return PasteKeep;
+            if (string.Equals(mode, CopyOnly, StringComparison.OrdinalIgnoreCase)) return CopyOnly;
+            return PasteRestore;
         }
     }
 

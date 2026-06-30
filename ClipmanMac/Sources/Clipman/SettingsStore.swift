@@ -76,9 +76,20 @@ final class SettingsStore {
                 || hotkey == settings.toggleMonitoringHotkey
                 || seenQuickCopyHotkeys.contains(hotkey) {
                 settings.quickCopyHotkeys.removeValue(forKey: entryID)
+                settings.quickPasteModes.removeValue(forKey: entryID)
                 changed = true
             } else {
                 seenQuickCopyHotkeys.insert(hotkey)
+            }
+        }
+        for (entryID, mode) in Array(settings.quickPasteModes) {
+            let normalized = QuickPasteMode.normalize(mode).rawValue
+            if settings.quickCopyHotkeys[entryID] == nil {
+                settings.quickPasteModes.removeValue(forKey: entryID)
+                changed = true
+            } else if normalized != mode {
+                settings.quickPasteModes[entryID] = normalized
+                changed = true
             }
         }
         if settings.showHistoryHotkey.keyCode == UInt32(kVK_ISO_Section),

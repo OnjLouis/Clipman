@@ -1,5 +1,35 @@
 import AppKit
 
+private struct PasteboardSnapshot {
+    let items: [[NSPasteboard.PasteboardType: Data]]
+
+    static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
+        let captured = (pasteboard.pasteboardItems ?? []).map { item in
+            var values: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    values[type] = data
+                }
+            }
+            return values
+        }.filter { !$0.isEmpty }
+        return PasteboardSnapshot(items: captured)
+    }
+
+    func restore(to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        guard !items.isEmpty else { return }
+        let pasteboardItems = items.map { itemValues in
+            let pasteboardItem = NSPasteboardItem()
+            for (type, data) in itemValues {
+                pasteboardItem.setData(data, forType: type)
+            }
+            return pasteboardItem
+        }
+        pasteboard.writeObjects(pasteboardItems)
+    }
+}
+
 @MainActor
 protocol ClipboardMonitorDelegate: AnyObject {
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, sourceApplication: String)
@@ -44,6 +74,22 @@ final class ClipboardMonitor: @unchecked Sendable {
         pasteboard.setString(text, forType: .string)
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
+    }
+
+    func writeTemporaryInternalText(_ text: String, restoreAfter delay: TimeInterval, action: () -> Void) {
+        let pasteboard = NSPasteboard.general
+        let snapshot = PasteboardSnapshot.capture(from: pasteboard)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        ignoredChangeCount = pasteboard.changeCount
+        lastChangeCount = pasteboard.changeCount
+        action()
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            snapshot.restore(to: pasteboard)
+            self.ignoredChangeCount = pasteboard.changeCount
+            self.lastChangeCount = pasteboard.changeCount
+        }
     }
 
     func writeInternalFiles(_ paths: [String], includeText: Bool = true) {

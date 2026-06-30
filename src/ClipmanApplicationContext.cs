@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -41,7 +42,7 @@ namespace Clipman
         private FileClipboardEventStore fileEventStore;
         private HistoryForm historyForm;
         private PreferencesForm preferencesForm;
-        private bool ignoreNextClipboardChange;
+        private int ignoredClipboardChangeCount;
         private bool showHotkeyRegistered;
         private bool toggleHotkeyRegistered;
         private bool toggleAlternateHotkeyRegistered;
@@ -264,7 +265,7 @@ namespace Clipman
             settings.ToggleActiveHotkey = updated.ToggleActiveHotkey;
             settings.QuickCopyHotkeys = updated.QuickCopyHotkeys == null
                 ? new List<QuickCopyBinding>()
-                : updated.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey }).ToList();
+                : updated.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey, Mode = QuickPasteModes.Normalize(b.Mode) }).ToList();
             settings.AutoCopyLatestRemoteText = updated.AutoCopyLatestRemoteText;
             settings.RemoveDuplicates = updated.RemoveDuplicates;
             settings.SoundsEnabled = updated.SoundsEnabled;
@@ -376,7 +377,7 @@ namespace Clipman
         public void CopyEntryToClipboard(ClipEntry entry)
         {
             if (entry == null) return;
-            ignoreNextClipboardChange = true;
+            IgnoreClipboardChanges(1);
             Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
             store.MarkUsed(entry.Id);
         }
@@ -387,7 +388,7 @@ namespace Clipman
             var data = new DataObject();
             data.SetText(string.Join("\r\n\r\n", entries.Select(e => e.Text ?? string.Empty)), TextDataFormat.UnicodeText);
             data.SetData(ClipmanClipboardData.EntriesFormat, ClipmanClipboardData.SerializeEntries(entries));
-            ignoreNextClipboardChange = true;
+            IgnoreClipboardChanges(1);
             Clipboard.SetDataObject(data, true);
             foreach (var entry in entries)
             {
@@ -397,7 +398,7 @@ namespace Clipman
 
         private void CopySensitiveTextToClipboard(string text)
         {
-            ignoreNextClipboardChange = true;
+            IgnoreClipboardChanges(1);
             Clipboard.SetText(text ?? string.Empty, TextDataFormat.UnicodeText);
         }
 
@@ -413,15 +414,15 @@ namespace Clipman
             }
             else if (quickCopyHotkeyEntryIds.ContainsKey(id))
             {
-                CopyQuickCopyEntryToClipboard(quickCopyHotkeyEntryIds[id]);
+                QuickPasteEntry(quickCopyHotkeyEntryIds[id]);
             }
         }
 
         internal void HandleClipboardUpdate()
         {
-            if (ignoreNextClipboardChange)
+            if (ignoredClipboardChangeCount > 0)
             {
-                ignoreNextClipboardChange = false;
+                ignoredClipboardChangeCount--;
                 return;
             }
 
@@ -479,12 +480,12 @@ namespace Clipman
                     text = cleaned;
                     try
                     {
-                        ignoreNextClipboardChange = true;
+                        IgnoreClipboardChanges(1);
                         Clipboard.SetText(text, TextDataFormat.UnicodeText);
                     }
                     catch
                     {
-                        ignoreNextClipboardChange = false;
+                        ClearIgnoredClipboardChanges();
                     }
                 }
             }
@@ -702,6 +703,7 @@ namespace Clipman
             toggleHotkeyRegistered = false;
             toggleAlternateHotkeyRegistered = false;
             quickCopyHotkeysRegistered = 0;
+            PruneInvalidQuickPasteBindings();
 
             HotkeyDefinition show;
             if (HotkeyDefinition.TryParse(settings.ShowHistoryHotkey, out show))
@@ -742,6 +744,54 @@ namespace Clipman
                     quickCopyHotkeysRegistered++;
                 }
                 quickCopyId++;
+            }
+        }
+
+        private void PruneInvalidQuickPasteBindings()
+        {
+            if (settings.QuickCopyHotkeys == null)
+            {
+                settings.QuickCopyHotkeys = new List<QuickCopyBinding>();
+                return;
+            }
+
+            var cleaned = new List<QuickCopyBinding>();
+            var usedEntryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var usedHotkeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var changed = false;
+
+            foreach (var binding in settings.QuickCopyHotkeys)
+            {
+                var entryId = binding == null ? string.Empty : (binding.EntryId ?? string.Empty).Trim();
+                var hotkey = binding == null ? string.Empty : (binding.Hotkey ?? string.Empty).Trim();
+                HotkeyDefinition parsed;
+                var entry = string.IsNullOrWhiteSpace(entryId) ? null : store.GetEntryById(entryId);
+
+                if (string.IsNullOrWhiteSpace(entryId) ||
+                    string.IsNullOrWhiteSpace(hotkey) ||
+                    !HotkeyDefinition.TryParse(hotkey, out parsed) ||
+                    entry == null ||
+                    string.IsNullOrEmpty(entry.Text) ||
+                    !usedEntryIds.Add(entryId) ||
+                    !usedHotkeys.Add(hotkey))
+                {
+                    changed = true;
+                    continue;
+                }
+
+                if (!string.Equals(binding.EntryId, entryId, StringComparison.Ordinal) ||
+                    !string.Equals(binding.Hotkey, hotkey, StringComparison.Ordinal))
+                {
+                    changed = true;
+                }
+
+                cleaned.Add(new QuickCopyBinding { EntryId = entryId, Hotkey = hotkey, Mode = QuickPasteModes.Normalize(binding.Mode) });
+            }
+
+            if (changed || cleaned.Count != settings.QuickCopyHotkeys.Count)
+            {
+                settings.QuickCopyHotkeys = cleaned;
+                settingsStore.Save(settings);
             }
         }
 
@@ -852,7 +902,7 @@ namespace Clipman
                 "Show history hotkey: " + settings.ShowHistoryHotkey + " (" + (showHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle hotkey: " + settings.ToggleActiveHotkey + " (" + (toggleHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle alternate UK key: " + (toggleAlternateHotkeyRegistered ? "registered" : "not registered or not needed") + "\r\n" +
-                "Quick copy bindings: " + ((settings.QuickCopyHotkeys == null ? 0 : settings.QuickCopyHotkeys.Count) + " configured, " + quickCopyHotkeysRegistered + " registered") + "\r\n" +
+                "Quick Paste bindings: " + ((settings.QuickCopyHotkeys == null ? 0 : settings.QuickCopyHotkeys.Count) + " configured, " + quickCopyHotkeysRegistered + " registered") + "\r\n" +
                 "Auto-copy latest remote text: " + (settings.AutoCopyLatestRemoteText ? "on" : "off") + "\r\n" +
                 "Build stamp: " + BuildInfo.BuildStampUtcMs + "\r\n" +
                 "Executable hash: " + SharedUpdateStateStore.CurrentExeHash() + "\r\n" +
@@ -953,7 +1003,7 @@ namespace Clipman
             }
         }
 
-        private void CopyQuickCopyEntryToClipboard(string entryId)
+        private void QuickPasteEntry(string entryId)
         {
             var entry = store.GetEntryById(entryId);
             if (entry == null || string.IsNullOrEmpty(entry.Text))
@@ -962,10 +1012,260 @@ namespace Clipman
                 return;
             }
 
-            ignoreNextClipboardChange = true;
-            Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
-            store.MarkUsed(entry.Id);
-            sounds.Copy(settings.SoundsEnabled);
+            try
+            {
+                var mode = QuickPasteModeForEntry(entryId);
+                if (mode == QuickPasteModes.CopyOnly)
+                {
+                    IgnoreClipboardChanges(1);
+                    Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+                    store.MarkUsed(entry.Id);
+                    sounds.Copy(settings.SoundsEnabled);
+                    return;
+                }
+
+                IDataObject previousClipboard = null;
+                if (mode == QuickPasteModes.PasteRestore)
+                {
+                    try
+                    {
+                        previousClipboard = SnapshotClipboardData();
+                    }
+                    catch
+                    {
+                        previousClipboard = null;
+                    }
+                }
+
+                IgnoreClipboardChanges(mode == QuickPasteModes.PasteKeep ? 1 : 2);
+                Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+                store.MarkUsed(entry.Id);
+                sounds.Copy(settings.SoundsEnabled);
+                if (mode == QuickPasteModes.PasteKeep)
+                {
+                    BeginPasteOnly();
+                }
+                else
+                {
+                    BeginPasteThenRestore(previousClipboard);
+                }
+            }
+            catch
+            {
+                ClearIgnoredClipboardChanges();
+                sounds.Skip(settings.SoundsEnabled);
+            }
+        }
+
+        private string QuickPasteModeForEntry(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || settings.QuickCopyHotkeys == null) return QuickPasteModes.PasteRestore;
+            var binding = settings.QuickCopyHotkeys.FirstOrDefault(b =>
+                b != null && string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+            return binding == null ? QuickPasteModes.PasteRestore : QuickPasteModes.Normalize(binding.Mode);
+        }
+
+        private void BeginPasteOnly()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                WaitForHotkeyModifiersReleased();
+                BeginInvokeIfReady(SendCtrlVPaste);
+            });
+        }
+
+        private void BeginPasteThenRestore(IDataObject previousClipboard)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                WaitForHotkeyModifiersReleased();
+                BeginInvokeIfReady(SendCtrlVPaste);
+                Thread.Sleep(600);
+                BeginInvokeIfReady(() => RestoreClipboard(previousClipboard));
+            });
+        }
+
+        private static IDataObject SnapshotClipboardData()
+        {
+            var source = Clipboard.GetDataObject();
+            if (source == null) return null;
+
+            var snapshot = new DataObject();
+            var copied = false;
+
+            copied |= SnapshotText(source, snapshot, DataFormats.UnicodeText, TextDataFormat.UnicodeText);
+            copied |= SnapshotText(source, snapshot, DataFormats.Text, TextDataFormat.Text);
+            copied |= SnapshotText(source, snapshot, DataFormats.OemText, TextDataFormat.Text);
+
+            try
+            {
+                if (source.GetDataPresent(DataFormats.FileDrop, false))
+                {
+                    var files = source.GetData(DataFormats.FileDrop, false) as string[];
+                    if (files != null && files.Length > 0)
+                    {
+                        var fileList = new StringCollection();
+                        fileList.AddRange(files);
+                        snapshot.SetFileDropList(fileList);
+                        copied = true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            string[] formats;
+            try
+            {
+                formats = source.GetFormats(false) ?? new string[0];
+            }
+            catch
+            {
+                formats = new string[0];
+            }
+
+            foreach (var format in formats)
+            {
+                if (string.IsNullOrWhiteSpace(format)) continue;
+                if (string.Equals(format, DataFormats.UnicodeText, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(format, DataFormats.Text, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(format, DataFormats.OemText, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(format, DataFormats.FileDrop, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var data = source.GetData(format, false);
+                    if (data == null) continue;
+                    snapshot.SetData(format, CloneClipboardFormatData(data));
+                    copied = true;
+                }
+                catch
+                {
+                }
+            }
+
+            return copied ? snapshot : null;
+        }
+
+        private static bool SnapshotText(IDataObject source, DataObject snapshot, string dataFormat, TextDataFormat textFormat)
+        {
+            try
+            {
+                if (!source.GetDataPresent(dataFormat, false)) return false;
+                var text = source.GetData(dataFormat, false) as string;
+                if (text == null) return false;
+                snapshot.SetText(text, textFormat);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static object CloneClipboardFormatData(object data)
+        {
+            var stream = data as MemoryStream;
+            if (stream != null)
+            {
+                var copy = new MemoryStream(stream.ToArray());
+                copy.Position = 0;
+                return copy;
+            }
+
+            var bytes = data as byte[];
+            if (bytes != null)
+            {
+                return bytes.ToArray();
+            }
+
+            var strings = data as string[];
+            if (strings != null)
+            {
+                return strings.ToArray();
+            }
+
+            return data;
+        }
+
+        private void BeginInvokeIfReady(Action action)
+        {
+            if (action == null) return;
+            if (invoker == null || invoker.IsDisposed || !invoker.IsHandleCreated) return;
+            try
+            {
+                invoker.BeginInvoke(action);
+            }
+            catch
+            {
+                ClearIgnoredClipboardChanges();
+            }
+        }
+
+        private static void WaitForHotkeyModifiersReleased()
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(1200);
+            while (DateTime.UtcNow < deadline && AnyHotkeyModifierDown())
+            {
+                Thread.Sleep(20);
+            }
+            Thread.Sleep(40);
+        }
+
+        private static bool AnyHotkeyModifierDown()
+        {
+            return IsKeyDown(NativeMethods.VK_CONTROL) ||
+                   IsKeyDown(NativeMethods.VK_SHIFT) ||
+                   IsKeyDown(NativeMethods.VK_MENU) ||
+                   IsKeyDown(NativeMethods.VK_LWIN) ||
+                   IsKeyDown(NativeMethods.VK_RWIN);
+        }
+
+        private static bool IsKeyDown(int virtualKey)
+        {
+            return (NativeMethods.GetAsyncKeyState(virtualKey) & unchecked((short)0x8000)) != 0;
+        }
+
+        private static void SendCtrlVPaste()
+        {
+            NativeMethods.keybd_event((byte)NativeMethods.VK_CONTROL, 0, 0, UIntPtr.Zero);
+            NativeMethods.keybd_event((byte)NativeMethods.VK_V, 0, 0, UIntPtr.Zero);
+            NativeMethods.keybd_event((byte)NativeMethods.VK_V, 0, NativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+            NativeMethods.keybd_event((byte)NativeMethods.VK_CONTROL, 0, NativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+
+        private void RestoreClipboard(IDataObject previousClipboard)
+        {
+            try
+            {
+                if (previousClipboard == null)
+                {
+                    Clipboard.Clear();
+                }
+                else
+                {
+                    Clipboard.SetDataObject(previousClipboard, true);
+                }
+            }
+            catch
+            {
+                ClearIgnoredClipboardChanges();
+            }
+        }
+
+        private void IgnoreClipboardChanges(int count)
+        {
+            if (count <= 0) return;
+            ignoredClipboardChangeCount += count;
+        }
+
+        private void ClearIgnoredClipboardChanges()
+        {
+            ignoredClipboardChangeCount = 0;
         }
 
         private void ResetRemoteAutoCopyBaseline()
@@ -1002,7 +1302,7 @@ namespace Clipman
 
             lastAutoCopiedRemoteEntryId = entry.Id ?? string.Empty;
             lastAutoCopiedRemoteEntryStamp = stamp;
-            ignoreNextClipboardChange = true;
+            IgnoreClipboardChanges(1);
             Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
             sounds.Remote(settings.SoundsEnabled);
         }
