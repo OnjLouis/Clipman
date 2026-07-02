@@ -85,8 +85,7 @@ namespace Clipman
 
                 WriteUpdateHistory(targetDir, "Update source located. Applying files.");
                 Directory.CreateDirectory(targetDir);
-                var backupRoot = Path.Combine(Path.Combine(targetDir, "Backups\\Updates"), DateTime.Now.ToString("yyyyMMdd-HHmmss"));
-                CleanupObsoleteRootUpdateFolders(targetDir, backupRoot);
+                CleanupObsoleteRootUpdateFolders(targetDir);
                 CleanupObsoleteFactorySoundBackups(targetDir);
 
                 foreach (var item in Directory.GetFileSystemEntries(source))
@@ -106,7 +105,7 @@ namespace Clipman
                         }
                         else
                         {
-                            ReplaceDirectory(item, destination, backupRoot);
+                            ReplaceDirectory(item, destination);
                         }
                     }
                     else
@@ -117,7 +116,6 @@ namespace Clipman
 
                 TryDeleteFile(Path.Combine(targetDir, "README.md"));
                 CleanupObsoleteFactorySoundBackups(targetDir);
-                RemoveEmptyDirectory(backupRoot);
                 CleanupEmptyBackupFolders(targetDir);
             }
             finally
@@ -163,27 +161,27 @@ namespace Clipman
             CopyDirectory(source, destination);
         }
 
-        private static void ReplaceDirectory(string source, string destination, string backupRoot)
+        private static void ReplaceDirectory(string source, string destination)
         {
             if (Directory.Exists(destination))
             {
-                NewBackupZip(destination, backupRoot, "Previous-" + Path.GetFileName(destination));
                 DeleteDirectoryWithRetry(destination);
             }
 
             CopyDirectory(source, destination);
         }
 
-        private static void CleanupObsoleteRootUpdateFolders(string targetDir, string backupRoot)
+        private static void CleanupObsoleteRootUpdateFolders(string targetDir)
         {
             var rootUpdateBackups = Path.Combine(targetDir, "Update Backups");
             if (Directory.Exists(rootUpdateBackups))
             {
-                NewBackupZip(rootUpdateBackups, backupRoot, "Legacy-Root-Update-Backups");
                 TryDeleteDirectory(rootUpdateBackups);
             }
 
+            TryDeleteDirectory(Path.Combine(targetDir, "Backups\\Updates"));
             TryDeleteDirectory(Path.Combine(targetDir, "Update Temp"));
+            CleanupEmptyBackupFolders(targetDir);
         }
 
         private static void CleanupObsoleteFactorySoundBackups(string targetDir)
@@ -352,20 +350,6 @@ namespace Clipman
             var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var fullPath = Path.GetFullPath(path);
             return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) ? fullPath.Substring(fullRoot.Length) : Path.GetFileName(path);
-        }
-
-        private static void NewBackupZip(string path, string backupRoot, string name)
-        {
-            if (!Directory.Exists(path)) return;
-            Directory.CreateDirectory(backupRoot);
-            var safeName = string.Join("_", (name ?? "Backup").Split(Path.GetInvalidFileNameChars()));
-            var zipPath = Path.Combine(backupRoot, safeName + ".zip");
-            if (File.Exists(zipPath))
-            {
-                zipPath = Path.Combine(backupRoot, safeName + "-" + Guid.NewGuid().ToString("N") + ".zip");
-            }
-
-            ZipFile.CreateFromDirectory(path, zipPath);
         }
 
         private static void RemoveEmptyDirectory(string folder)

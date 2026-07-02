@@ -110,6 +110,11 @@ If a sync service creates conflict copies of Clipman's own settings or history d
 
 ## Changelog
 
+### 1.6.3
+
+- Improved Windows updates so Clipman no longer creates an empty app-root `Backups` folder when no user files need preserving.
+- Added runtime crash logging so silent exits can be diagnosed more easily. Windows writes beside the app in `Logs\Runtime.log`; Mac writes to Clipman's Application Support log folder.
+
 ### 1.6.2
 
 - Improved hotkey editing: hotkey fields can now be cleared with Delete or Backspace.

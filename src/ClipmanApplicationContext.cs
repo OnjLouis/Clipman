@@ -917,6 +917,7 @@ namespace Clipman
                 "Update check frequency: " + settings.UpdateCheckFrequency + "\r\n" +
                 "Install updates silently: " + settings.InstallUpdatesSilently + "\r\n" +
                 "Database encryption enabled: " + settings.DatabaseEncryptionEnabled + "\r\n" +
+                "Runtime crash log: " + Program.RuntimeLogPath() + "\r\n" +
                 "User sound override folder: " + Path.Combine(settingsStore.SettingsDirectory, "sounds") + "\r\n" +
                 "Group filter: " + settings.GroupFilter + "\r\n" +
                 "Foreground process: " + FriendlyProcessName(ForegroundProcessName()) + "\r\n" +

@@ -289,6 +289,7 @@ function Assert-SmokeUpdateTarget([string]$appDir, [string]$sentinel, [string]$e
     Assert-NotExists (Join-Path $appDir 'README.md') "$label stale README"
     Assert-NotExists (Join-Path $appDir 'Update Temp') "$label legacy update temp"
     Assert-NotExists (Join-Path $appDir 'Update Backups') "$label legacy update backups"
+    Assert-NotExists (Join-Path $appDir 'Backups') "$label app-root update backups"
     Assert-NotExists (Join-Path $appDir 'sounds\sounds') "$label nested sounds folder"
     Assert-NoFactorySoundBackups $appDir $label
     $settingsText = Get-Content -LiteralPath (Join-Path $appDir "Settings\$env:COMPUTERNAME-settings.json") -Raw
@@ -460,6 +461,11 @@ function Invoke-PostPublishUpdateSmoke([string]$expectedVersion) {
                 break
             }
         } while ((Get-Date) -lt $deadline)
+
+        $cleanupDeadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $cleanupDeadline -and (Test-Path -LiteralPath (Join-Path $target 'Backups'))) {
+            Start-Sleep -Milliseconds 500
+        }
 
         & $exe --close | Out-Null
         Start-Sleep -Seconds 2
@@ -808,6 +814,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'TryRestartUpdatedApp' 'Updater restart code'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'ReplaceFactoryDirectory' 'Updater factory folder replacement code'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'CleanupObsoleteFactorySoundBackups' 'Updater factory sound backup cleanup code'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\Program.Updater.cs') 'NewBackupZip|CreateFromDirectory' 'Updater app-root backup creation'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'InstanceStateStore\.IsSameRunningFolder' 'Cross-folder instance takeover code'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ClipDatabaseFile\.IsEncryptedFile\(settings\.DatabasePath\)' 'Startup encrypted database detection'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DefaultFileHistoryDatabasePath\(\)' 'Machine-specific file history database path'
@@ -997,6 +1004,16 @@ function Assert-ManualAndReadmeClean {
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'encryptDatabase|Clipboard\.SetText\(password\)' 'Preferences encryption checkbox and raw password clipboard copy'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'Logs\\\\Startup\.log' 'Startup failure log message'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'WriteStartupLog\("Startup failed\."' 'Startup failure logging'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'Application\.ThreadException' 'Windows runtime UI exception logging'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'Runtime\.log' 'Windows runtime log file'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'CleanupStartupArtifacts\(\)' 'Windows startup cleanup for stale app-root backup folders'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'CleanupObsoleteRootUpdateFolders\(appDirectory\)' 'Windows startup cleanup removes obsolete update backup folders'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'Backups\\\\Updates' 'Windows update cleanup removes obsolete app-root update backups'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'CleanupEmptyBackupFolders\(appDirectory\)' 'Windows startup cleanup deletes stale app-root backup folders'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'Runtime crash log: ' 'Windows diagnostics runtime log path'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\RuntimeLogger.swift') 'Runtime\.log' 'Mac runtime log file'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\main.swift') 'RuntimeLogger\.install\(\)' 'Mac runtime logger install'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'Runtime crash log: ' 'Mac diagnostics runtime log path'
     Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'UseDefaultDatabasePath' 'Default database path setting'
     Assert-TextMatches (Join-Path $repoRoot 'src\SettingsStore.cs') 'ShouldTreatAsDefaultDatabasePath' 'Portable default database path detection'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'FolderBrowserDialog' 'Preferences uses folder picker for data folder'

@@ -45,6 +45,8 @@ namespace Clipman
                 return;
             }
 
+            CleanupStartupArtifacts();
+
             if (args.Length > 0 && string.Equals(args[0], "--close", StringComparison.OrdinalIgnoreCase))
             {
                 SignalEvent(CloseEventName);
@@ -124,7 +126,6 @@ namespace Clipman
             {
                 var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
                 InstanceStateStore.PublishCurrent(appDirectory);
-                CleanupObsoleteFactorySoundBackups(appDirectory);
                 try
                 {
                     RunApplication();
@@ -136,6 +137,14 @@ namespace Clipman
 
                 GC.KeepAlive(mutex);
             }
+        }
+
+        private static void CleanupStartupArtifacts()
+        {
+            var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            CleanupObsoleteRootUpdateFolders(appDirectory);
+            CleanupObsoleteFactorySoundBackups(appDirectory);
+            CleanupEmptyBackupFolders(appDirectory);
         }
 
         private static bool AcquireSingleInstanceMutex(out Mutex mutex)
@@ -228,6 +237,15 @@ namespace Clipman
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (sender, e) =>
+            {
+                WriteRuntimeLog("Unhandled UI thread exception.", e.Exception);
+            };
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                WriteRuntimeLog("Unhandled application exception.", e.ExceptionObject as Exception);
+            };
 
             try
             {
@@ -253,19 +271,40 @@ namespace Clipman
 
         private static void WriteStartupLog(string message, Exception exception)
         {
+            WriteLogFile("Startup.log", message, exception);
+        }
+
+        internal static string RuntimeLogPath()
+        {
+            return Path.Combine(LogDirectory(), "Runtime.log");
+        }
+
+        private static void WriteRuntimeLog(string message, Exception exception)
+        {
+            WriteLogFile("Runtime.log", message, exception);
+        }
+
+        private static void WriteLogFile(string fileName, string message, Exception exception)
+        {
             try
             {
-                var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-                var logDirectory = Path.Combine(appDirectory, "Logs");
-                Directory.CreateDirectory(logDirectory);
-                var path = Path.Combine(logDirectory, "Startup.log");
+                var path = Path.Combine(LogDirectory(), fileName);
                 using (var writer = new StreamWriter(path, true))
                 {
                     writer.WriteLine("[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "] " + message);
                     writer.WriteLine("App: " + Assembly.GetExecutingAssembly().Location);
+                    writer.WriteLine("Version: " + Assembly.GetExecutingAssembly().GetName().Version);
+                    writer.WriteLine("Build stamp: " + BuildInfo.BuildStampUtcMs);
+                    writer.WriteLine("OS: " + Environment.OSVersion);
+                    writer.WriteLine(".NET: " + Environment.Version);
+                    writer.WriteLine("Machine: " + Environment.MachineName);
                     if (exception != null)
                     {
                         writer.WriteLine(exception);
+                    }
+                    else
+                    {
+                        writer.WriteLine("(No exception object.)");
                     }
                     writer.WriteLine();
                 }
@@ -273,6 +312,14 @@ namespace Clipman
             catch
             {
             }
+        }
+
+        private static string LogDirectory()
+        {
+            var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            var logDirectory = Path.Combine(appDirectory, "Logs");
+            Directory.CreateDirectory(logDirectory);
+            return logDirectory;
         }
 
         private static void SignalEvent(string name)

@@ -249,6 +249,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Text entries: \(store.entryCount())",
             "File history: \(fileHistoryURL(for: settings).path)",
             "File events: \(fileStore.eventCount())",
+            "Runtime crash log: \(RuntimeLogger.logURL.path)",
             "Text sort: \(settings.sortMode), \(settings.sortDescending ? "descending" : "ascending")",
             "File sort: \(settings.fileHistorySortMode), \(settings.fileHistorySortDescending ? "descending" : "ascending")",
             "Group filter: \(settings.groupFilter)",
