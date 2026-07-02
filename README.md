@@ -110,6 +110,10 @@ If a sync service creates conflict copies of Clipman's own settings or history d
 
 ## Changelog
 
+### 1.6.4
+
+- Improved Windows updates so the factory `sounds` folder is updated file-by-file instead of being deleted and replaced as one folder. This should make updates less fragile in cloud-synced folders where OneDrive or another sync client may briefly lock the folder.
+
 ### 1.6.3
 
 - Improved Windows updates so Clipman no longer creates an empty app-root `Backups` folder when no user files need preserving.

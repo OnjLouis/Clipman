@@ -1010,6 +1010,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'CleanupObsoleteRootUpdateFolders\(appDirectory\)' 'Windows startup cleanup removes obsolete update backup folders'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'Backups\\\\Updates' 'Windows update cleanup removes obsolete app-root update backups'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'CleanupEmptyBackupFolders\(appDirectory\)' 'Windows startup cleanup deletes stale app-root backup folders'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'CopyFactoryDirectoryBestEffort' 'Windows updater uses tolerant factory folder copy'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Program.Updater.cs') 'could not update factory file' 'Windows updater logs factory asset copy warnings'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'Runtime crash log: ' 'Windows diagnostics runtime log path'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\RuntimeLogger.swift') 'Runtime\.log' 'Mac runtime log file'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\main.swift') 'RuntimeLogger\.install\(\)' 'Mac runtime logger install'

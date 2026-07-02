@@ -153,12 +153,9 @@ namespace Clipman
 
         private static void ReplaceFactoryDirectory(string source, string destination)
         {
-            if (Directory.Exists(destination))
-            {
-                DeleteDirectoryWithRetry(destination);
-            }
-
-            CopyDirectory(source, destination);
+            Directory.CreateDirectory(destination);
+            CopyFactoryDirectoryBestEffort(source, destination);
+            PruneFactoryDirectoryBestEffort(source, destination);
         }
 
         private static void ReplaceDirectory(string source, string destination)
@@ -298,6 +295,55 @@ namespace Clipman
                 var target = Path.Combine(destination, RelativePath(source, file));
                 Directory.CreateDirectory(Path.GetDirectoryName(target));
                 CopyFileWithRetry(file, target);
+            }
+        }
+
+        private static void CopyFactoryDirectoryBestEffort(string source, string destination)
+        {
+            foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+            {
+                Directory.CreateDirectory(Path.Combine(destination, RelativePath(source, directory)));
+            }
+
+            foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+            {
+                var target = Path.Combine(destination, RelativePath(source, file));
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    CopyFileWithRetry(file, target);
+                }
+                catch (Exception ex)
+                {
+                    WriteUpdateHistory(Path.GetDirectoryName(destination), "Warning: could not update factory file " + target + ": " + ex.Message);
+                }
+            }
+        }
+
+        private static void PruneFactoryDirectoryBestEffort(string source, string destination)
+        {
+            try
+            {
+                foreach (var file in Directory.GetFiles(destination, "*", SearchOption.AllDirectories))
+                {
+                    var relative = RelativePath(destination, file);
+                    if (File.Exists(Path.Combine(source, relative)))
+                    {
+                        continue;
+                    }
+
+                    TryDeleteFile(file);
+                }
+
+                foreach (var folder in Directory.GetDirectories(destination, "*", SearchOption.AllDirectories)
+                    .OrderByDescending(path => path.Length))
+                {
+                    RemoveEmptyDirectory(folder);
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteUpdateHistory(Path.GetDirectoryName(destination), "Warning: could not fully prune factory folder " + destination + ": " + ex.Message);
             }
         }
 
