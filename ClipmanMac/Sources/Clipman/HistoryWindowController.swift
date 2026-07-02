@@ -40,6 +40,16 @@ private final class QuickPasteModeRadioGroup: NSObject {
     }
 }
 
+private final class DialogTabTextView: NSTextView {
+    override func insertTab(_ sender: Any?) {
+        window?.selectNextKeyView(sender)
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        window?.selectPreviousKeyView(sender)
+    }
+}
+
 @MainActor
 protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry)
@@ -1386,7 +1396,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let groupField = NSTextField(string: entry.Group)
         groupField.placeholderString = "Group"
         groupField.setAccessibilityLabel("Entry group")
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 180))
+        let textView = DialogTabTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 180))
         textView.string = entry.Text
         textView.isRichText = false
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
@@ -1433,9 +1443,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         alert.accessoryView = stack
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let useQuickCopy = quickCopyCheckbox.state == .on
         let selectedMode = modeRadioGroup.selectedMode
         let capturedHotkey = hotkeyField.descriptor ?? HotkeyDescriptor.parse(hotkeyField.stringValue)
+        let requestedQuickCopy = quickCopyCheckbox.state == .on
+        let useQuickCopy = requestedQuickCopy && capturedHotkey != nil
+        if requestedQuickCopy && capturedHotkey == nil && !hotkeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            showPropertyError("Quick Paste needs a valid hotkey.")
+            return
+        }
         if useQuickCopy {
             guard let capturedHotkey, capturedHotkey.isValid else {
                 showPropertyError("Quick Paste needs a valid hotkey.")

@@ -66,7 +66,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Search: `Ctrl+F`, then `F3` or `Shift+F3`
 - Open Entry Properties: `F2`
 
-Hotkeys can be changed from Options > Preferences.
+Hotkeys can be changed from Options > Preferences. In hotkey fields, press a valid shortcut to assign it, or press Delete or Backspace to clear it. Windows hotkey fields accept the Windows key as a modifier for combinations Windows allows.
 
 Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared data folder and the history password controls.
 
@@ -109,6 +109,12 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.6.2
+
+- Improved hotkey editing: hotkey fields can now be cleared with Delete or Backspace.
+- Improved Windows hotkey capture so Windows-key combinations can be assigned where Windows allows them.
+- Improved Windows hotkey field accessibility so screen readers no longer announce the fields as read-only.
 
 ### 1.6.1
 

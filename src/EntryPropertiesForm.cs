@@ -95,12 +95,14 @@ namespace Clipman
             {
                 Location = new Point(150, 112),
                 Width = 180,
-                ReadOnly = true,
+                ReadOnly = false,
+                ShortcutsEnabled = false,
                 Text = quickCopyHotkey ?? string.Empty,
                 AccessibleName = "Quick Paste hotkey",
-                AccessibleDescription = "Global hotkey that pastes this entry into the active app. Press a valid key combination with at least two modifiers."
+                AccessibleDescription = "Global hotkey that pastes this entry into the active app. Press a valid key combination with at least two modifiers. Press Delete or Backspace to clear this hotkey."
             };
             quickCopyHotkeyBox.KeyDown += QuickCopyHotkeyBoxKeyDown;
+            quickCopyHotkeyBox.KeyPress += SuppressHotkeyTextInput;
             Controls.Add(quickCopyHotkeyBox);
 
             var modeBox = new GroupBox
@@ -188,7 +190,7 @@ namespace Clipman
             nameBox.SelectAll();
         }
 
-        private static void QuickCopyHotkeyBoxKeyDown(object sender, KeyEventArgs e)
+        private void QuickCopyHotkeyBoxKeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.Tab || e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter)
             {
@@ -199,6 +201,8 @@ namespace Clipman
             e.SuppressKeyPress = true;
             if (e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete)
             {
+                ((TextBox)sender).Clear();
+                quickCopyTargetBox.Checked = false;
                 return;
             }
 
@@ -216,6 +220,11 @@ namespace Clipman
             }
 
             System.Media.SystemSounds.Beep.Play();
+        }
+
+        private static void SuppressHotkeyTextInput(object sender, KeyPressEventArgs e)
+        {
+            e.Handled = true;
         }
 
     }

@@ -86,7 +86,7 @@
   </ul>
 
   <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
-  <p>Most commands are shared between Windows and Mac, but the modifier keys follow each platform's conventions. Windows uses <code>Ctrl</code> and <code>Alt</code>. Mac uses <code>Command</code>, <code>Option</code>, and <code>Control</code>. Global hotkeys can be changed in Preferences where supported.</p>
+  <p>Most commands are shared between Windows and Mac, but the modifier keys follow each platform's conventions. Windows uses <code>Ctrl</code>, <code>Alt</code>, <code>Shift</code>, and sometimes <code>Win</code>. Mac uses <code>Command</code>, <code>Option</code>, and <code>Control</code>. Global hotkeys can be changed in Preferences where supported.</p>
   <table>
     <thead>
       <tr>
@@ -145,7 +145,7 @@
   </table>
 
   <h2 id="preferences">Preferences</h2>
-  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, startup, update checks, and shared-database behavior.</p>
+  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
 
   <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
 
@@ -438,6 +438,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.6.2</h3>
+  <ul>
+    <li>Improved hotkey editing: hotkey fields can now be cleared with Delete or Backspace.</li>
+    <li>Improved Windows hotkey capture so Windows-key combinations can be assigned where Windows allows them.</li>
+    <li>Improved Windows hotkey field accessibility so screen readers no longer announce the fields as read-only.</li>
+  </ul>
+
   <h3>1.6.1</h3>
   <ul>
     <li>Changed per-entry global hotkeys from Quick Copy to Quick Paste. Pressing an assigned hotkey can paste the entry into the active app, paste and leave the target on the clipboard, or copy the target to the clipboard only.</li>

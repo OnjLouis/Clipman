@@ -699,11 +699,13 @@ namespace Clipman
             {
                 Width = 180,
                 Text = text ?? string.Empty,
-                ReadOnly = true,
+                ReadOnly = false,
+                ShortcutsEnabled = false,
                 AccessibleName = accessibleName,
-                AccessibleDescription = "Press a global key combination with at least two modifiers, such as Control Alt Backslash or Control Shift H. Modifier-only and unsafe Windows shortcuts are rejected."
+                AccessibleDescription = "Press a global key combination with at least two modifiers, such as Control Alt Backslash, Windows Alt H, or Control Shift H. Press Delete or Backspace to clear this hotkey. Modifier-only and unsafe Windows shortcuts are rejected."
             };
             box.KeyDown += HotkeyBoxKeyDown;
+            box.KeyPress += SuppressHotkeyTextInput;
             return box;
         }
 
@@ -772,6 +774,7 @@ namespace Clipman
             e.SuppressKeyPress = true;
             if (e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete)
             {
+                ((TextBox)sender).Clear();
                 return;
             }
 
@@ -789,6 +792,11 @@ namespace Clipman
             }
 
             System.Media.SystemSounds.Beep.Play();
+        }
+
+        private static void SuppressHotkeyTextInput(object sender, KeyPressEventArgs e)
+        {
+            e.Handled = true;
         }
     }
 }

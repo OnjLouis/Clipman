@@ -66,10 +66,16 @@ namespace Clipman
 
         public static string FromKeys(Keys keys)
         {
+            return FromKeys(keys, IsWindowsKeyPressed());
+        }
+
+        public static string FromKeys(Keys keys, bool windowsModifierPressed)
+        {
             var parts = new List<string>();
             if ((keys & Keys.Control) == Keys.Control) parts.Add("Ctrl");
             if ((keys & Keys.Alt) == Keys.Alt) parts.Add("Alt");
             if ((keys & Keys.Shift) == Keys.Shift) parts.Add("Shift");
+            if (windowsModifierPressed) parts.Add("Win");
 
             var key = keys & Keys.KeyCode;
             if (key != Keys.None)
@@ -78,6 +84,11 @@ namespace Clipman
             }
 
             return string.Join("+", parts);
+        }
+
+        public static bool IsWindowsKeyPressed()
+        {
+            return IsKeyPressed(NativeMethods.VK_LWIN) || IsKeyPressed(NativeMethods.VK_RWIN);
         }
 
         public bool IsValid
@@ -179,6 +190,11 @@ namespace Clipman
                 default:
                     return false;
             }
+        }
+
+        private static bool IsKeyPressed(int virtualKey)
+        {
+            return (NativeMethods.GetAsyncKeyState(virtualKey) & unchecked((short)0x8000)) != 0;
         }
 
         private static Keys ParseKey(string part)

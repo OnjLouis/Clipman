@@ -33,6 +33,7 @@ final class HotkeyCaptureField: NSTextField {
         isSelectable = false
         focusRingType = .default
         setAccessibilityRole(.textField)
+        setAccessibilityHelp("Press a valid global shortcut. Press Delete or Backspace to clear this hotkey.")
     }
 
     override func becomeFirstResponder() -> Bool {
@@ -64,6 +65,9 @@ final class HotkeyCaptureField: NSTextField {
         if moveFocusIfNeeded(for: event) {
             return
         }
+        if clearHotkeyIfNeeded(for: event) {
+            return
+        }
 
         let eventModifiers = HotkeyDescriptor.Modifiers(eventModifierFlags: event.modifierFlags)
         let modifiers = eventModifiers.union(trackedModifiers)
@@ -84,6 +88,9 @@ final class HotkeyCaptureField: NSTextField {
         if moveFocusIfNeeded(for: event) {
             return true
         }
+        if clearHotkeyIfNeeded(for: event) {
+            return true
+        }
         if event.modifierFlags.contains(.command),
            event.charactersIgnoringModifiers?.lowercased() == "w" {
             return false
@@ -99,6 +106,16 @@ final class HotkeyCaptureField: NSTextField {
             return true
         }
         descriptor = candidate
+        hotkeyDelegate?.hotkeyCaptureFieldDidChange(self)
+        return true
+    }
+
+    private func clearHotkeyIfNeeded(for event: NSEvent) -> Bool {
+        guard event.keyCode == UInt16(kVK_Delete) || event.keyCode == UInt16(kVK_ForwardDelete) else {
+            return false
+        }
+        descriptor = nil
+        trackedModifiers = []
         hotkeyDelegate?.hotkeyCaptureFieldDidChange(self)
         return true
     }
