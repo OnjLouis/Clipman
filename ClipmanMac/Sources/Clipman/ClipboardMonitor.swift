@@ -136,6 +136,17 @@ final class ClipboardMonitor: @unchecked Sendable {
             }
             return
         }
+        if shouldSkipPasteboardTypes(pasteboard) {
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Skipped because pasteboard types indicate concealed or ignored-application data.",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
+            if playSkipSound {
+                delegate?.clipboardMonitorDidSkipIgnoredApplication(self)
+            }
+            return
+        }
         if let fileCapture = fileCapture(from: pasteboard) {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Captured file or non-text clipboard event. File count: \(fileCapture.files.count).",
@@ -254,6 +265,28 @@ final class ClipboardMonitor: @unchecked Sendable {
         }
     }
 
+    private func shouldSkipPasteboardTypes(_ pasteboard: NSPasteboard) -> Bool {
+        let types = allPasteboardTypeNames(from: pasteboard)
+        if types.contains(where: isConcealedPasteboardType) {
+            return true
+        }
+
+        let ignored = ignoredApplications
+            .map { normalizeIgnoredApplicationName($0) }
+            .filter { !$0.isEmpty }
+        guard !ignored.isEmpty else { return false }
+
+        let candidates = types
+            .flatMap { pasteboardTypeCandidates($0) }
+            .filter { !$0.isEmpty }
+
+        return candidates.contains { candidate in
+            ignored.contains { ignoredItem in
+                ignoredApplicationMatches(ignoredItem: ignoredItem, candidate: candidate)
+            }
+        }
+    }
+
     private func ignoredApplicationMatches(ignoredItem: String, candidate: String) -> Bool {
         guard !ignoredItem.isEmpty, !candidate.isEmpty else { return false }
         if ignoredItem == candidate { return true }
@@ -270,6 +303,31 @@ final class ClipboardMonitor: @unchecked Sendable {
             trimmed = URL(fileURLWithPath: trimmed).deletingPathExtension().lastPathComponent
         }
         return trimmed.lowercased()
+    }
+
+    private func allPasteboardTypeNames(from pasteboard: NSPasteboard) -> [String] {
+        var names = pasteboard.types?.map(\.rawValue) ?? []
+        for item in pasteboard.pasteboardItems ?? [] {
+            names.append(contentsOf: item.types.map(\.rawValue))
+        }
+        return Array(Set(names.map { $0.lowercased() })).sorted()
+    }
+
+    private func isConcealedPasteboardType(_ value: String) -> Bool {
+        let normalized = value.lowercased()
+        return normalized == "org.nspasteboard.concealedtype"
+            || normalized.contains("concealed")
+            || normalized.contains("transient")
+    }
+
+    private func pasteboardTypeCandidates(_ value: String) -> [String] {
+        let normalized = normalizeIgnoredApplicationName(value)
+        var candidates = [normalized]
+        if normalized == "com.agilebits.onepassword" {
+            candidates.append("1password")
+            candidates.append("com.1password.1password")
+        }
+        return Array(Set(candidates))
     }
 
     private func fileCapture(from pasteboard: NSPasteboard) -> (files: [String], formats: [String])? {

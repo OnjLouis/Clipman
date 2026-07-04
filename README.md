@@ -33,6 +33,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - File history diagnostics are capped by preference, and unavailable unpinned file-history events can be removed manually or automatically.
 - Optional history size and age limits, with pinned entries kept.
 - Optional ignored application list for sensitive apps.
+- On Mac, concealed pasteboard data and password-manager quick-access pasteboard markers are skipped even when macOS reports a different foreground app.
 - Import and export clipboard history for backup, including text imports from old Clipman `clipman.db` and Ditto SQLite databases.
 - Compressed Clipman database can live in a cloud service, synced folder, or network share.
 - Optional history password encryption. By default the unlock password is session-only; users can explicitly choose to remember it on a computer with Windows user protection.
@@ -115,6 +116,7 @@ If a sync service creates conflict copies of Clipman's own settings or history d
 ### 1.6.5
 
 - Improved ignored-application matching so related helper windows and helper processes can be ignored when they use the same app name or bundle/process prefix.
+- Improved Mac ignored-application handling for concealed pasteboard data and password-manager quick-access panels that identify themselves through pasteboard type metadata.
 - Fixed Mac Preferences so standard edit shortcuts such as Command+V work in settings text fields.
 - Clarified Mac Preferences password status so users can tell whether the selected history database is encrypted and whether the password is saved in Keychain.
 - Added Push to other machines for selected text entries. This lets an existing history entry be sent as a fresh shared event so other opted-in machines can receive it on their clipboard.
