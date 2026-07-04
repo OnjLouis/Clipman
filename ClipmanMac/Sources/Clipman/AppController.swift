@@ -257,7 +257,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Run at login: \(settings.runAtStartup ? "On" : "Off")",
             "Auto-copy latest remote text: \(settings.autoCopyLatestRemoteText ? "On" : "Off")",
             "Update checks: \(settings.updateCheckFrequency)",
-            "Ignored applications: \(settings.ignoredApplications.isEmpty ? "None" : settings.ignoredApplications.joined(separator: ", "))"
+            "Ignored applications: \(settings.ignoredApplications.isEmpty ? "None" : settings.ignoredApplications.joined(separator: ", "))",
+            "",
+            monitor.diagnosticsReport()
         ].joined(separator: "\n")
 
         let alert = NSAlert()

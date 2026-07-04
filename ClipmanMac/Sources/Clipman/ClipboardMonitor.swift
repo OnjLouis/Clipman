@@ -45,6 +45,7 @@ final class ClipboardMonitor: @unchecked Sendable {
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var ignoredChangeCount: Int?
+    private var lastClipboardDiagnostic = "No clipboard changes have been inspected in this Clipman session."
 
     func start() {
         stop()
@@ -104,6 +105,10 @@ final class ClipboardMonitor: @unchecked Sendable {
         lastChangeCount = pasteboard.changeCount
     }
 
+    func diagnosticsReport() -> String {
+        lastClipboardDiagnostic
+    }
+
     private func tick() {
         let pasteboard = NSPasteboard.general
         let count = pasteboard.changeCount
@@ -118,18 +123,110 @@ final class ClipboardMonitor: @unchecked Sendable {
 
     private func capture(from pasteboard: NSPasteboard, playSkipSound: Bool) {
         guard isEnabled else { return }
+        let appDiagnostic = foregroundApplicationDiagnostic()
+        let pasteboardDiagnostic = pasteboardTypesDiagnostic(from: pasteboard)
         guard !isIgnoredForegroundApplication() else {
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Skipped because the foreground application matched the ignored-applications list.",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
             if playSkipSound {
                 delegate?.clipboardMonitorDidSkipIgnoredApplication(self)
             }
             return
         }
         if let fileCapture = fileCapture(from: pasteboard) {
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Captured file or non-text clipboard event. File count: \(fileCapture.files.count).",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
             delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil)
             return
         }
-        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty else {
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Ignored because the clipboard did not contain non-empty plain text or restorable files.",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
+            return
+        }
+        lastClipboardDiagnostic = clipboardDiagnostic(
+            result: "Captured text clipboard event. Text length: \(text.count) characters.",
+            appDiagnostic: appDiagnostic,
+            pasteboardDiagnostic: pasteboardDiagnostic
+        )
         delegate?.clipboardMonitor(self, didCapture: text, sourceApplication: sourceApplicationName())
+    }
+
+    private func clipboardDiagnostic(result: String, appDiagnostic: String, pasteboardDiagnostic: String) -> String {
+        [
+            "Last clipboard inspection",
+            "Result: \(result)",
+            appDiagnostic,
+            pasteboardDiagnostic
+        ].joined(separator: "\n")
+    }
+
+    private func foregroundApplicationDiagnostic() -> String {
+        guard let application = NSWorkspace.shared.frontmostApplication,
+              application.processIdentifier != NSRunningApplication.current.processIdentifier
+        else {
+            return "Foreground application: none reported, or Clipman itself."
+        }
+
+        let lines = [
+            "Foreground application:",
+            "  Name: \(application.localizedName ?? "")",
+            "  Bundle identifier: \(application.bundleIdentifier ?? "")",
+            "  Process identifier: \(application.processIdentifier)",
+            "  Executable: \(application.executableURL?.path ?? "")",
+            "  Bundle: \(application.bundleURL?.path ?? "")",
+            "  Ignore candidates: \(ignoredApplicationCandidates(for: application).joined(separator: ", "))"
+        ]
+        return lines.joined(separator: "\n")
+    }
+
+    private func ignoredApplicationCandidates(for application: NSRunningApplication) -> [String] {
+        [
+            application.localizedName,
+            application.bundleIdentifier,
+            application.executableURL?.lastPathComponent,
+            application.executableURL?.deletingPathExtension().lastPathComponent,
+            application.bundleURL?.lastPathComponent,
+            application.bundleURL?.deletingPathExtension().lastPathComponent
+        ]
+            .compactMap { $0 }
+            .map { normalizeIgnoredApplicationName($0) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { result, candidate in
+                if !result.contains(candidate) {
+                    result.append(candidate)
+                }
+            }
+    }
+
+    private func pasteboardTypesDiagnostic(from pasteboard: NSPasteboard) -> String {
+        let itemTypes: [String] = pasteboard.pasteboardItems?
+            .enumerated()
+            .map { index, item in
+                let types = item.types.map(\.rawValue).sorted().joined(separator: ", ")
+                return "  Item \(index + 1): \(types.isEmpty ? "none" : types)"
+            } ?? []
+        let directTypes = pasteboard.types?.map(\.rawValue).sorted().joined(separator: ", ") ?? ""
+        var lines: [String] = [
+            "Pasteboard:",
+            "  Change count: \(pasteboard.changeCount)",
+            "  Direct types: \(directTypes.isEmpty ? "none" : directTypes)"
+        ]
+        if itemTypes.isEmpty {
+            lines.append("  Items: none")
+        } else {
+            lines.append(contentsOf: itemTypes)
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func sourceApplicationName() -> String {
@@ -148,17 +245,7 @@ final class ClipboardMonitor: @unchecked Sendable {
               application.processIdentifier != NSRunningApplication.current.processIdentifier
         else { return false }
 
-        let candidates = [
-            application.localizedName,
-            application.bundleIdentifier,
-            application.executableURL?.lastPathComponent,
-            application.executableURL?.deletingPathExtension().lastPathComponent,
-            application.bundleURL?.lastPathComponent,
-            application.bundleURL?.deletingPathExtension().lastPathComponent
-        ]
-            .compactMap { $0 }
-            .map { normalizeIgnoredApplicationName($0) }
-            .filter { !$0.isEmpty }
+        let candidates = ignoredApplicationCandidates(for: application)
 
         return candidates.contains { candidate in
             ignored.contains { ignoredItem in
