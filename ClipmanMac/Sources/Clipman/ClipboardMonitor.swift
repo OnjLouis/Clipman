@@ -125,6 +125,17 @@ final class ClipboardMonitor: @unchecked Sendable {
         guard isEnabled else { return }
         let appDiagnostic = foregroundApplicationDiagnostic()
         let pasteboardDiagnostic = pasteboardTypesDiagnostic(from: pasteboard)
+        if isClipmanForegroundApplication() {
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Skipped because Clipman itself was the foreground application.",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
+            if playSkipSound {
+                delegate?.clipboardMonitorDidSkipIgnoredApplication(self)
+            }
+            return
+        }
         guard !isIgnoredForegroundApplication() else {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Skipped because the foreground application matched the ignored-applications list.",
@@ -263,6 +274,10 @@ final class ClipboardMonitor: @unchecked Sendable {
                 ignoredApplicationMatches(ignoredItem: ignoredItem, candidate: candidate)
             }
         }
+    }
+
+    private func isClipmanForegroundApplication() -> Bool {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == NSRunningApplication.current.processIdentifier
     }
 
     private func shouldSkipPasteboardTypes(_ pasteboard: NSPasteboard) -> Bool {
