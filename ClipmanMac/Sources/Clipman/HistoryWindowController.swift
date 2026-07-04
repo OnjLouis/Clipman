@@ -59,6 +59,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode)
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry])
+    func historyWindow(_ controller: HistoryWindowController, didPushToOtherMachines entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didMove entries: [ClipEntry], direction: Int)
     func historyWindowDidRequestPaste(_ controller: HistoryWindowController, after entry: ClipEntry?)
     func historyWindowDidRequestImport(_ controller: HistoryWindowController)
@@ -101,6 +102,7 @@ final class HistoryWindow: NSWindow {
     var onCopy: (() -> Void)?
     var onCut: (() -> Void)?
     var onPaste: (() -> Void)?
+    var onPushToOtherMachines: (() -> Void)?
     var onImport: (() -> Void)?
     var onExport: (() -> Void)?
     var onCleanTracking: (() -> Void)?
@@ -318,6 +320,10 @@ final class HistoryWindow: NSWindow {
             onPaste?()
             return true
         }
+        if event.keyCode == UInt16(kVK_ANSI_P), modifiers == [.command] {
+            onPushToOtherMachines?()
+            return true
+        }
         if handleListNavigationShortcut(event) { return true }
         return false
     }
@@ -426,6 +432,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.onCopy = { [weak self] in self?.copySelectedEntries() }
         window.onCut = { [weak self] in self?.cutSelectedEntries() }
         window.onPaste = { [weak self] in self?.pasteAfterSelectedEntry() }
+        window.onPushToOtherMachines = { [weak self] in self?.pushSelectedToOtherMachines() }
         window.onImport = { [weak self] in self?.requestImport() }
         window.onExport = { [weak self] in self?.requestExport() }
         window.onCleanTracking = { [weak self] in self?.cleanSelectedEntriesForTracking() }
@@ -911,6 +918,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             addMenuItem("Entry Properties", action: #selector(menuEditSelected), to: menu, shortcut: "F2")
             addMenuItem("View Selected Text", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
             addMenuItem("Set As Quick Paste Target...", action: #selector(menuSetQuickCopyTarget), to: menu)
+            addMenuItem("Push To Other Machines", action: #selector(menuPushToOtherMachines), to: menu, shortcut: "Command+P")
             addQuickPasteTargetItems(to: menu)
         } else {
             addMenuItem("View File Event Details", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
@@ -1116,6 +1124,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuEditSelected() { editSelectedEntry() }
     @objc private func menuViewSelected() { viewSelectedItem() }
     @objc private func menuSetQuickCopyTarget() { setQuickCopyTarget() }
+    @objc private func menuPushToOtherMachines() { pushSelectedToOtherMachines() }
     @objc private func menuQuickPasteTargetSelected(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         focusEntry(id: id)
@@ -1532,6 +1541,20 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         guard !entries.isEmpty else { return }
         preferredRowAfterReload = tableView.selectedRowIndexes.min()
         historyDelegate?.historyWindow(self, didCut: entries)
+    }
+
+    private func pushSelectedToOtherMachines() {
+        guard mode == .text else {
+            NSSound.beep()
+            return
+        }
+        let entries = selectedEntries()
+        guard !entries.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        preferredRowAfterReload = tableView.selectedRowIndexes.min()
+        historyDelegate?.historyWindow(self, didPushToOtherMachines: entries)
     }
 
     private func groupSelectedEntries() {

@@ -38,6 +38,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Optional history password encryption. By default the unlock password is session-only; users can explicitly choose to remember it on a computer with Windows user protection.
 - The app watches the database file inside the configured data folder and reloads when another machine or process replaces it.
 - Optional setting to put newly created text entries received from another machine onto this machine's clipboard.
+- Push an existing selected text entry to other synced machines as a fresh remote event.
 - Tray and app menus show the configured global hotkeys.
 - Help menu links to the GitHub project, release history, update checker, contact page, and donate page.
 - Optional per-user Windows startup entry.
@@ -63,6 +64,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Restore pinned file event: `Ctrl+1` to `Ctrl+0` on the File history tab.
 - Copy paths from pinned file event: `Ctrl+Shift+1` to `Ctrl+Shift+0` on the File history tab.
 - Copy without closing history: `Ctrl+C`
+- Push selected text entry to other synced machines: `Ctrl+P`
 - Search: `Ctrl+F`, then `F3` or `Shift+F3`
 - Open Entry Properties: `F2`
 
@@ -86,13 +88,13 @@ If the shared database file is missing but its folder is available, Clipman crea
 
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
 
-Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman first baselines the current newest remote entry, so turning the option on does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry.
+Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman first baselines the current newest remote entry, so turning the option on does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. To intentionally send an existing selected entry to other machines, use Push to other machines from the entry menu, or press `Ctrl+P` on Windows and `Command+P` on Mac. This creates a fresh shared-history event from the selected text so other opted-in machines can receive it as the latest remote text. When duplicate removal is enabled, Clipman refreshes the selected entry instead of leaving an extra duplicate behind.
 
 Quick Paste is machine-specific. Use Entry Properties or the entry menu to assign a global Quick Paste hotkey to a text entry, then press that hotkey from anywhere without showing the history window. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture. Each target has its own mode: paste and restore the previous clipboard, paste and keep the target on the clipboard, or copy to clipboard only. Several entries can each have their own Quick Paste hotkey and mode on the same machine.
 
 Use the Quick Paste menu on Windows, or Quick Paste Targets from the Mac `Option+M` Clipman menu, to review every entry that currently has a Quick Paste hotkey. Choosing a target moves focus to that entry so the hotkey or mode can be edited or removed with Entry Properties. Entries with Quick Paste targets show the assigned hotkey and mode in the row text.
 
-Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, which is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
+Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, and Mac stores it in that user's Keychain for the selected database path. Mac Preferences reports whether database encryption is on and whether the password is saved in Keychain; the password field stays blank for security even when a remembered password exists. Remembering a password is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
 
 When a history password is saved, `.clipdb` imports and exports use the current history password. JSON and text exports are readable backup formats, so use `.clipdb` for private encrypted backups.
 
@@ -109,6 +111,13 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.6.5
+
+- Improved ignored-application matching so related helper windows and helper processes can be ignored when they use the same app name or bundle/process prefix.
+- Fixed Mac Preferences so standard edit shortcuts such as Command+V work in settings text fields.
+- Clarified Mac Preferences password status so users can tell whether the selected history database is encrypted and whether the password is saved in Keychain.
+- Added Push to other machines for selected text entries. This lets an existing history entry be sent as a fresh shared event so other opted-in machines can receive it on their clipboard.
 
 ### 1.6.4
 

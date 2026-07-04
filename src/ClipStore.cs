@@ -225,6 +225,50 @@ namespace Clipman
             }
         }
 
+        public int PushEntriesToOtherMachines(IEnumerable<string> ids, bool keepDuplicateEntries)
+        {
+            var idSet = new HashSet<string>((ids ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrWhiteSpace(id)));
+            if (idSet.Count == 0) return 0;
+
+            lock (sync)
+            {
+                var selected = database.Entries
+                    .Where(e => e != null && idSet.Contains(e.Id) && !string.IsNullOrEmpty(e.Text))
+                    .ToList();
+                if (selected.Count == 0) return 0;
+
+                var now = TimeUtil.NowUnixMs();
+                foreach (var entry in selected)
+                {
+                    var stamp = now++;
+                    if (!keepDuplicateEntries)
+                    {
+                        entry.SourceMachine = CurrentMachineName();
+                        entry.CreatedUnixMs = stamp;
+                        entry.LastUsedUnixMs = stamp;
+                        continue;
+                    }
+
+                    database.Entries.Add(new ClipEntry
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Text = entry.Text ?? string.Empty,
+                        Name = entry.Name ?? string.Empty,
+                        Group = entry.Group ?? string.Empty,
+                        SourceMachine = CurrentMachineName(),
+                        CreatedUnixMs = stamp,
+                        LastUsedUnixMs = stamp,
+                        Pinned = false,
+                        ManualOrder = NextManualOrderLocked()
+                    });
+                }
+
+                SaveLocked();
+                OnChanged();
+                return selected.Count;
+            }
+        }
+
         public void MarkUsed(string id)
         {
             lock (sync)

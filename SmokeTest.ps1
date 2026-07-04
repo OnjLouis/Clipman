@@ -2,6 +2,7 @@ param(
     [string]$LivePath = '',
     [switch]$SkipBuild,
     [switch]$RunPostPublishUpdateSmoke,
+    [switch]$RequireMacReleaseAsset,
     [string]$Version = '',
     [int[]]$ReviewedOpenIssue = @(),
     [switch]$SkipGitHubActivityCheck
@@ -203,6 +204,129 @@ function Read-AppVersion {
         Fail 'Could not read Clipman version from portable executable.'
     }
     return $version.Trim()
+}
+
+function Read-AppFileVersion {
+    $exe = Join-Path $portable 'clipman.exe'
+    Assert-Exists $exe 'Portable executable for file version read'
+    $version = (Get-Item -LiteralPath $exe).VersionInfo.FileVersion
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        Fail 'Could not read Clipman file version from portable executable.'
+    }
+    return $version.Trim()
+}
+
+function Get-ZipEntry($zip, [string]$entryName) {
+    $normalized = $entryName -replace '\\', '/'
+    return $zip.Entries | Where-Object {
+        ($_.FullName -replace '\\', '/') -eq $normalized
+    } | Select-Object -First 1
+}
+
+function Assert-ZipEntry($zip, [string]$entryName, [string]$description) {
+    $entry = Get-ZipEntry $zip $entryName
+    if ($null -eq $entry) {
+        Fail "$description is missing from Mac release ZIP: $entryName"
+    }
+    return $entry
+}
+
+function Read-ZipEntryText($zip, [string]$entryName, [string]$description) {
+    $entry = Assert-ZipEntry $zip $entryName $description
+    $stream = $entry.Open()
+    try {
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+        try {
+            return $reader.ReadToEnd()
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Assert-ZipTextMatches($zip, [string]$entryName, [string]$pattern, [string]$description) {
+    $text = Read-ZipEntryText $zip $entryName $description
+    if ($text -notmatch $pattern) {
+        Fail "$description does not match expected content in Mac release ZIP."
+    }
+}
+
+function Get-LatestInputFile([string[]]$paths) {
+    $files = @()
+    foreach ($path in $paths) {
+        if (!(Test-Path -LiteralPath $path)) {
+            continue
+        }
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer) {
+            $files += @(Get-ChildItem -LiteralPath $path -Recurse -File -Force | Where-Object {
+                $_.FullName -notmatch '\\(\.build|\.swiftpm|build|dist)\\'
+            })
+        } else {
+            $files += $item
+        }
+    }
+
+    return $files | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+}
+
+function Assert-MacReleaseAsset([string]$expectedVersion) {
+    if (!$RequireMacReleaseAsset) {
+        return
+    }
+
+    Write-Host 'Checking Mac release asset parity.'
+    $expectedBundleVersion = Read-AppFileVersion
+    $macZip = Join-Path $repoRoot "ClipmanMac\dist\ClipmanMac-$expectedVersion.zip"
+    Assert-Exists $macZip 'Versioned Mac release ZIP'
+
+    $zipItem = Get-Item -LiteralPath $macZip
+    $latestInput = Get-LatestInputFile @(
+        (Join-Path $repoRoot 'ClipmanMac\Package.swift'),
+        (Join-Path $repoRoot 'ClipmanMac\Sources'),
+        (Join-Path $repoRoot 'ClipmanMac\Scripts'),
+        (Join-Path $repoRoot 'Manual.html'),
+        (Join-Path $repoRoot 'LICENSE.txt'),
+        (Join-Path $repoRoot 'src\AssemblyInfo.cs'),
+        (Join-Path $repoRoot 'Assets\sounds'),
+        (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\Resources\sounds')
+    )
+    if ($null -ne $latestInput -and $latestInput.LastWriteTimeUtc -gt $zipItem.LastWriteTimeUtc.AddSeconds(2)) {
+        Fail "Mac release ZIP is stale. Newer input: $($latestInput.FullName) at $($latestInput.LastWriteTimeUtc.ToString('u')); ZIP: $macZip at $($zipItem.LastWriteTimeUtc.ToString('u'))."
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($macZip)
+    try {
+        Assert-ZipEntry $zip 'Clipman.app/Contents/Info.plist' 'Mac app Info.plist' | Out-Null
+        Assert-ZipEntry $zip 'Clipman.app/Contents/Resources/Manual.html' 'Bundled Mac manual' | Out-Null
+        Assert-ZipEntry $zip 'Clipman.app/Contents/Resources/LICENSE.txt' 'Bundled Mac license' | Out-Null
+        foreach ($sound in @('copy.wav', 'off.wav', 'on.wav', 'remote.wav', 'skip.wav')) {
+            Assert-ZipEntry $zip "Clipman.app/Contents/Resources/sounds/$sound" "Bundled Mac sound $sound" | Out-Null
+        }
+
+        Assert-ZipTextMatches $zip 'Clipman.app/Contents/Info.plist' "<key>CFBundleShortVersionString</key>\s*<string>$([regex]::Escape($expectedVersion))</string>" 'Mac short version'
+        Assert-ZipTextMatches $zip 'Clipman.app/Contents/Info.plist' "<key>CFBundleVersion</key>\s*<string>$([regex]::Escape($expectedBundleVersion))</string>" 'Mac bundle version'
+
+        $rootManual = Get-Content -LiteralPath (Join-Path $repoRoot 'Manual.html') -Raw
+        $zipManual = Read-ZipEntryText $zip 'Clipman.app/Contents/Resources/Manual.html' 'Bundled Mac manual'
+        if ($zipManual -ne $rootManual) {
+            Fail 'Bundled Mac manual does not match root Manual.html.'
+        }
+
+        $rootLicense = Get-Content -LiteralPath (Join-Path $repoRoot 'LICENSE.txt') -Raw
+        $zipLicense = Read-ZipEntryText $zip 'Clipman.app/Contents/Resources/LICENSE.txt' 'Bundled Mac license'
+        if ($zipLicense -ne $rootLicense) {
+            Fail 'Bundled Mac license does not match root LICENSE.txt.'
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
 }
 
 function New-PortableZip([string]$zipPath) {
@@ -666,6 +790,10 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Multiple running Clipman instances can use the same history database' 'Manual shared history explanation'
     Assert-TextMatches $manual 'During an online or automatic update' 'Manual seamless update explanation'
     Assert-TextMatches $manual 'Storage and Password' 'Manual storage/password tab documentation'
+    Assert-TextMatches $manual '<h3>1\.6\.5</h3>' 'Manual 1.6.5 changelog'
+    Assert-TextMatches $manual 'helper windows and helper processes can be ignored' 'Manual 1.6.5 ignored helper changelog'
+    Assert-TextMatches $manual 'standard edit shortcuts such as <code>Command\+V</code> work in settings text fields' 'Manual 1.6.5 Mac Preferences paste changelog'
+    Assert-TextMatches $manual 'whether the selected history database is encrypted and whether the password is saved in Keychain' 'Manual 1.6.5 Mac password status changelog'
     Assert-TextMatches $manual 'Ctrl\+1</code> to <code>Ctrl\+5' 'Manual preferences tab shortcut documentation'
     Assert-TextMatches $manual 'File history preferences' 'Manual File history preferences documentation'
     Assert-TextMatches $manual 'diagnostics event limit' 'Manual diagnostics event limit documentation'
@@ -737,6 +865,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/3">issue #3</a>' 'Manual issue #3 closure'
     Assert-TextMatches $manual '<h3>1\.1\.1</h3>' 'Manual 1.1.1 changelog'
     Assert-TextMatches $manual 'deliberately ignores that generated password copy' 'Manual generated password documentation'
+    Assert-TextMatches $manual 'same name or bundle/process prefix' 'Manual ignored helper matching documentation'
+    Assert-TextMatches $manual 'Preferences reports whether database encryption is on and whether the password is saved in Keychain' 'Manual Mac encryption status documentation'
     Assert-TextMatches $manual '<h2 id="application-files">Application Files</h2>' 'Manual application files section'
     Assert-TextMatches $manual '<code>sqlite3\.dll</code>' 'Manual SQLite runtime file documentation'
     Assert-TextMatches $manual '<code>LICENSE\.txt</code>' 'Manual license file documentation'
@@ -752,6 +882,10 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Clipman is a small portable accessible clipboard management tool for Windows and macOS' 'README cross-platform project summary'
     Assert-TextMatches $readme 'Add, remove, move, rename, group, pin, or edit text entries on one machine' 'README opening shared database explanation'
     Assert-TextMatches $readme '### 1\.6\.0' 'README 1.6.0 changelog'
+    Assert-TextMatches $readme '### 1\.6\.5' 'README 1.6.5 changelog'
+    Assert-TextMatches $readme 'helper windows and helper processes can be ignored' 'README 1.6.5 ignored helper changelog'
+    Assert-TextMatches $readme 'standard edit shortcuts such as Command\+V work in settings text fields' 'README 1.6.5 Mac Preferences paste changelog'
+    Assert-TextMatches $readme 'whether the selected history database is encrypted and whether the password is saved in Keychain' 'README 1.6.5 Mac password status changelog'
     Assert-TextMatches $readme 'Updated the Windows and Mac builds together' 'README 1.6.0 release summary'
     Assert-TextMatches $readme 'Fixed Windows Alt\+number group-filter shortcuts' 'README 1.6 Alt+number menu-focus changelog'
     Assert-TextMatches $readme '### 1\.5\.12' 'README 1.5.12 changelog'
@@ -798,6 +932,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'start a copy from a different folder' 'README different folder takeover behavior'
     Assert-TextMatches $readme 'Multiple machines can write to the same history database' 'README shared history explanation'
     Assert-TextMatches $readme 'Optional history password encryption' 'README encryption documentation'
+    Assert-TextMatches $readme 'Mac Preferences reports whether database encryption is on and whether the password is saved in Keychain' 'README Mac encryption status documentation'
     Assert-TextMatches $readme 'Desktop-file-history\.clipdb' 'README persistent file-history documentation'
     Assert-TextMatches $readme 'remove unavailable unpinned events' 'README unavailable event cleanup documentation'
     Assert-TextMatches $readme 'deliberately ignores that generated password copy' 'README generated password documentation'
@@ -817,6 +952,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\Program.Updater.cs') 'NewBackupZip|CreateFromDirectory' 'Updater app-root backup creation'
     Assert-TextMatches (Join-Path $repoRoot 'src\Program.cs') 'InstanceStateStore\.IsSameRunningFolder' 'Cross-folder instance takeover code'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ClipDatabaseFile\.IsEncryptedFile\(settings\.DatabasePath\)' 'Startup encrypted database detection'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'IgnoredProcessMatches' 'Windows ignored process helper-prefix matching'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'processName\.StartsWith\(ignoredProcessName \+ "-"' 'Windows ignored process prefix separator matching'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DefaultFileHistoryDatabasePath\(\)' 'Machine-specific file history database path'
     Assert-TextMatches (Join-Path $repoRoot 'src\FileClipboardEventStore.cs') 'FileClipboardDatabase' 'Persistent file history store'
     Assert-TextMatches (Join-Path $repoRoot 'src\FileClipboardEventStore.cs') 'TogglePinned' 'File history pinning store'
@@ -954,6 +1091,11 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'quickPasteLabel\(for: entry\)' 'Mac text rows expose Quick Paste hotkeys'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipmanSettings.swift') 'soundsEnabled' 'Mac settings include Play sounds parity'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Play sounds' 'Mac Preferences exposes Play sounds'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') '#selector\(NSText\.paste' 'Mac Preferences supports Command+V in text fields'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Database encryption is on\. The password is saved in Keychain' 'Mac Preferences explains remembered encrypted password status'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Database encryption is off' 'Mac Preferences explains unencrypted status'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipboardMonitor.swift') 'ignoredApplicationMatches' 'Mac ignored app helper-prefix matching'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipboardMonitor.swift') 'candidate\.hasPrefix' 'Mac ignored app bundle prefix matching'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HotkeyCaptureField.swift') 'clearHotkeyIfNeeded' 'Mac hotkey fields clear with Delete or Backspace'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HotkeyCaptureField.swift') 'Delete or Backspace to clear this hotkey' 'Mac hotkey field exposes clear hint'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'requestedQuickCopy && capturedHotkey == nil' 'Mac cleared Quick Paste hotkey removes the assignment instead of trapping validation'
@@ -990,6 +1132,17 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'lastAutoCopiedRemoteEntryStamp = entry\.CreatedUnixMs' 'Remote auto-copy baseline uses created time'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'var stamp = entry\.CreatedUnixMs' 'Remote auto-copy trigger uses created time'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\ClipStore.cs') 'Math\.Max\(e\.LastUsedUnixMs, e\.CreatedUnixMs\)' 'Remote auto-copy does not use last-used time'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'PushEntriesToOtherMachines' 'Windows store exposes explicit remote push'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'if \(!keepDuplicateEntries\)' 'Windows remote push respects duplicate-removal mode'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'settings\.DuplicateMode, "KeepBoth"' 'Windows remote push keeps clones only when duplicate mode is KeepBoth'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Push to other &machines\\tCtrl\+P' 'Windows menu exposes remote push shortcut'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'e\.Control && e\.KeyCode == Keys\.P' 'Windows Ctrl+P pushes selected text entry'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipStore.swift') 'pushEntriesToOtherMachines' 'Mac store exposes explicit remote push'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipStore.swift') 'CreatedUnixMs = now' 'Mac remote push re-stamps selected entry for de-duped history'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Push To Other Machines' 'Mac Clipman menu exposes remote push'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'kVK_ANSI_P\), modifiers == \[\.command\]' 'Mac Command+P pushes selected text entry'
+    Assert-TextMatches $manual 'Push selected text entry to other synced machines' 'Manual documents remote push shortcut'
+    Assert-TextMatches $readme 'Push an existing selected text entry to other synced machines' 'README documents remote push feature'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'data\.SetText\(string\.Join\(Environment\.NewLine, existing\), TextDataFormat\.UnicodeText\)' 'File history restore includes text paths'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'SaveListPositionIndex\(preferredIndex\)' 'Delete/cut updates saved position before store refresh'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'if \(index >= list\.Items\.Count\)\s*\{\s*index = list\.Items\.Count - 1;\s*\}' 'Reload clamps preferred index after deleting the last row'
@@ -1032,6 +1185,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'sqlite3\.dll' 'GitHub release rules SQLite runtime packaging'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'LICENSE\.txt' 'GitHub release rules license packaging'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'ClipmanMac/dist/ClipmanMac-<version>\.zip' 'GitHub release rules Mac release ZIP packaging'
+    Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') '-RequireMacReleaseAsset' 'GitHub release rules require Mac release asset smoke gate'
     Assert-TextMatches (Join-Path $repoRoot 'GITHUB-RELEASE-RULES.md') 'CFBundleShortVersionString.*AssemblyInformationalVersion' 'GitHub release rules Mac version parity'
     Assert-TextMatches (Join-Path $repoRoot 'CLIPMAN_AGENT_SYNC.md') 'shared-version\.sh' 'Agent sync Mac version workflow'
     Assert-TextMatches (Join-Path $repoRoot 'CLIPMAN_AGENT_SYNC.md') 'Windows remains the source of truth' 'Agent sync Windows release source of truth'
@@ -1472,6 +1626,7 @@ if ($LASTEXITCODE -ne 0) {
 Assert-GitHubActivityChecked $Version
 Write-CommunityMentionReminder
 Assert-HandoverParity $Version
+Assert-MacReleaseAsset $Version
 Assert-CodeBehavior
 Assert-CleanPortable $portable
 Invoke-LocalUpdaterSmoke $Version

@@ -280,10 +280,18 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     @objc private func showPreferences(_ sender: Any?) {
         if preferencesWindow == nil {
-            preferencesWindow = PreferencesWindowController(settings: settings)
+            preferencesWindow = PreferencesWindowController(
+                settings: settings,
+                historyIsEncrypted: encryptedHistoryExists(for: settings),
+                rememberedPasswordExists: keychain.hasPassword(for: settings.databasePath)
+            )
             preferencesWindow?.preferencesDelegate = self
         } else {
-            preferencesWindow?.update(settings: settings)
+            preferencesWindow?.update(
+                settings: settings,
+                historyIsEncrypted: encryptedHistoryExists(for: settings),
+                rememberedPasswordExists: keychain.hasPassword(for: settings.databasePath)
+            )
         }
         preferencesWindow?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -411,6 +419,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         for entry in entries where !entry.Pinned {
             store.delete(entry.Id)
         }
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didPushToOtherMachines entries: [ClipEntry]) {
+        store.pushEntriesToOtherMachines(ids: entries.map(\.Id))
+        sounds.play(.copy)
     }
 
     func historyWindow(_ controller: HistoryWindowController, didMove entries: [ClipEntry], direction: Int) {

@@ -107,6 +107,28 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
+    func pushEntriesToOtherMachines(ids: [String]) {
+        let idSet = Set(ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        guard !idSet.isEmpty else { return }
+        queue.async {
+            guard self.mergeLatestBeforeWriteLocked() else { return }
+            let selected = self.database.Entries.filter { idSet.contains($0.Id) && !$0.Text.isEmpty }
+            guard !selected.isEmpty else { return }
+
+            var now = TimeUtil.nowUnixMs()
+            for entry in selected {
+                guard let index = self.database.Entries.firstIndex(where: { $0.Id == entry.Id }) else { continue }
+                self.database.Entries[index].SourceMachine = self.machineName
+                self.database.Entries[index].CreatedUnixMs = now
+                self.database.Entries[index].LastUsedUnixMs = now
+                now += 1
+            }
+
+            self.saveLocked()
+            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+        }
+    }
+
     func markUsed(_ id: String) {
         queue.async {
             guard self.mergeLatestBeforeWriteLocked() else { return }

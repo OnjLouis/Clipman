@@ -856,7 +856,17 @@ namespace Clipman
             if (IsClipmanProcess(processName)) return true;
             if (settings.IgnoredProcesses == null || settings.IgnoredProcesses.Count == 0) return false;
             return settings.IgnoredProcesses.Any(p =>
-                string.Equals(NormalizeProcessName(p), processName, StringComparison.OrdinalIgnoreCase));
+                IgnoredProcessMatches(NormalizeProcessName(p), processName));
+        }
+
+        private static bool IgnoredProcessMatches(string ignoredProcessName, string processName)
+        {
+            if (string.IsNullOrWhiteSpace(ignoredProcessName) || string.IsNullOrWhiteSpace(processName)) return false;
+            if (string.Equals(ignoredProcessName, processName, StringComparison.OrdinalIgnoreCase)) return true;
+            return processName.StartsWith(ignoredProcessName + ".", StringComparison.OrdinalIgnoreCase) ||
+                processName.StartsWith(ignoredProcessName + "-", StringComparison.OrdinalIgnoreCase) ||
+                processName.StartsWith(ignoredProcessName + "_", StringComparison.OrdinalIgnoreCase) ||
+                processName.StartsWith(ignoredProcessName + " ", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsClipmanProcess(string processName)

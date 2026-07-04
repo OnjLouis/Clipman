@@ -47,6 +47,14 @@ Scripts/package-release.sh
 
 That produces `ClipmanMac/dist/ClipmanMac-<version>.zip`, runs the macOS codec/sync/file-history smoke tests, creates a drag-to-Applications `Clipman.app`, and ad-hoc signs the app. The generated bundle reads the Windows release version from `src/AssemblyInfo.cs`, so `CFBundleShortVersionString` must match `AssemblyInformationalVersion` and `CFBundleVersion` must match `AssemblyFileVersion`. The generated `dist` folder is ignored source noise and should not be committed.
 
+Before publishing a cross-platform release, run the Windows smoke test with the Mac release asset gate enabled:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "& '.\SmokeTest.ps1' -Version '<version>' -RequireMacReleaseAsset"
+```
+
+For releases with open issues that were reviewed but intentionally left open, include the usual `-ReviewedOpenIssue` values as well. The Mac asset gate must fail if `ClipmanMac/dist/ClipmanMac-<version>.zip` is missing, stale compared with Mac/package inputs, has mismatched bundle versions, lacks bundled sounds, or contains a bundled manual/license that does not match the repo root.
+
 Future GitHub releases should attach both:
 
 - the Windows portable ZIP from the local Program Builds archive

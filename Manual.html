@@ -120,6 +120,7 @@
       <tr><td>Copy selected text entry without closing history</td><td><code>Ctrl+C</code></td><td><code>Command+C</code></td></tr>
       <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
       <tr><td>Paste clipboard text into history</td><td><code>Ctrl+V</code></td><td><code>Command+V</code></td></tr>
+      <tr><td>Push selected text entry to other synced machines</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
       <tr><td>Pin or unpin selected entry</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
       <tr><td>Open Entry Properties</td><td><code>F2</code></td><td><code>F2</code></td></tr>
       <tr><td>View selected text in a read-only window</td><td><code>F4</code></td><td><code>F4</code></td></tr>
@@ -242,7 +243,7 @@
       </tr>
       <tr>
         <td>Edit</td>
-        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history. When a selected pinned text entry or file event is in the first ten pinned items, the menu also shows the relevant pinned shortcut.</td>
+        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, push to other machines, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history. When a selected pinned text entry or file event is in the first ten pinned items, the menu also shows the relevant pinned shortcut.</td>
       </tr>
       <tr>
         <td>Actions</td>
@@ -266,7 +267,7 @@
   <h2 id="ignored-applications">Ignored Applications</h2>
   <p>Preferences can list applications that Clipman should ignore, one per line. This is useful for password managers, banking tools, private notes, or any app where clipboard history should not be recorded.</p>
 
-  <p>On Windows, enter process names with or without <code>.exe</code>, or use <strong>Add running app</strong> to choose from currently running processes. On Mac, enter the app name, bundle identifier, or executable name, such as <code>Safari</code>, <code>com.apple.TextEdit</code>, or <code>KeePassXC</code>. Ignored applications are machine-specific settings.</p>
+  <p>On Windows, enter process names with or without <code>.exe</code>, or use <strong>Add running app</strong> to choose from currently running processes. On Mac, enter the app name, bundle identifier, or executable name, such as <code>Safari</code>, <code>com.apple.TextEdit</code>, or <code>KeePassXC</code>. Ignored applications are machine-specific settings. Clipman also treats related helper names as ignored when they use the same name or bundle/process prefix, which helps with password-manager quick-access windows and similar helper tools.</p>
 
   <h2 id="database-and-sync">Database and Sync</h2>
   <p>On Windows, Clipman defaults to a portable <code>Settings</code> folder beside <code>clipman.exe</code>. On Mac, Clipman stores a small pointer under Application Support and keeps the active machine settings in the selected Clipman data folder. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code>, <code>Settings\Laptop-settings.json</code>, or <code>MacBook-settings.json</code>. This lets multiple computers share one data folder without fighting over hotkeys, monitoring state, startup choices, or window position. The shared text history database is <code>clipman-history.clipdb</code>.</p>
@@ -277,13 +278,13 @@
 
   <p>Multiple running Clipman instances can use the same history database. When one machine writes a new entry, the database is saved atomically and the other machines reload it when the changed file arrives. Each text entry stores the machine name that added or most recently re-added it, and the history list includes a Machine column and machine sort mode so shared setups can tell which computer supplied an entry.</p>
 
-  <p>Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. This preference is machine-specific and does not change the shared database format.</p>
+  <p>Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. To intentionally send an existing selected entry to other machines, use <strong>Push to other machines</strong> from the entry menu, or press <code>Ctrl+P</code> on Windows and <code>Command+P</code> on Mac. This creates a fresh shared-history event from the selected text so other opted-in machines can receive it as the latest remote text. When duplicate removal is enabled, Clipman refreshes the selected entry instead of leaving an extra duplicate behind. This preference is machine-specific and does not change the shared database format.</p>
 
   <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
 
   <p><strong>History password:</strong> Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed <code>.clipdb</code> storage without password encryption. If you enter and confirm a history password, the database is encrypted with AES and checked with a message authentication code before loading. The password is not stored inside the shared <code>.clipdb</code> file.</p>
 
-  <p>New settings do not remember the history password by default. In that mode, Clipman prompts for the password when it starts, keeps it only while Clipman is running, and clears any saved platform password. If you check Remember history password on this computer, Windows stores the password using Windows user protection for this account and machine, and Mac stores it in that user's Keychain for the selected database path. Copying a settings file to another computer does not copy a working key; that computer must be given the same history password through its own Preferences window. Remembered passwords are still recoverable by software already running as the same signed-in user, so leave Remember unchecked if you prefer startup prompts over same-user recoverability.</p>
+  <p>New settings do not remember the history password by default. In that mode, Clipman prompts for the password when it starts, keeps it only while Clipman is running, and clears any saved platform password. If you check Remember history password on this computer, Windows stores the password using Windows user protection for this account and machine, and Mac stores it in that user's Keychain for the selected database path. On Mac, Preferences reports whether database encryption is on and whether the password is saved in Keychain; the password field stays blank for security even when a remembered password exists. Copying a settings file to another computer does not copy a working key; that computer must be given the same history password through its own Preferences window. Remembered passwords are still recoverable by software already running as the same signed-in user, so leave Remember unchecked if you prefer startup prompts over same-user recoverability.</p>
 
   <p>The Generate password button, where available, creates a random history password, fills both password fields, and copies it to the clipboard. Clipman deliberately ignores that generated password copy, so it is not added to clipboard history. You are responsible for saving that password somewhere safe and entering it on each computer that shares the encrypted history. If the password is lost, Clipman cannot recover the encrypted history.</p>
 
@@ -438,6 +439,14 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.6.5</h3>
+  <ul>
+    <li>Improved ignored-application matching so related helper windows and helper processes can be ignored when they use the same app name or bundle/process prefix.</li>
+    <li>Fixed Mac Preferences so standard edit shortcuts such as <code>Command+V</code> work in settings text fields.</li>
+    <li>Clarified Mac Preferences password status so users can tell whether the selected history database is encrypted and whether the password is saved in Keychain.</li>
+    <li>Added Push to other machines for selected text entries. This lets an existing history entry be sent as a fresh shared event so other opted-in machines can receive it on their clipboard.</li>
+  </ul>
+
   <h3>1.6.4</h3>
   <ul>
     <li>Improved Windows updates so the factory <code>sounds</code> folder is updated file-by-file instead of being deleted and replaced as one folder. This should make updates less fragile in cloud-synced folders where OneDrive or another sync client may briefly lock the folder.</li>

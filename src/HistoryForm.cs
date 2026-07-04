@@ -693,6 +693,7 @@ namespace Clipman
             edit.DropDownItems.Add(groupEntryMenuItem);
             edit.DropDownItems.Add("Entry &properties...\tF2", null, (s, e) => ShowEntryProperties());
             edit.DropDownItems.Add("Set as &quick-paste target...", null, (s, e) => ShowEntryProperties(true));
+            edit.DropDownItems.Add("Push to other &machines\tCtrl+P", null, (s, e) => PushSelectedToOtherMachines());
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
             edit.DropDownItems.Add("Pin or &unpin\tShift+Enter", null, (s, e) => TogglePinned());
             edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelected());
@@ -728,6 +729,7 @@ namespace Clipman
             menu.Items.Add("&Group entry...\tCtrl+G", null, (sender, args) => GroupSelectedEntries());
             menu.Items.Add("Entry &properties...\tF2", null, (sender, args) => ShowEntryProperties());
             menu.Items.Add("Set as &quick-paste target...", null, (sender, args) => ShowEntryProperties(true));
+            menu.Items.Add("Push to other &machines\tCtrl+P", null, (sender, args) => PushSelectedToOtherMachines());
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
             menu.Items.Add(PinMenuText(), null, (sender, args) => TogglePinned());
             var pinnedShortcutPosition = SelectedPinnedEntryShortcutPosition();
@@ -908,6 +910,11 @@ namespace Clipman
             {
                 e.Handled = true;
                 PasteAfterSelected();
+            }
+            else if (e.Control && e.KeyCode == Keys.P)
+            {
+                e.Handled = true;
+                PushSelectedToOtherMachines();
             }
             else if (e.KeyCode == Keys.Back)
             {
@@ -2115,6 +2122,31 @@ namespace Clipman
             {
                 Hide();
             }
+        }
+
+        private void PushSelectedToOtherMachines()
+        {
+            var selected = SelectedEntries();
+            if (selected.Count == 0)
+            {
+                statusText.Text = "No clipboard entry selected to push.";
+                return;
+            }
+
+            var firstSelectedId = selected[0].Id;
+            var keepDuplicateEntries = string.Equals(settings.DuplicateMode, "KeepBoth", StringComparison.OrdinalIgnoreCase);
+            var pushed = store.PushEntriesToOtherMachines(selected.Select(e => e.Id), keepDuplicateEntries);
+            if (pushed == 0)
+            {
+                statusText.Text = "No text entries were pushed.";
+                return;
+            }
+
+            Reload(firstSelectedId, -1);
+            FocusHistoryList();
+            statusText.Text = pushed == 1
+                ? "Pushed selected entry to other machines."
+                : "Pushed " + pushed + " selected entries to other machines.";
         }
 
         private void CopyPinnedByPosition(int position)

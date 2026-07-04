@@ -161,8 +161,20 @@ final class ClipboardMonitor: @unchecked Sendable {
             .filter { !$0.isEmpty }
 
         return candidates.contains { candidate in
-            ignored.contains(candidate)
+            ignored.contains { ignoredItem in
+                ignoredApplicationMatches(ignoredItem: ignoredItem, candidate: candidate)
+            }
         }
+    }
+
+    private func ignoredApplicationMatches(ignoredItem: String, candidate: String) -> Bool {
+        guard !ignoredItem.isEmpty, !candidate.isEmpty else { return false }
+        if ignoredItem == candidate { return true }
+        if candidate.hasPrefix("\(ignoredItem).") { return true }
+        if candidate.hasPrefix("\(ignoredItem)-") { return true }
+        if candidate.hasPrefix("\(ignoredItem)_") { return true }
+        if candidate.hasPrefix("\(ignoredItem) ") { return true }
+        return false
     }
 
     private func normalizeIgnoredApplicationName(_ value: String) -> String {

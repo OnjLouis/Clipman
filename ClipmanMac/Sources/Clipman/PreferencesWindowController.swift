@@ -21,9 +21,27 @@ final class PreferencesWindow: NSWindow {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "w" {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "w" {
             close()
             return true
+        }
+        if modifiers.contains(.command),
+           !modifiers.contains(.option),
+           !modifiers.contains(.control),
+           let command = event.charactersIgnoringModifiers?.lowercased() {
+            switch command {
+            case "x":
+                return NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self)
+            case "c":
+                return NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self)
+            case "v":
+                return NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self)
+            case "a":
+                return NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self)
+            default:
+                break
+            }
         }
         return super.performKeyEquivalent(with: event)
     }
@@ -32,6 +50,8 @@ final class PreferencesWindow: NSWindow {
 final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldDelegate {
     weak var preferencesDelegate: PreferencesWindowControllerDelegate?
     private var settings: ClipmanSettings
+    private var historyIsEncrypted: Bool
+    private var rememberedPasswordExists: Bool
     private let databasePathField = NSTextField()
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds", target: nil, action: nil)
@@ -46,8 +66,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let ignoredApplicationsView = NSTextView()
     private let statusLabel = NSTextField(labelWithString: "")
 
-    init(settings: ClipmanSettings) {
+    init(settings: ClipmanSettings, historyIsEncrypted: Bool, rememberedPasswordExists: Bool) {
         self.settings = settings
+        self.historyIsEncrypted = historyIsEncrypted
+        self.rememberedPasswordExists = rememberedPasswordExists
         let window = PreferencesWindow(
             contentRect: NSRect(x: 140, y: 140, width: 760, height: 660),
             styleMask: [.titled, .closable, .resizable],
@@ -64,8 +86,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(settings: ClipmanSettings) {
+    func update(settings: ClipmanSettings, historyIsEncrypted: Bool, rememberedPasswordExists: Bool) {
         self.settings = settings
+        self.historyIsEncrypted = historyIsEncrypted
+        self.rememberedPasswordExists = rememberedPasswordExists
         loadFields()
     }
 
@@ -175,9 +199,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         toggleHotkeyField.descriptor = settings.toggleMonitoringHotkey
         passwordField.stringValue = ""
         ignoredApplicationsView.string = settings.ignoredApplications.joined(separator: "\n")
-        statusLabel.stringValue = settings.rememberDatabasePassword
-            ? "Leave password blank to keep the current Keychain password."
-            : "Leave password blank to keep the current session password. The password will not be stored."
+        statusLabel.stringValue = passwordStatusText()
     }
 
     @objc private func chooseSettingsFolder() {
@@ -223,6 +245,22 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
 
     func hotkeyCaptureFieldDidChange(_ field: HotkeyCaptureField) {
         statusLabel.stringValue = "Captured \(field.stringValue)."
+    }
+
+    private func passwordStatusText() -> String {
+        if historyIsEncrypted {
+            if settings.rememberDatabasePassword && rememberedPasswordExists {
+                return "Database encryption is on. The password is saved in Keychain, so the password field is blank for security. Leave it blank to keep the saved password."
+            }
+            if settings.rememberDatabasePassword {
+                return "Database encryption is on. Remember in Keychain is enabled, but no saved password was found yet. Enter the password to save it."
+            }
+            return "Database encryption is on. The password is not saved; Clipman will ask for it each app session. Leave the field blank to keep the current session password."
+        }
+        if settings.rememberDatabasePassword && rememberedPasswordExists {
+            return "Database encryption will be used when Clipman next writes history. The password is saved in Keychain and the field is blank for security."
+        }
+        return "Database encryption is off. Type and save a history password to encrypt future history writes, or leave it blank for no password."
     }
 
     private func normalizedDatabasePath(_ value: String) -> String {
