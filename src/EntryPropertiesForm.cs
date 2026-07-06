@@ -9,6 +9,7 @@ namespace Clipman
         private readonly TextBox nameBox;
         private readonly TextBox groupBox;
         private readonly CheckBox pinnedBox;
+        private readonly CheckBox templateBox;
         private readonly CheckBox quickCopyTargetBox;
         private readonly TextBox quickCopyHotkeyBox;
         private readonly RadioButton pasteRestoreMode;
@@ -21,6 +22,7 @@ namespace Clipman
         public string EntryGroup { get { return groupBox.Text; } }
         public string EntryText { get { return textBox.Text; } }
         public bool EntryPinned { get { return pinnedBox.Checked; } }
+        public bool EntryIsTemplate { get { return templateBox.Checked; } }
         public bool EntryIsQuickCopyTarget { get { return quickCopyTargetBox.Checked; } }
         public string EntryQuickCopyHotkey { get { return quickCopyHotkeyBox.Text.Trim(); } }
         public string EntryQuickPasteMode
@@ -42,7 +44,7 @@ namespace Clipman
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(700, 548);
+            ClientSize = new Size(700, 620);
             KeyPreview = true;
 
             var nameLabel = new Label { Text = "&Name:", Location = new Point(12, 14), AutoSize = true };
@@ -78,10 +80,21 @@ namespace Clipman
             };
             Controls.Add(pinnedBox);
 
+            templateBox = new CheckBox
+            {
+                Text = "&Template entry",
+                Location = new Point(220, 78),
+                Width = 160,
+                Checked = entry != null && entry.IsTemplate,
+                AccessibleName = "Template entry",
+                AccessibleDescription = "When checked, variables such as year full in double braces are resolved when this entry is copied or pasted. Stored text is not changed."
+            };
+            Controls.Add(templateBox);
+
             quickCopyTargetBox = new CheckBox
             {
-                Text = "Use as &quick-paste target",
-                Location = new Point(220, 78),
+                Text = "&Use as quick-paste target",
+                Location = new Point(390, 78),
                 Width = 260,
                 Checked = isQuickCopyTarget,
                 AccessibleName = "Use as quick-paste target",
@@ -89,7 +102,7 @@ namespace Clipman
             };
             Controls.Add(quickCopyTargetBox);
 
-            var quickCopyHotkeyLabel = new Label { Text = "&Quick Paste hotkey:", Location = new Point(12, 116), AutoSize = true };
+            var quickCopyHotkeyLabel = new Label { Text = "Quick Paste &hotkey:", Location = new Point(12, 116), AutoSize = true };
             Controls.Add(quickCopyHotkeyLabel);
             quickCopyHotkeyBox = new TextBox
             {
@@ -145,7 +158,7 @@ namespace Clipman
             {
                 Location = new Point(15, 262),
                 Width = 665,
-                Height = 150,
+                Height = 190,
                 Multiline = true,
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
@@ -155,11 +168,45 @@ namespace Clipman
             };
             Controls.Add(textBox);
 
-            var copy = new Button { Text = "&Copy text", Location = new Point(15, 474), Width = 95 };
+            var copy = new Button { Text = "Copy te&xt", Location = new Point(15, 546), Width = 95 };
             copy.Click += (s, e) => Clipboard.SetText(textBox.Text ?? string.Empty, TextDataFormat.UnicodeText);
             Controls.Add(copy);
 
-            var delete = new Button { Text = "&Delete", Location = new Point(120, 474), Width = 85 };
+            var preview = new Button
+            {
+                Text = "Preview t&emplate",
+                Location = new Point(120, 546),
+                Width = 125,
+                AccessibleName = "Preview template",
+                AccessibleDescription = "Shows the clipboard text after template variables are resolved."
+            };
+            preview.Click += (s, e) =>
+            {
+                using (var viewer = new TextViewerForm("Template Preview", TemplateResolver.Resolve(textBox.Text), "Template preview", "Resolved template preview.", true))
+                {
+                    viewer.ShowDialog(this);
+                }
+            };
+            Controls.Add(preview);
+
+            var variables = new Button
+            {
+                Text = "Template &variables",
+                Location = new Point(255, 546),
+                Width = 135,
+                AccessibleName = "Template variables",
+                AccessibleDescription = "Shows the variables that Clipman can resolve in template entries."
+            };
+            variables.Click += (s, e) =>
+            {
+                using (var viewer = new TextViewerForm("Template Variables", TemplateResolver.VariableReferenceText, "Template variables", "Available Clipman template variables.", true))
+                {
+                    viewer.ShowDialog(this);
+                }
+            };
+            Controls.Add(variables);
+
+            var delete = new Button { Text = "&Delete", Location = new Point(400, 546), Width = 85 };
             delete.Click += (s, e) =>
             {
                 deleteRequested = true;
@@ -168,10 +215,10 @@ namespace Clipman
             };
             Controls.Add(delete);
 
-            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(500, 474), Width = 85 };
+            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(500, 546), Width = 85 };
             Controls.Add(ok);
 
-            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 474), Width = 85 };
+            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 546), Width = 85 };
             Controls.Add(cancel);
 
             AcceptButton = ok;

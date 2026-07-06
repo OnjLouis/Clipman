@@ -637,6 +637,24 @@ function Assert-TextMatches([string]$path, [string]$pattern, [string]$descriptio
     }
 }
 
+function Assert-UniqueWindowsControlMnemonics([string]$path, [string]$description) {
+    Assert-Exists $path $description
+    $text = Get-Content -LiteralPath $path -Raw
+    $matches = [regex]::Matches($text, 'Text\s*=\s*"((?:[^"\\]|\\.)*)"')
+    $seen = @{}
+    foreach ($match in $matches) {
+        $label = $match.Groups[1].Value
+        $mnemonicMatches = [regex]::Matches($label, '&(?!&)([A-Za-z0-9])')
+        foreach ($mnemonicMatch in $mnemonicMatches) {
+            $key = $mnemonicMatch.Groups[1].Value.ToUpperInvariant()
+            if ($seen.ContainsKey($key)) {
+                Fail "$description has duplicate Alt+$key mnemonic: '$($seen[$key])' and '$label'"
+            }
+            $seen[$key] = $label
+        }
+    }
+}
+
 function Get-GitHubHeaders {
     $token = $env:GH_TOKEN
     if ([string]::IsNullOrWhiteSpace($token)) {
@@ -790,6 +808,12 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Multiple running Clipman instances can use the same history database' 'Manual shared history explanation'
     Assert-TextMatches $manual 'During an online or automatic update' 'Manual seamless update explanation'
     Assert-TextMatches $manual 'Storage and Password' 'Manual storage/password tab documentation'
+    Assert-TextMatches $manual '<h3>1\.7\.0</h3>' 'Manual 1.7.0 changelog'
+    Assert-TextMatches $manual 'Template entries' 'Manual template entries documentation'
+    Assert-TextMatches $manual '\{\{year_full\}\}' 'Manual template year variable documentation'
+    Assert-TextMatches $manual '\{\{os_version\}\}' 'Manual template OS version variable documentation'
+    Assert-TextMatches $manual 'stored text remains unchanged' 'Manual template storage behavior documentation'
+    Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/12">issue #12</a>' 'Manual issue #12 closure'
     Assert-TextMatches $manual '<h3>1\.6\.6</h3>' 'Manual 1.6.6 changelog'
     Assert-TextMatches $manual 'one-modifier hotkeys are now allowed for function keys and grave/backslash-style punctuation keys' 'Manual 1.6.6 safe single-modifier changelog'
     Assert-TextMatches $manual '<h3>1\.6\.5</h3>' 'Manual 1.6.5 changelog'
@@ -883,6 +907,11 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Project page: <https://github.com/OnjLouis/Clipman>' 'README project page link'
     Assert-TextMatches $readme 'Clipman is a small portable accessible clipboard management tool for Windows and macOS' 'README cross-platform project summary'
     Assert-TextMatches $readme 'Add, remove, move, rename, group, pin, or edit text entries on one machine' 'README opening shared database explanation'
+    Assert-TextMatches $readme '### 1\.7\.0' 'README 1.7.0 changelog'
+    Assert-TextMatches $readme 'Optional template entries' 'README template entries feature'
+    Assert-TextMatches $readme '\{\{username\}\}' 'README template username variable documentation'
+    Assert-TextMatches $readme 'Unknown variables are left alone' 'README template unknown-variable behavior'
+    Assert-TextMatches $readme 'Closes issue #12' 'README issue #12 closure'
     Assert-TextMatches $readme '### 1\.6\.6' 'README 1.6.6 changelog'
     Assert-TextMatches $readme 'one-modifier hotkeys are now allowed for function keys and grave/backslash-style punctuation keys' 'README 1.6.6 safe single-modifier changelog'
     Assert-TextMatches $readme '### 1\.6\.0' 'README 1.6.0 changelog'
@@ -1089,6 +1118,21 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'ReadOnly = false' 'Entry Properties Quick Paste hotkey field is not exposed as read-only'
     Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') '\(\(TextBox\)sender\)\.Clear\(\);' 'Entry Properties Quick Paste hotkey clears with Delete or Backspace'
     Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'quickCopyTargetBox\.Checked = false;' 'Clearing Entry Properties Quick Paste hotkey removes the assignment'
+    Assert-UniqueWindowsControlMnemonics (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Entry Properties dialog'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'public bool IsTemplate \{ get; set; \}' 'Windows shared entries store template flag'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'class TemplateResolver|static class TemplateResolver' 'Windows template resolver exists'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'month_name_full' 'Windows template resolver supports month_name_full alias'
+    Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Template entry' 'Windows Entry Properties exposes template entry checkbox'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') '\{\{year_full\}\} - four-digit year' 'Windows template variable reference is line-oriented'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ResolvedEntryText\(entry\)' 'Windows copy and Quick Paste resolve template entries at output time'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'store\.SetTemplate\(entry\.Id, dialog\.EntryIsTemplate\)' 'Windows Entry Properties saves template flag'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\ClipmanCore\Models.swift') 'public var IsTemplate: Bool' 'Mac shared entries store template flag'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'enum TemplateResolver' 'Mac template resolver exists'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'variableReferenceText' 'Mac template variable reference exists'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Preview template' 'Mac Entry Properties exposes template preview'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Template variables' 'Mac Entry Properties exposes template variable reference'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'TemplateResolver\.resolveEntryText' 'Mac copy and Quick Paste resolve template entries at output time'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Template entry' 'Mac Entry Properties exposes template entry checkbox'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'private func quickPasteEntry\(id: String\)' 'Mac Quick Paste hotkey uses paste workflow'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipmanSettings.swift') 'var quickPasteModes: \[String: String\]' 'Mac settings store per-target Quick Paste modes'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipmanSettings.swift') 'enum QuickPasteMode' 'Mac defines shared Quick Paste mode strings'
@@ -1104,6 +1148,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'quickPasteLabel\(for: entry\)' 'Mac text rows expose Quick Paste hotkeys'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipmanSettings.swift') 'soundsEnabled' 'Mac settings include Play sounds parity'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Play sounds' 'Mac Preferences exposes Play sounds'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SoundService.swift') 'func useDataFolder' 'Mac sound service can use selected data/settings folder'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'sounds\.useDataFolder\(settingsStore\.dataFolder\(for: settings\)\)' 'Mac custom sound overrides follow the active data/settings folder'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') '#selector\(NSText\.paste' 'Mac Preferences supports Command+V in text fields'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Database encryption is on\. The password is saved in Keychain' 'Mac Preferences explains remembered encrypted password status'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Database encryption is off' 'Mac Preferences explains unencrypted status'

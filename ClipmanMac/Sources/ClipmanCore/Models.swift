@@ -9,6 +9,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
     public var CreatedUnixMs: Int64
     public var LastUsedUnixMs: Int64
     public var Pinned: Bool
+    public var IsTemplate: Bool
     public var ManualOrder: Int64
     public var unknownFields: [String: JSONValue]
 
@@ -23,6 +24,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         CreatedUnixMs: Int64 = TimeUtil.nowUnixMs(),
         LastUsedUnixMs: Int64 = TimeUtil.nowUnixMs(),
         Pinned: Bool = false,
+        IsTemplate: Bool = false,
         ManualOrder: Int64 = 0,
         unknownFields: [String: JSONValue] = [:]
     ) {
@@ -34,12 +36,13 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         self.CreatedUnixMs = CreatedUnixMs
         self.LastUsedUnixMs = LastUsedUnixMs
         self.Pinned = Pinned
+        self.IsTemplate = IsTemplate
         self.ManualOrder = ManualOrder
         self.unknownFields = unknownFields
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs, Pinned, ManualOrder
+        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs, Pinned, IsTemplate, ManualOrder
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,6 +55,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         CreatedUnixMs = try known.decodeIfPresent(Int64.self, forKey: .CreatedUnixMs) ?? TimeUtil.nowUnixMs()
         LastUsedUnixMs = try known.decodeIfPresent(Int64.self, forKey: .LastUsedUnixMs) ?? CreatedUnixMs
         Pinned = try known.decodeIfPresent(Bool.self, forKey: .Pinned) ?? false
+        IsTemplate = try known.decodeIfPresent(Bool.self, forKey: .IsTemplate) ?? false
         ManualOrder = try known.decodeIfPresent(Int64.self, forKey: .ManualOrder) ?? 0
 
         let dynamic = try decoder.container(keyedBy: DynamicCodingKey.self)
@@ -76,6 +80,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         try dynamic.encode(CreatedUnixMs, forKey: DynamicCodingKey("CreatedUnixMs"))
         try dynamic.encode(LastUsedUnixMs, forKey: DynamicCodingKey("LastUsedUnixMs"))
         try dynamic.encode(Pinned, forKey: DynamicCodingKey("Pinned"))
+        try dynamic.encode(IsTemplate, forKey: DynamicCodingKey("IsTemplate"))
         try dynamic.encode(ManualOrder, forKey: DynamicCodingKey("ManualOrder"))
     }
 }

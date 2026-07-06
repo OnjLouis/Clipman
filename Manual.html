@@ -81,6 +81,7 @@
     <li>Copy normally. Clipman stores text clips and separate file-history events while monitoring is on.</li>
     <li>Open history, choose an item, and press <code>Enter</code> to put it back on the clipboard. Press <code>Esc</code> or close the window to hide history without quitting.</li>
     <li>Use search, groups, pinned entries, sort order, and Entry Properties as your history grows. The detailed commands are in the Keyboard Shortcuts table.</li>
+    <li>Use template entries for reusable text that should resolve date, time, system, or username variables only when copied or pasted.</li>
     <li>Turn monitoring off temporarily when copying text that should not enter history, or add sensitive apps to the ignored applications list.</li>
     <li>On Mac, <code>Option+M</code> opens the history window's Clipman command menu directly.</li>
   </ul>
@@ -153,6 +154,12 @@
   <p>Each Quick Paste target has a mode. <strong>Paste and restore previous clipboard</strong> temporarily places the entry on the system clipboard, sends the normal paste command to the active app, and then restores the previous clipboard contents where possible. <strong>Paste and keep target on clipboard</strong> pastes the entry and leaves that entry on the clipboard. <strong>Copy to clipboard only</strong> places the entry on the clipboard without sending a paste command.</p>
 
   <p>Use the <strong>Quick Paste</strong> menu on Windows, or <strong>Quick Paste Targets</strong> from the Mac <code>Option+M</code> Clipman menu, to review all entries that currently have Quick Paste hotkeys. Choosing one of those menu items moves focus to the matching entry so you can press <code>F2</code> to edit or remove its Quick Paste assignment. Entries with Quick Paste targets include the assigned hotkey and mode in the row text; entries without Quick Paste targets do not carry that extra wording.</p>
+
+  <p><strong>Template entries:</strong> In Entry Properties, mark a text entry as a template when you want variables to resolve at copy or paste time. The stored text remains unchanged in the database, exports, search, and Entry Properties. Clipman resolves the template only when the entry is copied, quick-pasted, or automatically copied as a new remote entry.</p>
+
+  <p>Template variables include <code>{{year_full}}</code>, <code>{{year_short}}</code>, <code>{{month_name}}</code>, <code>{{month_name_full}}</code>, <code>{{month_name_short}}</code>, <code>{{month_num}}</code>, <code>{{month_num_padded}}</code>, <code>{{day_of_month}}</code>, <code>{{day_of_month_padded}}</code>, <code>{{day_name_full}}</code>, <code>{{day_name_short}}</code>, <code>{{hour_24}}</code>, <code>{{hour_24_padded}}</code>, <code>{{hour_12}}</code>, <code>{{hour_12_padded}}</code>, <code>{{minute}}</code>, <code>{{minute_padded}}</code>, <code>{{second}}</code>, <code>{{second_padded}}</code>, <code>{{utc_offset}}</code>, <code>{{time_zone}}</code>, <code>{{time_zone_short}}</code>, <code>{{os_name}}</code>, <code>{{os_version}}</code>, and <code>{{username}}</code>. Unknown variables are left alone.</p>
+
+  <p>Example templates: <code>{{year_full}}-{{month_num_padded}}-{{day_of_month_padded}}</code>, <code>Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}</code>, or <code>{{os_name}} version {{os_version}}</code>. Windows Entry Properties includes buttons to preview the resolved template and view the variable list.</p>
 
   <p><strong>Automatically group new clips by source application</strong> is enabled by default for new installs where the setting is exposed. It places newly captured clipboard text into a group named after the application Clipman believes supplied the clipboard text, such as Chrome, Thunderbird, Outlook, Safari, TextEdit, or Logic. Disable it if you prefer all new entries to start ungrouped.</p>
 
@@ -332,7 +339,7 @@
   <h2 id="sounds">Sounds</h2>
   <p>Clipman can play short sounds when text is copied, remote text is copied from another synced machine, monitoring is turned on, monitoring is turned off, or a clipboard item is ignored because monitoring is off. Sounds can be enabled or disabled in preferences.</p>
 
-  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's settings or data folder and put any replacement WAV files there. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, and <code>skip.wav</code>.</p>
+  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, and <code>skip.wav</code>.</p>
 
   <h2 id="application-files">Application Files</h2>
   <p>A normal Windows portable Clipman folder contains only the files needed to run the app. A Mac tester package contains <code>Clipman.app</code>, which bundles the executable, manual, sounds, and supporting resources inside the app package.</p>
@@ -439,6 +446,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.7.0</h3>
+  <ul>
+    <li>Added template entries. Mark a text entry as a template in Entry Properties and Clipman resolves date, time, timezone, operating system, and username variables when the entry is copied or quick-pasted. Closes <a href="https://github.com/OnjLouis/Clipman/issues/12">issue #12</a>.</li>
+    <li>Added Windows template preview and variable-reference buttons to Entry Properties.</li>
+    <li>Added the shared <code>IsTemplate</code> text-entry field so Windows and Mac can keep template status in sync without changing the stored template text.</li>
+  </ul>
+
   <h3>1.6.6</h3>
   <ul>
     <li>Relaxed global hotkey validation for compatibility: one-modifier hotkeys are now allowed for function keys and grave/backslash-style punctuation keys, while single-modifier letters, numbers, comma, and unsafe operating-system shortcuts remain blocked.</li>

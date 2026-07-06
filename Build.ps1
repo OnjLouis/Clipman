@@ -1,5 +1,7 @@
 param(
-    [string]$OutputPath = "$PSScriptRoot\portable\clipman.exe"
+    [string]$OutputPath = "$PSScriptRoot\portable\clipman.exe",
+    [string]$LivePath = '',
+    [switch]$NoLiveDeploy
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,6 +78,108 @@ function Assert-PortableShape {
     }
 }
 
+function Stop-LiveClipman([string]$path) {
+    $liveExe = Join-Path $path 'clipman.exe'
+    if (-not (Test-Path -LiteralPath $liveExe)) {
+        return
+    }
+
+    try {
+        & $liveExe --close | Out-Null
+    } catch {
+        Write-Host "Could not ask live Clipman to close before deployment: $($_.Exception.Message)"
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $running = @(Get-Process clipman -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $liveExe })
+        if ($running.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 150
+    }
+
+    foreach ($process in @(Get-Process clipman -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $liveExe })) {
+        Stop-Process -Id $process.Id -Force
+    }
+}
+
+function Find-LiveClipmanPath {
+    if (![string]::IsNullOrWhiteSpace($LivePath)) {
+        return $LivePath
+    }
+
+    if (![string]::IsNullOrWhiteSpace($env:CLIPMAN_LIVE_PATH)) {
+        return $env:CLIPMAN_LIVE_PATH
+    }
+
+    $sourceRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+    foreach ($process in @(Get-Process clipman -ErrorAction SilentlyContinue)) {
+        try {
+            if ([string]::IsNullOrWhiteSpace($process.Path)) {
+                continue
+            }
+            $processDirectory = [IO.Path]::GetDirectoryName($process.Path)
+            if ([string]::IsNullOrWhiteSpace($processDirectory)) {
+                continue
+            }
+            $processDirectory = [IO.Path]::GetFullPath($processDirectory).TrimEnd('\')
+            if ($processDirectory.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+            if (Test-Path -LiteralPath (Join-Path $processDirectory 'clipman.exe')) {
+                return $processDirectory
+            }
+        }
+        catch {
+        }
+    }
+
+    foreach ($drive in [IO.DriveInfo]::GetDrives()) {
+        if (-not $drive.IsReady) {
+            continue
+        }
+
+        $candidate = Join-Path $drive.RootDirectory.FullName 'Dropbox\SOFTWARE\clipman'
+        if (Test-Path -LiteralPath (Join-Path $candidate 'clipman.exe')) {
+            return $candidate
+        }
+    }
+
+    return ''
+}
+
+function Deploy-LiveCopy([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        Write-Host 'No live path supplied; skipping live deployment.'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-Host "Live path not found; skipping live deployment: $path"
+        return
+    }
+
+    $resolvedLive = (Resolve-Path -LiteralPath $path).Path
+    $sourceDirectory = Split-Path -Parent $OutputPath
+
+    Stop-LiveClipman $resolvedLive
+
+    foreach ($fileName in @('clipman.exe', 'Manual.html', 'LICENSE.txt', 'sqlite3.dll')) {
+        $source = Join-Path $sourceDirectory $fileName
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $resolvedLive $fileName) -Force
+        }
+    }
+
+    Start-Sleep -Milliseconds 250
+    $liveExe = Join-Path $resolvedLive 'clipman.exe'
+    if (Test-Path -LiteralPath $liveExe) {
+        Start-Process -FilePath $liveExe -WorkingDirectory $resolvedLive -WindowStyle Hidden | Out-Null
+    }
+
+    Write-Host "Deployed live copy to $resolvedLive"
+}
+
 Assert-VersionCanBuild
 
 $manifest = Join-Path $PSScriptRoot 'src\clipman.exe.manifest'
@@ -141,5 +245,9 @@ foreach ($folderName in @('Settings', 'Logs', 'Reports', 'Backups')) {
 }
 
 Assert-PortableShape
+
+if (-not $NoLiveDeploy) {
+    Deploy-LiveCopy (Find-LiveClipmanPath)
+}
 
 Write-Host "Built $OutputPath"

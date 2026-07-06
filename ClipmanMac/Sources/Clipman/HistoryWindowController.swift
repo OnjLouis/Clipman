@@ -50,13 +50,17 @@ private final class DialogTabTextView: NSTextView {
     }
 }
 
+private final class TemplatePreviewButton: NSButton {
+    weak var templateTextView: NSTextView?
+}
+
 @MainActor
 protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didTogglePin entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didDelete entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didEdit entry: ClipEntry, name: String, text: String)
-    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode)
+    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, isTemplate: Bool, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode)
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didPushToOtherMachines entries: [ClipEntry])
@@ -1415,6 +1419,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         scroll.hasVerticalScroller = true
         scroll.documentView = textView
         let quickCopyCheckbox = NSButton(checkboxWithTitle: "Use this entry for Quick Paste", target: nil, action: nil)
+        let templateCheckbox = NSButton(checkboxWithTitle: "Template entry", target: nil, action: nil)
+        templateCheckbox.state = entry.IsTemplate ? .on : .off
+        templateCheckbox.setAccessibilityLabel("Template entry")
         let existingHotkey = quickCopyHotkeys[entry.Id]
         let existingMode = QuickPasteMode.normalize(quickPasteModes[entry.Id])
         quickCopyCheckbox.state = quickCopyOnly || existingHotkey != nil ? .on : .off
@@ -1441,14 +1448,26 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         modeStack.orientation = .vertical
         modeStack.spacing = 4
         modeStack.setAccessibilityLabel("Quick Paste mode")
+        let previewTemplateButton = TemplatePreviewButton(title: "Preview template", target: nil, action: nil)
+        previewTemplateButton.setAccessibilityLabel("Preview template")
+        previewTemplateButton.target = self
+        previewTemplateButton.action = #selector(entryPropertiesPreviewTemplate(_:))
+        previewTemplateButton.templateTextView = textView
+        let templateVariablesButton = NSButton(title: "Template variables", target: nil, action: nil)
+        templateVariablesButton.setAccessibilityLabel("Template variables")
+        templateVariablesButton.target = self
+        templateVariablesButton.action = #selector(entryPropertiesTemplateVariables(_:))
+        let templateButtonRow = NSStackView(views: [previewTemplateButton, templateVariablesButton])
+        templateButtonRow.orientation = .horizontal
+        templateButtonRow.spacing = 8
 
         let views = quickCopyOnly
             ? [quickCopyCheckbox, hotkeyRow, modeStack]
-            : [nameField, groupField, scroll, quickCopyCheckbox, hotkeyRow, modeStack]
+            : [nameField, groupField, scroll, templateCheckbox, templateButtonRow, quickCopyCheckbox, hotkeyRow, modeStack]
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 520, height: quickCopyOnly ? 162 : 372)
+        stack.frame = NSRect(x: 0, y: 0, width: 520, height: quickCopyOnly ? 162 : 438)
         alert.accessoryView = stack
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -1478,10 +1497,22 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             }
         }
         if quickCopyOnly {
-            historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: entry.Name, group: entry.Group, text: entry.Text, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
+            historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: entry.Name, group: entry.Group, text: entry.Text, isTemplate: entry.IsTemplate, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
             return
         }
-        historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: nameField.stringValue, group: groupField.stringValue, text: textView.string, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
+        historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: nameField.stringValue, group: groupField.stringValue, text: textView.string, isTemplate: templateCheckbox.state == .on, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
+    }
+
+    @objc private func entryPropertiesPreviewTemplate(_ sender: TemplatePreviewButton) {
+        guard let textView = sender.templateTextView else {
+            NSSound.beep()
+            return
+        }
+        showReadOnlyText(title: "Template Preview", accessibilityLabel: "Template preview", text: TemplateResolver.resolve(textView.string))
+    }
+
+    @objc private func entryPropertiesTemplateVariables(_ sender: NSButton) {
+        showReadOnlyText(title: "Template Variables", accessibilityLabel: "Template variables", text: TemplateResolver.variableReferenceText)
     }
 
     private func confirmSingleModifierQuickPasteHotkey() -> Bool {
@@ -1884,6 +1915,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         if entry.Pinned {
             parts.append("Pinned: Yes")
+        }
+        if entry.IsTemplate {
+            parts.append("Template: Yes")
         }
         return parts.joined(separator: " - ")
     }

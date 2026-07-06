@@ -16,6 +16,7 @@ namespace Clipman
         public long CreatedUnixMs { get; set; }
         public long LastUsedUnixMs { get; set; }
         public bool Pinned { get; set; }
+        public bool IsTemplate { get; set; }
         public long ManualOrder { get; set; }
 
         public ClipEntry()
@@ -266,6 +267,7 @@ namespace Clipman
                     CreatedUnixMs = e.CreatedUnixMs,
                     LastUsedUnixMs = e.LastUsedUnixMs,
                     Pinned = e.Pinned,
+                    IsTemplate = e.IsTemplate,
                     ManualOrder = e.ManualOrder
                 })
                 .ToList();

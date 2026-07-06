@@ -621,6 +621,10 @@ namespace Clipman
         {
             var text = entry.Pinned ? NumberedPinnedDisplayText(DisplayText(entry), pinnedEntryPosition++) : DisplayText(entry);
             var quickPaste = QuickPasteDisplayText(entry.Id);
+            if (entry.IsTemplate)
+            {
+                text = "Template; " + text;
+            }
             return string.IsNullOrWhiteSpace(quickPaste) ? text : quickPaste + "; " + text;
         }
 
@@ -2377,6 +2381,7 @@ namespace Clipman
                 store.SetNameAndText(entry.Id, dialog.EntryName, dialog.EntryText);
                 store.SetGroup(new[] { entry.Id }, dialog.EntryGroup);
                 store.SetPinned(entry.Id, dialog.EntryPinned);
+                store.SetTemplate(entry.Id, dialog.EntryIsTemplate);
                 if (dialog.EntryIsQuickCopyTarget)
                 {
                     SetQuickCopyHotkeyForEntry(entry.Id, dialog.EntryQuickCopyHotkey, dialog.EntryQuickPasteMode);

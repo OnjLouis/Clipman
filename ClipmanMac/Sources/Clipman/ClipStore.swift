@@ -173,6 +173,16 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
+    func setTemplate(id: String, isTemplate: Bool) {
+        queue.async {
+            guard self.mergeLatestBeforeWriteLocked() else { return }
+            guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
+            self.database.Entries[index].IsTemplate = isTemplate
+            self.saveLocked()
+            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+        }
+    }
+
     func setGroup(ids: [String], group: String) {
         let idSet = Set(ids)
         let trimmed = group.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -259,6 +269,7 @@ final class ClipStore: @unchecked Sendable {
                     CreatedUnixMs: entry.CreatedUnixMs == 0 ? now : entry.CreatedUnixMs,
                     LastUsedUnixMs: entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
                     Pinned: false,
+                    IsTemplate: entry.IsTemplate,
                     ManualOrder: order + Int64(offset)
                 ))
             }

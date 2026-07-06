@@ -9,12 +9,16 @@ final class SoundService {
         case skip = "skip.wav"
     }
 
-    private let userSoundsDirectory: URL
+    private var userSoundsDirectory: URL
     private var currentSound: NSSound?
     var isEnabled = true
 
     init(applicationSupportURL: URL) {
         userSoundsDirectory = applicationSupportURL.appendingPathComponent("sounds", isDirectory: true)
+    }
+
+    func useDataFolder(_ dataFolderURL: URL) {
+        userSoundsDirectory = dataFolderURL.appendingPathComponent("sounds", isDirectory: true)
     }
 
     func play(_ name: SoundName) {

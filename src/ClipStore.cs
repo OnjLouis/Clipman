@@ -259,6 +259,7 @@ namespace Clipman
                         CreatedUnixMs = stamp,
                         LastUsedUnixMs = stamp,
                         Pinned = false,
+                        IsTemplate = entry.IsTemplate,
                         ManualOrder = NextManualOrderLocked()
                     });
                 }
@@ -324,6 +325,7 @@ namespace Clipman
                         CreatedUnixMs = entry.CreatedUnixMs == 0 ? TimeUtil.NowUnixMs() : entry.CreatedUnixMs,
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? TimeUtil.NowUnixMs() : entry.LastUsedUnixMs,
                         Pinned = entry.Pinned,
+                        IsTemplate = entry.IsTemplate,
                         ManualOrder = entry.ManualOrder
                     });
                 }
@@ -413,6 +415,19 @@ namespace Clipman
                 entry.Name = (name ?? string.Empty).Trim();
                 entry.Text = text ?? string.Empty;
                 entry.LastUsedUnixMs = TimeUtil.NowUnixMs();
+                SaveLocked();
+                OnChanged();
+            }
+        }
+
+        public void SetTemplate(string id, bool isTemplate)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            lock (sync)
+            {
+                var entry = database.Entries.FirstOrDefault(e => e.Id == id);
+                if (entry == null) return;
+                entry.IsTemplate = isTemplate;
                 SaveLocked();
                 OnChanged();
             }
@@ -567,6 +582,7 @@ namespace Clipman
                         CreatedUnixMs = entry.CreatedUnixMs == 0 ? now : entry.CreatedUnixMs,
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
                         Pinned = entry.Pinned,
+                        IsTemplate = entry.IsTemplate,
                         ManualOrder = order++
                     };
                     database.Entries.Add(newEntry);
@@ -620,6 +636,7 @@ namespace Clipman
                         CreatedUnixMs = entry.CreatedUnixMs == 0 ? now : entry.CreatedUnixMs,
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
                         Pinned = false,
+                        IsTemplate = entry.IsTemplate,
                         ManualOrder = order++
                     };
                     database.Entries.Add(newEntry);
@@ -828,6 +845,7 @@ namespace Clipman
                 CreatedUnixMs = entry.CreatedUnixMs,
                 LastUsedUnixMs = entry.LastUsedUnixMs,
                 Pinned = entry.Pinned,
+                IsTemplate = entry.IsTemplate,
                 ManualOrder = entry.ManualOrder
             };
         }

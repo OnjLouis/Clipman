@@ -27,6 +27,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings = settingsStore.load()
+        sounds.useDataFolder(settingsStore.dataFolder(for: settings))
         migrateLegacyKeychainPasswordIfNeeded()
         let initialPassword = initialDatabasePassword()
         store = ClipStore(databaseURL: URL(fileURLWithPath: settings.databasePath), machineName: settings.machineName)
@@ -171,16 +172,17 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             return
         }
         let mode = QuickPasteMode.normalize(settings.quickPasteModes[id])
+        let text = TemplateResolver.resolveEntryText(entry)
         switch mode {
         case .pasteRestore:
-            monitor.writeTemporaryInternalText(entry.Text, restoreAfter: 0.35) {
+            monitor.writeTemporaryInternalText(text, restoreAfter: 0.35) {
                 self.sendPasteKeystroke()
             }
         case .pasteKeep:
-            monitor.writeInternalText(entry.Text)
+            monitor.writeInternalText(text)
             sendPasteKeystroke()
         case .copyOnly:
-            monitor.writeInternalText(entry.Text)
+            monitor.writeInternalText(text)
         }
         sounds.play(.copy)
         store.markUsed(entry.Id)
@@ -374,7 +376,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry) {
-        monitor.writeInternalText(entry.Text)
+        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry))
         sounds.play(.copy)
         store.markUsed(entry.Id)
         controller.hide()
@@ -392,9 +394,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         store.setNameAndText(id: entry.Id, name: name, text: text)
     }
 
-    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode) {
+    func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, isTemplate: Bool, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode) {
         store.setNameAndText(id: entry.Id, name: name, text: text)
         store.setGroup(ids: [entry.Id], group: group)
+        store.setTemplate(id: entry.Id, isTemplate: isTemplate)
         if useQuickCopy {
             if let quickCopyHotkey {
                 settings.quickCopyHotkeys[entry.Id] = quickCopyHotkey
@@ -411,7 +414,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry]) {
-        let text = entries.map(\.Text).joined(separator: "\n---\n")
+        let text = entries.map(TemplateResolver.resolveEntryText).joined(separator: "\n---\n")
         monitor.writeInternalText(text)
         sounds.play(.copy)
     }
@@ -685,6 +688,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             try? keychain.delete(for: previousDatabasePath)
         }
         try? settingsStore.save(settings)
+        sounds.useDataFolder(settingsStore.dataFolder(for: settings))
         sounds.isEnabled = settings.soundsEnabled
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
@@ -767,7 +771,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         guard stamp > baseline.stamp || (stamp == baseline.stamp && entry.Id != baseline.id) else { return }
         remoteClipboardBaseline = (entry.Id, stamp)
-        monitor.writeInternalText(entry.Text)
+        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry))
         sounds.play(.remote)
     }
 

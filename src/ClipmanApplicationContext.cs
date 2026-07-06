@@ -378,7 +378,7 @@ namespace Clipman
         {
             if (entry == null) return;
             IgnoreClipboardChanges(1);
-            Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+            Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
             store.MarkUsed(entry.Id);
         }
 
@@ -386,7 +386,7 @@ namespace Clipman
         {
             if (entries == null || entries.Count == 0) return;
             var data = new DataObject();
-            data.SetText(string.Join("\r\n\r\n", entries.Select(e => e.Text ?? string.Empty)), TextDataFormat.UnicodeText);
+            data.SetText(string.Join("\r\n\r\n", entries.Select(ResolvedEntryText)), TextDataFormat.UnicodeText);
             data.SetData(ClipmanClipboardData.EntriesFormat, ClipmanClipboardData.SerializeEntries(entries));
             IgnoreClipboardChanges(1);
             Clipboard.SetDataObject(data, true);
@@ -1029,7 +1029,7 @@ namespace Clipman
                 if (mode == QuickPasteModes.CopyOnly)
                 {
                     IgnoreClipboardChanges(1);
-                    Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+                    Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
                     store.MarkUsed(entry.Id);
                     sounds.Copy(settings.SoundsEnabled);
                     return;
@@ -1049,7 +1049,7 @@ namespace Clipman
                 }
 
                 IgnoreClipboardChanges(mode == QuickPasteModes.PasteKeep ? 1 : 2);
-                Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+                Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
                 store.MarkUsed(entry.Id);
                 sounds.Copy(settings.SoundsEnabled);
                 if (mode == QuickPasteModes.PasteKeep)
@@ -1314,8 +1314,15 @@ namespace Clipman
             lastAutoCopiedRemoteEntryId = entry.Id ?? string.Empty;
             lastAutoCopiedRemoteEntryStamp = stamp;
             IgnoreClipboardChanges(1);
-            Clipboard.SetText(entry.Text ?? string.Empty, TextDataFormat.UnicodeText);
+            Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
             sounds.Remote(settings.SoundsEnabled);
+        }
+
+        private static string ResolvedEntryText(ClipEntry entry)
+        {
+            if (entry == null) return string.Empty;
+            var text = entry.Text ?? string.Empty;
+            return entry.IsTemplate ? TemplateResolver.Resolve(text) : text;
         }
 
         private void FileEventStoreChanged(object sender, EventArgs e)

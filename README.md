@@ -14,10 +14,11 @@ Windows and macOS downloads are attached to releases in this repository.
 - Lives in the Windows notification area or the macOS status menu.
 - Tray icon and tooltip show whether clipboard monitoring is on or off.
 - Plays copy/remote-sync/on/off/skip sounds when enabled.
-- Lets custom sounds live in `Settings\sounds` so updates do not overwrite them.
+- Lets custom sounds live in the active settings/data folder's `sounds` subfolder so updates do not overwrite them.
 - Global hotkeys for showing history and toggling monitoring.
 - User-configurable hotkeys.
 - Optional per-entry Quick Paste global hotkeys that paste chosen text entries into the active app from anywhere without opening history.
+- Optional template entries. Mark a text entry as a template in Entry Properties and Clipman resolves variables such as `{{year_full}}`, `{{month_num_padded}}`, `{{day_of_month_padded}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}` when that entry is copied or quick-pasted.
 - Press Enter on a history entry to copy it back to the clipboard and close history.
 - Press Ctrl+C to copy without closing the history window.
 - Press Shift+Enter to pin or unpin an entry. Pinned entries are protected from delete and cleanup.
@@ -95,6 +96,10 @@ Quick Paste is machine-specific. Use Entry Properties or the entry menu to assig
 
 Use the Quick Paste menu on Windows, or Quick Paste Targets from the Mac `Option+M` Clipman menu, to review every entry that currently has a Quick Paste hotkey. Choosing a target moves focus to that entry so the hotkey or mode can be edited or removed with Entry Properties. Entries with Quick Paste targets show the assigned hotkey and mode in the row text.
 
+Template entries are shared text entries with one extra flag. The stored text remains unchanged in the database, exports, search, and Entry Properties. Clipman resolves variables only when the entry is copied, quick-pasted, or automatically copied as a new remote entry. This makes templates useful for dates, system/version snippets, and repeatable support text without creating a new history entry every day.
+
+Supported template variables include `{{year_full}}`, `{{year_short}}`, `{{month_name}}`, `{{month_name_full}}`, `{{month_name_short}}`, `{{month_num}}`, `{{month_num_padded}}`, `{{day_of_month}}`, `{{day_of_month_padded}}`, `{{day_name_full}}`, `{{day_name_short}}`, `{{hour_24}}`, `{{hour_24_padded}}`, `{{hour_12}}`, `{{hour_12_padded}}`, `{{minute}}`, `{{minute_padded}}`, `{{second}}`, `{{second_padded}}`, `{{utc_offset}}`, `{{time_zone}}`, `{{time_zone_short}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}`. Unknown variables are left alone.
+
 Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, and Mac stores it in that user's Keychain for the selected database path. Mac Preferences reports whether database encryption is on and whether the password is saved in Keychain; the password field stays blank for security even when a remembered password exists. Remembering a password is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
 
 When a history password is saved, `.clipdb` imports and exports use the current history password. JSON and text exports are readable backup formats, so use `.clipdb` for private encrypted backups.
@@ -112,6 +117,12 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.7.0
+
+- Added template entries. Mark a text entry as a template in Entry Properties and Clipman resolves date, time, timezone, operating system, and username variables when the entry is copied or quick-pasted. Closes issue #12.
+- Added Windows template preview and variable-reference buttons to Entry Properties.
+- Added the shared `IsTemplate` text-entry field so Windows and Mac can keep template status in sync without changing the stored template text.
 
 ### 1.6.6
 
@@ -190,9 +201,9 @@ Clipman also writes a small shared update-state file in the `Settings` folder. I
 
 During an update, Clipman downloads the release ZIP to a temporary folder, publishes a short close request so other instances running from the same shared folder stand down, replaces app files while preserving `Settings`, then restarts. The updated copy publishes the new shared state so other machines restart after the updated executable reaches them through a cloud service or network share.
 
-Custom sounds can be placed in `Settings\sounds` using the same file names as the bundled sounds: `copy.wav`, `remote.wav`, `on.wav`, `off.wav`, and `skip.wav`. Clipman uses those first and falls back to the bundled defaults for any missing sound.
+Custom sounds can be placed in the active settings/data folder's `sounds` subfolder using the same file names as the bundled sounds: `copy.wav`, `remote.wav`, `on.wav`, `off.wav`, and `skip.wav`. For a default Windows portable install this is usually `Settings\sounds` beside `clipman.exe`; if you choose a different data folder, use the `sounds` folder inside that chosen data folder instead. Clipman uses custom sounds first and falls back to the bundled defaults for any missing sound.
 
-Bundled sounds in the root `sounds` folder are factory files. Updates replace them without backing them up, and only user-provided sounds in `Settings\sounds` are treated as custom data.
+Bundled sounds in the root `sounds` folder are factory files. Updates replace them without backing them up, and only user-provided sounds in the active settings/data folder's `sounds` subfolder are treated as custom data.
 
 If Clipman is already running and you start a copy from the same folder, the existing history window is shown. If you start a copy from a different folder, the old copy is asked to close and the new folder takes over.
 
