@@ -33,7 +33,7 @@ final class HotkeyCaptureField: NSTextField {
         isSelectable = false
         focusRingType = .default
         setAccessibilityRole(.textField)
-        setAccessibilityHelp("Press a valid global shortcut. Press Delete or Backspace to clear this hotkey.")
+        setAccessibilityHelp("Press a valid global shortcut. Two modifiers are safest. One modifier is allowed only with function keys, Grave, Backslash, or ISO section. Press Delete or Backspace to clear this hotkey.")
     }
 
     override func becomeFirstResponder() -> Bool {

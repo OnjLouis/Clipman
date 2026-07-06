@@ -99,7 +99,7 @@ namespace Clipman
                 ShortcutsEnabled = false,
                 Text = quickCopyHotkey ?? string.Empty,
                 AccessibleName = "Quick Paste hotkey",
-                AccessibleDescription = "Global hotkey that pastes this entry into the active app. Press a valid key combination with at least two modifiers. Press Delete or Backspace to clear this hotkey."
+                AccessibleDescription = "Global hotkey that pastes this entry into the active app. Two modifiers are safest. One modifier is allowed only with function keys, Grave, or Backslash. Press Delete or Backspace to clear this hotkey."
             };
             quickCopyHotkeyBox.KeyDown += QuickCopyHotkeyBoxKeyDown;
             quickCopyHotkeyBox.KeyPress += SuppressHotkeyTextInput;

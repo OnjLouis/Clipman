@@ -93,17 +93,42 @@ namespace Clipman
 
         public bool IsValid
         {
-            get { return IsAllowedBaseKey(Key) && IsAllowedModifierSet(Modifiers) && !IsReservedCombination(Key, Modifiers); }
+            get { return IsAllowedBaseKey(Key) && IsAllowedModifierCombination(Key, Modifiers) && !IsReservedCombination(Key, Modifiers); }
         }
 
-        public static bool IsAllowedModifierSet(NativeMethods.Modifiers modifiers)
+        public static bool IsSingleModifierHotkey(string text)
+        {
+            HotkeyDefinition definition;
+            return TryParse(text, out definition) && ModifierCount(definition.Modifiers) == 1;
+        }
+
+        private static bool IsAllowedModifierCombination(Keys key, NativeMethods.Modifiers modifiers)
+        {
+            var count = ModifierCount(modifiers);
+            if (count >= 2) return true;
+            if (count != 1) return false;
+
+            if (key >= Keys.F1 && key <= Keys.F24)
+            {
+                return true;
+            }
+
+            if ((modifiers & NativeMethods.Modifiers.Shift) != 0)
+            {
+                return false;
+            }
+
+            return IsAllowedSingleModifierKey(key);
+        }
+
+        private static int ModifierCount(NativeMethods.Modifiers modifiers)
         {
             var count = 0;
             if ((modifiers & NativeMethods.Modifiers.Control) != 0) count++;
             if ((modifiers & NativeMethods.Modifiers.Alt) != 0) count++;
             if ((modifiers & NativeMethods.Modifiers.Shift) != 0) count++;
             if ((modifiers & NativeMethods.Modifiers.Windows) != 0) count++;
-            return count >= 2;
+            return count;
         }
 
         public static bool IsAllowedBaseKey(Keys key)
@@ -186,6 +211,18 @@ namespace Clipman
                 case Keys.Oemplus:
                 case Keys.OemOpenBrackets:
                 case Keys.Oem6:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsAllowedSingleModifierKey(Keys key)
+        {
+            switch (key)
+            {
+                case Keys.Oem5:
+                case Keys.Oem3:
                     return true;
                 default:
                     return false;

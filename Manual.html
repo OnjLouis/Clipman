@@ -158,7 +158,7 @@
 
   <p>Windows first asks for the clipboard owner application, then falls back to the foreground application if Windows does not expose a useful owner. Mac uses the foreground application reported by macOS when the clipboard change is captured. Some background hotkeys or automation tools may still be attributed to the foreground application because operating systems do not always preserve reliable source metadata.</p>
 
-  <p>Global hotkey fields accept only combinations with enough modifiers and one real key, such as <code>Ctrl+Alt+\</code>, <code>Ctrl+Shift+H</code>, <code>Option+Shift+1</code>, or <code>Control+Option+F1</code>. Modifier-only keys, single keys, and unsafe shortcuts are rejected.</p>
+  <p>Global hotkey fields accept combinations with modifiers and one real key, such as <code>Ctrl+Alt+\</code>, <code>Ctrl+Shift+H</code>, <code>Option+Shift+1</code>, or <code>Control+Option+F1</code>. Two modifiers are safest. For compatibility with existing clipboard-manager habits, Clipman also allows one modifier with function keys or with the grave/accent and backslash-style punctuation keys. Single-modifier letters, numbers, comma, space, Tab, Delete, Backspace, Escape, and reserved operating-system shortcuts are rejected. Clipman warns before saving a single-modifier global hotkey because it may conflict with another app or keyboard layout.</p>
 
   <p><strong>Storage and Password:</strong> Choose the shared Clipman data folder, set or change the history password, choose whether this computer remembers the password, remove password encryption, and manage ignored applications. Clipman stores shared text history as <code>clipman-history.clipdb</code> inside the chosen folder.</p>
 
@@ -439,6 +439,12 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.6.6</h3>
+  <ul>
+    <li>Relaxed global hotkey validation for compatibility: one-modifier hotkeys are now allowed for function keys and grave/backslash-style punctuation keys, while single-modifier letters, numbers, comma, and unsafe operating-system shortcuts remain blocked.</li>
+    <li>Added warnings when saving a single-modifier global hotkey so users know it may conflict with other apps or keyboard layouts.</li>
+  </ul>
+
   <h3>1.6.5</h3>
   <ul>
     <li>Improved ignored-application matching so related helper windows and helper processes can be ignored when they use the same app name or bundle/process prefix.</li>

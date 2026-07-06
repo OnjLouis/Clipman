@@ -62,7 +62,21 @@ struct HotkeyDescriptor: Codable, Equatable, Hashable, CustomStringConvertible {
         if Self.isFunctionKey(keyCode) {
             return modifierCount >= 1
         }
-        return modifierCount >= 2
+        if modifierCount >= 2 {
+            return true
+        }
+        guard modifierCount == 1 else { return false }
+        if modifiers.contains(.shift) {
+            return false
+        }
+        if modifiers == [.command], keyCode == UInt32(kVK_ANSI_Grave) {
+            return false
+        }
+        return Self.isSingleModifierPunctuationKey(keyCode)
+    }
+
+    var usesSingleModifier: Bool {
+        isValid && modifiers.count == 1
     }
 
     var description: String {
@@ -194,6 +208,15 @@ struct HotkeyDescriptor: Codable, Equatable, Hashable, CustomStringConvertible {
         switch Int(keyCode) {
         case kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6,
              kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func isSingleModifierPunctuationKey(_ keyCode: UInt32) -> Bool {
+        switch Int(keyCode) {
+        case kVK_ANSI_Backslash, kVK_ANSI_Grave, kVK_ISO_Section:
             true
         default:
             false

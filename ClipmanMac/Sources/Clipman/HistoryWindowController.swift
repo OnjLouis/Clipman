@@ -1473,12 +1473,24 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 showPropertyError("Another Quick Paste entry already uses \(capturedHotkey).")
                 return
             }
+            if capturedHotkey.usesSingleModifier && !confirmSingleModifierQuickPasteHotkey() {
+                return
+            }
         }
         if quickCopyOnly {
             historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: entry.Name, group: entry.Group, text: entry.Text, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
             return
         }
         historyDelegate?.historyWindow(self, didUpdateProperties: entry, name: nameField.stringValue, group: groupField.stringValue, text: textView.string, useQuickCopy: useQuickCopy, quickCopyHotkey: capturedHotkey, quickPasteMode: selectedMode)
+    }
+
+    private func confirmSingleModifierQuickPasteHotkey() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Keep single-modifier Quick Paste hotkey?"
+        alert.informativeText = "This Quick Paste hotkey uses only one modifier. Clipman allows this for compatibility, but it is more likely to conflict with other apps or keyboard layouts."
+        alert.addButton(withTitle: "Keep")
+        alert.addButton(withTitle: "Go Back")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func showPropertyError(_ message: String) {

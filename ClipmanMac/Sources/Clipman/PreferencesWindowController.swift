@@ -215,15 +215,18 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
 
     @objc private func saveClicked() {
         guard let show = showHotkeyField.descriptor ?? HotkeyDescriptor.parse(showHotkeyField.stringValue), show.isValid else {
-            statusLabel.stringValue = "Show history hotkey must use at least two modifiers, or one modifier with F1-F12. Escape, Tab, Backspace, Return, and Space are not available."
+            statusLabel.stringValue = "Show history hotkey must use two modifiers, or one modifier with F1-F12, Grave, Backslash, or ISO section. Escape, Tab, Backspace, Return, Space, and Command+Grave are not available."
             return
         }
         guard let toggle = toggleHotkeyField.descriptor ?? HotkeyDescriptor.parse(toggleHotkeyField.stringValue), toggle.isValid else {
-            statusLabel.stringValue = "Toggle monitoring hotkey must use at least two modifiers, or one modifier with F1-F12. Escape, Tab, Backspace, Return, and Space are not available."
+            statusLabel.stringValue = "Toggle monitoring hotkey must use two modifiers, or one modifier with F1-F12, Grave, Backslash, or ISO section. Escape, Tab, Backspace, Return, Space, and Command+Grave are not available."
             return
         }
         guard show != toggle else {
             statusLabel.stringValue = "Show history and toggle monitoring cannot use the same hotkey."
+            return
+        }
+        guard confirmSingleModifierHotkeys(show: show, toggle: toggle) else {
             return
         }
         settings.databasePath = normalizedDatabasePath(databasePathField.stringValue)
@@ -241,6 +244,24 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         preferencesDelegate?.preferencesWindow(self, didUpdate: settings, passwordToSave: password)
         statusLabel.stringValue = "Preferences saved."
         window?.close()
+    }
+
+    private func confirmSingleModifierHotkeys(show: HotkeyDescriptor, toggle: HotkeyDescriptor) -> Bool {
+        guard show.usesSingleModifier || toggle.usesSingleModifier else {
+            return true
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Keep single-modifier hotkey?"
+        alert.informativeText = "One of your global hotkeys uses only one modifier. Clipman allows this for compatibility, but it is more likely to conflict with other apps or keyboard layouts."
+        alert.addButton(withTitle: "Keep")
+        alert.addButton(withTitle: "Go Back")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            return true
+        }
+        statusLabel.stringValue = "Single-modifier hotkey not saved."
+        return false
     }
 
     func hotkeyCaptureFieldDidChange(_ field: HotkeyCaptureField) {

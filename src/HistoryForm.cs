@@ -2425,6 +2425,20 @@ namespace Clipman
                 return false;
             }
 
+            if (HotkeyDefinition.IsSingleModifierHotkey(quickCopyHotkey))
+            {
+                var result = MessageBox.Show(
+                    this,
+                    "This Quick Paste hotkey uses only one modifier. Clipman allows this for compatibility, but it is more likely to conflict with other apps or keyboard layouts. Keep this hotkey anyway?",
+                    "Clipman Quick Paste",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                if (result != DialogResult.Yes)
+                {
+                    return false;
+                }
+            }
+
             var currentEntry = SelectedEntries().FirstOrDefault();
             var currentEntryId = currentEntry == null ? string.Empty : currentEntry.Id;
             if ((settings.QuickCopyHotkeys ?? new List<QuickCopyBinding>()).Any(b =>

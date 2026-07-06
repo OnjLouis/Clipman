@@ -69,7 +69,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Search: `Ctrl+F`, then `F3` or `Shift+F3`
 - Open Entry Properties: `F2`
 
-Hotkeys can be changed from Options > Preferences. In hotkey fields, press a valid shortcut to assign it, or press Delete or Backspace to clear it. Windows hotkey fields accept the Windows key as a modifier for combinations Windows allows.
+Hotkeys can be changed from Options > Preferences. In hotkey fields, press a valid shortcut to assign it, or press Delete or Backspace to clear it. Two modifiers are safest. For compatibility with existing clipboard-manager habits, Clipman also allows one modifier with function keys or with the grave/accent and backslash-style punctuation keys. Single-modifier letters, numbers, comma, space, Tab, Delete, Backspace, Escape, and reserved operating-system shortcuts are rejected. Windows hotkey fields accept the Windows key as a modifier for combinations Windows allows.
 
 Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared data folder and the history password controls.
 
@@ -112,6 +112,11 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.6.6
+
+- Relaxed global hotkey validation for compatibility: one-modifier hotkeys are now allowed for function keys and grave/backslash-style punctuation keys, while single-modifier letters, numbers, comma, and unsafe operating-system shortcuts remain blocked.
+- Added warnings when saving a single-modifier global hotkey so users know it may conflict with other apps or keyboard layouts.
 
 ### 1.6.5
 

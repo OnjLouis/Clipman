@@ -40,6 +40,7 @@ namespace Clipman
         private readonly CheckBox sendToEnabled;
         private readonly CheckBox showHistoryAfterSendTo;
         private bool loading;
+        private bool acceptedSingleModifierHotkeyWarning;
 
         public PreferencesForm(AppSettings current, Action<AppSettings> applySettings, Action<string> copySensitiveText)
         {
@@ -122,7 +123,7 @@ namespace Clipman
             var hotkeyLayout = NewRows();
             AddRow(hotkeyLayout, "&Show history hotkey:", showHotkey);
             AddRow(hotkeyLayout, "&Toggle on/off hotkey:", toggleHotkey);
-            AddFullRow(hotkeyLayout, NewNote("Global hotkeys must use at least two keys and cannot be modifier-only."));
+            AddFullRow(hotkeyLayout, NewNote("Most global hotkeys should use at least two modifiers. For compatibility, one modifier is allowed with function keys, Grave, or Backslash. Single-modifier letters, numbers, comma, and ordinary editing keys are rejected."));
             hotkeys.Controls.Add(hotkeyLayout);
 
             databasePath = NewTextBox(DisplayDatabaseFolder(settings.DatabasePath));
@@ -423,8 +424,44 @@ namespace Clipman
                 return;
             }
 
+            if (!ConfirmSingleModifierHotkeys())
+            {
+                e.Cancel = true;
+                return;
+            }
+
             ApplyNow();
             base.OnFormClosing(e);
+        }
+
+        private bool ConfirmSingleModifierHotkeys()
+        {
+            if (acceptedSingleModifierHotkeyWarning)
+            {
+                return true;
+            }
+
+            if (!HotkeyDefinition.IsSingleModifierHotkey(showHotkey.Text) &&
+                !HotkeyDefinition.IsSingleModifierHotkey(toggleHotkey.Text))
+            {
+                return true;
+            }
+
+            var result = MessageBox.Show(
+                this,
+                "One of your global hotkeys uses only one modifier. Clipman allows this for compatibility, but it is more likely to conflict with other apps or keyboard layouts. Keep this hotkey anyway?",
+                "Clipman hotkeys",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (result == DialogResult.Yes)
+            {
+                acceptedSingleModifierHotkeyWarning = true;
+                return true;
+            }
+
+            preferencesTabs.SelectedIndex = 2;
+            showHotkey.Focus();
+            return false;
         }
 
         private bool ValidateDatabasePasswordInput(bool showMessage)
@@ -702,7 +739,7 @@ namespace Clipman
                 ReadOnly = false,
                 ShortcutsEnabled = false,
                 AccessibleName = accessibleName,
-                AccessibleDescription = "Press a global key combination with at least two modifiers, such as Control Alt Backslash, Windows Alt H, or Control Shift H. Press Delete or Backspace to clear this hotkey. Modifier-only and unsafe Windows shortcuts are rejected."
+                AccessibleDescription = "Press a global key combination. Two modifiers are safest, such as Control Alt Backslash, Windows Alt H, or Control Shift H. One modifier is allowed only with function keys, Grave, or Backslash. Press Delete or Backspace to clear this hotkey. Modifier-only and unsafe Windows shortcuts are rejected."
             };
             box.KeyDown += HotkeyBoxKeyDown;
             box.KeyPress += SuppressHotkeyTextInput;
