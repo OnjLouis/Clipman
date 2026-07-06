@@ -102,7 +102,7 @@ Supported template variables include `{{year_full}}`, `{{year_short}}`, `{{month
 
 Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, and Mac stores it in that user's Keychain for the selected database path. Mac Preferences reports whether database encryption is on and whether the password is saved in Keychain; the password field stays blank for security even when a remembered password exists. Remembering a password is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
 
-When a history password is saved, `.clipdb` imports and exports use the current history password. JSON and text exports are readable backup formats, so use `.clipdb` for private encrypted backups.
+When importing an encrypted `.clipdb`, Clipman asks for that import file's password if it is different from the current database password. When exporting a `.clipdb` from the app, Clipman asks whether to use the current history password, a new export-only password, or no password. If the current history database is password protected, Clipman asks you to re-enter the current history password before creating any `.clipdb` export, including an export that uses no password. JSON and text exports are readable backup formats, so use `.clipdb` for private encrypted backups.
 
 Old Clipman and Ditto imports read text entries only. They do not import images or every custom clipboard format.
 
@@ -117,6 +117,13 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.7.1
+
+- Fixed importing encrypted `.clipdb` files into an unencrypted or empty Clipman session. Clipman now asks for the import file's history password instead of failing silently.
+- Added export password choices for `.clipdb` backups: use the current history password, set a new export-only password, or export without a password. When the current history is password protected, Clipman requires the current history password before creating any `.clipdb` export.
+- Fixed Mac `.clipdb` export filenames so the save dialog does not produce a duplicated `.clipdb.clipdb` extension.
+- Updated the manual and README wording so the Mac app is described as a full Clipman app and release asset.
 
 ### 1.7.0
 

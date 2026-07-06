@@ -462,9 +462,47 @@ namespace Clipman
             }
             using (var store = new ClipStore(settings.DatabasePath, settingsStore.DatabasePassword(settings)))
             {
-                store.ImportFromFile(sourcePath, replace);
+                if (!ImportDatabaseIntoStore(store, sourcePath, replace))
+                {
+                    return false;
+                }
             }
             return true;
+        }
+
+        private static bool ImportDatabaseIntoStore(ClipStore store, string sourcePath, bool replace)
+        {
+            try
+            {
+                store.ImportFromFile(sourcePath, replace);
+                return true;
+            }
+            catch (DatabasePasswordRequiredException)
+            {
+                var password = PasswordPromptForm.Ask(
+                    "Clipman import password",
+                    "The selected Clipman import file is encrypted. Enter its history password.");
+                if (string.IsNullOrEmpty(password))
+                {
+                    return false;
+                }
+
+                try
+                {
+                    store.ImportFromFile(sourcePath, replace, password);
+                    return true;
+                }
+                catch (DatabasePasswordRequiredException ex)
+                {
+                    MessageBox.Show(ex.Message, "Clipman import", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Clipman could not import the selected file.\r\n\r\n" + ex.Message, "Clipman import", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
         }
 
         private static bool ConfirmReplace(string sourcePath)

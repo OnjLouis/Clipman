@@ -176,7 +176,7 @@
 
   <p><strong>Windows:</strong> Clipman runs in the notification area and opens the history window with the configured global hotkey. Windows Preferences includes Send To integration, Windows startup registration, command-line import/export support, and Windows-protected password remembering when explicitly enabled.</p>
 
-  <p><strong>Mac:</strong> Clipman is packaged as <code>Clipman.app</code> and runs as a menu bar app. Tester releases may be unsigned or ad-hoc signed; after unzipping, move or drag <code>Clipman.app</code> to <code>/Applications</code>. If macOS blocks the first launch, Control-click or Option-click the app and choose Open. With VoiceOver, use <code>VO+Shift+M</code> on the app in Finder for the same context menu, then choose Open.</p>
+  <p><strong>Mac:</strong> Clipman is packaged as <code>Clipman.app</code> and runs as a menu bar app. Release builds may be unsigned or ad-hoc signed; after unzipping, move or drag <code>Clipman.app</code> to <code>/Applications</code>. If macOS blocks the first launch, Control-click or Option-click the app and choose Open. With VoiceOver, use <code>VO+Shift+M</code> on the app in Finder for the same context menu, then choose Open.</p>
 
   <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
 
@@ -325,7 +325,7 @@
     <li><strong>Import and replace</strong> replaces the current clipboard database with the selected file on Windows. Mac currently imports into the existing history.</li>
     <li><strong>Export</strong> saves the current clipboard history as compressed <code>.clipdb</code>, JSON, or text on both platforms.</li>
   </ul>
-  <p>When a history password is saved, <code>.clipdb</code> imports and exports use the current history password. JSON and text exports are deliberately readable interchange formats, so use <code>.clipdb</code> when exporting private history that should stay encrypted.</p>
+  <p>When importing an encrypted <code>.clipdb</code>, Clipman asks for that import file's password if it is different from the current database password. When exporting a <code>.clipdb</code> from the app, Clipman asks whether to use the current history password, a new export-only password, or no password. If the current history database is password protected, Clipman asks you to re-enter the current history password before creating any <code>.clipdb</code> export, including an export that uses no password. JSON and text exports are deliberately readable interchange formats, so use <code>.clipdb</code> when exporting private history that should stay encrypted.</p>
 
   <p>Old Clipman and Ditto imports are Windows-only and read text entries only. They do not import images or every custom clipboard format. Imported entries are grouped as <strong>Imported from old Clipman</strong> or <strong>Imported from Ditto</strong> so they are easy to review after import.</p>
 
@@ -342,7 +342,7 @@
   <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, and <code>skip.wav</code>.</p>
 
   <h2 id="application-files">Application Files</h2>
-  <p>A normal Windows portable Clipman folder contains only the files needed to run the app. A Mac tester package contains <code>Clipman.app</code>, which bundles the executable, manual, sounds, and supporting resources inside the app package.</p>
+  <p>A normal Windows portable Clipman folder contains only the files needed to run the app. A Mac package contains <code>Clipman.app</code>, which bundles the executable, manual, sounds, and supporting resources inside the app package.</p>
   <table>
     <thead>
       <tr>
@@ -389,7 +389,7 @@
   <p>Press <code>Enter</code> on a file event to put its files back on the clipboard, ready to paste into Explorer, Finder, or another file-aware application. Press <code>Ctrl+C</code> on Windows or <code>Command+C</code> on Mac to copy the file paths as text, <code>Shift+Enter</code> to pin or unpin selected events, <code>Del</code> on Windows or <code>Command+Backspace</code> on Mac to remove selected unpinned events from file history, <code>F4</code> to view event details, or <code>Ctrl+Enter</code> on Windows and <code>Command+Enter</code> on Mac to go to one selected file or folder. Non-file events are informational; they can be reviewed, pinned, moved, or deleted, but they cannot be restored as files. Open diagnostics for a text report of the same events.</p>
 
   <h2 id="command-line">Command Line</h2>
-  <p>The command-line interface is currently Windows-focused. Mac tester builds are intended to be used through <code>Clipman.app</code>, the menu bar item, global hotkeys, and the history window.</p>
+  <p>The command-line interface is currently Windows-focused. The Mac app is intended to be used through <code>Clipman.app</code>, the menu bar item, global hotkeys, and the history window.</p>
   <table>
     <thead>
       <tr>
@@ -446,6 +446,14 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.7.1</h3>
+  <ul>
+    <li>Fixed importing encrypted <code>.clipdb</code> files into an unencrypted or empty Clipman session. Clipman now asks for the import file's history password instead of failing silently.</li>
+    <li>Added export password choices for <code>.clipdb</code> backups: use the current history password, set a new export-only password, or export without a password. When the current history is password protected, Clipman requires the current history password before creating any <code>.clipdb</code> export.</li>
+    <li>Fixed Mac <code>.clipdb</code> export filenames so the save dialog does not produce a duplicated <code>.clipdb.clipdb</code> extension.</li>
+    <li>Updated the manual and README wording so the Mac app is described as a full Clipman app and release asset.</li>
+  </ul>
+
   <h3>1.7.0</h3>
   <ul>
     <li>Added template entries. Mark a text entry as a template in Entry Properties and Clipman resolves date, time, timezone, operating system, and username variables when the entry is copied or quick-pasted. Closes <a href="https://github.com/OnjLouis/Clipman/issues/12">issue #12</a>.</li>

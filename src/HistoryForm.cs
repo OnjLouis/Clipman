@@ -2644,9 +2644,49 @@ namespace Clipman
                 dialog.Title = replace ? "Import and replace clipboard database" : "Import clipboard entries";
                 dialog.Filter = "Supported clipboard databases and text files|*.clipdb;*.json;*.txt;*.db;*.sqlite;*.sqlite3|All files|*.*";
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                store.ImportFromFile(dialog.FileName, replace);
+                if (!ImportSelectedFile(dialog.FileName, replace)) return;
+            }
+        }
+
+        private bool ImportSelectedFile(string fileName, bool replace)
+        {
+            try
+            {
+                store.ImportFromFile(fileName, replace);
                 Reload();
                 statusText.Text = replace ? "Imported replacement clipboard database." : "Imported clipboard entries.";
+                return true;
+            }
+            catch (DatabasePasswordRequiredException)
+            {
+                var password = PasswordPromptForm.Ask(
+                    "Clipman import password",
+                    "The selected Clipman import file is encrypted. Enter its history password.");
+                if (string.IsNullOrEmpty(password))
+                {
+                    statusText.Text = "Import cancelled. The selected file needs a history password.";
+                    return false;
+                }
+
+                try
+                {
+                    store.ImportFromFile(fileName, replace, password);
+                    Reload();
+                    statusText.Text = replace ? "Imported replacement clipboard database." : "Imported clipboard entries.";
+                    return true;
+                }
+                catch (DatabasePasswordRequiredException ex)
+                {
+                    MessageBox.Show(this, ex.Message, "Clipman import", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    statusText.Text = "Import failed. The history password did not unlock the selected file.";
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Clipman could not import the selected file.\r\n\r\n" + ex.Message, "Clipman import", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                statusText.Text = "Import failed.";
+                return false;
             }
         }
 
@@ -2663,9 +2703,20 @@ namespace Clipman
                 {
                     File.WriteAllText(dialog.FileName, string.Join("\r\n---\r\n", entries.Select(e => e.Text)), System.Text.Encoding.UTF8);
                 }
+                else if (Path.GetExtension(dialog.FileName).Equals(".clipdb", StringComparison.OrdinalIgnoreCase))
+                {
+                    bool useCurrentPassword;
+                    string exportPassword;
+                    if (!ExportPasswordForm.Ask(this, store.HasCurrentPassword(), store.CurrentPasswordMatches, out useCurrentPassword, out exportPassword))
+                    {
+                        statusText.Text = "Export cancelled.";
+                        return;
+                    }
+                    store.ExportToFile(dialog.FileName, useCurrentPassword ? null : exportPassword);
+                }
                 else
                 {
-                    store.ExportToFile(dialog.FileName);
+                    store.ExportToFile(dialog.FileName, string.Empty);
                 }
 
                 statusText.Text = "Exported clipboard entries.";

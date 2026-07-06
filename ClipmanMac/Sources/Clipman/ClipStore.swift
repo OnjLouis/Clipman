@@ -279,14 +279,14 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    func importEntries(from url: URL, completion: @escaping @Sendable (Result<Int, Error>) -> Void) {
+    func importEntries(from url: URL, importPassword: String? = nil, completion: @escaping @Sendable (Result<Int, Error>) -> Void) {
         queue.async {
             do {
                 guard self.mergeLatestBeforeWriteLocked() else {
                     DispatchQueue.main.async { completion(.failure(ClipDatabaseError.passwordRequired)) }
                     return
                 }
-                let imported = try self.loadImportedEntriesLocked(from: url)
+                let imported = try self.loadImportedEntriesLocked(from: url, importPassword: importPassword)
                 var added = 0
                 for var entry in imported where !entry.Text.isEmpty {
                     if self.database.Entries.contains(where: { $0.Text == entry.Text }) { continue }
@@ -325,7 +325,7 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    func exportDatabase(to url: URL, completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
+    func exportDatabase(to url: URL, exportPassword: String? = nil, completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
         queue.async {
             do {
                 guard self.mergeLatestBeforeWriteLocked() else {
@@ -339,7 +339,7 @@ final class ClipStore: @unchecked Sendable {
                 } else {
                     var snapshot = self.database
                     snapshot.UpdatedUnixMs = TimeUtil.nowUnixMs()
-                    try ClipDatabaseFile.saveAtomic(url, database: snapshot, password: self.exportPassword(for: url))
+                    try ClipDatabaseFile.saveAtomic(url, database: snapshot, password: exportPassword ?? self.exportPassword(for: url))
                 }
                 DispatchQueue.main.async { completion(.success(())) }
             } catch {
@@ -376,7 +376,7 @@ final class ClipStore: @unchecked Sendable {
         queue.sync { password }
     }
 
-    private func loadImportedEntriesLocked(from url: URL) throws -> [ClipEntry] {
+    private func loadImportedEntriesLocked(from url: URL, importPassword: String? = nil) throws -> [ClipEntry] {
         if url.pathExtension.caseInsensitiveCompare("txt") == .orderedSame {
             let content = try String(contentsOf: url, encoding: .utf8)
             return content
@@ -395,7 +395,7 @@ final class ClipStore: @unchecked Sendable {
                 }
         }
 
-        let imported = try ClipDatabaseFile.load(url, password: exportPassword(for: url))
+        let imported = try ClipDatabaseFile.load(url, password: importPassword ?? exportPassword(for: url))
         return imported.Entries.filter { !$0.Text.isEmpty }
     }
 

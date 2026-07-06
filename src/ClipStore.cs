@@ -338,6 +338,17 @@ namespace Clipman
         public void ImportFromFile(string path, bool replace)
         {
             var imported = LoadEntriesFromFile(path, CurrentPassword());
+            ImportEntries(imported, replace);
+        }
+
+        public void ImportFromFile(string path, bool replace, string importPassword)
+        {
+            var imported = LoadEntriesFromFile(path, importPassword ?? string.Empty);
+            ImportEntries(imported, replace);
+        }
+
+        private void ImportEntries(List<ClipEntry> imported, bool replace)
+        {
             if (replace)
             {
                 ReplaceAll(imported);
@@ -361,11 +372,26 @@ namespace Clipman
 
         public void ExportToFile(string path)
         {
+            ExportToFile(path, CurrentPassword());
+        }
+
+        public void ExportToFile(string path, string exportPassword)
+        {
             lock (sync)
             {
                 database.UpdatedUnixMs = TimeUtil.NowUnixMs();
-                ClipDatabaseFile.SaveAtomic(path, database, CurrentPassword());
+                ClipDatabaseFile.SaveAtomic(path, database, exportPassword == null ? CurrentPassword() : exportPassword);
             }
+        }
+
+        public bool HasCurrentPassword()
+        {
+            return !string.IsNullOrEmpty(CurrentPassword());
+        }
+
+        public bool CurrentPasswordMatches(string password)
+        {
+            return string.Equals(CurrentPassword(), password ?? string.Empty, StringComparison.Ordinal);
         }
 
         public bool TogglePinned(string id)

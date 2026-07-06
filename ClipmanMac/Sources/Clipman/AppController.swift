@@ -3,6 +3,12 @@ import Carbon
 import ClipmanCore
 import UniformTypeIdentifiers
 
+private enum ExportPasswordChoice {
+    case current
+    case password(String)
+    case none
+}
+
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, FileHistoryStoreDelegate, ClipboardMonitorDelegate, HistoryWindowControllerDelegate, PreferencesWindowControllerDelegate {
     private let settingsStore = SettingsStore()
@@ -468,7 +474,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         panel.canChooseFiles = true
         panel.allowedContentTypes = supportedImportExportTypes()
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        store.importEntries(from: url) { [weak self] result in
+        importEntries(from: url, importPassword: nil)
+    }
+
+    private func importEntries(from url: URL, importPassword: String?) {
+        store.importEntries(from: url, importPassword: importPassword) { [weak self] result in
             Task { @MainActor in
                 switch result {
                 case .success(let count):
@@ -476,10 +486,37 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                         title: "Import Complete",
                         message: count == 1 ? "Imported one clipboard entry." : "Imported \(count) clipboard entries."
                     )
-                case .failure:
-                    break
+                case .failure(let error):
+                    guard self?.isImportPasswordError(error) == true else { return }
+                    guard let password = self?.promptForImportPassword(path: url.path) else { return }
+                    self?.importEntries(from: url, importPassword: password)
                 }
             }
+        }
+    }
+
+    private func promptForImportPassword(path: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Import Password Required"
+        alert.informativeText = "The selected Clipman import file is encrypted. Enter its history password."
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.setAccessibilityLabel("Import file history password")
+        alert.accessoryView = field
+        let result = alert.runModal()
+        guard result == .alertFirstButtonReturn else { return nil }
+        let password = field.stringValue
+        return password.isEmpty ? nil : password
+    }
+
+    private func isImportPasswordError(_ error: Error) -> Bool {
+        guard let databaseError = error as? ClipDatabaseError else { return false }
+        switch databaseError {
+        case .passwordRequired, .incorrectPassword:
+            return true
+        default:
+            return false
         }
     }
 
@@ -487,10 +524,21 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         let panel = NSSavePanel()
         panel.title = "Export Clipboard Entries"
         panel.prompt = "Export"
-        panel.nameFieldStringValue = "clipman-export.clipdb"
+        panel.nameFieldStringValue = "clipman-export"
         panel.allowedContentTypes = supportedImportExportTypes()
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        store.exportDatabase(to: url) { [weak self] result in
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
+        let url = removingDuplicatePathExtension(from: selectedURL)
+        guard let passwordChoice = chooseExportPassword(for: url) else { return }
+        let exportPassword: String?
+        switch passwordChoice {
+        case .current:
+            exportPassword = nil
+        case .password(let password):
+            exportPassword = password
+        case .none:
+            exportPassword = ""
+        }
+        store.exportDatabase(to: url, exportPassword: exportPassword) { [weak self] result in
             Task { @MainActor in
                 switch result {
                 case .success:
@@ -500,6 +548,107 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 }
             }
         }
+    }
+
+    private func removingDuplicatePathExtension(from url: URL) -> URL {
+        let fileName = url.lastPathComponent
+        let pathExtension = url.pathExtension
+        guard !pathExtension.isEmpty else { return url }
+        let duplicatedSuffix = ".\(pathExtension).\(pathExtension)"
+        guard fileName.lowercased().hasSuffix(duplicatedSuffix.lowercased()) else { return url }
+        return url.deletingPathExtension()
+    }
+
+    private func chooseExportPassword(for url: URL) -> ExportPasswordChoice? {
+        guard url.pathExtension.caseInsensitiveCompare("clipdb") == .orderedSame else {
+            return ExportPasswordChoice.none
+        }
+
+        while true {
+            let currentPasswordAvailable = !store.currentPassword().isEmpty
+            let alert = NSAlert()
+            alert.messageText = "Export Password"
+            alert.informativeText = "Choose how to protect this .clipdb export."
+            alert.addButton(withTitle: "Continue")
+            alert.addButton(withTitle: "Cancel")
+
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 360, height: 26), pullsDown: false)
+            if currentPasswordAvailable {
+                popup.addItem(withTitle: "Use current history password")
+            }
+            popup.addItem(withTitle: "Use a new export password")
+            popup.addItem(withTitle: "Use no password")
+            popup.setAccessibilityLabel("Export password choice")
+            alert.accessoryView = popup
+
+            guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+
+            let selection = popup.titleOfSelectedItem ?? ""
+            if selection == "Use current history password" {
+                guard confirmCurrentExportPassword() else { continue }
+                return .current
+            }
+            if selection == "Use no password" {
+                if currentPasswordAvailable {
+                    guard confirmCurrentExportPassword() else { continue }
+                }
+                return ExportPasswordChoice.none
+            }
+            guard let password = promptForNewExportPassword() else { continue }
+            if currentPasswordAvailable {
+                guard confirmCurrentExportPassword() else { continue }
+            }
+            return .password(password)
+        }
+    }
+
+    private func confirmCurrentExportPassword() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Confirm History Password"
+        alert.informativeText = "Enter the current history password to create this export."
+        alert.addButton(withTitle: "Export")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.setAccessibilityLabel("Current history password")
+        alert.accessoryView = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        if field.stringValue == store.currentPassword() {
+            return true
+        }
+        showInformationalAlert(title: "Export Password", message: "The current history password did not match. The export was not created.")
+        return false
+    }
+
+    private func promptForNewExportPassword() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "New Export Password"
+        alert.informativeText = "Enter and confirm the password for this export file."
+        alert.addButton(withTitle: "Export")
+        alert.addButton(withTitle: "Cancel")
+
+        let passwordField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        passwordField.placeholderString = "New export password"
+        passwordField.setAccessibilityLabel("New export password")
+        let confirmField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        confirmField.placeholderString = "Confirm new export password"
+        confirmField.setAccessibilityLabel("Confirm new export password")
+        let stack = NSStackView(views: [passwordField, confirmField])
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.frame = NSRect(x: 0, y: 0, width: 360, height: 56)
+        alert.accessoryView = stack
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let password = passwordField.stringValue
+        if password.isEmpty {
+            showInformationalAlert(title: "Export Password", message: "Enter an export password, or choose Use no password.")
+            return nil
+        }
+        if password != confirmField.stringValue {
+            showInformationalAlert(title: "Export Password", message: "The export password and confirmation do not match.")
+            return nil
+        }
+        return password
     }
 
     func historyWindow(_ controller: HistoryWindowController, didCleanURLTracking entries: [ClipEntry]) {
