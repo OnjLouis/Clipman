@@ -287,7 +287,7 @@
 
   <p>Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. To intentionally send an existing selected entry to other machines, use <strong>Push to other machines</strong> from the entry menu, or press <code>Ctrl+P</code> on Windows and <code>Command+P</code> on Mac. This creates a fresh shared-history event from the selected text so other opted-in machines can receive it as the latest remote text. When duplicate removal is enabled, Clipman refreshes the selected entry instead of leaving an extra duplicate behind. This preference is machine-specific and does not change the shared database format.</p>
 
-  <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
+  <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. Background clipboard captures do not display blocking error dialogs while storage is missing. On Mac, Clipman pauses monitoring and adds a Retry Storage command to the status menu until the data folder returns. On Windows, the notification-area menu and tooltip report that storage is unavailable and offer Retry storage. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
 
   <p><strong>History password:</strong> Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed <code>.clipdb</code> storage without password encryption. If you enter and confirm a history password, the database is encrypted with AES and checked with a message authentication code before loading. The password is not stored inside the shared <code>.clipdb</code> file.</p>
 
@@ -446,6 +446,11 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.7.2</h3>
+  <ul>
+    <li>Improved temporarily unavailable shared-folder handling. If a cloud folder, network share, or mounted NAS disappears during background clipboard capture, Clipman no longer shows blocking storage alerts or plays the success sound for a failed write. Mac pauses monitoring and offers Retry Storage from the status menu; Windows reports the unavailable storage in the notification-area menu and offers Retry storage.</li>
+  </ul>
+
   <h3>1.7.1</h3>
   <ul>
     <li>Fixed importing encrypted <code>.clipdb</code> files into an unencrypted or empty Clipman session. Clipman now asks for the import file's history password instead of failing silently.</li>

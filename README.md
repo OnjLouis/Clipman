@@ -86,7 +86,7 @@ File and non-text clipboard history is stored separately in a machine-specific f
 
 To share a database between machines, open Options > Preferences on each machine and set the data folder to the same synced or network-shared folder. Clipman uses `clipman-history.clipdb` inside that folder. When that file changes, Clipman reloads it without needing to restart. Existing explicit `.clipdb` paths remain readable for compatibility, but the Preferences Browse button now chooses a folder so users do not accidentally select a machine-specific file-history database.
 
-If the shared database file is missing but its folder is available, Clipman creates it when it next saves. If the folder or drive is temporarily unavailable, Clipman keeps running and reports the storage problem in diagnostics; when the location returns, it merges the existing database before saving.
+If the shared database file is missing but its folder is available, Clipman creates it when it next saves. If the folder or drive is temporarily unavailable, Clipman keeps running and reports the storage problem in diagnostics. Background clipboard captures do not display blocking error dialogs while storage is missing. On Mac, Clipman pauses monitoring and adds a Retry Storage command to the status menu until the data folder returns. On Windows, the notification-area menu and tooltip report that storage is unavailable and offer Retry storage. When the location returns, Clipman merges the existing database before saving.
 
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
 
@@ -117,6 +117,10 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.7.2
+
+- Improved temporarily unavailable shared-folder handling. If a cloud folder, network share, or mounted NAS disappears during background clipboard capture, Clipman no longer shows blocking storage alerts or plays the success sound for a failed write. Mac pauses monitoring and offers Retry Storage from the status menu; Windows reports the unavailable storage in the notification-area menu and offers Retry storage.
 
 ### 1.7.1
 

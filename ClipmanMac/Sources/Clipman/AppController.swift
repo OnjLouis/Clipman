@@ -30,6 +30,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var cancelledPasswordPaths = Set<String>()
     private var remoteClipboardBaseline: (id: String, stamp: Int64)?
     private var updateTimer: Timer?
+    private var storageUnavailableReasons: [String: String] = [:]
+    private var monitoringPausedForStorage = false
+
+    private var storageUnavailableReason: String {
+        storageUnavailableReasons.values.sorted().joined(separator: "; ")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings = settingsStore.load()
@@ -121,9 +127,18 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     private func rebuildMenu() {
         let menu = NSMenu(title: "Clipman")
+        if !storageUnavailableReason.isEmpty {
+            let item = NSMenuItem(title: "Storage unavailable", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            menu.addItem(NSMenuItem(title: "Retry Storage", action: #selector(retryStorage(_:)), keyEquivalent: ""))
+            menu.addItem(.separator())
+        }
         menu.addItem(NSMenuItem(title: "Show History", action: #selector(showHistory(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
-        let monitorTitle = settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On"
+        let monitorTitle = storageUnavailableReason.isEmpty
+            ? (settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On")
+            : "Monitoring Paused Until Storage Returns"
         menu.addItem(NSMenuItem(title: monitorTitle, action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Manual", action: #selector(openManual(_:)), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -165,6 +180,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     @objc private func toggleMonitoring(_ sender: Any?) {
+        guard storageUnavailableReason.isEmpty else {
+            retryStorage(sender)
+            return
+        }
         settings.monitoringEnabled.toggle()
         monitor.isEnabled = settings.monitoringEnabled
         try? settingsStore.save(settings)
@@ -319,13 +338,33 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, sourceApplication: String) {
-        store.addText(text, group: sourceApplication)
-        sounds.play(.copy)
+        guard storageUnavailableReason.isEmpty else {
+            sounds.play(.skip)
+            return
+        }
+        store.addText(text, group: sourceApplication) { [weak self] saved in
+            guard let self else { return }
+            if saved {
+                self.sounds.play(.copy)
+            } else if self.storageUnavailableReason.isEmpty {
+                self.sounds.play(.skip)
+            }
+        }
     }
 
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool) {
-        fileStore.add(files: files, formats: formats, containsText: containsText)
-        sounds.play(.copy)
+        guard storageUnavailableReason.isEmpty else {
+            sounds.play(.skip)
+            return
+        }
+        fileStore.add(files: files, formats: formats, containsText: containsText) { [weak self] saved in
+            guard let self else { return }
+            if saved {
+                self.sounds.play(.copy)
+            } else if self.storageUnavailableReason.isEmpty {
+                self.sounds.play(.skip)
+            }
+        }
     }
 
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor) {
@@ -333,18 +372,18 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipStoreDidChange() {
+        clearStorageFailureIfNeeded(area: "text history")
         historyWindow.update(entries: sortedTextEntries())
         copyLatestRemoteTextIfNeeded()
     }
 
     func fileHistoryStoreDidChange() {
+        clearStorageFailureIfNeeded(area: "file history")
         historyWindow.update(fileEvents: sortedFileEvents())
     }
 
     func fileHistoryStoreDidFail(error: Error) {
-        let alert = NSAlert(error: error)
-        alert.messageText = "Clipman File History Error"
-        alert.runModal()
+        handleStorageFailure(error: error, area: "file history")
     }
 
     func clipStoreNeedsPassword(for path: String) -> String? {
@@ -376,9 +415,69 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipStoreDidFail(error: Error) {
+        if isRecoverableStorageError(error) {
+            handleStorageFailure(error: error, area: "text history")
+            return
+        }
         let alert = NSAlert(error: error)
         alert.messageText = "Clipman Database Error"
         alert.runModal()
+    }
+
+    @objc private func retryStorage(_ sender: Any?) {
+        store.load()
+        fileStore.load()
+    }
+
+    private func handleStorageFailure(error: Error, area: String) {
+        guard isRecoverableStorageError(error) else {
+            let alert = NSAlert(error: error)
+            alert.messageText = area == "file history" ? "Clipman File History Error" : "Clipman Database Error"
+            alert.runModal()
+            return
+        }
+
+        let message = "\(area) storage is unavailable: \(error.localizedDescription)"
+        let wasAvailable = storageUnavailableReason.isEmpty
+        storageUnavailableReasons[area] = message
+        if settings.monitoringEnabled && monitor.isEnabled {
+            monitor.isEnabled = false
+            monitoringPausedForStorage = true
+        }
+        statusItem?.button?.toolTip = "Clipman: \(storageUnavailableReason)"
+        rebuildMenu()
+        if wasAvailable {
+            sounds.play(.skip)
+        }
+    }
+
+    private func clearStorageFailureIfNeeded(area: String) {
+        guard !storageUnavailableReason.isEmpty else { return }
+        storageUnavailableReasons.removeValue(forKey: area)
+        guard storageUnavailableReason.isEmpty else {
+            statusItem?.button?.toolTip = "Clipman: \(storageUnavailableReason)"
+            rebuildMenu()
+            return
+        }
+        statusItem?.button?.toolTip = "Clipman"
+        if monitoringPausedForStorage {
+            monitoringPausedForStorage = false
+            monitor.isEnabled = settings.monitoringEnabled
+        }
+        rebuildMenu()
+    }
+
+    private func isRecoverableStorageError(_ error: Error) -> Bool {
+        if let databaseError = error as? ClipDatabaseError {
+            switch databaseError {
+            case .passwordRequired, .incorrectPassword:
+                return false
+            default:
+                return true
+            }
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain || nsError.domain == NSPOSIXErrorDomain
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry) {

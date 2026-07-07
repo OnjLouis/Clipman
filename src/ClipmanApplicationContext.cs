@@ -492,6 +492,13 @@ namespace Clipman
 
             var group = settings.AutoGroupByApp ? FriendlyProcessName(sourceProcessName) : string.Empty;
             store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group);
+            if (IsStorageUnavailable())
+            {
+                sounds.Skip(settings.SoundsEnabled);
+                UpdateTray();
+                return;
+            }
+
             sounds.Copy(settings.SoundsEnabled);
         }
 
@@ -681,12 +688,32 @@ namespace Clipman
         private ContextMenuStrip BuildTrayMenu()
         {
             var menu = new ContextMenuStrip();
+            var storageMessage = StorageUnavailableMessage();
+            if (!string.IsNullOrWhiteSpace(storageMessage))
+            {
+                var unavailable = new ToolStripMenuItem("Storage unavailable")
+                {
+                    Enabled = false,
+                    ToolTipText = storageMessage
+                };
+                menu.Items.Add(unavailable);
+                menu.Items.Add("&Retry storage", null, (s, e) => RetryStorage());
+                menu.Items.Add("-");
+            }
+
             menu.Items.Add("&Show or hide history\t" + settings.ShowHistoryHotkey, null, (s, e) => ToggleHistoryWindow());
             menu.Items.Add((settings.Active ? "Turn &off" : "Turn &on") + "\t" + settings.ToggleActiveHotkey, null, (s, e) => ToggleActive());
             menu.Items.Add("&Preferences...", null, (s, e) => ShowPreferences());
             menu.Items.Add("-");
             menu.Items.Add("E&xit", null, (s, e) => ExitThread());
             return menu;
+        }
+
+        private void RetryStorage()
+        {
+            store.Reload();
+            fileEventStore.Reload();
+            UpdateTray();
         }
 
         private void RegisterHotkeys()
@@ -1335,7 +1362,40 @@ namespace Clipman
 
         private string TrayText()
         {
+            var storageMessage = StorageUnavailableMessage();
+            if (!string.IsNullOrWhiteSpace(storageMessage))
+            {
+                return ShortTrayText("Clipman: storage unavailable");
+            }
+
             return settings.Active ? "Clipman: on" : "Clipman: off";
+        }
+
+        private bool IsStorageUnavailable()
+        {
+            return !string.IsNullOrWhiteSpace(StorageUnavailableMessage());
+        }
+
+        private string StorageUnavailableMessage()
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(store.LastStorageError))
+            {
+                parts.Add("Text history: " + store.LastStorageError);
+            }
+
+            if (!string.IsNullOrWhiteSpace(fileEventStore.LastStorageError))
+            {
+                parts.Add("File history: " + fileEventStore.LastStorageError);
+            }
+
+            return string.Join("; ", parts);
+        }
+
+        private static string ShortTrayText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
+            return text.Length <= 63 ? text : text.Substring(0, 63);
         }
 
         private void UpdateTray()

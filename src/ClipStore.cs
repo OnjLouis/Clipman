@@ -83,6 +83,17 @@ namespace Clipman
             }
         }
 
+        public void Reload()
+        {
+            lock (sync)
+            {
+                LoadLocked();
+                ResetWatcherLocked();
+            }
+
+            OnChanged();
+        }
+
         public List<ClipEntry> GetEntries()
         {
             return GetEntries("LastUsed", "All", true);

@@ -41,6 +41,17 @@ namespace Clipman
             return GetEvents("Manual", false);
         }
 
+        public void Reload()
+        {
+            lock (sync)
+            {
+                LoadLocked();
+                ResetWatcherLocked();
+            }
+
+            OnChanged();
+        }
+
         public List<ClipboardEventSummary> GetEvents(string sortMode, bool descending)
         {
             lock (sync)

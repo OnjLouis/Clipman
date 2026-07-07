@@ -53,14 +53,24 @@ final class FileHistoryStore: @unchecked Sendable {
         queue.sync { database.Events.count }
     }
 
-    func add(files: [String], formats: [String], containsText: Bool) {
+    func add(files: [String], formats: [String], containsText: Bool, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         let cleanFiles = files
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard !cleanFiles.isEmpty else { return }
+        guard !cleanFiles.isEmpty else {
+            Task { @MainActor in
+                completion?(false)
+            }
+            return
+        }
 
         queue.async {
-            guard self.loadLocked() else { return }
+            guard self.loadLocked() else {
+                Task { @MainActor in
+                    completion?(false)
+                }
+                return
+            }
             let now = TimeUtil.nowUnixMs()
             var event = FileClipboardEvent(
                 CapturedUnixMs: now,
@@ -85,8 +95,13 @@ final class FileHistoryStore: @unchecked Sendable {
             self.database.Events.insert(event, at: 0)
             self.normalizeLocked()
             self.trimLocked()
-            self.saveLocked()
-            DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidChange() }
+            let saved = self.saveLocked()
+            Task { @MainActor in
+                if saved {
+                    self.delegate?.fileHistoryStoreDidChange()
+                }
+                completion?(saved)
+            }
         }
     }
 
@@ -196,13 +211,16 @@ final class FileHistoryStore: @unchecked Sendable {
         }
     }
 
-    private func saveLocked() {
-        guard !passwordLocked else { return }
+    @discardableResult
+    private func saveLocked() -> Bool {
+        guard !passwordLocked else { return false }
         do {
             database.UpdatedUnixMs = TimeUtil.nowUnixMs()
             try ClipDatabaseFile.saveAtomicCodable(databaseURL, value: database, password: password)
+            return true
         } catch {
             DispatchQueue.main.async { self.delegate?.fileHistoryStoreDidFail(error: error) }
+            return false
         }
     }
 

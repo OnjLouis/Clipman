@@ -29,17 +29,21 @@ final class ClipStore: @unchecked Sendable {
         queue.async {
             self.databaseURL = url
             self.password = password
-            self.loadLocked()
+            let loaded = self.loadLocked()
             self.resetWatcherLocked()
-            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            if loaded {
+                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            }
         }
     }
 
     func load() {
         queue.async {
-            self.loadLocked()
+            let loaded = self.loadLocked()
             self.resetWatcherLocked()
-            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            if loaded {
+                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            }
         }
     }
 
@@ -79,11 +83,21 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    func addText(_ text: String, group: String = "", maxEntries: Int = 1000) {
-        guard !text.isEmpty else { return }
+    func addText(_ text: String, group: String = "", maxEntries: Int = 1000, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+        guard !text.isEmpty else {
+            Task { @MainActor in
+                completion?(false)
+            }
+            return
+        }
         let trimmedGroup = group.trimmingCharacters(in: .whitespacesAndNewlines)
         queue.async {
-            guard self.mergeLatestBeforeWriteLocked() else { return }
+            guard self.mergeLatestBeforeWriteLocked() else {
+                Task { @MainActor in
+                    completion?(false)
+                }
+                return
+            }
             let now = TimeUtil.nowUnixMs()
             if let index = self.database.Entries.firstIndex(where: { $0.Text == text }) {
                 self.database.Entries[index].LastUsedUnixMs = now
@@ -102,8 +116,13 @@ final class ClipStore: @unchecked Sendable {
                 ))
             }
             self.pruneLocked(maxEntries: maxEntries)
-            self.saveLocked()
-            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            let saved = self.saveLocked()
+            Task { @MainActor in
+                if saved {
+                    self.delegate?.clipStoreDidChange()
+                }
+                completion?(saved)
+            }
         }
     }
 
@@ -403,13 +422,15 @@ final class ClipStore: @unchecked Sendable {
         url.pathExtension.caseInsensitiveCompare("clipdb") == .orderedSame ? password : ""
     }
 
-    private func loadLocked() {
+    private func loadLocked() -> Bool {
         do {
             _ = try SyncConflictResolver.resolveDatabaseConflicts(databaseURL: databaseURL, password: password)
             database = try loadDatabaseWithPasswordLocked()
             normalizeManualOrderLocked()
+            return true
         } catch {
             DispatchQueue.main.async { self.delegate?.clipStoreDidFail(error: error) }
+            return false
         }
     }
 
@@ -438,13 +459,16 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    private func saveLocked() {
+    @discardableResult
+    private func saveLocked() -> Bool {
         do {
             database.UpdatedUnixMs = TimeUtil.nowUnixMs()
             try ClipDatabaseFile.saveAtomic(databaseURL, database: database, password: password)
             resetWatcherLocked()
+            return true
         } catch {
             DispatchQueue.main.async { self.delegate?.clipStoreDidFail(error: error) }
+            return false
         }
     }
 
@@ -538,9 +562,11 @@ final class ClipStore: @unchecked Sendable {
         reloadWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.loadLocked()
+            let loaded = self.loadLocked()
             self.resetWatcherLocked()
-            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            if loaded {
+                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            }
         }
         reloadWorkItem = workItem
         queue.asyncAfter(deadline: .now() + .milliseconds(500), execute: workItem)
