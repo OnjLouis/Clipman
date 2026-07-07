@@ -26,11 +26,21 @@ namespace Clipman
         public void Off(bool enabled) { Play("off.wav", enabled); }
         public void Remote(bool enabled) { Play("remote.wav", enabled); }
         public void Skip(bool enabled) { Play("skip.wav", enabled); }
+        public void Exclude(bool enabled) { Play("exclude.wav", enabled, "skip.wav"); }
 
         private void Play(string fileName, bool enabled)
         {
+            Play(fileName, enabled, string.Empty);
+        }
+
+        private void Play(string fileName, bool enabled, string fallbackFileName)
+        {
             if (!enabled) return;
             var path = PreferredSoundPath(fileName);
+            if (!File.Exists(path) && !string.IsNullOrWhiteSpace(fallbackFileName))
+            {
+                path = PreferredSoundPath(fallbackFileName);
+            }
             if (!File.Exists(path)) return;
             try
             {

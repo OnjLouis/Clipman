@@ -286,6 +286,8 @@ namespace Clipman
             settings.AutoRemoveUrlTracking = updated.AutoRemoveUrlTracking;
             settings.AutoRemoveUnavailableFileHistoryEvents = updated.AutoRemoveUnavailableFileHistoryEvents;
             settings.DiagnosticsFileHistoryLimit = updated.DiagnosticsFileHistoryLimit;
+            settings.SensitiveDataMode = SensitiveDataExclusion.NormalizeMode(updated.SensitiveDataMode);
+            settings.SensitiveDataPresetIds = updated.SensitiveDataPresetIds == null ? new List<string>() : new List<string>(updated.SensitiveDataPresetIds);
             settings.RunAtStartup = updated.RunAtStartup;
             settings.UpdateCheckFrequency = updated.UpdateCheckFrequency;
             settings.InstallUpdatesSilently = updated.InstallUpdatesSilently;
@@ -469,6 +471,13 @@ namespace Clipman
 
             if (string.IsNullOrEmpty(text))
             {
+                return;
+            }
+
+            var sensitiveMatch = SensitiveDataExclusion.FindMatch(text, settings);
+            if (sensitiveMatch != null)
+            {
+                sounds.Exclude(settings.SoundsEnabled);
                 return;
             }
 
@@ -949,6 +958,8 @@ namespace Clipman
                 "Duplicate mode: " + settings.DuplicateMode + "\r\n" +
                 "Auto group by app: " + settings.AutoGroupByApp + "\r\n" +
                 "Auto remove URL tracking: " + settings.AutoRemoveUrlTracking + "\r\n" +
+                "Sensitive data mode: " + SensitiveDataExclusion.NormalizeMode(settings.SensitiveDataMode) + "\r\n" +
+                "Sensitive data presets: " + SensitiveDataPresetSummary() + "\r\n" +
                 "Run at startup: " + settings.RunAtStartup + "\r\n" +
                 "Startup registration present: " + StartupRegistration.IsEnabled() + "\r\n" +
                 "Update check frequency: " + settings.UpdateCheckFrequency + "\r\n" +
@@ -963,6 +974,20 @@ namespace Clipman
                 "Maximum age: " + (settings.MaxHistoryDays <= 0 ? "No limit" : settings.MaxHistoryDays + " days") + "\r\n" +
                 "Ignored applications: " + ignored + "\r\n\r\n" +
                 BuildRecentClipboardEventsText();
+        }
+
+        private string SensitiveDataPresetSummary()
+        {
+            if (settings.SensitiveDataPresetIds == null || settings.SensitiveDataPresetIds.Count == 0)
+            {
+                return "None";
+            }
+
+            var names = SensitiveDataExclusion.BuiltInPresets
+                .Where(p => settings.SensitiveDataPresetIds.Any(id => string.Equals(id, p.Id, StringComparison.OrdinalIgnoreCase)))
+                .Select(p => p.Name)
+                .ToList();
+            return names.Count == 0 ? "None" : string.Join(", ", names);
         }
 
         private string BuildRecentClipboardEventsText()

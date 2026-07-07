@@ -60,6 +60,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let autoCopyRemoteCheckbox = NSButton(checkboxWithTitle: "Copy latest remote text to this Mac clipboard", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
     private let updateFrequencyPopup = NSPopUpButton()
+    private let sensitiveDataModePopup = NSPopUpButton()
+    private var sensitiveDataPresetCheckboxes: [String: NSButton] = [:]
     private let showHotkeyField = HotkeyCaptureField()
     private let toggleHotkeyField = HotkeyCaptureField()
     private let passwordField = NSSecureTextField()
@@ -71,7 +73,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         self.historyIsEncrypted = historyIsEncrypted
         self.rememberedPasswordExists = rememberedPasswordExists
         let window = PreferencesWindow(
-            contentRect: NSRect(x: 140, y: 140, width: 760, height: 660),
+            contentRect: NSRect(x: 140, y: 120, width: 760, height: 760),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -151,6 +153,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         installUpdatesSilentlyCheckbox.setAccessibilityHelp("When checked, Clipman installs available Mac updates in the background and relaunches itself.")
         grid.addRow(with: [NSGridCell.emptyContentView, installUpdatesSilentlyCheckbox])
 
+        sensitiveDataModePopup.addItems(withTitles: ["Off", "Exclude from history"])
+        sensitiveDataModePopup.setAccessibilityLabel("Sensitive data mode")
+        addRow("Sensitive data mode", sensitiveDataModePopup)
+        addSensitiveDataPresetsRow(to: grid)
+
         let saveButton = button(title: "Save and Close", action: #selector(saveClicked))
         let buttonStack = NSStackView(views: [saveButton])
         buttonStack.orientation = .horizontal
@@ -195,6 +202,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         autoCopyRemoteCheckbox.state = settings.autoCopyLatestRemoteText ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
         updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
+        sensitiveDataModePopup.selectItem(withTitle: displaySensitiveDataMode(settings.sensitiveDataMode))
+        let sensitiveIds = Set(settings.sensitiveDataPresetIds)
+        for (id, checkbox) in sensitiveDataPresetCheckboxes {
+            checkbox.state = sensitiveIds.contains(id) ? .on : .off
+        }
         showHotkeyField.descriptor = settings.showHistoryHotkey
         toggleHotkeyField.descriptor = settings.toggleMonitoringHotkey
         passwordField.stringValue = ""
@@ -237,6 +249,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.autoCopyLatestRemoteText = autoCopyRemoteCheckbox.state == .on
         settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on
         settings.updateCheckFrequency = storedUpdateFrequency(updateFrequencyPopup.titleOfSelectedItem ?? "Never")
+        settings.sensitiveDataMode = storedSensitiveDataMode(sensitiveDataModePopup.titleOfSelectedItem ?? "Off")
+        settings.sensitiveDataPresetIds = sensitiveDataPresetCheckboxes
+            .filter { $0.value.state == .on }
+            .map(\.key)
+            .sorted()
         settings.showHistoryHotkey = show
         settings.toggleMonitoringHotkey = toggle
         settings.ignoredApplications = normalizedIgnoredApplications(ignoredApplicationsView.string)
@@ -328,6 +345,16 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         }
     }
 
+    private func displaySensitiveDataMode(_ value: String) -> String {
+        SensitiveDataExclusion.normalizeMode(value) == SensitiveDataExclusion.modeExclude ? "Exclude from history" : "Off"
+    }
+
+    private func storedSensitiveDataMode(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Exclude from history") == .orderedSame
+            ? SensitiveDataExclusion.modeExclude
+            : SensitiveDataExclusion.modeOff
+    }
+
     private func addIgnoredApplicationsRow(to grid: NSGridView) {
         let labelView = NSTextField(labelWithString: "Ignored applications")
         labelView.alignment = .right
@@ -350,6 +377,30 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         note.textColor = .secondaryLabelColor
         note.lineBreakMode = .byWordWrapping
         note.maximumNumberOfLines = 2
+        grid.addRow(with: [NSGridCell.emptyContentView, note])
+    }
+
+    private func addSensitiveDataPresetsRow(to grid: NSGridView) {
+        let labelView = NSTextField(labelWithString: "Exclusion presets")
+        labelView.alignment = .right
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        sensitiveDataPresetCheckboxes.removeAll()
+        for preset in SensitiveDataExclusion.builtInPresets {
+            let checkbox = NSButton(checkboxWithTitle: preset.name, target: nil, action: nil)
+            checkbox.setAccessibilityLabel(preset.name)
+            checkbox.setAccessibilityHelp("When checked, this preset is excluded from automatic clipboard history if sensitive data mode is set to Exclude from history.")
+            sensitiveDataPresetCheckboxes[preset.id] = checkbox
+            stack.addArrangedSubview(checkbox)
+        }
+        grid.addRow(with: [labelView, stack])
+
+        let note = NSTextField(labelWithString: "Sensitive data exclusions apply only to automatic clipboard capture. They do not alter the Mac clipboard, existing history, explicit imports, or entries copied from Clipman. Presets are off by default.")
+        note.textColor = .secondaryLabelColor
+        note.lineBreakMode = .byWordWrapping
+        note.maximumNumberOfLines = 3
         grid.addRow(with: [NSGridCell.emptyContentView, note])
     }
 

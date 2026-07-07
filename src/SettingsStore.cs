@@ -133,10 +133,21 @@ namespace Clipman
             {
                 settings.LastSelectedTab = 0;
             }
-            if (settings.LastPreferencesTab < 0 || settings.LastPreferencesTab > 4)
+            if (settings.LastPreferencesTab < 0 || settings.LastPreferencesTab > 5)
             {
                 settings.LastPreferencesTab = 0;
             }
+            settings.SensitiveDataMode = SensitiveDataExclusion.NormalizeMode(settings.SensitiveDataMode);
+            if (settings.SensitiveDataPresetIds == null)
+            {
+                settings.SensitiveDataPresetIds = new List<string>();
+            }
+            var knownSensitivePresets = new HashSet<string>(SensitiveDataExclusion.BuiltInPresets.Select(p => p.Id), StringComparer.OrdinalIgnoreCase);
+            settings.SensitiveDataPresetIds = settings.SensitiveDataPresetIds
+                .Where(id => !string.IsNullOrWhiteSpace(id) && knownSensitivePresets.Contains(id.Trim()))
+                .Select(id => id.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             if (settings.DiagnosticsFileHistoryLimit < 0)
             {
                 settings.DiagnosticsFileHistoryLimit = 0;

@@ -67,6 +67,7 @@ The clean portable output must contain only shipped app files:
 - `LICENSE.txt`
 - `sqlite3.dll`
 - `sounds\copy.wav`
+- `sounds\exclude.wav`
 - `sounds\on.wav`
 - `sounds\off.wav`
 - `sounds\remote.wav`

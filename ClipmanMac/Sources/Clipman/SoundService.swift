@@ -7,6 +7,7 @@ final class SoundService {
         case off = "off.wav"
         case remote = "remote.wav"
         case skip = "skip.wav"
+        case exclude = "exclude.wav"
     }
 
     private var userSoundsDirectory: URL
@@ -24,7 +25,7 @@ final class SoundService {
     func play(_ name: SoundName) {
         guard isEnabled else { return }
         currentSound?.stop()
-        currentSound = loadSound(name)
+        currentSound = loadSound(name) ?? (name == .exclude ? loadSound(.skip) : nil)
         currentSound?.play()
     }
 

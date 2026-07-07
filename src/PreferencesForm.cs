@@ -39,6 +39,8 @@ namespace Clipman
         private readonly TextBox ignoredProcesses;
         private readonly CheckBox sendToEnabled;
         private readonly CheckBox showHistoryAfterSendTo;
+        private readonly ComboBox sensitiveDataMode;
+        private readonly CheckedListBox sensitiveDataPresets;
         private bool loading;
         private bool acceptedSingleModifierHotkeyWarning;
 
@@ -68,7 +70,7 @@ namespace Clipman
                 Height = 515,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom,
                 AccessibleName = "Preference sections",
-                AccessibleDescription = "Preference sections. Press Control 1 through Control 5 to switch tabs."
+                AccessibleDescription = "Preference sections. Press Control 1 through Control 6 to switch tabs."
             };
 
             var general = new TabPage("General");
@@ -76,11 +78,13 @@ namespace Clipman
             var hotkeys = new TabPage("Hotkeys");
             var storage = new TabPage("Storage and Password");
             var integration = new TabPage("Startup and updates");
+            var sensitiveData = new TabPage("Sensitive data");
             general.AccessibleDescription = "General preferences. Shortcut Ctrl+1.";
             fileHistory.AccessibleDescription = "File history preferences. Shortcut Ctrl+2.";
             hotkeys.AccessibleDescription = "Hotkeys preferences. Shortcut Ctrl+3.";
             storage.AccessibleDescription = "Storage and Password preferences. Shortcut Ctrl+4.";
             integration.AccessibleDescription = "Startup and updates preferences. Shortcut Ctrl+5.";
+            sensitiveData.AccessibleDescription = "Sensitive data preferences. Shortcut Ctrl+6.";
 
             active = NewCheckBox("Clipboard monitoring &active", settings.Active);
             soundsEnabled = NewCheckBox("Play &sounds", settings.SoundsEnabled);
@@ -206,11 +210,33 @@ namespace Clipman
             AddFullRow(integrationLayout, showHistoryAfterSendTo);
             integration.Controls.Add(integrationLayout);
 
+            sensitiveDataMode = NewComboBox("Sensitive data mode", new[] { "Off", "Exclude from history" }, DisplaySensitiveDataMode(settings.SensitiveDataMode));
+            sensitiveDataPresets = new CheckedListBox
+            {
+                Width = 455,
+                Height = 145,
+                CheckOnClick = true,
+                AccessibleName = "Sensitive data exclusion presets",
+                AccessibleDescription = "Checked presets are excluded from automatic clipboard history when sensitive data mode is set to Exclude from history."
+            };
+            var enabledSensitivePresets = new HashSet<string>(settings.SensitiveDataPresetIds ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var preset in SensitiveDataExclusion.BuiltInPresets)
+            {
+                sensitiveDataPresets.Items.Add(preset, enabledSensitivePresets.Contains(preset.Id));
+            }
+            var sensitiveLayout = NewRows();
+            AddRow(sensitiveLayout, "&Sensitive data mode:", sensitiveDataMode);
+            AddRow(sensitiveLayout, "Exclusion &presets:", sensitiveDataPresets);
+            AddFullRow(sensitiveLayout, NewNote("Sensitive data exclusions apply only to automatic clipboard capture. They do not change the Windows clipboard, existing history, Send To imports, explicit imports, or entries you manually copy from Clipman."));
+            AddFullRow(sensitiveLayout, NewNote("Built-in presets are deliberately off by default. Credit card detection uses a Luhn check to reduce false positives. International phone numbers include compact E.164-style numbers such as +447890123456 and common spaced, dashed, dotted, or bracketed variants."));
+            sensitiveData.Controls.Add(sensitiveLayout);
+
             preferencesTabs.TabPages.Add(general);
             preferencesTabs.TabPages.Add(fileHistory);
             preferencesTabs.TabPages.Add(hotkeys);
             preferencesTabs.TabPages.Add(storage);
             preferencesTabs.TabPages.Add(integration);
+            preferencesTabs.TabPages.Add(sensitiveData);
             preferencesTabs.SelectedIndex = Clamp(settings.LastPreferencesTab, 0, preferencesTabs.TabPages.Count - 1);
             preferencesTabs.SelectedIndexChanged += (s, e) => ApplyNow();
             Controls.Add(preferencesTabs);
@@ -288,6 +314,8 @@ namespace Clipman
             showDatabasePassword.CheckedChanged += (s, e) => ToggleDatabasePasswordVisibility();
             sendToEnabled.CheckedChanged += (s, e) => ApplyNow();
             showHistoryAfterSendTo.CheckedChanged += (s, e) => ApplyNow();
+            sensitiveDataMode.SelectedIndexChanged += (s, e) => ApplyNow();
+            sensitiveDataPresets.ItemCheck += (s, e) => BeginInvoke(new Action(ApplyNow));
         }
 
         private void ApplyNow()
@@ -343,6 +371,12 @@ namespace Clipman
             settings.MaxHistoryDays = (int)maxHistoryDays.Value;
             settings.SendToEnabled = sendToEnabled.Checked;
             settings.ShowHistoryAfterSendTo = showHistoryAfterSendTo.Checked;
+            settings.SensitiveDataMode = StoredSensitiveDataMode(Convert.ToString(sensitiveDataMode.SelectedItem));
+            settings.SensitiveDataPresetIds = sensitiveDataPresets.CheckedItems
+                .OfType<SensitiveDataPreset>()
+                .Select(p => p.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             settings.IgnoredProcesses = ignoredProcesses.Lines
                 .Select(l => l.Trim())
                 .Where(l => l.Length > 0)
@@ -604,7 +638,9 @@ namespace Clipman
                 RememberDatabasePassword = current.RememberDatabasePassword,
                 ProtectedDatabasePassword = current.ProtectedDatabasePassword,
                 PlainDatabasePassword = string.Empty,
-                UseDefaultDatabasePath = current.UseDefaultDatabasePath
+                UseDefaultDatabasePath = current.UseDefaultDatabasePath,
+                SensitiveDataMode = SensitiveDataExclusion.NormalizeMode(current.SensitiveDataMode),
+                SensitiveDataPresetIds = current.SensitiveDataPresetIds == null ? new List<string>() : new List<string>(current.SensitiveDataPresetIds)
             };
         }
 
@@ -786,6 +822,20 @@ namespace Clipman
             if (string.Equals(value, "Hourly", StringComparison.OrdinalIgnoreCase)) return "Hourly";
             if (string.Equals(value, "Daily", StringComparison.OrdinalIgnoreCase)) return "Daily";
             return "Never";
+        }
+
+        private static string DisplaySensitiveDataMode(string value)
+        {
+            return string.Equals(value, SensitiveDataExclusion.ModeExclude, StringComparison.OrdinalIgnoreCase)
+                ? "Exclude from history"
+                : "Off";
+        }
+
+        private static string StoredSensitiveDataMode(string value)
+        {
+            return string.Equals(value, "Exclude from history", StringComparison.OrdinalIgnoreCase)
+                ? SensitiveDataExclusion.ModeExclude
+                : SensitiveDataExclusion.ModeOff;
         }
 
         private static bool HotkeysConflict(params string[] hotkeys)

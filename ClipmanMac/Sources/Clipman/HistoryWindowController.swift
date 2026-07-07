@@ -48,10 +48,44 @@ private final class DialogTabTextView: NSTextView {
     override func insertBacktab(_ sender: Any?) {
         window?.selectPreviousKeyView(sender)
     }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.command),
+              !modifiers.contains(.option),
+              !modifiers.contains(.control),
+              let command = event.charactersIgnoringModifiers?.lowercased()
+        else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        switch command {
+        case "a":
+            selectAll(nil)
+            return true
+        case "x":
+            cut(nil)
+            return true
+        case "c":
+            copy(nil)
+            return true
+        case "v":
+            paste(nil)
+            return true
+        default:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
 }
 
 private final class TemplatePreviewButton: NSButton {
     weak var templateTextView: NSTextView?
+}
+
+private final class TemplateInsertButton: NSButton {
+    weak var templateTextView: NSTextView?
+    weak var templateCheckbox: NSButton?
+    var templateItems: [TemplateResolver.TemplateItem] = []
 }
 
 @MainActor
@@ -1453,11 +1487,27 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         previewTemplateButton.target = self
         previewTemplateButton.action = #selector(entryPropertiesPreviewTemplate(_:))
         previewTemplateButton.templateTextView = textView
+        let insertPresetButton = TemplateInsertButton(title: "Insert sample...", target: nil, action: nil)
+        insertPresetButton.setAccessibilityLabel("Insert sample template")
+        insertPresetButton.setAccessibilityHelp("Opens a menu of sample templates. The chosen sample is inserted at the cursor in the clipboard text field.")
+        insertPresetButton.target = self
+        insertPresetButton.action = #selector(entryPropertiesInsertTemplateItem(_:))
+        insertPresetButton.templateTextView = textView
+        insertPresetButton.templateCheckbox = templateCheckbox
+        insertPresetButton.templateItems = TemplateResolver.presets
+        let insertVariableButton = TemplateInsertButton(title: "Insert field...", target: nil, action: nil)
+        insertVariableButton.setAccessibilityLabel("Insert template field")
+        insertVariableButton.setAccessibilityHelp("Opens a menu of template fields. The chosen field is inserted at the cursor in the clipboard text field.")
+        insertVariableButton.target = self
+        insertVariableButton.action = #selector(entryPropertiesInsertTemplateItem(_:))
+        insertVariableButton.templateTextView = textView
+        insertVariableButton.templateCheckbox = templateCheckbox
+        insertVariableButton.templateItems = TemplateResolver.variables
         let templateVariablesButton = NSButton(title: "Template variables", target: nil, action: nil)
         templateVariablesButton.setAccessibilityLabel("Template variables")
         templateVariablesButton.target = self
         templateVariablesButton.action = #selector(entryPropertiesTemplateVariables(_:))
-        let templateButtonRow = NSStackView(views: [previewTemplateButton, templateVariablesButton])
+        let templateButtonRow = NSStackView(views: [insertPresetButton, insertVariableButton, previewTemplateButton, templateVariablesButton])
         templateButtonRow.orientation = .horizontal
         templateButtonRow.spacing = 8
 
@@ -1509,6 +1559,47 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return
         }
         showReadOnlyText(title: "Template Preview", accessibilityLabel: "Template preview", text: TemplateResolver.resolve(textView.string))
+    }
+
+    @objc private func entryPropertiesInsertTemplateItem(_ sender: TemplateInsertButton) {
+        guard let textView = sender.templateTextView else {
+            NSSound.beep()
+            return
+        }
+        guard let selected = chooseTemplateItem(sender.templateItems, title: sender.title) else {
+            textView.window?.makeFirstResponder(textView)
+            return
+        }
+        textView.insertText(selected.text, replacementRange: textView.selectedRange())
+        sender.templateCheckbox?.state = .on
+        textView.window?.makeFirstResponder(textView)
+    }
+
+    private func chooseTemplateItem(_ items: [TemplateResolver.TemplateItem], title: String) -> TemplateResolver.TemplateItem? {
+        guard let first = items.first else {
+            NSSound.beep()
+            return nil
+        }
+
+        let alert = NSAlert()
+        alert.messageText = title.replacingOccurrences(of: "...", with: "")
+        alert.informativeText = "Choose the template text to insert."
+        alert.addButton(withTitle: "Insert")
+        alert.addButton(withTitle: "Cancel")
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 26), pullsDown: false)
+        for item in items {
+            popup.addItem(withTitle: item.name)
+            popup.lastItem?.representedObject = item.text
+        }
+        popup.selectItem(at: 0)
+        popup.setAccessibilityLabel(title.replacingOccurrences(of: "...", with: ""))
+        alert.accessoryView = popup
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let index = popup.indexOfSelectedItem
+        guard items.indices.contains(index) else { return first }
+        return items[index]
     }
 
     @objc private func entryPropertiesTemplateVariables(_ sender: NSButton) {

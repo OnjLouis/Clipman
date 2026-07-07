@@ -168,6 +168,28 @@ namespace Clipman
             };
             Controls.Add(textBox);
 
+            var insertPreset = new Button
+            {
+                Text = "Insert &sample...",
+                Location = new Point(15, 466),
+                Width = 125,
+                AccessibleName = "Insert sample template",
+                AccessibleDescription = "Opens a menu of sample templates. The chosen sample is inserted at the cursor in the clipboard text field."
+            };
+            insertPreset.Click += (s, e) => ShowTemplateMenu(insertPreset, TemplateResolver.Presets);
+            Controls.Add(insertPreset);
+
+            var insertVariable = new Button
+            {
+                Text = "Insert &field...",
+                Location = new Point(150, 466),
+                Width = 115,
+                AccessibleName = "Insert template field",
+                AccessibleDescription = "Opens a menu of template fields. The chosen field is inserted at the cursor in the clipboard text field."
+            };
+            insertVariable.Click += (s, e) => ShowTemplateMenu(insertVariable, TemplateResolver.Variables);
+            Controls.Add(insertVariable);
+
             var copy = new Button { Text = "Copy te&xt", Location = new Point(15, 546), Width = 95 };
             copy.Click += (s, e) => Clipboard.SetText(textBox.Text ?? string.Empty, TextDataFormat.UnicodeText);
             Controls.Add(copy);
@@ -272,6 +294,26 @@ namespace Clipman
         private static void SuppressHotkeyTextInput(object sender, KeyPressEventArgs e)
         {
             e.Handled = true;
+        }
+
+        private void ShowTemplateMenu(Control owner, TemplateResolver.TemplateItem[] items)
+        {
+            var menu = new ContextMenuStrip();
+            foreach (var item in items)
+            {
+                var captured = item;
+                var menuItem = new ToolStripMenuItem(captured.Name);
+                menuItem.Click += (s, e) => InsertTemplateText(captured.Text);
+                menu.Items.Add(menuItem);
+            }
+            menu.Show(owner, new Point(0, owner.Height));
+        }
+
+        private void InsertTemplateText(string text)
+        {
+            textBox.Focus();
+            textBox.SelectedText = text ?? string.Empty;
+            templateBox.Checked = true;
         }
 
     }

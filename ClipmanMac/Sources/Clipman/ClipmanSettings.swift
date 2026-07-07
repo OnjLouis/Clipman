@@ -24,6 +24,8 @@ struct ClipmanSettings: Codable, Equatable {
     var quickCopyHotkeys: [String: HotkeyDescriptor]
     var quickPasteModes: [String: String]
     var ignoredApplications: [String]
+    var sensitiveDataMode: String
+    var sensitiveDataPresetIds: [String]
 
     enum CodingKeys: String, CodingKey {
         case machineName, databasePath, monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
@@ -31,6 +33,8 @@ struct ClipmanSettings: Codable, Equatable {
         case rememberDatabasePassword
         case autoCopyLatestRemoteText, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
         case ignoredApplications
+        case sensitiveDataMode = "SensitiveDataMode"
+        case sensitiveDataPresetIds = "SensitiveDataPresetIds"
         case ignoredProcesses = "IgnoredProcesses"
         case legacyQuickCopyHotkey = "quickCopyHotkey"
         case legacyQuickCopyEntryID = "quickCopyEntryID"
@@ -58,7 +62,9 @@ struct ClipmanSettings: Codable, Equatable {
         lastUpdateCheckUnixMs: Int64,
         quickCopyHotkeys: [String: HotkeyDescriptor],
         quickPasteModes: [String: String],
-        ignoredApplications: [String]
+        ignoredApplications: [String],
+        sensitiveDataMode: String,
+        sensitiveDataPresetIds: [String]
     ) {
         self.machineName = machineName
         self.databasePath = databasePath
@@ -82,6 +88,8 @@ struct ClipmanSettings: Codable, Equatable {
         self.quickCopyHotkeys = quickCopyHotkeys
         self.quickPasteModes = quickPasteModes
         self.ignoredApplications = ignoredApplications
+        self.sensitiveDataMode = sensitiveDataMode
+        self.sensitiveDataPresetIds = sensitiveDataPresetIds
     }
 
     init(from decoder: Decoder) throws {
@@ -109,6 +117,11 @@ struct ClipmanSettings: Codable, Equatable {
         ignoredApplications = try container.decodeIfPresent([String].self, forKey: .ignoredApplications)
             ?? container.decodeIfPresent([String].self, forKey: .ignoredProcesses)
             ?? []
+        sensitiveDataMode = SensitiveDataExclusion.normalizeMode(try container.decodeIfPresent(String.self, forKey: .sensitiveDataMode))
+        let knownSensitiveIds = Set(SensitiveDataExclusion.builtInPresets.map(\.id))
+        sensitiveDataPresetIds = (try container.decodeIfPresent([String].self, forKey: .sensitiveDataPresetIds) ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && knownSensitiveIds.contains($0) }
         let legacyQuickCopyHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .legacyQuickCopyHotkey)
             ?? HotkeyDescriptor(keyCode: UInt32(kVK_F2), modifiers: [.option, .shift])
         let legacyQuickCopyEntryID = try container.decodeIfPresent(String.self, forKey: .legacyQuickCopyEntryID) ?? ""
@@ -147,6 +160,8 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(quickCopyHotkeys, forKey: .quickCopyHotkeys)
         try container.encode(quickPasteModes, forKey: .quickPasteModes)
         try container.encode(ignoredApplications, forKey: .ignoredApplications)
+        try container.encode(sensitiveDataMode, forKey: .sensitiveDataMode)
+        try container.encode(sensitiveDataPresetIds, forKey: .sensitiveDataPresetIds)
     }
 
     static func defaults(applicationSupport: URL) -> ClipmanSettings {
@@ -172,7 +187,9 @@ struct ClipmanSettings: Codable, Equatable {
             lastUpdateCheckUnixMs: 0,
             quickCopyHotkeys: [:],
             quickPasteModes: [:],
-            ignoredApplications: []
+            ignoredApplications: [],
+            sensitiveDataMode: SensitiveDataExclusion.modeOff,
+            sensitiveDataPresetIds: []
         )
     }
 }

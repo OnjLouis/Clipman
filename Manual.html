@@ -33,6 +33,13 @@
     code {
       font-family: Consolas, "Courier New", monospace;
     }
+    .copy-test {
+      margin: 0.2rem 0 0.8rem 0;
+    }
+    .copy-test code {
+      display: inline-block;
+      margin-right: 0.5rem;
+    }
   </style>
 </head>
 <body>
@@ -58,6 +65,7 @@
     <li><a href="#history-limits">History Limits</a></li>
     <li><a href="#actions">Actions</a></li>
     <li><a href="#menus">Menus</a></li>
+    <li><a href="#sensitive-data">Sensitive Data Exclusions</a></li>
     <li><a href="#ignored-applications">Ignored Applications</a></li>
     <li><a href="#database-and-sync">Database and Sync</a></li>
     <li><a href="#send-to">Send To</a></li>
@@ -82,7 +90,7 @@
     <li>Open history, choose an item, and press <code>Enter</code> to put it back on the clipboard. Press <code>Esc</code> or close the window to hide history without quitting.</li>
     <li>Use search, groups, pinned entries, sort order, and Entry Properties as your history grows. The detailed commands are in the Keyboard Shortcuts table.</li>
     <li>Use template entries for reusable text that should resolve date, time, system, or username variables only when copied or pasted.</li>
-    <li>Turn monitoring off temporarily when copying text that should not enter history, or add sensitive apps to the ignored applications list.</li>
+    <li>Turn monitoring off temporarily when copying text that should not enter history, add sensitive apps to the ignored applications list, or enable sensitive-data exclusions for known text patterns.</li>
     <li>On Mac, <code>Option+M</code> opens the history window's Clipman command menu directly.</li>
   </ul>
 
@@ -116,7 +124,7 @@
       <tr><td>Open the project page</td><td><code>Ctrl+F1</code></td><td><code>Command+F1</code></td></tr>
       <tr><td>Open diagnostics</td><td><code>Alt+F1</code></td><td><code>Option+F1</code></td></tr>
       <tr><td>Close or hide the history window</td><td><code>Esc</code></td><td><code>Escape</code></td></tr>
-      <tr><td>Switch Preferences tabs</td><td><code>Ctrl+1</code> to <code>Ctrl+5</code></td><td>Tab control navigation</td></tr>
+      <tr><td>Switch Preferences tabs</td><td><code>Ctrl+1</code> to <code>Ctrl+6</code></td><td>Tab control navigation</td></tr>
       <tr><td>Copy selected text entry and close history</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
       <tr><td>Copy selected text entry without closing history</td><td><code>Ctrl+C</code></td><td><code>Command+C</code></td></tr>
       <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
@@ -159,7 +167,7 @@
 
   <p>Template variables include <code>{{year_full}}</code>, <code>{{year_short}}</code>, <code>{{month_name}}</code>, <code>{{month_name_full}}</code>, <code>{{month_name_short}}</code>, <code>{{month_num}}</code>, <code>{{month_num_padded}}</code>, <code>{{day_of_month}}</code>, <code>{{day_of_month_padded}}</code>, <code>{{day_name_full}}</code>, <code>{{day_name_short}}</code>, <code>{{hour_24}}</code>, <code>{{hour_24_padded}}</code>, <code>{{hour_12}}</code>, <code>{{hour_12_padded}}</code>, <code>{{minute}}</code>, <code>{{minute_padded}}</code>, <code>{{second}}</code>, <code>{{second_padded}}</code>, <code>{{utc_offset}}</code>, <code>{{time_zone}}</code>, <code>{{time_zone_short}}</code>, <code>{{os_name}}</code>, <code>{{os_version}}</code>, and <code>{{username}}</code>. Unknown variables are left alone.</p>
 
-  <p>Example templates: <code>{{year_full}}-{{month_num_padded}}-{{day_of_month_padded}}</code>, <code>Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}</code>, or <code>{{os_name}} version {{os_version}}</code>. Windows Entry Properties includes buttons to preview the resolved template and view the variable list.</p>
+  <p>Example templates: <code>{{year_full}}-{{month_num_padded}}-{{day_of_month_padded}}</code>, <code>Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}</code>, or <code>{{os_name}} version {{os_version}}</code>. Entry Properties includes buttons to insert sample templates, insert individual fields at the current cursor, preview the resolved template, and view the variable list. Built-in samples include <code>{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}</code>, <code>{{day_of_month_padded}} {{month_name_short}} {{year_full}}</code>, and <code>{{month_name_short}} {{day_of_month_padded}}, {{year_full}}</code>.</p>
 
   <p><strong>Automatically group new clips by source application</strong> is enabled by default for new installs where the setting is exposed. It places newly captured clipboard text into a group named after the application Clipman believes supplied the clipboard text, such as Chrome, Thunderbird, Outlook, Safari, TextEdit, or Logic. Disable it if you prefer all new entries to start ungrouped.</p>
 
@@ -170,6 +178,10 @@
   <p><strong>Storage and Password:</strong> Choose the shared Clipman data folder, set or change the history password, choose whether this computer remembers the password, remove password encryption, and manage ignored applications. Clipman stores shared text history as <code>clipman-history.clipdb</code> inside the chosen folder.</p>
 
   <p>The Remember history password on this computer checkbox controls convenience versus exposure. When unchecked, Clipman asks for the history password when it starts and keeps the password only for the current run. When checked, Windows stores an unlockable password protected by Windows for the current user and machine, and Mac stores it in that user's Keychain for the selected database path. That is convenient for automatic startup, but it cannot protect against malware already running as the same signed-in user. The Use no password button clears the saved history password, clears any session-only password, and rewrites the current database without password encryption. It exists because blank password fields mean "keep the current password"; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
+
+  <p><strong>Sensitive data:</strong> Sensitive-data exclusions are off by default and machine-specific. When the mode is set to Exclude from history, Clipman checks automatic clipboard text capture against the presets you enable. Matching text is not stored in Clipman history, and the system clipboard is not changed, so your immediate paste still works. This filter does not apply to existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman.</p>
+
+  <p>The built-in presets include credit card numbers with Luhn validation, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys, and approximate US driver-license shapes. International phone numbers include compact E.164-style numbers such as <code>+447890123456</code> and common spaced, dashed, dotted, or bracketed variants. Built-in presets are deliberately unchecked by default because pattern matching can have false positives.</p>
 
   <h2 id="platform-notes">Platform Notes</h2>
   <p>The same manual ships with the Windows and Mac builds. The app name, shared history format, sounds folder behavior, password model, and database sync model are intended to stay aligned across platforms.</p>
@@ -271,10 +283,40 @@
     </tbody>
   </table>
 
+  <h2 id="sensitive-data">Sensitive Data Exclusions</h2>
+  <p>Sensitive-data exclusions live in Preferences. They are off by default. Set the mode to <strong>Exclude from history</strong>, then check the presets you want. When automatic clipboard text matches a checked preset, Clipman does not save that text to history. The system clipboard or Mac pasteboard is not changed, so your immediate paste still works.</p>
+
+  <p>This feature is deliberately conservative. It applies only to automatic text capture. It does not filter existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman. Presets can have false positives, so enable only the ones that fit the work you do.</p>
+
+  <table>
+    <thead>
+      <tr><th>Preset</th><th>What it looks for</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Credit card number</td><td>13 to 19 digits, with optional spaces or dashes</td><td>Uses a Luhn checksum, so random 16-digit numbers usually do not match.</td></tr>
+      <tr><td>US Social Security number</td><td>Three digits, two digits, four digits</td><td>Can match dashed, spaced, or run-together forms.</td></tr>
+      <tr><td>International phone number</td><td>A plus sign followed by 8 to 15 digits, allowing common separators</td><td>Examples include compact E.164-style numbers such as <code>+447890123456</code>.</td></tr>
+      <tr><td>Long API key or token</td><td>A run of 32 or more letters and numbers</td><td>Useful for many tokens, but can also match long IDs or hashes.</td></tr>
+      <tr><td>Software license key</td><td>Five groups of five letters or numbers separated by hyphens</td><td>Covers common Windows-style product keys and similar software serials. Clipman checks the shape only; it does not validate vendor-specific keys.</td></tr>
+      <tr><td>US driver license, approximate</td><td>One letter followed by 6 to 13 digits</td><td>Approximate because US license formats vary by state.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Use these harmless test values to check that a preset is enabled and that the exclude sound plays. Copying one of these from the button should trigger <code>exclude.wav</code> when that preset is checked and sounds are enabled. If the browser or reader blocks clipboard buttons, select the text manually and copy it.</p>
+
+  <div class="copy-test"><code>4111111111111111</code><button type="button" data-copy-test="4111111111111111">Copy credit-card test number</button></div>
+  <div class="copy-test"><code>+447890123456</code><button type="button" data-copy-test="+447890123456">Copy international phone test number</button></div>
+  <div class="copy-test"><code>AAAAA-BBBBB-CCCCC-DDDDD-EEEEE</code><button type="button" data-copy-test="AAAAA-BBBBB-CCCCC-DDDDD-EEEEE">Copy software license key test</button></div>
+  <div class="copy-test"><code>0123456789ABCDEF0123456789ABCDEF</code><button type="button" data-copy-test="0123456789ABCDEF0123456789ABCDEF">Copy API-token test string</button></div>
+
+  <p>The credit-card test number is a common non-real test value that passes the Luhn checksum. It is useful precisely because Clipman should exclude it while ignoring most random 16-digit strings.</p>
+
   <h2 id="ignored-applications">Ignored Applications</h2>
   <p>Preferences can list applications that Clipman should ignore, one per line. This is useful for password managers, banking tools, private notes, or any app where clipboard history should not be recorded.</p>
 
   <p>On Windows, enter process names with or without <code>.exe</code>, or use <strong>Add running app</strong> to choose from currently running processes. On Mac, enter the app name, bundle identifier, or executable name, such as <code>Safari</code>, <code>com.apple.TextEdit</code>, or <code>KeePassXC</code>. Ignored applications are machine-specific settings. Clipman also treats related helper names as ignored when they use the same name or bundle/process prefix. On Mac, Clipman also refuses concealed pasteboard data and can use pasteboard type metadata from password-manager quick-access panels where macOS does not report the password manager as the foreground app.</p>
+
+  <p>Ignored applications and sensitive-data exclusions solve different problems. Ignored applications are best when an entire app should never be captured. Sensitive-data exclusions are best when ordinary apps sometimes copy text matching a known sensitive pattern.</p>
 
   <h2 id="database-and-sync">Database and Sync</h2>
   <p>On Windows, Clipman defaults to a portable <code>Settings</code> folder beside <code>clipman.exe</code>. On Mac, Clipman stores a small pointer under Application Support and keeps the active machine settings in the selected Clipman data folder. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code>, <code>Settings\Laptop-settings.json</code>, or <code>MacBook-settings.json</code>. This lets multiple computers share one data folder without fighting over hotkeys, monitoring state, startup choices, or window position. The shared text history database is <code>clipman-history.clipdb</code>.</p>
@@ -337,9 +379,9 @@
   <p>Use <strong>Help, Version history</strong> on Windows or <strong>Version History</strong> on Mac to review the latest release notes. Use <strong>Help, Project page</strong> or <code>Ctrl+F1</code> on Windows and <strong>Project Page</strong> or <code>Command+F1</code> on Mac to open the GitHub project page. Use <strong>Help, Contact</strong> on Windows or <strong>Contact</strong> on Mac for feedback, and <strong>Help, Donate</strong> on Windows or <strong>Donate</strong> on Mac to support Clipman. Use <strong>Help, Diagnostics</strong> or <code>Alt+F1</code> on Windows and <strong>Diagnostics</strong> or <code>Option+F1</code> on Mac to open diagnostics.</p>
 
   <h2 id="sounds">Sounds</h2>
-  <p>Clipman can play short sounds when text is copied, remote text is copied from another synced machine, monitoring is turned on, monitoring is turned off, or a clipboard item is ignored because monitoring is off. Sounds can be enabled or disabled in preferences.</p>
+  <p>Clipman can play short sounds when text is copied, remote text is copied from another synced machine, monitoring is turned on, monitoring is turned off, a clipboard item is ignored because monitoring is off, or a sensitive-data exclusion blocks automatic capture. Sounds can be enabled or disabled in preferences.</p>
 
-  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, and <code>skip.wav</code>.</p>
+  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, <code>skip.wav</code>, and <code>exclude.wav</code>. If <code>exclude.wav</code> is missing, Clipman falls back to <code>skip.wav</code>.</p>
 
   <h2 id="application-files">Application Files</h2>
   <p>A normal Windows portable Clipman folder contains only the files needed to run the app. A Mac package contains <code>Clipman.app</code>, which bundles the executable, manual, sounds, and supporting resources inside the app package.</p>
@@ -446,6 +488,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.8.0</h3>
+  <ul>
+    <li>Added Sensitive Data preferences for automatic clipboard text capture. The new mode is off by default; when set to Exclude from history, checked presets are not stored in Clipman history and the system clipboard is left unchanged. Built-in presets include credit card numbers with Luhn validation, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys, and approximate US driver-license shapes. Addresses <a href="https://github.com/OnjLouis/Clipman/issues/13">issue #13</a>.</li>
+    <li>Added <code>exclude.wav</code> as a dedicated sound for sensitive-data exclusions, with fallback to <code>skip.wav</code> when the custom or bundled exclude sound is missing.</li>
+    <li>Improved template entries with Insert sample and Insert field commands in Entry Properties on Windows and Mac. Sample templates include compact numeric dates, day-month-year dates, month-day-year dates, a Today sentence, and an operating-system version snippet.</li>
+  </ul>
+
   <h3>1.7.2</h3>
   <ul>
     <li>Improved temporarily unavailable shared-folder handling. If a cloud folder, network share, or mounted NAS disappears during background clipboard capture, Clipman no longer shows blocking storage alerts or plays the success sound for a failed write. Mac pauses monitoring and offers Retry Storage from the status menu; Windows reports the unavailable storage in the notification-area menu and offers Retry storage.</li>
@@ -673,5 +722,45 @@
   <p>Questions and feedback can be sent through <strong>Help, Contact</strong> in the app or <a href="https://onj.me/contact">https://onj.me/contact</a>.</p>
 
   <p>Clipman is free software. If you want to support Andre's work, use <strong>Help, Donate</strong> in the app or visit <a href="https://onj.me/donate">https://onj.me/donate</a>.</p>
+  <script>
+    (function () {
+      var buttons = document.querySelectorAll("button[data-copy-test]");
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].addEventListener("click", function () {
+          var text = this.getAttribute("data-copy-test") || "";
+          var button = this;
+          function done(message) {
+            button.setAttribute("aria-label", message);
+            button.textContent = message;
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+              done("Copied test value");
+            }, function () {
+              fallbackCopy(text, done);
+            });
+          } else {
+            fallbackCopy(text, done);
+          }
+        });
+      }
+      function fallbackCopy(text, done) {
+        var area = document.createElement("textarea");
+        area.value = text;
+        area.setAttribute("readonly", "readonly");
+        area.style.position = "fixed";
+        area.style.left = "-9999px";
+        document.body.appendChild(area);
+        area.focus();
+        area.select();
+        try {
+          done(document.execCommand("copy") ? "Copied test value" : "Could not copy automatically");
+        } catch (e) {
+          done("Could not copy automatically");
+        }
+        document.body.removeChild(area);
+      }
+    }());
+  </script>
 </body>
 </html>

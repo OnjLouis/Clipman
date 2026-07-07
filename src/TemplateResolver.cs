@@ -9,8 +9,65 @@ namespace Clipman
     {
         private static readonly Regex VariablePattern = new Regex(@"\{\{([A-Za-z0-9_]+)\}\}", RegexOptions.Compiled);
 
+        public sealed class TemplateItem
+        {
+            public string Name { get; private set; }
+            public string Text { get; private set; }
+
+            public TemplateItem(string name, string text)
+            {
+                Name = name ?? string.Empty;
+                Text = text ?? string.Empty;
+            }
+
+            public override string ToString()
+            {
+                return Name;
+            }
+        }
+
+        public static readonly TemplateItem[] Presets =
+        {
+            new TemplateItem("Date, year/month/day", "{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}"),
+            new TemplateItem("Date, day short-month year", "{{day_of_month_padded}} {{month_name_short}} {{year_full}}"),
+            new TemplateItem("Date, short-month day, year", "{{month_name_short}} {{day_of_month_padded}}, {{year_full}}"),
+            new TemplateItem("Today sentence", "Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}"),
+            new TemplateItem("Operating system version", "{{os_name}} version {{os_version}}")
+        };
+
+        public static readonly TemplateItem[] Variables =
+        {
+            new TemplateItem("Year, four digits", "{{year_full}}"),
+            new TemplateItem("Year, two digits", "{{year_short}}"),
+            new TemplateItem("Month name", "{{month_name_full}}"),
+            new TemplateItem("Month name, short", "{{month_name_short}}"),
+            new TemplateItem("Month number", "{{month_num}}"),
+            new TemplateItem("Month number, two digits", "{{month_num_padded}}"),
+            new TemplateItem("Day of month", "{{day_of_month}}"),
+            new TemplateItem("Day of month, two digits", "{{day_of_month_padded}}"),
+            new TemplateItem("Day name", "{{day_name_full}}"),
+            new TemplateItem("Day name, short", "{{day_name_short}}"),
+            new TemplateItem("Hour, 24-hour clock", "{{hour_24}}"),
+            new TemplateItem("Hour, 24-hour clock, two digits", "{{hour_24_padded}}"),
+            new TemplateItem("Hour, 12-hour clock", "{{hour_12}}"),
+            new TemplateItem("Hour, 12-hour clock, two digits", "{{hour_12_padded}}"),
+            new TemplateItem("Minute", "{{minute}}"),
+            new TemplateItem("Minute, two digits", "{{minute_padded}}"),
+            new TemplateItem("Second", "{{second}}"),
+            new TemplateItem("Second, two digits", "{{second_padded}}"),
+            new TemplateItem("UTC offset", "{{utc_offset}}"),
+            new TemplateItem("Time zone", "{{time_zone}}"),
+            new TemplateItem("Time zone, short", "{{time_zone_short}}"),
+            new TemplateItem("Operating system name", "{{os_name}}"),
+            new TemplateItem("Operating system version", "{{os_version}}"),
+            new TemplateItem("User name", "{{username}}")
+        };
+
         public static readonly string VariableReferenceText =
             "Template variables are resolved only when the entry is copied or pasted.\r\n\r\n" +
+            "Presets:\r\n" +
+            string.Join("\r\n", Presets.Select(p => p.Name + " - " + p.Text).ToArray()) +
+            "\r\n\r\n" +
             "Date and time:\r\n" +
             "{{year_full}} - four-digit year\r\n" +
             "{{year_short}} - two-digit year\r\n" +

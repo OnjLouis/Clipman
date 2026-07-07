@@ -2,8 +2,55 @@ import Foundation
 import ClipmanCore
 
 enum TemplateResolver {
+    struct TemplateItem {
+        let name: String
+        let text: String
+    }
+
+    static let presets: [TemplateItem] = [
+        TemplateItem(name: "Date, year/month/day", text: "{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}"),
+        TemplateItem(name: "Date, day short-month year", text: "{{day_of_month_padded}} {{month_name_short}} {{year_full}}"),
+        TemplateItem(name: "Date, short-month day, year", text: "{{month_name_short}} {{day_of_month_padded}}, {{year_full}}"),
+        TemplateItem(name: "Today sentence", text: "Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}"),
+        TemplateItem(name: "Operating system version", text: "{{os_name}} version {{os_version}}")
+    ]
+
+    static let variables: [TemplateItem] = [
+        TemplateItem(name: "Year, four digits", text: "{{year_full}}"),
+        TemplateItem(name: "Year, two digits", text: "{{year_short}}"),
+        TemplateItem(name: "Month name", text: "{{month_name_full}}"),
+        TemplateItem(name: "Month name, short", text: "{{month_name_short}}"),
+        TemplateItem(name: "Month number", text: "{{month_num}}"),
+        TemplateItem(name: "Month number, two digits", text: "{{month_num_padded}}"),
+        TemplateItem(name: "Day of month", text: "{{day_of_month}}"),
+        TemplateItem(name: "Day of month, two digits", text: "{{day_of_month_padded}}"),
+        TemplateItem(name: "Day name", text: "{{day_name_full}}"),
+        TemplateItem(name: "Day name, short", text: "{{day_name_short}}"),
+        TemplateItem(name: "Hour, 24-hour clock", text: "{{hour_24}}"),
+        TemplateItem(name: "Hour, 24-hour clock, two digits", text: "{{hour_24_padded}}"),
+        TemplateItem(name: "Hour, 12-hour clock", text: "{{hour_12}}"),
+        TemplateItem(name: "Hour, 12-hour clock, two digits", text: "{{hour_12_padded}}"),
+        TemplateItem(name: "Minute", text: "{{minute}}"),
+        TemplateItem(name: "Minute, two digits", text: "{{minute_padded}}"),
+        TemplateItem(name: "Second", text: "{{second}}"),
+        TemplateItem(name: "Second, two digits", text: "{{second_padded}}"),
+        TemplateItem(name: "UTC offset", text: "{{utc_offset}}"),
+        TemplateItem(name: "Time zone", text: "{{time_zone}}"),
+        TemplateItem(name: "Time zone, short", text: "{{time_zone_short}}"),
+        TemplateItem(name: "Operating system name", text: "{{os_name}}"),
+        TemplateItem(name: "Operating system version", text: "{{os_version}}"),
+        TemplateItem(name: "User name", text: "{{username}}")
+    ]
+
     static let variableReferenceText = """
     Template variables are resolved only when the entry is copied or pasted.
+
+    Presets:
+    Date, year/month/day - {{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}
+    Date, day short-month year - {{day_of_month_padded}} {{month_name_short}} {{year_full}}
+    Date, short-month day, year - {{month_name_short}} {{day_of_month_padded}}, {{year_full}}
+    Today sentence - Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}
+    Operating system version - {{os_name}} version {{os_version}}
 
     Date and time:
     {{year_full}} - four-digit year

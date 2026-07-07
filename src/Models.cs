@@ -134,6 +134,8 @@ namespace Clipman
         public string PlainDatabasePassword { get; set; }
         public bool AutoRemoveUnavailableFileHistoryEvents { get; set; }
         public int DiagnosticsFileHistoryLimit { get; set; }
+        public string SensitiveDataMode { get; set; }
+        public List<string> SensitiveDataPresetIds { get; set; }
 
         public AppSettings()
         {
@@ -172,6 +174,8 @@ namespace Clipman
             PlainDatabasePassword = string.Empty;
             AutoRemoveUnavailableFileHistoryEvents = false;
             DiagnosticsFileHistoryLimit = 20;
+            SensitiveDataMode = "Off";
+            SensitiveDataPresetIds = new List<string>();
         }
     }
 

@@ -13,12 +13,12 @@ Windows and macOS downloads are attached to releases in this repository.
 - Runs from its folder with no installer.
 - Lives in the Windows notification area or the macOS status menu.
 - Tray icon and tooltip show whether clipboard monitoring is on or off.
-- Plays copy/remote-sync/on/off/skip sounds when enabled.
+- Plays copy/remote-sync/on/off/skip/exclude sounds when enabled.
 - Lets custom sounds live in the active settings/data folder's `sounds` subfolder so updates do not overwrite them.
 - Global hotkeys for showing history and toggling monitoring.
 - User-configurable hotkeys.
 - Optional per-entry Quick Paste global hotkeys that paste chosen text entries into the active app from anywhere without opening history.
-- Optional template entries. Mark a text entry as a template in Entry Properties and Clipman resolves variables such as `{{year_full}}`, `{{month_num_padded}}`, `{{day_of_month_padded}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}` when that entry is copied or quick-pasted.
+- Optional template entries. Mark a text entry as a template in Entry Properties and Clipman resolves variables such as `{{year_full}}`, `{{month_num_padded}}`, `{{day_of_month_padded}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}` when that entry is copied or quick-pasted. Entry Properties includes sample templates and field insertion.
 - Press Enter on a history entry to copy it back to the clipboard and close history.
 - Press Ctrl+C to copy without closing the history window.
 - Press Shift+Enter to pin or unpin an entry. Pinned entries are protected from delete and cleanup.
@@ -34,6 +34,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - File history diagnostics are capped by preference, and unavailable unpinned file-history events can be removed manually or automatically.
 - Optional history size and age limits, with pinned entries kept.
 - Optional ignored application list for sensitive apps.
+- Optional sensitive-data exclusions for automatic text capture. Built-in presets are off by default and can skip storing likely credit card numbers, US Social Security numbers, international phone numbers, long API keys/tokens, software license keys, and approximate US driver-license shapes without changing the system clipboard.
 - On Mac, concealed pasteboard data and password-manager quick-access pasteboard markers are skipped even when macOS reports a different foreground app.
 - Import and export clipboard history for backup, including text imports from old Clipman `clipman.db` and Ditto SQLite databases.
 - Compressed Clipman database can live in a cloud service, synced folder, or network share.
@@ -54,7 +55,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Preferences: `Ctrl+,` in the history window only.
 - Import clipboard entries: `Ctrl+I`
 - Export clipboard entries: `Ctrl+E`
-- Switch Preferences tabs: `Ctrl+1` to `Ctrl+5` in the Preferences window.
+- Switch Preferences tabs: `Ctrl+1` to `Ctrl+6` in the Preferences window.
 - Close history or Preferences: `Esc`
 - Manual: `F1` in the history window.
 - Check for updates: `Shift+F1` in the history window.
@@ -96,9 +97,11 @@ Quick Paste is machine-specific. Use Entry Properties or the entry menu to assig
 
 Use the Quick Paste menu on Windows, or Quick Paste Targets from the Mac `Option+M` Clipman menu, to review every entry that currently has a Quick Paste hotkey. Choosing a target moves focus to that entry so the hotkey or mode can be edited or removed with Entry Properties. Entries with Quick Paste targets show the assigned hotkey and mode in the row text.
 
-Template entries are shared text entries with one extra flag. The stored text remains unchanged in the database, exports, search, and Entry Properties. Clipman resolves variables only when the entry is copied, quick-pasted, or automatically copied as a new remote entry. This makes templates useful for dates, system/version snippets, and repeatable support text without creating a new history entry every day.
+Template entries are shared text entries with one extra flag. The stored text remains unchanged in the database, exports, search, and Entry Properties. Clipman resolves variables only when the entry is copied, quick-pasted, or automatically copied as a new remote entry. This makes templates useful for dates, system/version snippets, and repeatable support text without creating a new history entry every day. Entry Properties can insert sample templates such as `{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}`, `{{day_of_month_padded}} {{month_name_short}} {{year_full}}`, `{{month_name_short}} {{day_of_month_padded}}, {{year_full}}`, a Today sentence, and an operating-system version snippet.
 
 Supported template variables include `{{year_full}}`, `{{year_short}}`, `{{month_name}}`, `{{month_name_full}}`, `{{month_name_short}}`, `{{month_num}}`, `{{month_num_padded}}`, `{{day_of_month}}`, `{{day_of_month_padded}}`, `{{day_name_full}}`, `{{day_name_short}}`, `{{hour_24}}`, `{{hour_24_padded}}`, `{{hour_12}}`, `{{hour_12_padded}}`, `{{minute}}`, `{{minute_padded}}`, `{{second}}`, `{{second_padded}}`, `{{utc_offset}}`, `{{time_zone}}`, `{{time_zone_short}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}`. Unknown variables are left alone.
+
+Sensitive-data exclusions are machine-specific and off by default. When enabled in Preferences, they apply only to automatic clipboard text capture. They do not alter the system clipboard, existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman. Built-in presets include credit card numbers with a Luhn check, US Social Security numbers, international phone numbers such as `+447890123456` and common spaced/dashed/bracketed variants, long API keys or tokens, software license keys shaped like `AAAAA-BBBBB-CCCCC-DDDDD-EEEEE`, and approximate US driver-license shapes. When a match is excluded, Clipman plays `exclude.wav` if sounds are enabled, falling back to `skip.wav` if that sound is missing. The manual includes harmless test values and copy buttons so users can check that their selected presets and exclude sound are working.
 
 Preferences can encrypt the shared history database with a password. On a new database, leaving the password fields blank means Clipman uses compressed `.clipdb` storage without password encryption. If a password is set, Clipman unlocks the database for the current run. The Remember history password on this computer option is off by default for new settings; when it is off, Clipman asks for the password when it starts and does not save an unlockable password in settings. If you turn Remember on, Windows protects the saved password for the current user and machine, and Mac stores it in that user's Keychain for the selected database path. Mac Preferences reports whether database encryption is on and whether the password is saved in Keychain; the password field stays blank for security even when a remembered password exists. Remembering a password is convenient but does not defend against malware already running as the same user. Enter the same history password in Preferences on each computer that shares the encrypted database. The Generate password button copies the new password to the Windows clipboard, and Clipman deliberately ignores that generated password copy so it is not saved in clipboard history.
 
@@ -117,6 +120,12 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.8.0
+
+- Added Sensitive Data preferences for automatic clipboard text capture. The new mode is off by default; when set to Exclude from history, checked presets are not stored in Clipman history and the system clipboard is left unchanged. Built-in presets include credit card numbers with Luhn validation, US Social Security numbers, international phone numbers, long API keys/tokens, software license keys, and approximate US driver-license shapes. The manual includes harmless copy-button test values for selected presets. Addresses issue #13.
+- Added `exclude.wav` as a dedicated sound for sensitive-data exclusions, with fallback to `skip.wav` when the custom or bundled exclude sound is missing.
+- Improved template entries with Insert sample and Insert field commands in Entry Properties on Windows and Mac. Sample templates include compact numeric dates, day-month-year dates, month-day-year dates, a Today sentence, and an operating-system version snippet.
 
 ### 1.7.2
 
@@ -212,7 +221,7 @@ Clipman also writes a small shared update-state file in the `Settings` folder. I
 
 During an update, Clipman downloads the release ZIP to a temporary folder, publishes a short close request so other instances running from the same shared folder stand down, replaces app files while preserving `Settings`, then restarts. The updated copy publishes the new shared state so other machines restart after the updated executable reaches them through a cloud service or network share.
 
-Custom sounds can be placed in the active settings/data folder's `sounds` subfolder using the same file names as the bundled sounds: `copy.wav`, `remote.wav`, `on.wav`, `off.wav`, and `skip.wav`. For a default Windows portable install this is usually `Settings\sounds` beside `clipman.exe`; if you choose a different data folder, use the `sounds` folder inside that chosen data folder instead. Clipman uses custom sounds first and falls back to the bundled defaults for any missing sound.
+Custom sounds can be placed in the active settings/data folder's `sounds` subfolder using the same file names as the bundled sounds: `copy.wav`, `remote.wav`, `on.wav`, `off.wav`, `skip.wav`, and `exclude.wav`. For a default Windows portable install this is usually `Settings\sounds` beside `clipman.exe`; if you choose a different data folder, use the `sounds` folder inside that chosen data folder instead. Clipman uses custom sounds first and falls back to the bundled defaults for any missing sound. If `exclude.wav` is missing, Clipman falls back to `skip.wav`.
 
 Bundled sounds in the root `sounds` folder are factory files. Updates replace them without backing them up, and only user-provided sounds in the active settings/data folder's `sounds` subfolder are treated as custom data.
 

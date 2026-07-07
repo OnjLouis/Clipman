@@ -105,7 +105,7 @@ function Assert-CleanPortable([string]$path) {
     Assert-NotExists (Join-Path $path 'Backups') 'Runtime Backups folder in clean portable output'
     Assert-NotExists (Join-Path $path 'sounds\sounds') 'Nested duplicate sounds folder'
 
-    $expectedSounds = @('copy.wav', 'off.wav', 'on.wav', 'remote.wav', 'skip.wav')
+    $expectedSounds = @('copy.wav', 'exclude.wav', 'off.wav', 'on.wav', 'remote.wav', 'skip.wav')
     foreach ($sound in $expectedSounds) {
         Assert-Exists (Join-Path $path "sounds\$sound") "Portable sound $sound"
     }
@@ -305,7 +305,7 @@ function Assert-MacReleaseAsset([string]$expectedVersion) {
         Assert-ZipEntry $zip 'Clipman.app/Contents/Info.plist' 'Mac app Info.plist' | Out-Null
         Assert-ZipEntry $zip 'Clipman.app/Contents/Resources/Manual.html' 'Bundled Mac manual' | Out-Null
         Assert-ZipEntry $zip 'Clipman.app/Contents/Resources/LICENSE.txt' 'Bundled Mac license' | Out-Null
-        foreach ($sound in @('copy.wav', 'off.wav', 'on.wav', 'remote.wav', 'skip.wav')) {
+        foreach ($sound in @('copy.wav', 'exclude.wav', 'off.wav', 'on.wav', 'remote.wav', 'skip.wav')) {
             Assert-ZipEntry $zip "Clipman.app/Contents/Resources/sounds/$sound" "Bundled Mac sound $sound" | Out-Null
         }
 
@@ -808,6 +808,16 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Multiple running Clipman instances can use the same history database' 'Manual shared history explanation'
     Assert-TextMatches $manual 'During an online or automatic update' 'Manual seamless update explanation'
     Assert-TextMatches $manual 'Storage and Password' 'Manual storage/password tab documentation'
+    Assert-TextMatches $manual '<h3>1\.8\.0</h3>' 'Manual 1.8.0 changelog'
+    Assert-TextMatches $manual 'Sensitive Data preferences' 'Manual sensitive data changelog'
+    Assert-TextMatches $manual 'international phone numbers' 'Manual international phone preset documentation'
+    Assert-TextMatches $manual '\+447890123456' 'Manual E.164-style phone example'
+    Assert-TextMatches $manual 'Software license key' 'Manual software license key preset documentation'
+    Assert-TextMatches $manual 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE' 'Manual software license key test value'
+    Assert-TextMatches $manual 'Copy credit-card test number' 'Manual sensitive data copy test button'
+    Assert-TextMatches $manual 'data-copy-test' 'Manual sensitive data copy test wiring'
+    Assert-TextMatches $manual 'Insert sample' 'Manual template preset insertion documentation'
+    Assert-TextMatches $manual 'Insert field' 'Manual template field insertion documentation'
     Assert-TextMatches $manual '<h3>1\.7\.2</h3>' 'Manual 1.7.2 changelog'
     Assert-TextMatches $manual 'Retry Storage command to the status menu' 'Manual Mac unavailable storage retry documentation'
     Assert-TextMatches $manual 'notification-area menu and tooltip report that storage is unavailable' 'Manual Windows unavailable storage retry documentation'
@@ -830,7 +840,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'helper windows and helper processes can be ignored' 'Manual 1.6.5 ignored helper changelog'
     Assert-TextMatches $manual 'standard edit shortcuts such as <code>Command\+V</code> work in settings text fields' 'Manual 1.6.5 Mac Preferences paste changelog'
     Assert-TextMatches $manual 'whether the selected history database is encrypted and whether the password is saved in Keychain' 'Manual 1.6.5 Mac password status changelog'
-    Assert-TextMatches $manual 'Ctrl\+1</code> to <code>Ctrl\+5' 'Manual preferences tab shortcut documentation'
+    Assert-TextMatches $manual 'Ctrl\+1</code> to <code>Ctrl\+6' 'Manual preferences tab shortcut documentation'
     Assert-TextMatches $manual 'File history preferences' 'Manual File history preferences documentation'
     Assert-TextMatches $manual 'diagnostics event limit' 'Manual diagnostics event limit documentation'
     Assert-TextMatches $manual 'Ctrl\+I' 'Manual import shortcut documentation'
@@ -917,6 +927,14 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Project page: <https://github.com/OnjLouis/Clipman>' 'README project page link'
     Assert-TextMatches $readme 'Clipman is a small portable accessible clipboard management tool for Windows and macOS' 'README cross-platform project summary'
     Assert-TextMatches $readme 'Add, remove, move, rename, group, pin, or edit text entries on one machine' 'README opening shared database explanation'
+    Assert-TextMatches $readme '### 1\.8\.0' 'README 1.8.0 changelog'
+    Assert-TextMatches $readme 'Sensitive Data preferences' 'README sensitive data changelog'
+    Assert-TextMatches $readme 'international phone numbers' 'README international phone preset documentation'
+    Assert-TextMatches $readme '\+447890123456' 'README E.164-style phone example'
+    Assert-TextMatches $readme 'software license keys' 'README software license key preset documentation'
+    Assert-TextMatches $readme 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE' 'README software license key test value'
+    Assert-TextMatches $readme 'Insert sample' 'README template preset insertion documentation'
+    Assert-TextMatches $readme 'Insert field' 'README template field insertion documentation'
     Assert-TextMatches $readme '### 1\.7\.2' 'README 1.7.2 changelog'
     Assert-TextMatches $readme 'Retry Storage command to the status menu' 'README Mac unavailable storage retry documentation'
     Assert-TextMatches $readme 'notification-area menu and tooltip report that storage is unavailable' 'README Windows unavailable storage retry documentation'
@@ -963,7 +981,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme '<code>Ctrl\+Alt\+`</code>' 'README backtick hotkey formatting'
     Assert-TextMatches $readme 'automatic update checks' 'README update preferences'
     Assert-TextMatches $readme 'Switch Preferences tabs' 'README preferences tab shortcut'
-    Assert-TextMatches $readme 'Ctrl\+1` to `Ctrl\+5' 'README preferences tab range'
+    Assert-TextMatches $readme 'Ctrl\+1` to `Ctrl\+6' 'README preferences tab range'
     Assert-TextMatches $readme 'File history preferences' 'README file-history preferences documentation'
     Assert-TextMatches $readme 'standard Windows multi-selection' 'README file-history multi-selection documentation'
     Assert-TextMatches $readme 'File history rows start with the file or folder name' 'README file-history filename-first documentation'
@@ -1058,6 +1076,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'SelectPreferencesTabByShortcut' 'Preferences tab shortcut code'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Shortcut Ctrl\+1' 'Preferences tab shortcut accessibility text'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Shortcut Ctrl\+5' 'Preferences fifth tab shortcut accessibility text'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Shortcut Ctrl\+6' 'Preferences sixth tab shortcut accessibility text'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Automatically remove &unavailable file-history events' 'File history preference auto cleanup checkbox'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Automatically group &new clips by source application' 'General preference auto-group unique mnemonic'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Diagnostics event limit' 'File history preference diagnostics limit'
@@ -1143,14 +1162,33 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'class TemplateResolver|static class TemplateResolver' 'Windows template resolver exists'
     Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'month_name_full' 'Windows template resolver supports month_name_full alias'
     Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Template entry' 'Windows Entry Properties exposes template entry checkbox'
+    Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Insert &sample' 'Windows Entry Properties exposes template sample insertion'
+    Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Insert &field' 'Windows Entry Properties exposes template field insertion'
     Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') '\{\{year_full\}\} - four-digit year' 'Windows template variable reference is line-oriented'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'Date, year/month/day' 'Windows template presets include year/month/day'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'Date, day short-month year' 'Windows template presets include non-US date'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs') 'international-phone' 'Windows sensitive data presets include international phone'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs') 'software-license-key' 'Windows sensitive data presets include software license key'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs') 'PassesLuhn' 'Windows sensitive data credit-card preset validates Luhn'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Sensitive data preferences' 'Windows Preferences exposes sensitive data tab'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'SensitiveDataExclusion\.FindMatch' 'Windows capture path checks sensitive data exclusions'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'sounds\.Exclude' 'Windows sensitive data exclusion plays exclude sound'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ResolvedEntryText\(entry\)' 'Windows copy and Quick Paste resolve template entries at output time'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'store\.SetTemplate\(entry\.Id, dialog\.EntryIsTemplate\)' 'Windows Entry Properties saves template flag'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\ClipmanCore\Models.swift') 'public var IsTemplate: Bool' 'Mac shared entries store template flag'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'enum TemplateResolver' 'Mac template resolver exists'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'variableReferenceText' 'Mac template variable reference exists'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Preview template' 'Mac Entry Properties exposes template preview'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Insert sample' 'Mac Entry Properties exposes template sample insertion'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Insert field' 'Mac Entry Properties exposes template field insertion'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Template variables' 'Mac Entry Properties exposes template variable reference'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'Date, year/month/day' 'Mac template presets include year/month/day'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'Date, day short-month year' 'Mac template presets include non-US date'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'international-phone' 'Mac sensitive data presets include international phone'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'software-license-key' 'Mac sensitive data presets include software license key'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'passesLuhn' 'Mac sensitive data credit-card preset validates Luhn'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Sensitive data mode' 'Mac Preferences exposes sensitive data mode'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'SensitiveDataExclusion\.matchName' 'Mac capture path checks sensitive data exclusions'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'TemplateResolver\.resolveEntryText' 'Mac copy and Quick Paste resolve template entries at output time'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Template entry' 'Mac Entry Properties exposes template entry checkbox'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'private func quickPasteEntry\(id: String\)' 'Mac Quick Paste hotkey uses paste workflow'
@@ -1326,6 +1364,38 @@ internal static class ClipmanSmokeHarness
 
         var youtubeShare = UrlTrackingCleaner.CleanForSharing("https://www.youtube.com/watch?v=A4jvHpegXHk&t=4s&pp=ygUVQXJlIHRoZSBmdW5kcyBnbGFyZGVk");
         Assert(youtubeShare == "https://www.youtube.com/watch?v=A4jvHpegXHk", "Share cleaner did not remove YouTube timestamp and share metadata.");
+
+        var sensitiveOffSettings = new AppSettings
+        {
+            SensitiveDataMode = SensitiveDataExclusion.ModeOff,
+            SensitiveDataPresetIds = { "credit-card", "international-phone" }
+        };
+        Assert(SensitiveDataExclusion.FindMatch("Card 4111 1111 1111 1111", sensitiveOffSettings) == null, "Sensitive data exclusions matched while disabled.");
+
+        var creditCardSettings = new AppSettings
+        {
+            SensitiveDataMode = SensitiveDataExclusion.ModeExclude,
+            SensitiveDataPresetIds = { "credit-card" }
+        };
+        Assert(SensitiveDataExclusion.FindMatch("Card 4111 1111 1111 1111", creditCardSettings) != null, "Sensitive data exclusions did not match a valid Luhn card number.");
+        Assert(SensitiveDataExclusion.FindMatch("Card 4111 1111 1111 1112", creditCardSettings) == null, "Sensitive data exclusions matched an invalid Luhn card number.");
+
+        var phoneSettings = new AppSettings
+        {
+            SensitiveDataMode = SensitiveDataExclusion.ModeExclude,
+            SensitiveDataPresetIds = { "international-phone" }
+        };
+        Assert(SensitiveDataExclusion.FindMatch("Call +447890123456", phoneSettings) != null, "Sensitive data exclusions did not match a compact international phone number.");
+        Assert(SensitiveDataExclusion.FindMatch("Call +44 7890 123 456", phoneSettings) != null, "Sensitive data exclusions did not match a spaced international phone number.");
+        Assert(SensitiveDataExclusion.FindMatch("Reference 447890123456", phoneSettings) == null, "Sensitive data exclusions matched a phone number without an international plus prefix.");
+
+        var licenseSettings = new AppSettings
+        {
+            SensitiveDataMode = SensitiveDataExclusion.ModeExclude,
+            SensitiveDataPresetIds = { "software-license-key" }
+        };
+        Assert(SensitiveDataExclusion.FindMatch("Key AAAAA-BBBBB-CCCCC-DDDDD-EEEEE", licenseSettings) != null, "Sensitive data exclusions did not match a software license key shape.");
+        Assert(SensitiveDataExclusion.FindMatch("Key AAAAABBBBBCCCCCDDDDDEEEEE", licenseSettings) == null, "Sensitive data exclusions matched a software license key without hyphen groups.");
 
         var path = Path.Combine(Path.GetTempPath(), "clipman-test-" + Guid.NewGuid().ToString("N") + ".clipdb");
         var secretText = "plain text should be compressed";
@@ -1666,6 +1736,7 @@ internal static class ClipmanSmokeHarness
             (Join-Path $repoRoot 'src\ClipDatabaseFile.cs'),
             (Join-Path $repoRoot 'src\FileClipboardEventStore.cs'),
             (Join-Path $repoRoot 'src\UrlTrackingCleaner.cs'),
+            (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs'),
             (Join-Path $repoRoot 'src\SqliteClipboardImporter.cs'),
             (Join-Path $repoRoot 'src\SyncConflictResolver.cs'),
             (Join-Path $repoRoot 'src\SharedUpdateState.cs'),

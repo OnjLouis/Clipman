@@ -342,6 +342,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             sounds.play(.skip)
             return
         }
+        if SensitiveDataExclusion.matchName(in: text, mode: settings.sensitiveDataMode, presetIds: settings.sensitiveDataPresetIds) != nil {
+            sounds.play(.exclude)
+            return
+        }
         store.addText(text, group: sourceApplication) { [weak self] saved in
             guard let self else { return }
             if saved {
