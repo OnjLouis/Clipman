@@ -66,6 +66,7 @@
     <li><a href="#actions">Actions</a></li>
     <li><a href="#menus">Menus</a></li>
     <li><a href="#sensitive-data">Sensitive Data Exclusions</a></li>
+    <li><a href="#clipboard-privacy-signals">Clipboard Privacy Signals</a></li>
     <li><a href="#ignored-applications">Ignored Applications</a></li>
     <li><a href="#database-and-sync">Database and Sync</a></li>
     <li><a href="#send-to">Send To</a></li>
@@ -311,6 +312,11 @@
 
   <p>The credit-card test number is a common non-real test value that passes the Luhn checksum. It is useful precisely because Clipman should exclude it while ignoring most random 16-digit strings.</p>
 
+  <h2 id="clipboard-privacy-signals">Clipboard Privacy Signals</h2>
+  <p>On Windows, Clipman also honors standard clipboard privacy signals added by the application that placed data on the clipboard. If a clipboard update contains <code>Clipboard Viewer Ignore</code>, <code>ExcludeClipboardContentFromMonitorProcessing</code>, <code>CanIncludeInClipboardHistory</code> set to zero, or <code>CanUploadToCloudClipboard</code> set to zero, Clipman treats that update as private, plays <code>exclude.wav</code> when sounds are enabled, and stores nothing in text history or file history.</p>
+
+  <p>This helps with password managers and secure-copy workflows that mark their own clipboard data as not suitable for history or sync. It is still cooperative: if Chrome, a webpage, a password manager, or another app puts only ordinary text on the clipboard with no privacy format, Clipman cannot reliably tell whether that text came from a password field or a normal webpage. Use ignored applications and Sensitive Data Exclusions for cases where the source app does not mark private clipboard updates itself.</p>
+
   <h2 id="ignored-applications">Ignored Applications</h2>
   <p>Preferences can list applications that Clipman should ignore, one per line. This is useful for password managers, banking tools, private notes, or any app where clipboard history should not be recorded.</p>
 
@@ -488,6 +494,11 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.8.1</h3>
+  <ul>
+    <li>Windows now honors clipboard privacy signals before automatic capture. Clipboard updates marked with <code>Clipboard Viewer Ignore</code>, <code>ExcludeClipboardContentFromMonitorProcessing</code>, <code>CanIncludeInClipboardHistory</code> set to zero, or <code>CanUploadToCloudClipboard</code> set to zero are excluded from Clipman's text and file history and play the exclude sound when sounds are enabled.</li>
+  </ul>
+
   <h3>1.8.0</h3>
   <ul>
     <li>Added Sensitive Data preferences for automatic clipboard text capture. The new mode is off by default; when set to Exclude from history, checked presets are not stored in Clipman history and the system clipboard is left unchanged. Built-in presets include credit card numbers with Luhn validation, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys, and approximate US driver-license shapes. Addresses <a href="https://github.com/OnjLouis/Clipman/issues/13">issue #13</a>.</li>

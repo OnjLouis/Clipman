@@ -48,6 +48,7 @@ namespace Clipman
         private bool toggleAlternateHotkeyRegistered;
         private readonly Dictionary<int, string> quickCopyHotkeyEntryIds = new Dictionary<int, string>();
         private int quickCopyHotkeysRegistered;
+        private string lastClipboardPrivacySignal = "None";
         private string lastHandledCloseRequestId = string.Empty;
         private string lastAutoCopiedRemoteEntryId = string.Empty;
         private long lastAutoCopiedRemoteEntryStamp;
@@ -450,6 +451,16 @@ namespace Clipman
                 sounds.Skip(settings.SoundsEnabled);
                 return;
             }
+
+            var privacySignal = ClipboardPrivacySignals.Detect();
+            if (privacySignal != null)
+            {
+                lastClipboardPrivacySignal = privacySignal.Reason;
+                sounds.Exclude(settings.SoundsEnabled);
+                return;
+            }
+
+            lastClipboardPrivacySignal = "None";
 
             RecordClipboardEvent(sourceProcessName);
 
@@ -960,6 +971,7 @@ namespace Clipman
                 "Auto remove URL tracking: " + settings.AutoRemoveUrlTracking + "\r\n" +
                 "Sensitive data mode: " + SensitiveDataExclusion.NormalizeMode(settings.SensitiveDataMode) + "\r\n" +
                 "Sensitive data presets: " + SensitiveDataPresetSummary() + "\r\n" +
+                "Last clipboard privacy signal: " + lastClipboardPrivacySignal + "\r\n" +
                 "Run at startup: " + settings.RunAtStartup + "\r\n" +
                 "Startup registration present: " + StartupRegistration.IsEnabled() + "\r\n" +
                 "Update check frequency: " + settings.UpdateCheckFrequency + "\r\n" +
