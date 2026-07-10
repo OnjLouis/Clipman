@@ -452,6 +452,7 @@ namespace Clipman
             preferencesMenuItem = new ToolStripMenuItem("&Preferences...\tCtrl+,", null, (s, e) => showPreferences());
             toggleMenuItem = new ToolStripMenuItem("&Toggle on/off", null, (s, e) => toggleActive());
             options.DropDownItems.Add(preferencesMenuItem);
+            options.DropDownItems.Add("Open &settings folder", null, (s, e) => OpenSettingsFolder());
             options.DropDownItems.Add(toggleMenuItem);
 
             var view = new ToolStripMenuItem("&View");
@@ -2925,6 +2926,35 @@ namespace Clipman
                 ? new Point(10, 10)
                 : new Point(Math.Max(0, item.Bounds.Left + 8), item.Bounds.Bottom);
             historyContextMenu.Show(list, location);
+        }
+
+        private void OpenSettingsFolder()
+        {
+            try
+            {
+                var folder = SettingsFolderFromDatabasePath(settings.DatabasePath);
+                Directory.CreateDirectory(folder);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = folder,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Clipman could not open the settings folder.\r\n\r\n" + ex.Message, "Clipman", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private static string SettingsFolderFromDatabasePath(string databasePath)
+        {
+            if (!string.IsNullOrWhiteSpace(databasePath))
+            {
+                var folder = Path.GetDirectoryName(databasePath);
+                if (!string.IsNullOrWhiteSpace(folder)) return folder;
+            }
+
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), "Settings");
         }
 
         private void ShowFileEventsContextMenu()

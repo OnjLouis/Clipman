@@ -124,6 +124,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindowDidRequestContact(_ controller: HistoryWindowController)
     func historyWindowDidRequestDonate(_ controller: HistoryWindowController)
     func historyWindowDidRequestDiagnostics(_ controller: HistoryWindowController)
+    func historyWindowDidRequestSettingsFolder(_ controller: HistoryWindowController)
     func historyWindowDidHide(_ controller: HistoryWindowController)
 }
 
@@ -1010,6 +1011,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         addMenuItem("Contact", action: #selector(menuContact), to: menu)
         addMenuItem("Donate", action: #selector(menuDonate), to: menu)
         addMenuItem("Diagnostics", action: #selector(menuDiagnostics), to: menu, shortcut: "Option+F1")
+        addMenuItem("Open Settings Folder", action: #selector(menuOpenSettingsFolder), to: menu)
         menu.addItem(.separator())
         addPinnedShortcutItems(to: menu)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: actionsButton.bounds.height + 2), in: actionsButton)
@@ -1186,6 +1188,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuContact() { historyDelegate?.historyWindowDidRequestContact(self) }
     @objc private func menuDonate() { historyDelegate?.historyWindowDidRequestDonate(self) }
     @objc private func menuDiagnostics() { historyDelegate?.historyWindowDidRequestDiagnostics(self) }
+    @objc private func menuOpenSettingsFolder() { historyDelegate?.historyWindowDidRequestSettingsFolder(self) }
     @objc private func menuToggleDirection() {
         if mode == .files {
             fileSortDescending.toggle()

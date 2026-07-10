@@ -494,6 +494,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.8.2</h3>
+  <ul>
+    <li>Fixed the Windows Preferences duplicate-handling combo box so its choices read as “Move to top”, “Ignore”, and “Keep both”, and so Up/Down navigation visits each option normally. Closes <a href="https://github.com/OnjLouis/Clipman/issues/14">issue #14</a> and closes <a href="https://github.com/OnjLouis/Clipman/issues/15">issue #15</a>.</li>
+    <li>Fixed opening Preferences from the Windows notification-area menu so it no longer forces the hidden history window to appear behind Preferences. Closes <a href="https://github.com/OnjLouis/Clipman/issues/16">issue #16</a>.</li>
+    <li>Added an Open settings folder command to the Windows notification-area menu and Options menu, plus the Mac menu bar, status menu, and in-window Clipman menu. Closes <a href="https://github.com/OnjLouis/Clipman/issues/17">issue #17</a>.</li>
+  </ul>
+
   <h3>1.8.1</h3>
   <ul>
     <li>Windows now honors clipboard privacy signals before automatic capture. Clipboard updates marked with <code>Clipboard Viewer Ignore</code>, <code>ExcludeClipboardContentFromMonitorProcessing</code>, <code>CanIncludeInClipboardHistory</code> set to zero, or <code>CanUploadToCloudClipboard</code> set to zero are excluded from Clipman's text and file history and play the exclude sound when sounds are enabled.</li>

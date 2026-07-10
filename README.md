@@ -123,6 +123,12 @@ If a sync service creates conflict copies of Clipman's own settings or history d
 
 ## Changelog
 
+### 1.8.2
+
+- Fixed the Windows Preferences duplicate-handling combo box so its choices read as “Move to top”, “Ignore”, and “Keep both”, and so Up/Down navigation visits each option normally. Closes issue #14 and closes issue #15.
+- Fixed opening Preferences from the Windows notification-area menu so it no longer forces the hidden history window to appear behind Preferences. Closes issue #16.
+- Added an Open settings folder command to the Windows notification-area menu and Options menu, plus the Mac menu bar, status menu, and in-window Clipman menu. Closes issue #17.
+
 ### 1.8.1
 
 - Windows now honors clipboard privacy signals before automatic capture. Clipboard updates marked with `Clipboard Viewer Ignore`, `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` set to zero, or `CanUploadToCloudClipboard` set to zero are excluded from Clipman's text and file history and play the exclude sound when sounds are enabled.
@@ -255,7 +261,7 @@ powershell -ExecutionPolicy Bypass -File .\CommunitySearch.ps1
 
 This checks GitHub for Clipman activity and writes web/community search links for public feedback that may not have arrived as a GitHub issue.
 
-Release rules for coding agents live in `GITHUB-RELEASE-RULES.md`.
+Release packaging is guarded by the smoke test and release privacy check.
 
 ## License
 

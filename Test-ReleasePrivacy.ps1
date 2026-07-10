@@ -20,7 +20,8 @@ function Test-PrivateCoordinationFilesAreUntracked {
     $privateFiles = @(
         'ClipmanShared.md',
         'CLIPMAN_AGENT_SYNC.md',
-        'CLIPMAN_SHARED_CONTRACT.md'
+        'CLIPMAN_SHARED_CONTRACT.md',
+        'GITHUB-RELEASE-RULES.md'
     )
     $tracked = @(& git -C $repoRoot ls-files -- $privateFiles 2>$null)
     if ($LASTEXITCODE -eq 0 -and $tracked.Count -gt 0) {

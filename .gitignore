@@ -27,6 +27,7 @@ clipman-settings.json
 ClipmanShared.md
 CLIPMAN_AGENT_SYNC.md
 CLIPMAN_SHARED_CONTRACT.md
+GITHUB-RELEASE-RULES.md
 
 # Editor and OS noise
 .DS_Store

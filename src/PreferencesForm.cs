@@ -94,8 +94,8 @@ namespace Clipman
             autoRemoveUrlTracking = NewCheckBox("Automatically remove URL &tracking from copied text", settings.AutoRemoveUrlTracking);
             saveListPosition = NewCheckBox("Save list &position", settings.SaveListPosition);
             removeDuplicates = NewCheckBox("&Remove duplicate entries", settings.RemoveDuplicates);
-            duplicateMode = NewComboBox("Duplicate handling", new[] { "MoveToTop", "Ignore", "KeepBoth" }, string.IsNullOrWhiteSpace(settings.DuplicateMode) ? "MoveToTop" : settings.DuplicateMode);
-            removeDuplicates.Checked = !string.Equals(Convert.ToString(duplicateMode.SelectedItem), "KeepBoth", StringComparison.OrdinalIgnoreCase);
+            duplicateMode = NewComboBox("Duplicate handling", new[] { "Move to top", "Ignore", "Keep both" }, DisplayDuplicateMode(settings.DuplicateMode));
+            removeDuplicates.Checked = !string.Equals(StoredDuplicateMode(Convert.ToString(duplicateMode.SelectedItem)), "KeepBoth", StringComparison.OrdinalIgnoreCase);
             maxHistoryEntries = NewNumeric(Clamp(settings.MaxHistoryEntries, 0, 100000), 0, 100000, 100);
             maxHistoryDays = NewNumeric(Clamp(settings.MaxHistoryDays, 0, 3650), 0, 3650, 1);
 
@@ -285,7 +285,7 @@ namespace Clipman
             {
                 if (!loading)
                 {
-                    duplicateMode.SelectedItem = removeDuplicates.Checked ? "MoveToTop" : "KeepBoth";
+                    duplicateMode.SelectedItem = removeDuplicates.Checked ? "Move to top" : "Keep both";
                 }
                 ApplyNow();
             };
@@ -293,7 +293,19 @@ namespace Clipman
             {
                 if (!loading)
                 {
-                    removeDuplicates.Checked = !string.Equals(Convert.ToString(duplicateMode.SelectedItem), "KeepBoth", StringComparison.OrdinalIgnoreCase);
+                    var storedDuplicateMode = StoredDuplicateMode(Convert.ToString(duplicateMode.SelectedItem));
+                    if (removeDuplicates.Checked == string.Equals(storedDuplicateMode, "KeepBoth", StringComparison.OrdinalIgnoreCase))
+                    {
+                        loading = true;
+                        try
+                        {
+                            removeDuplicates.Checked = !string.Equals(storedDuplicateMode, "KeepBoth", StringComparison.OrdinalIgnoreCase);
+                        }
+                        finally
+                        {
+                            loading = false;
+                        }
+                    }
                 }
                 ApplyNow();
             };
@@ -335,7 +347,7 @@ namespace Clipman
 
             settings.ShowHistoryHotkey = showHotkey.Text.Trim();
             settings.ToggleActiveHotkey = toggleHotkey.Text.Trim();
-            settings.DuplicateMode = Convert.ToString(duplicateMode.SelectedItem);
+            settings.DuplicateMode = StoredDuplicateMode(Convert.ToString(duplicateMode.SelectedItem));
             settings.RemoveDuplicates = !string.Equals(settings.DuplicateMode, "KeepBoth", StringComparison.OrdinalIgnoreCase);
             settings.SoundsEnabled = soundsEnabled.Checked;
             settings.AutoGroupByApp = autoGroupByApp.Checked;
@@ -822,6 +834,28 @@ namespace Clipman
             if (string.Equals(value, "Hourly", StringComparison.OrdinalIgnoreCase)) return "Hourly";
             if (string.Equals(value, "Daily", StringComparison.OrdinalIgnoreCase)) return "Daily";
             return "Never";
+        }
+
+        private static string DisplayDuplicateMode(string value)
+        {
+            if (string.Equals(value, "Ignore", StringComparison.OrdinalIgnoreCase)) return "Ignore";
+            if (string.Equals(value, "KeepBoth", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "Keep both", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Keep both";
+            }
+            return "Move to top";
+        }
+
+        private static string StoredDuplicateMode(string value)
+        {
+            if (string.Equals(value, "Ignore", StringComparison.OrdinalIgnoreCase)) return "Ignore";
+            if (string.Equals(value, "Keep both", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "KeepBoth", StringComparison.OrdinalIgnoreCase))
+            {
+                return "KeepBoth";
+            }
+            return "MoveToTop";
         }
 
         private static string DisplaySensitiveDataMode(string value)

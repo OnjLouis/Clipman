@@ -112,6 +112,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         appMenu.addItem(NSMenuItem(title: "Contact", action: #selector(openContactPage(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Donate", action: #selector(openDonatePage(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Diagnostics...", action: #selector(showDiagnostics(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Open Settings Folder", action: #selector(openSettingsFolder(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ","))
         appMenu.addItem(NSMenuItem(title: "About Clipman", action: #selector(showAbout(_:)), keyEquivalent: ""))
@@ -148,6 +149,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         menu.addItem(NSMenuItem(title: "Contact", action: #selector(openContactPage(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Donate", action: #selector(openDonatePage(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Diagnostics...", action: #selector(showDiagnostics(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Open Settings Folder", action: #selector(openSettingsFolder(_:)), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "About Clipman", action: #selector(showAbout(_:)), keyEquivalent: ""))
@@ -324,6 +326,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         preferencesWindow?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openSettingsFolder(_ sender: Any?) {
+        let folder = settingsStore.dataFolder(for: settings)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
     }
 
     @objc private func showAbout(_ sender: Any?) {
@@ -919,6 +927,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func historyWindowDidRequestDiagnostics(_ controller: HistoryWindowController) {
         showDiagnostics(nil)
+    }
+
+    func historyWindowDidRequestSettingsFolder(_ controller: HistoryWindowController) {
+        openSettingsFolder(nil)
     }
 
     func historyWindowDidHide(_ controller: HistoryWindowController) {

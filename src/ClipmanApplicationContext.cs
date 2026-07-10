@@ -168,6 +168,16 @@ namespace Clipman
 
         public void ShowPreferences()
         {
+            ShowPreferences(true);
+        }
+
+        private void ShowPreferencesFromTray()
+        {
+            ShowPreferences(false);
+        }
+
+        private void ShowPreferences(bool showHistoryIfHidden)
+        {
             if (preferencesForm != null && !preferencesForm.IsDisposed)
             {
                 FocusPreferencesForm();
@@ -176,12 +186,22 @@ namespace Clipman
 
             if (historyForm == null || historyForm.IsDisposed || !historyForm.Visible)
             {
-                ShowHistory();
+                if (showHistoryIfHidden)
+                {
+                    ShowHistory();
+                }
             }
 
             preferencesForm = new PreferencesForm(settings, ApplyPreferences, CopySensitiveTextToClipboard);
             preferencesForm.FormClosed += (s, e) => preferencesForm = null;
-            preferencesForm.ShowDialog(historyForm);
+            if (historyForm != null && !historyForm.IsDisposed && historyForm.Visible)
+            {
+                preferencesForm.ShowDialog(historyForm);
+            }
+            else
+            {
+                preferencesForm.ShowDialog();
+            }
             preferencesForm = null;
         }
 
@@ -723,10 +743,28 @@ namespace Clipman
 
             menu.Items.Add("&Show or hide history\t" + settings.ShowHistoryHotkey, null, (s, e) => ToggleHistoryWindow());
             menu.Items.Add((settings.Active ? "Turn &off" : "Turn &on") + "\t" + settings.ToggleActiveHotkey, null, (s, e) => ToggleActive());
-            menu.Items.Add("&Preferences...", null, (s, e) => ShowPreferences());
+            menu.Items.Add("&Preferences...", null, (s, e) => ShowPreferencesFromTray());
+            menu.Items.Add("Open &settings folder", null, (s, e) => OpenSettingsFolder());
             menu.Items.Add("-");
             menu.Items.Add("E&xit", null, (s, e) => ExitThread());
             return menu;
+        }
+
+        private void OpenSettingsFolder()
+        {
+            try
+            {
+                Directory.CreateDirectory(settingsStore.SettingsDirectory);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = settingsStore.SettingsDirectory,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Clipman could not open the settings folder.\r\n\r\n" + ex.Message, "Clipman", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void RetryStorage()
