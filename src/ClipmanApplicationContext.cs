@@ -83,6 +83,10 @@ namespace Clipman
                 ContextMenuStrip = BuildTrayMenu()
             };
             notifyIcon.DoubleClick += (s, e) => ToggleHistoryWindow();
+            if (settings.CaptureClipboardOnStartup)
+            {
+                HandleClipboardUpdate();
+            }
 
             RegisterHotkeys();
             ApplyStartupRegistration(false);
@@ -281,6 +285,7 @@ namespace Clipman
                 settings.InstallUpdatesSilently != updated.InstallUpdatesSilently;
             var autoRemoteCopyTurnedOn = !settings.AutoCopyLatestRemoteText && updated.AutoCopyLatestRemoteText;
             var saveListPositionTurnedOff = settings.SaveListPosition && !updated.SaveListPosition;
+            var linksHistoryVisibilityChanged = settings.LinksHistoryEnabled != updated.LinksHistoryEnabled;
             var oldSettingsDirectory = settingsStore.SettingsDirectory;
             settings.ShowHistoryHotkey = updated.ShowHistoryHotkey;
             settings.ToggleActiveHotkey = updated.ToggleActiveHotkey;
@@ -305,11 +310,14 @@ namespace Clipman
             settings.DuplicateMode = updated.DuplicateMode;
             settings.AutoGroupByApp = updated.AutoGroupByApp;
             settings.AutoRemoveUrlTracking = updated.AutoRemoveUrlTracking;
+            settings.LinksHistoryEnabled = updated.LinksHistoryEnabled;
+            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(updated.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
             settings.AutoRemoveUnavailableFileHistoryEvents = updated.AutoRemoveUnavailableFileHistoryEvents;
             settings.DiagnosticsFileHistoryLimit = updated.DiagnosticsFileHistoryLimit;
             settings.SensitiveDataMode = SensitiveDataExclusion.NormalizeMode(updated.SensitiveDataMode);
             settings.SensitiveDataPresetIds = updated.SensitiveDataPresetIds == null ? new List<string>() : new List<string>(updated.SensitiveDataPresetIds);
             settings.RunAtStartup = updated.RunAtStartup;
+            settings.CaptureClipboardOnStartup = updated.CaptureClipboardOnStartup;
             settings.UpdateCheckFrequency = updated.UpdateCheckFrequency;
             settings.InstallUpdatesSilently = updated.InstallUpdatesSilently;
             settings.DatabaseEncryptionEnabled = updated.DatabaseEncryptionEnabled;
@@ -391,9 +399,9 @@ namespace Clipman
             {
                 if (settings.Active) sounds.On(settings.SoundsEnabled); else sounds.Off(settings.SoundsEnabled);
             }
-            if (databaseChanged && historyForm != null && !historyForm.IsDisposed)
+            if (historyForm != null && !historyForm.IsDisposed && (databaseChanged || linksHistoryVisibilityChanged))
             {
-                historyForm.Reload();
+                historyForm.RefreshTabsAndReload();
             }
         }
 
@@ -403,6 +411,7 @@ namespace Clipman
             IgnoreClipboardChanges(1);
             Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
             store.MarkUsed(entry.Id);
+            sounds.Copy(settings.SoundsEnabled);
         }
 
         public void CopyEntriesToClipboard(List<ClipEntry> entries)
@@ -417,6 +426,7 @@ namespace Clipman
             {
                 store.MarkUsed(entry.Id);
             }
+            sounds.Copy(settings.SoundsEnabled);
         }
 
         private void CopySensitiveTextToClipboard(string text)
@@ -1011,6 +1021,7 @@ namespace Clipman
                 "Sensitive data presets: " + SensitiveDataPresetSummary() + "\r\n" +
                 "Last clipboard privacy signal: " + lastClipboardPrivacySignal + "\r\n" +
                 "Run at startup: " + settings.RunAtStartup + "\r\n" +
+                "Add clipboard item on startup: " + settings.CaptureClipboardOnStartup + "\r\n" +
                 "Startup registration present: " + StartupRegistration.IsEnabled() + "\r\n" +
                 "Update check frequency: " + settings.UpdateCheckFrequency + "\r\n" +
                 "Install updates silently: " + settings.InstallUpdatesSilently + "\r\n" +

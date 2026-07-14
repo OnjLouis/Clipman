@@ -19,9 +19,11 @@ namespace Clipman
         private readonly CheckBox autoGroupByApp;
         private readonly CheckBox autoCopyLatestRemoteText;
         private readonly CheckBox autoRemoveUrlTracking;
+        private readonly CheckBox linksHistoryEnabled;
         private readonly CheckBox saveListPosition;
         private readonly CheckBox active;
         private readonly CheckBox runAtStartup;
+        private readonly CheckBox captureClipboardOnStartup;
         private readonly ComboBox updateCheckFrequency;
         private readonly CheckBox installUpdatesSilently;
         private readonly TabControl preferencesTabs;
@@ -92,6 +94,8 @@ namespace Clipman
             autoCopyLatestRemoteText = NewCheckBox("Put new text received from another &machine on the clipboard", settings.AutoCopyLatestRemoteText);
             autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another machine onto this machine's clipboard. Reusing an older entry on another machine does not trigger this. This is off by default.";
             autoRemoveUrlTracking = NewCheckBox("Automatically remove URL &tracking from copied text", settings.AutoRemoveUrlTracking);
+            linksHistoryEnabled = NewCheckBox("Show &Links history tab", settings.LinksHistoryEnabled);
+            linksHistoryEnabled.AccessibleDescription = "When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.";
             saveListPosition = NewCheckBox("Save list &position", settings.SaveListPosition);
             removeDuplicates = NewCheckBox("&Remove duplicate entries", settings.RemoveDuplicates);
             duplicateMode = NewComboBox("Duplicate handling", new[] { "Move to top", "Ignore", "Keep both" }, DisplayDuplicateMode(settings.DuplicateMode));
@@ -105,6 +109,7 @@ namespace Clipman
             AddFullRow(generalLayout, autoGroupByApp);
             AddFullRow(generalLayout, autoCopyLatestRemoteText);
             AddFullRow(generalLayout, autoRemoveUrlTracking);
+            AddFullRow(generalLayout, linksHistoryEnabled);
             AddFullRow(generalLayout, saveListPosition);
             AddFullRow(generalLayout, removeDuplicates);
             AddRow(generalLayout, "&Duplicate handling:", duplicateMode);
@@ -196,6 +201,8 @@ namespace Clipman
             storage.Controls.Add(storageLayout);
 
             runAtStartup = NewCheckBox("Run Clipman at Windows &startup", settings.RunAtStartup);
+            captureClipboardOnStartup = NewCheckBox("Add current &clipboard item to Clipman on start", settings.CaptureClipboardOnStartup);
+            captureClipboardOnStartup.AccessibleDescription = "When checked, Clipman tries to add the current Windows clipboard item to history once when Clipman starts. This is off by default and still follows monitoring, ignored application, privacy signal, and sensitive data settings.";
             updateCheckFrequency = NewComboBox("Update check frequency", new[] { "Never", "At startup", "Hourly", "Daily" }, DisplayUpdateFrequency(settings.UpdateCheckFrequency));
             installUpdatesSilently = NewCheckBox("&Install updates silently when possible", settings.InstallUpdatesSilently);
             sendToEnabled = NewCheckBox("Add Clipman to the Windows Send &To menu for text files", settings.SendToEnabled);
@@ -203,6 +210,7 @@ namespace Clipman
 
             var integrationLayout = NewRows();
             AddFullRow(integrationLayout, runAtStartup);
+            AddFullRow(integrationLayout, captureClipboardOnStartup);
             AddRow(integrationLayout, "Check for &updates:", updateCheckFrequency);
             AddFullRow(integrationLayout, installUpdatesSilently);
             AddFullRow(integrationLayout, NewNote("Silent installs only run when a GitHub release contains a Clipman ZIP package. Settings are preserved."));
@@ -313,6 +321,7 @@ namespace Clipman
             autoGroupByApp.CheckedChanged += (s, e) => ApplyNow();
             autoCopyLatestRemoteText.CheckedChanged += (s, e) => ApplyNow();
             autoRemoveUrlTracking.CheckedChanged += (s, e) => ApplyNow();
+            linksHistoryEnabled.CheckedChanged += (s, e) => ApplyNow();
             saveListPosition.CheckedChanged += (s, e) => ApplyNow();
             active.CheckedChanged += (s, e) => ApplyNow();
             autoRemoveUnavailableFileHistoryEvents.CheckedChanged += (s, e) => ApplyNow();
@@ -353,11 +362,14 @@ namespace Clipman
             settings.AutoGroupByApp = autoGroupByApp.Checked;
             settings.AutoCopyLatestRemoteText = autoCopyLatestRemoteText.Checked;
             settings.AutoRemoveUrlTracking = autoRemoveUrlTracking.Checked;
+            settings.LinksHistoryEnabled = linksHistoryEnabled.Checked;
+            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
             settings.SaveListPosition = saveListPosition.Checked;
             settings.Active = active.Checked;
             settings.AutoRemoveUnavailableFileHistoryEvents = autoRemoveUnavailableFileHistoryEvents.Checked;
             settings.DiagnosticsFileHistoryLimit = (int)diagnosticsFileHistoryLimit.Value;
             settings.RunAtStartup = runAtStartup.Checked;
+            settings.CaptureClipboardOnStartup = captureClipboardOnStartup.Checked;
             settings.UpdateCheckFrequency = StoredUpdateFrequency(Convert.ToString(updateCheckFrequency.SelectedItem));
             settings.InstallUpdatesSilently = installUpdatesSilently.Checked;
             settings.LastPreferencesTab = preferencesTabs == null ? 0 : preferencesTabs.SelectedIndex;
@@ -641,9 +653,12 @@ namespace Clipman
                 DuplicateMode = current.DuplicateMode,
                 AutoGroupByApp = current.AutoGroupByApp,
                 AutoRemoveUrlTracking = current.AutoRemoveUrlTracking,
+                LinksHistoryEnabled = current.LinksHistoryEnabled,
+                LastSelectedHistoryTab = current.LastSelectedHistoryTab,
                 AutoRemoveUnavailableFileHistoryEvents = current.AutoRemoveUnavailableFileHistoryEvents,
                 DiagnosticsFileHistoryLimit = current.DiagnosticsFileHistoryLimit,
                 RunAtStartup = current.RunAtStartup,
+                CaptureClipboardOnStartup = current.CaptureClipboardOnStartup,
                 UpdateCheckFrequency = current.UpdateCheckFrequency,
                 InstallUpdatesSilently = current.InstallUpdatesSilently,
                 DatabaseEncryptionEnabled = current.DatabaseEncryptionEnabled,

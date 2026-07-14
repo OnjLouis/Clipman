@@ -18,6 +18,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Global hotkeys for showing history and toggling monitoring.
 - User-configurable hotkeys.
 - Optional per-entry Quick Paste global hotkeys that paste chosen text entries into the active app from anywhere without opening history.
+- Optional Links history tab for whole-entry HTTP and HTTPS links. Links remain in the normal shared text-history database; the tab is a filtered view that can be enabled in Preferences.
 - Optional template entries. Mark a text entry as a template in Entry Properties and Clipman resolves variables such as `{{year_full}}`, `{{month_num_padded}}`, `{{day_of_month_padded}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}` when that entry is copied or quick-pasted. Entry Properties includes sample templates and field insertion.
 - Press Enter on a history entry to copy it back to the clipboard and close history.
 - Press Ctrl+C to copy without closing the history window.
@@ -45,6 +46,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Tray and app menus show the configured global hotkeys.
 - Help menu links to the GitHub project, release history, update checker, contact page, and donate page.
 - Optional per-user Windows startup entry.
+- Optional startup capture, so Clipman can add the current clipboard item once when it starts if you choose.
 - Optional automatic update checks at startup, hourly, or daily, with silent install support when a release ZIP is available.
 
 ## Default Hotkeys
@@ -75,6 +77,8 @@ Hotkeys can be changed from Options > Preferences. In hotkey fields, press a val
 
 Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared data folder and the history password controls.
 
+Links history is optional and off by default. When enabled, it adds a separate view for entries where the whole clipboard text is one absolute `http` or `https` URL. Prose containing links, multiline text, `mailto:`, `file:`, and custom schemes remain in Text history. With Links history disabled, File history remains the second history area. With Links history enabled, Links becomes the second area and File history moves to the third.
+
 The default data folder is `Settings` beside `clipman.exe`. If Clipman is moved while using that default data folder, settings and history follow the new folder. If you choose a different data folder, Clipman uses `clipman-history.clipdb` inside that folder and stores this machine's settings beside it. A small pointer remains in the app's `Settings` folder so Clipman can find the selected data folder on the next launch.
 
 Clipman remembers whether clipboard monitoring was on or off. On launch it plays the on or off sound for the restored state when sounds are enabled.
@@ -101,7 +105,7 @@ Template entries are shared text entries with one extra flag. The stored text re
 
 Supported template variables include `{{year_full}}`, `{{year_short}}`, `{{month_name}}`, `{{month_name_full}}`, `{{month_name_short}}`, `{{month_num}}`, `{{month_num_padded}}`, `{{day_of_month}}`, `{{day_of_month_padded}}`, `{{day_name_full}}`, `{{day_name_short}}`, `{{hour_24}}`, `{{hour_24_padded}}`, `{{hour_12}}`, `{{hour_12_padded}}`, `{{minute}}`, `{{minute_padded}}`, `{{second}}`, `{{second_padded}}`, `{{utc_offset}}`, `{{time_zone}}`, `{{time_zone_short}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}`. Unknown variables are left alone.
 
-Sensitive-data exclusions are machine-specific and off by default. When enabled in Preferences, they apply only to automatic clipboard text capture. They do not alter the system clipboard, existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman. Built-in presets include credit card numbers with a Luhn check, US Social Security numbers, international phone numbers such as `+447890123456` and common spaced/dashed/bracketed variants, long API keys or tokens, software license keys shaped like `AAAAA-BBBBB-CCCCC-DDDDD-EEEEE`, and approximate US driver-license shapes. When a match is excluded, Clipman plays `exclude.wav` if sounds are enabled, falling back to `skip.wav` if that sound is missing. The manual includes harmless test values and copy buttons so users can check that their selected presets and exclude sound are working.
+Sensitive-data exclusions are machine-specific and off by default. When enabled in Preferences, they apply only to automatic clipboard text capture. They do not alter the system clipboard, existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman. Built-in presets include credit card numbers with a Luhn check, US Social Security numbers, international phone numbers such as `+447890123456` and common spaced/dashed/bracketed variants, long API keys or tokens, software license keys shaped like `AAAAA-BBBBB-CCCCC-DDDDD-EEEEE`, and approximate US driver-license shapes. The broad long-token preset ignores full `http` and `https` URLs, so ordinary shopping/search links with long tracking parameters are not excluded as raw tokens. When a match is excluded, Clipman plays `exclude.wav` if sounds are enabled, falling back to `skip.wav` if that sound is missing. The manual includes harmless test values and copy buttons so users can check that their selected presets and exclude sound are working.
 
 On Windows, Clipman also honors clipboard privacy signals added by the application that placed data on the clipboard. Clipboard updates marked with `Clipboard Viewer Ignore`, `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` set to zero, or `CanUploadToCloudClipboard` set to zero are excluded before Clipman records text history or file history. This can help with password managers and secure-copy workflows that mark their own clipboard data. It is cooperative: if an app puts only ordinary text on the clipboard with no privacy format, Clipman cannot reliably know whether that text came from a password field or a normal document or webpage.
 
@@ -122,6 +126,15 @@ File history preferences can automatically remove unavailable unpinned events as
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
 ## Changelog
+
+### 1.9.0
+
+- Added an optional Links history tab for clipboard entries where the whole text is a single `http` or `https` link. Links history is off by default, and links remain part of the normal shared text-history database. Closes issue #18.
+- When Links history is enabled, the history areas are Text, Links, then Files. When Links history is disabled, the history areas remain Text then Files, preserving the existing File history shortcut.
+- Improved history tab remembering so Clipman remembers Text, Links, or Files by name rather than by a raw tab number.
+- Adjusted the Long API key or token sensitive-data preset so ordinary full web links with long tracking parameters are not excluded as raw tokens.
+- Added an opt-in startup preference on Windows and Mac to add the current clipboard item to Clipman once when the app starts. It is off by default and still follows monitoring, ignored-application, privacy, and sensitive-data rules.
+- Windows now plays the normal copy sound when an entry is chosen from Clipman history, matching the Mac confirmation behavior.
 
 ### 1.8.2
 

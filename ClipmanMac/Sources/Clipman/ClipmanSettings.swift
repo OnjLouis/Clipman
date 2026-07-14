@@ -14,8 +14,11 @@ struct ClipmanSettings: Codable, Equatable {
     var fileHistorySortMode: String
     var fileHistorySortDescending: Bool
     var lastSelectedTab: Int
+    var lastSelectedHistoryTab: String
+    var linksHistoryEnabled: Bool
     var groupFilter: String
     var runAtStartup: Bool
+    var captureClipboardOnStartup: Bool
     var rememberDatabasePassword: Bool
     var autoCopyLatestRemoteText: Bool
     var updateCheckFrequency: String
@@ -29,7 +32,8 @@ struct ClipmanSettings: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case machineName, databasePath, monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
-        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, groupFilter, runAtStartup
+        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, linksHistoryEnabled, groupFilter, runAtStartup
+        case captureClipboardOnStartup
         case rememberDatabasePassword
         case autoCopyLatestRemoteText, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
         case ignoredApplications
@@ -53,8 +57,11 @@ struct ClipmanSettings: Codable, Equatable {
         fileHistorySortMode: String,
         fileHistorySortDescending: Bool,
         lastSelectedTab: Int,
+        lastSelectedHistoryTab: String,
+        linksHistoryEnabled: Bool,
         groupFilter: String,
         runAtStartup: Bool,
+        captureClipboardOnStartup: Bool,
         rememberDatabasePassword: Bool,
         autoCopyLatestRemoteText: Bool,
         updateCheckFrequency: String,
@@ -78,8 +85,11 @@ struct ClipmanSettings: Codable, Equatable {
         self.fileHistorySortMode = fileHistorySortMode
         self.fileHistorySortDescending = fileHistorySortDescending
         self.lastSelectedTab = lastSelectedTab
+        self.lastSelectedHistoryTab = lastSelectedHistoryTab
+        self.linksHistoryEnabled = linksHistoryEnabled
         self.groupFilter = groupFilter
         self.runAtStartup = runAtStartup
+        self.captureClipboardOnStartup = captureClipboardOnStartup
         self.rememberDatabasePassword = rememberDatabasePassword
         self.autoCopyLatestRemoteText = autoCopyLatestRemoteText
         self.updateCheckFrequency = updateCheckFrequency
@@ -107,8 +117,11 @@ struct ClipmanSettings: Codable, Equatable {
         fileHistorySortMode = try container.decodeIfPresent(String.self, forKey: .fileHistorySortMode) ?? "Manual"
         fileHistorySortDescending = try container.decodeIfPresent(Bool.self, forKey: .fileHistorySortDescending) ?? false
         lastSelectedTab = try container.decodeIfPresent(Int.self, forKey: .lastSelectedTab) ?? 0
+        linksHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .linksHistoryEnabled) ?? false
+        lastSelectedHistoryTab = try container.decodeIfPresent(String.self, forKey: .lastSelectedHistoryTab) ?? (lastSelectedTab == 1 ? HistoryTabID.files : HistoryTabID.text)
         groupFilter = try container.decodeIfPresent(String.self, forKey: .groupFilter) ?? "All"
         runAtStartup = try container.decodeIfPresent(Bool.self, forKey: .runAtStartup) ?? false
+        captureClipboardOnStartup = try container.decodeIfPresent(Bool.self, forKey: .captureClipboardOnStartup) ?? false
         rememberDatabasePassword = try container.decodeIfPresent(Bool.self, forKey: .rememberDatabasePassword) ?? false
         autoCopyLatestRemoteText = try container.decodeIfPresent(Bool.self, forKey: .autoCopyLatestRemoteText) ?? false
         updateCheckFrequency = try container.decodeIfPresent(String.self, forKey: .updateCheckFrequency) ?? "Never"
@@ -150,8 +163,11 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(fileHistorySortMode, forKey: .fileHistorySortMode)
         try container.encode(fileHistorySortDescending, forKey: .fileHistorySortDescending)
         try container.encode(lastSelectedTab, forKey: .lastSelectedTab)
+        try container.encode(lastSelectedHistoryTab, forKey: .lastSelectedHistoryTab)
+        try container.encode(linksHistoryEnabled, forKey: .linksHistoryEnabled)
         try container.encode(groupFilter, forKey: .groupFilter)
         try container.encode(runAtStartup, forKey: .runAtStartup)
+        try container.encode(captureClipboardOnStartup, forKey: .captureClipboardOnStartup)
         try container.encode(rememberDatabasePassword, forKey: .rememberDatabasePassword)
         try container.encode(autoCopyLatestRemoteText, forKey: .autoCopyLatestRemoteText)
         try container.encode(updateCheckFrequency, forKey: .updateCheckFrequency)
@@ -178,8 +194,11 @@ struct ClipmanSettings: Codable, Equatable {
             fileHistorySortMode: "Manual",
             fileHistorySortDescending: false,
             lastSelectedTab: 0,
+            lastSelectedHistoryTab: HistoryTabID.text,
+            linksHistoryEnabled: false,
             groupFilter: "All",
             runAtStartup: false,
+            captureClipboardOnStartup: false,
             rememberDatabasePassword: false,
             autoCopyLatestRemoteText: false,
             updateCheckFrequency: "Never",

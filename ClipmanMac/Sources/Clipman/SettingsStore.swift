@@ -29,6 +29,10 @@ final class SettingsStore {
                 .first
             loadedSettingsHadRememberDatabasePassword = loaded.map { settingsFileContainsProperty($0.url, "rememberDatabasePassword") } ?? true
             var settings = loaded?.settings ?? ClipmanSettings.defaults(applicationSupport: applicationSupportURL)
+            if let loaded,
+               !settingsFileContainsProperty(loaded.url, "lastSelectedHistoryTab") {
+                settings.lastSelectedHistoryTab = settings.lastSelectedTab == 1 ? HistoryTabID.files : HistoryTabID.text
+            }
             if repairInvalidHotkeys(&settings) || normalize(&settings) {
                 try? save(settings)
             }
@@ -129,6 +133,16 @@ final class SettingsStore {
         }
         if settings.lastSelectedTab < 0 || settings.lastSelectedTab > 1 {
             settings.lastSelectedTab = 0
+            changed = true
+        }
+        let normalizedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled)
+        if normalizedHistoryTab != settings.lastSelectedHistoryTab {
+            settings.lastSelectedHistoryTab = normalizedHistoryTab
+            changed = true
+        }
+        let legacySelectedTab = normalizedHistoryTab == HistoryTabID.files ? 1 : 0
+        if settings.lastSelectedTab != legacySelectedTab {
+            settings.lastSelectedTab = legacySelectedTab
             changed = true
         }
         if settings.groupFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

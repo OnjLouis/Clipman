@@ -312,13 +312,13 @@ function Assert-MacReleaseAsset([string]$expectedVersion) {
         Assert-ZipTextMatches $zip 'Clipman.app/Contents/Info.plist' "<key>CFBundleShortVersionString</key>\s*<string>$([regex]::Escape($expectedVersion))</string>" 'Mac short version'
         Assert-ZipTextMatches $zip 'Clipman.app/Contents/Info.plist' "<key>CFBundleVersion</key>\s*<string>$([regex]::Escape($expectedBundleVersion))</string>" 'Mac bundle version'
 
-        $rootManual = Get-Content -LiteralPath (Join-Path $repoRoot 'Manual.html') -Raw
+        $rootManual = Get-Content -LiteralPath (Join-Path $repoRoot 'Manual.html') -Raw -Encoding UTF8
         $zipManual = Read-ZipEntryText $zip 'Clipman.app/Contents/Resources/Manual.html' 'Bundled Mac manual'
         if ($zipManual -ne $rootManual) {
             Fail 'Bundled Mac manual does not match root Manual.html.'
         }
 
-        $rootLicense = Get-Content -LiteralPath (Join-Path $repoRoot 'LICENSE.txt') -Raw
+        $rootLicense = Get-Content -LiteralPath (Join-Path $repoRoot 'LICENSE.txt') -Raw -Encoding UTF8
         $zipLicense = Read-ZipEntryText $zip 'Clipman.app/Contents/Resources/LICENSE.txt' 'Bundled Mac license'
         if ($zipLicense -ne $rootLicense) {
             Fail 'Bundled Mac license does not match root LICENSE.txt.'
@@ -804,6 +804,15 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'Multiple running Clipman instances can use the same history database' 'Manual shared history explanation'
     Assert-TextMatches $manual 'During an online or automatic update' 'Manual seamless update explanation'
     Assert-TextMatches $manual 'Storage and Password' 'Manual storage/password tab documentation'
+    Assert-TextMatches $manual '<h2 id="links-history">Links History</h2>' 'Manual Links history section'
+    Assert-TextMatches $manual 'Show Links history tab' 'Manual Links history preference documentation'
+    Assert-TextMatches $manual 'single absolute <code>http</code> or <code>https</code> URL' 'Manual Links history classification documentation'
+    Assert-TextMatches $manual 'Links are not stored in a separate database' 'Manual Links history filtered-view documentation'
+    Assert-TextMatches $manual 'With Links history disabled, File history remains the second history area' 'Manual Links disabled shortcut behavior'
+    Assert-TextMatches $manual 'With Links history enabled, Links history becomes the second area and File history moves to the third' 'Manual Links enabled shortcut behavior'
+    Assert-TextMatches $manual 'Control\+3</code> switches File history' 'Manual Mac Links history Control+3 documentation'
+    Assert-TextMatches $manual '<h3>1\.9\.0</h3>' 'Manual 1.9.0 changelog'
+    Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/18">issue #18</a>' 'Manual issue #18 closure'
     Assert-TextMatches $manual '<h3>1\.8\.2</h3>' 'Manual 1.8.2 changelog'
     Assert-TextMatches $manual 'Move to top' 'Manual 1.8.2 duplicate handling label changelog'
     Assert-TextMatches $manual 'Closes <a href="https://github\.com/OnjLouis/Clipman/issues/14">issue #14</a>' 'Manual issue #14 closure'
@@ -935,6 +944,11 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Project page: <https://github.com/OnjLouis/Clipman>' 'README project page link'
     Assert-TextMatches $readme 'Clipman is a small portable accessible clipboard management tool for Windows and macOS' 'README cross-platform project summary'
     Assert-TextMatches $readme 'Add, remove, move, rename, group, pin, or edit text entries on one machine' 'README opening shared database explanation'
+    Assert-TextMatches $readme 'Optional Links history tab for whole-entry HTTP and HTTPS links' 'README Links history feature'
+    Assert-TextMatches $readme 'Links history is optional and off by default' 'README Links history preference documentation'
+    Assert-TextMatches $readme 'With Links history enabled, Links becomes the second area and File history moves to the third' 'README Links enabled shortcut behavior'
+    Assert-TextMatches $readme '### 1\.9\.0' 'README 1.9.0 changelog'
+    Assert-TextMatches $readme 'Closes issue #18' 'README issue #18 closure'
     Assert-TextMatches $readme '### 1\.8\.2' 'README 1.8.2 changelog'
     Assert-TextMatches $readme 'Move to top' 'README 1.8.2 duplicate handling label changelog'
     Assert-TextMatches $readme 'issue #14 and closes issue #15' 'README 1.8.2 duplicate handling issue closures'
@@ -1099,6 +1113,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Shortcut Ctrl\+6' 'Preferences sixth tab shortcut accessibility text'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Automatically remove &unavailable file-history events' 'File history preference auto cleanup checkbox'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Automatically group &new clips by source application' 'General preference auto-group unique mnemonic'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Run Clipman at Windows &startup' 'Startup tab Run at startup unique mnemonic'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Add current &clipboard item to Clipman on start' 'Startup tab startup clipboard capture unique mnemonic'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Add current clipboard item to Clipman on &start' 'Startup tab avoids duplicate Alt+S mnemonic'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Diagnostics event limit' 'File history preference diagnostics limit'
     Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'LastPreferencesTab' 'Preferences tab persistence setting'
     Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'AutoRemoveUnavailableFileHistoryEvents' 'Auto unavailable file-history cleanup setting'
@@ -1214,6 +1231,13 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'passesLuhn' 'Mac sensitive data credit-card preset validates Luhn'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Sensitive data mode' 'Mac Preferences exposes sensitive data mode'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'SensitiveDataExclusion\.matchName' 'Mac capture path checks sensitive data exclusions'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'if settings\.captureClipboardOnStartup \{\s*monitor\.captureCurrentContents\(\)\s*\}' 'Mac launch captures existing clipboard only when opted in'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'monitor\.start\(\)\s*monitor\.captureCurrentContents\(\)' 'Mac launch must not unconditionally capture existing clipboard'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Add current clipboard item to Clipman on start' 'Mac Preferences exposes startup clipboard capture'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Add current &clipboard item to Clipman on start' 'Windows Preferences exposes startup clipboard capture'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'if \(settings\.CaptureClipboardOnStartup\)\s*\{\s*HandleClipboardUpdate\(\);\s*\}' 'Windows launch captures existing clipboard only when opted in'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') '(?s)public void CopyEntryToClipboard\(ClipEntry entry\).*?sounds\.Copy\(settings\.SoundsEnabled\);' 'Windows history entry copy plays confirmation sound'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') '(?s)public void CopyEntriesToClipboard\(List<ClipEntry> entries\).*?sounds\.Copy\(settings\.SoundsEnabled\);' 'Windows multi-entry copy plays confirmation sound'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'TemplateResolver\.resolveEntryText' 'Mac copy and Quick Paste resolve template entries at output time'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Template entry' 'Mac Entry Properties exposes template entry checkbox'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'private func quickPasteEntry\(id: String\)' 'Mac Quick Paste hotkey uses paste workflow'
@@ -1269,6 +1293,8 @@ function Assert-ManualAndReadmeClean {
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'LICENSE.txt') 'Sensor Readout|SensorReadout|AccessibleSensorReadout' 'License does not contain Sensor Readout leftovers'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'NumberedPinnedDisplayText\(DisplayText\(entry\), pinnedEntryPosition\+\+\)' 'Pinned text rows display shortcut number'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'NumberedPinnedDisplayText\(FileEventDisplayText\(item\), pinnedEventPosition\+\+\)' 'Pinned file rows display shortcut number'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'var pinnedEntries = TextEntriesForActiveTab\(store\.GetEntries\(settings\.SortMode, "Pinned", settings\.SortDescending\)\);' 'Pinned text shortcuts are scoped to the active Text or Links tab'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'case \.text, \.links: return filteredEntries\.filter\(\\\.Pinned\)\.map\(Row\.entry\)' 'Mac pinned text shortcuts are scoped to the active Text or Links mode'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'SubItems\.Add\(entry\.Pinned \? "Pinned" : string\.Empty\)' 'Pinned text state is not repeated in a noisy per-row column'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'SubItems\.Add\(item\.Pinned \? "Pinned" : string\.Empty\)' 'Pinned file state remains in pinned column'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Pinned entries are protected\. Unpin before deleting\.' 'Pinned text delete guard'
@@ -1329,6 +1355,25 @@ function Assert-ManualAndReadmeClean {
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'optionsMenuItem\.ShowDropDown\(\)' 'Standard Options menu mnemonic handling'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'DescribeDropEffect\(int value\)' 'Drop effect display helper'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'string\.Join\(" or ", parts\)' 'Combined drop effect wording'
+    Assert-TextMatches (Join-Path $repoRoot 'src\LinkClassifier.cs') 'UriSchemeHttps' 'Windows Links history classifier accepts HTTPS links'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryTabs.cs') 'Normalize\(string value, bool linksEnabled\)' 'Windows history tab identity normalization'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Show &Links history tab' 'Windows Preferences exposes Links history toggle'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Links history' 'Windows history window exposes Links history tab'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'AccessibleName = "Text history"' 'Windows text history list has distinct accessible name'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'list\.AccessibleName = "Links history"' 'Windows links history list has distinct accessible name'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'Text clipboard history, links history, and file clipboard history|Text clipboard history and file clipboard history' 'Windows tab control does not expose verbose section descriptions'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'FocusHistoryTabControlNow' 'Windows tab control can retain focus during arrow-key tab navigation'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'var keepTabControlFocus = tabs\.Focused' 'Windows tab control focus is detected before tab reload'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'if \(keepTabControlFocus\)\s*\{\s*FocusHistoryTabControlNow\(\);' 'Windows tab control arrow navigation keeps focus on tabs'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'private void SelectMainTab\(\)\s*\{[\s\S]{0,260}FocusHistoryListNow\(\);' 'Windows text tab shortcut lands in text history list'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'private void SelectLinksTab\(\)\s*\{[\s\S]{0,360}FocusHistoryListNow\(\);' 'Windows links tab shortcut lands in links history list'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'private void SelectFileClipboardTab\(\)\s*\{[\s\S]{0,260}FocusFileClipboardListNow\(\);' 'Windows file tab shortcut lands in file history list'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\LinkClassifier.swift') 'scheme == "http" \|\| scheme == "https"' 'Mac Links history classifier accepts HTTP and HTTPS links'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryTabs.swift') 'static let links = "Links"' 'Mac history tab identity constants include Links'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Show Links history tab' 'Mac Preferences exposes Links history toggle'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Control\+3' 'Mac history mode accessibility documents Control+3 when Links is enabled'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'private let modeControl = NSSegmentedControl\(\)' 'Mac history mode control is not initialized with stale two-tab labels'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') '(?s)func preferencesWindow\(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String\?\).*?historyWindow\.configureSort\(' 'Mac Preferences updates reconfigure visible history tabs'
     Assert-TextMatches (Join-Path $repoRoot 'src\AssemblyInfo.cs') 'AssemblyCompany\("Andre Louis"\)' 'Executable company metadata'
     Assert-TextMatches (Join-Path $repoRoot 'src\AssemblyInfo.cs') 'Copyright \(c\) Andre Louis' 'Executable copyright metadata'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Build stamp: ' 'About build stamp'
@@ -1339,6 +1384,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" build' 'Mac release package reads shared build version'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'cp "\$ROOT/\.\./LICENSE\.txt" "\$APP/Contents/Resources/LICENSE\.txt"' 'Mac release package bundles root license'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') '<string>0\.1</string>|<string>1</string>' 'Mac release package must not hard-code bundle version'
+    Assert-TextMatches (Join-Path $repoRoot 'CLIPMAN_AGENT_SYNC.md') 'verify the old `/Applications/Clipman\.app/Contents/MacOS/Clipman` process has actually exited, force-kill that old process if it did not quit' 'Agent sync requires verified Mac process restart after Mac builds'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" version' 'Mac dev package reads shared short version'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') 'cp "\$ROOT/\.\./LICENSE\.txt" "\$APP/Contents/Resources/LICENSE\.txt"' 'Mac dev package bundles root license'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') '<string>0\.1</string>|<string>1</string>' 'Mac dev package must not hard-code bundle version'
@@ -1420,6 +1466,15 @@ internal static class ClipmanSmokeHarness
         };
         Assert(SensitiveDataExclusion.FindMatch("Key AAAAA-BBBBB-CCCCC-DDDDD-EEEEE", licenseSettings) != null, "Sensitive data exclusions did not match a software license key shape.");
         Assert(SensitiveDataExclusion.FindMatch("Key AAAAABBBBBCCCCCDDDDDEEEEE", licenseSettings) == null, "Sensitive data exclusions matched a software license key without hyphen groups.");
+
+        var tokenSettings = new AppSettings
+        {
+            SensitiveDataMode = SensitiveDataExclusion.ModeExclude,
+            SensitiveDataPresetIds = { "api-token" }
+        };
+        Assert(SensitiveDataExclusion.FindMatch("Token abcdefghijklmnopqrstuvwxyzABCDEF", tokenSettings) != null, "Sensitive data exclusions did not match a raw long API token.");
+        var amazonUrl = "https://www.amazon.co.uk/EM7345-Module-Thinkpad-T431s-T440p-default/dp/B07QQZ899Y/ref=sr_1_1?crid=19SLV6CUQAJRO&dib=eyJ2IjoiMSJ9.IwA4NYkA3RbfsXGnAR-_nuQChbG5SN9bZYkUvhTgjSR6XBSPGX8GKZxD60U01mj9Dz5nLht6uFs-wXpXGCbVDEBhkWzUQ4oNhVAHpkY3bYRH2rkNZOax53v29X9hBD8guA1artIrv20knKx4qF7eu0tNQN0hXDosaGvi1Q3840cYapl55rYnW09VmW41D17dKGxLBDsc6zhUg6uSh330E8C8d3KuLBQ0mldFSug8N5g.boDRMrutCGh7SV-UoZjDNmNqglQ_cTbTnt9ihkmMTu0&dib_tag=se&keywords=Lenovo+WAN+card&qid=1783960991&sprefix=lenovo+wan+car%2Caps%2C165&sr=8-1";
+        Assert(SensitiveDataExclusion.FindMatch(amazonUrl, tokenSettings) == null, "Sensitive data exclusions matched an ordinary Amazon URL as a long API token.");
 
         var path = Path.Combine(Path.GetTempPath(), "clipman-test-" + Guid.NewGuid().ToString("N") + ".clipdb");
         var secretText = "plain text should be compressed";
@@ -1756,6 +1811,8 @@ internal static class ClipmanSmokeHarness
         $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
         $sources = @(
             (Join-Path $repoRoot 'src\Models.cs'),
+            (Join-Path $repoRoot 'src\HistoryTabs.cs'),
+            (Join-Path $repoRoot 'src\LinkClassifier.cs'),
             (Join-Path $repoRoot 'src\JsonUtil.cs'),
             (Join-Path $repoRoot 'src\ClipDatabaseFile.cs'),
             (Join-Path $repoRoot 'src\FileClipboardEventStore.cs'),

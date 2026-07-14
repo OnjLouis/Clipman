@@ -57,6 +57,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileSortMode: settings.fileHistorySortMode,
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
+            selectedHistoryTab: settings.lastSelectedHistoryTab,
+            linksHistoryEnabled: settings.linksHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         configureHistoryQuickCopyState()
@@ -65,7 +67,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
         monitor.start()
-        monitor.captureCurrentContents()
+        if settings.captureClipboardOnStartup {
+            monitor.captureCurrentContents()
+        }
         sounds.play(settings.monitoringEnabled ? .on : .off)
         applyStartupRegistration(showErrors: false)
 
@@ -284,6 +288,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Group filter: \(settings.groupFilter)",
             "Remember password: \(settings.rememberDatabasePassword ? "On" : "Off")",
             "Run at login: \(settings.runAtStartup ? "On" : "Off")",
+            "Add clipboard item on startup: \(settings.captureClipboardOnStartup ? "On" : "Off")",
             "Auto-copy latest remote text: \(settings.autoCopyLatestRemoteText ? "On" : "Off")",
             "Update checks: \(settings.updateCheckFrequency)",
             "Ignored applications: \(settings.ignoredApplications.isEmpty ? "None" : settings.ignoredApplications.joined(separator: ", "))",
@@ -558,6 +563,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileSortMode: settings.fileHistorySortMode,
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
+            selectedHistoryTab: settings.lastSelectedHistoryTab,
+            linksHistoryEnabled: settings.linksHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         store.moveEntries(ids: entries.map(\.Id), direction: direction)
@@ -838,6 +845,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileSortMode: settings.fileHistorySortMode,
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
+            selectedHistoryTab: settings.lastSelectedHistoryTab,
+            linksHistoryEnabled: settings.linksHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         fileStore.moveEvents(ids: events.map(\.Id), direction: direction)
@@ -851,8 +860,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         fileStore.removeUnavailable()
     }
 
-    func historyWindow(_ controller: HistoryWindowController, didChangeModeToFileHistory isFileHistory: Bool) {
-        settings.lastSelectedTab = isFileHistory ? 1 : 0
+    func historyWindow(_ controller: HistoryWindowController, didChangeHistoryTab tab: String) {
+        settings.lastSelectedHistoryTab = HistoryTabID.normalize(tab, linksEnabled: settings.linksHistoryEnabled)
+        settings.lastSelectedTab = settings.lastSelectedHistoryTab == HistoryTabID.files ? 1 : 0
         try? settingsStore.save(settings)
         refreshHistoryWindow()
     }
@@ -872,6 +882,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileSortMode: settings.fileHistorySortMode,
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
+            selectedHistoryTab: settings.lastSelectedHistoryTab,
+            linksHistoryEnabled: settings.linksHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         refreshHistoryWindow()
@@ -890,6 +902,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileSortMode: settings.fileHistorySortMode,
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
+            selectedHistoryTab: settings.lastSelectedHistoryTab,
+            linksHistoryEnabled: settings.linksHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         refreshHistoryWindow()
@@ -966,6 +980,17 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.machineName, password: password)
         fileStore.delegate = self
         fileStore.load()
+        historyWindow.configureSort(
+            textSortMode: settings.sortMode,
+            textDescending: settings.sortDescending,
+            fileSortMode: settings.fileHistorySortMode,
+            fileDescending: settings.fileHistorySortDescending,
+            selectedTab: settings.lastSelectedTab,
+            selectedHistoryTab: settings.lastSelectedHistoryTab,
+            linksHistoryEnabled: settings.linksHistoryEnabled,
+            groupFilter: settings.groupFilter
+        )
+        refreshHistoryWindow()
         rebuildMenu()
     }
 

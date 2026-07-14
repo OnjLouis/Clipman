@@ -113,7 +113,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didMoveFileEvents events: [FileClipboardEvent], direction: Int)
     func historyWindowDidRequestClearNormalFileHistory(_ controller: HistoryWindowController)
     func historyWindowDidRequestRemoveUnavailableFileHistory(_ controller: HistoryWindowController)
-    func historyWindow(_ controller: HistoryWindowController, didChangeModeToFileHistory isFileHistory: Bool)
+    func historyWindow(_ controller: HistoryWindowController, didChangeHistoryTab tab: String)
     func historyWindow(_ controller: HistoryWindowController, didChangeSortMode sortMode: String, fileHistory: Bool)
     func historyWindowDidToggleSortDirection(_ controller: HistoryWindowController, fileHistory: Bool)
     func historyWindow(_ controller: HistoryWindowController, didChangeGroupFilter groupFilter: String)
@@ -186,7 +186,7 @@ final class HistoryWindow: NSWindow {
                 onPinnedShortcut?(digitIndex)
                 return true
             }
-            if modifiers == [.control], digitIndex == 0 || digitIndex == 1 {
+            if modifiers == [.control], digitIndex >= 0 && digitIndex <= 2 {
                 onSwitchMode?(digitIndex)
                 return true
             }
@@ -396,9 +396,18 @@ final class HistoryWindow: NSWindow {
 
 @MainActor
 final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
-    private enum Mode: Int {
-        case text = 0
-        case files = 1
+    private enum Mode {
+        case text
+        case links
+        case files
+
+        var tabID: String {
+            switch self {
+            case .text: return HistoryTabID.text
+            case .links: return HistoryTabID.links
+            case .files: return HistoryTabID.files
+            }
+        }
     }
 
     private enum Row {
@@ -411,7 +420,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
     private let searchField = NSSearchField()
-    private let modeControl = NSSegmentedControl(labels: ["Text History", "File History"], trackingMode: .selectOne, target: nil, action: nil)
+    private let modeControl = NSSegmentedControl()
     private let actionsButton = NSButton(title: "Clipman", target: nil, action: nil)
     private let toolbarStack = NSStackView()
     private let groupButton = NSButton(title: "Set Group...", target: nil, action: nil)
@@ -422,6 +431,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let directionButton = NSButton(title: "Newest first", target: nil, action: nil)
     private let preferencesButton = NSButton(title: "Preferences...", target: nil, action: nil)
     private var mode: Mode = .text
+    private var linksHistoryEnabled = false
     private var textSortMode = "LastUsed"
     private var textSortDescending = true
     private var fileSortMode = "Manual"
@@ -482,7 +492,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.onGoToFile = { [weak self] in self?.goToSelectedFileEvent() }
         window.onMoveUp = { [weak self] in self?.moveSelectedItems(direction: -1) }
         window.onMoveDown = { [weak self] in self?.moveSelectedItems(direction: 1) }
-        window.onSwitchMode = { [weak self] index in self?.setMode(index == 1 ? .files : .text, notify: true) }
+        window.onSwitchMode = { [weak self] index in
+            guard let self else { return }
+            self.setMode(self.modeForVisibleSegment(index), notify: true)
+        }
         window.onPinnedShortcut = { [weak self] index in self?.activatePinnedShortcut(index: index) }
         window.onActionsMenu = { [weak self] in self?.showActionsMenu() }
         window.onManual = { [weak self] in
@@ -527,7 +540,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func update(entries: [ClipEntry]) {
         rememberSelectionForCurrentMode()
-        let selectedID = mode == .text ? selectedID() : rememberedTextSelectionID
+        let selectedID = mode != .files ? selectedID() : rememberedTextSelectionID
         allEntries = entries
         applyFilter(preferredSelectedID: selectedID)
     }
@@ -543,14 +556,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         setMode(.files, notify: true)
     }
 
-    func configureSort(textSortMode: String, textDescending: Bool, fileSortMode: String, fileDescending: Bool, selectedTab: Int, groupFilter: String) {
+    func configureSort(textSortMode: String, textDescending: Bool, fileSortMode: String, fileDescending: Bool, selectedTab: Int, selectedHistoryTab: String, linksHistoryEnabled: Bool, groupFilter: String) {
         self.textSortMode = textSortMode
         self.textSortDescending = textDescending
         self.fileSortMode = fileSortMode
         self.fileSortDescending = fileDescending
         self.groupFilter = groupFilter.isEmpty ? "All" : groupFilter
-        mode = selectedTab == 1 ? .files : .text
-        modeControl.selectedSegment = mode.rawValue
+        self.linksHistoryEnabled = linksHistoryEnabled
+        mode = modeForTabID(HistoryTabID.normalize(selectedHistoryTab.isEmpty ? (selectedTab == 1 ? HistoryTabID.files : HistoryTabID.text) : selectedHistoryTab, linksEnabled: linksHistoryEnabled))
+        configureModeControl()
         updateToolbarState()
         applyFilter(preferredSelectedID: rememberedSelectionID(for: mode))
     }
@@ -626,10 +640,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         searchField.setAccessibilityLabel("Search history, Command+F")
         stack.addArrangedSubview(searchField)
 
-        modeControl.selectedSegment = mode.rawValue
+        configureModeControl()
         modeControl.target = self
         modeControl.action = #selector(modeChanged)
-        modeControl.setAccessibilityLabel("History type. Text History, Control+1. File History, Control+2.")
         stack.addArrangedSubview(modeControl)
 
         configureToolbar()
@@ -653,6 +666,50 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         stack.addArrangedSubview(scrollView)
         scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
         updateToolbarState()
+    }
+
+    private func visibleModes() -> [Mode] {
+        linksHistoryEnabled ? [.text, .links, .files] : [.text, .files]
+    }
+
+    private func modeForVisibleSegment(_ index: Int) -> Mode {
+        let modes = visibleModes()
+        guard modes.indices.contains(index) else { return .text }
+        return modes[index]
+    }
+
+    private func modeForTabID(_ tabID: String) -> Mode {
+        if tabID.caseInsensitiveCompare(HistoryTabID.files) == .orderedSame { return .files }
+        if linksHistoryEnabled, tabID.caseInsensitiveCompare(HistoryTabID.links) == .orderedSame { return .links }
+        return .text
+    }
+
+    private func configureModeControl() {
+        let modes = visibleModes()
+        modeControl.trackingMode = .selectOne
+        modeControl.segmentCount = modes.count
+        for (index, visibleMode) in modes.enumerated() {
+            modeControl.setLabel(modeTitle(for: visibleMode), forSegment: index)
+            modeControl.setWidth(130, forSegment: index)
+            modeControl.setToolTip(modeTitle(for: visibleMode), forSegment: index)
+        }
+        if let selected = modes.firstIndex(of: mode) {
+            modeControl.selectedSegment = selected
+        } else {
+            mode = .text
+            modeControl.selectedSegment = 0
+        }
+        modeControl.setAccessibilityLabel(linksHistoryEnabled
+            ? "History type. Text History, Control+1. Links History, Control+2. File History, Control+3."
+            : "History type. Text History, Control+1. File History, Control+2.")
+    }
+
+    private func modeTitle(for mode: Mode) -> String {
+        switch mode {
+        case .text: return "Text History"
+        case .links: return "Links History"
+        case .files: return "File History"
+        }
     }
 
     private func configureToolbar() {
@@ -690,7 +747,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func updateToolbarState() {
-        let textMode = mode == .text
+        let textMode = mode != .files
         groupButton.isHidden = !textMode
         setToFilterButton.isHidden = !textMode || isReservedGroupFilter(groupFilter)
         groupFilterButton.isHidden = !textMode
@@ -705,7 +762,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             $0.value.caseInsensitiveCompare(currentSortMode()) == .orderedSame
         }?.title ?? currentSortMode()
         sortButton.title = "Sort: \(selectedSort)"
-        sortButton.setAccessibilityLabel("Sort \(mode == .files ? "file history" : "text history"), current sort \(selectedSort)")
+        sortButton.setAccessibilityLabel("Sort \(modeTitle(for: mode).lowercased()), current sort \(selectedSort)")
 
         let direction = sortDirectionTitle(descending: currentSortDescending())
         directionButton.title = direction
@@ -747,7 +804,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     @objc private func modeChanged() {
-        setMode(Mode(rawValue: modeControl.selectedSegment) ?? .text, notify: true)
+        setMode(modeForVisibleSegment(modeControl.selectedSegment), notify: true)
     }
 
     @objc private func actionsClicked() {
@@ -789,12 +846,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         rememberSelectionForCurrentMode()
         mode = newMode
-        modeControl.selectedSegment = newMode.rawValue
+        configureModeControl()
         updateTableAccessibility()
         updateToolbarState()
         applyFilter(preferredSelectedID: rememberedSelectionID(for: newMode))
         if notify {
-            historyDelegate?.historyWindow(self, didChangeModeToFileHistory: mode == .files)
+            historyDelegate?.historyWindow(self, didChangeHistoryTab: mode.tabID)
         }
         tableView.window?.makeFirstResponder(tableView)
     }
@@ -802,8 +859,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private func applyFilter(preferredSelectedID: String?) {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch mode {
-        case .text:
-            let grouped = filterEntriesByGroup(allEntries)
+        case .text, .links:
+            let linkMode = mode == .links
+            let tabEntries = linksHistoryEnabled
+                ? allEntries.filter { LinkClassifier.isLinkOnlyText($0.Text) == linkMode }
+                : allEntries
+            let grouped = filterEntriesByGroup(tabEntries)
             if query.isEmpty {
                 filteredEntries = grouped
             } else {
@@ -872,7 +933,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private func rebuildRows() {
         rows.removeAll()
         switch mode {
-        case .text:
+        case .text, .links:
             let pinned = filteredEntries.filter(\.Pinned)
             let normal = filteredEntries.filter { !$0.Pinned }
             rows.append(contentsOf: pinned.map(Row.entry))
@@ -903,7 +964,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let row = tableView.selectedRow
         let id = selectedID()
         switch mode {
-        case .text:
+        case .text, .links:
             rememberedTextSelectionID = id
             rememberedTextSelectionRow = row >= 0 ? row : nil
         case .files:
@@ -914,14 +975,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func rememberedSelectionID(for mode: Mode) -> String? {
         switch mode {
-        case .text: return rememberedTextSelectionID
+        case .text, .links: return rememberedTextSelectionID
         case .files: return rememberedFileSelectionID
         }
     }
 
     private func rememberedSelectionRow(for mode: Mode) -> Int? {
         switch mode {
-        case .text: return rememberedTextSelectionRow
+        case .text, .links: return rememberedTextSelectionRow
         case .files: return rememberedFileSelectionRow
         }
     }
@@ -943,15 +1004,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func updateTableAccessibility() {
-        tableView.setAccessibilityLabel(mode == .files ? "File history" : "Text history")
-        tableView.tableColumns.first?.title = mode == .files ? "File history" : "Text history"
+        tableView.setAccessibilityLabel(modeTitle(for: mode))
+        tableView.tableColumns.first?.title = modeTitle(for: mode)
     }
 
     private func showActionsMenu() {
         let menu = NSMenu(title: "Clipman")
         addMenuItem("Choose Selected", action: #selector(menuChooseSelected), to: menu, shortcut: "Enter")
         addMenuItem(mode == .files ? "Copy Selected Paths" : "Copy Selected", action: #selector(menuCopySelected), to: menu, shortcut: "Command+C")
-        if mode == .text {
+        if mode != .files {
             addMenuItem("Cut Selected", action: #selector(menuCutSelected), to: menu, shortcut: "Command+X")
             addMenuItem("Paste After Selected", action: #selector(menuPasteAfterSelected), to: menu, shortcut: "Command+V")
             addMenuItem("Entry Properties", action: #selector(menuEditSelected), to: menu, shortcut: "F2")
@@ -973,7 +1034,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             addMenuItem("Go To File", action: #selector(menuGoToFile), to: menu, shortcut: "Command+Enter")
         }
         menu.addItem(.separator())
-        if mode == .text {
+        if mode != .files {
             addMenuItem("Remove URL Tracking", action: #selector(menuCleanTracking), to: menu, shortcut: "Command+Shift+R")
             addMenuItem("Clean Link For Sharing", action: #selector(menuCleanForSharing), to: menu, shortcut: "Command+Shift+S")
             menu.addItem(.separator())
@@ -985,7 +1046,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             menu.addItem(.separator())
         }
         addMenuItem("Text History", action: #selector(menuTextHistory), to: menu, shortcut: "Control+1").state = mode == .text ? .on : .off
-        addMenuItem("File History", action: #selector(menuFileHistory), to: menu, shortcut: "Control+2").state = mode == .files ? .on : .off
+        if linksHistoryEnabled {
+            addMenuItem("Links History", action: #selector(menuLinksHistory), to: menu, shortcut: "Control+2").state = mode == .links ? .on : .off
+            addMenuItem("File History", action: #selector(menuFileHistory), to: menu, shortcut: "Control+3").state = mode == .files ? .on : .off
+        } else {
+            addMenuItem("File History", action: #selector(menuFileHistory), to: menu, shortcut: "Control+2").state = mode == .files ? .on : .off
+        }
         menu.addItem(.separator())
 
         let sortMenu = NSMenu(title: mode == .files ? "Sort File History By" : "Sort Text History By")
@@ -1028,7 +1094,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func showGroupFilterMenu() {
-        guard mode == .text else {
+        guard mode != .files else {
             setMode(.text, notify: true)
             return
         }
@@ -1131,7 +1197,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func pinnedRows() -> [Row] {
         switch mode {
-        case .text: return filteredEntries.filter(\.Pinned).map(Row.entry)
+        case .text, .links: return filteredEntries.filter(\.Pinned).map(Row.entry)
         case .files: return filteredFileEvents.filter(\.Pinned).map(Row.fileEvent)
         }
     }
@@ -1176,6 +1242,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuMoveUp() { moveSelectedItems(direction: -1) }
     @objc private func menuMoveDown() { moveSelectedItems(direction: 1) }
     @objc private func menuTextHistory() { setMode(.text, notify: true) }
+    @objc private func menuLinksHistory() { setMode(.links, notify: true) }
     @objc private func menuFileHistory() { setMode(.files, notify: true) }
     @objc private func menuJumpToNormal() { jumpToFirstNormalEntry() }
     @objc private func menuFind() { focusSearch() }
@@ -1221,7 +1288,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func applyGroupFilter(at index: Int) {
-        guard mode == .text else {
+        guard mode != .files else {
             setMode(.text, notify: true)
             return
         }
@@ -1305,7 +1372,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return
         }
         switch mode {
-        case .text:
+        case .text, .links:
             let entries = selectedEntries()
             guard !entries.isEmpty else { return }
             if entries.contains(where: \.Pinned) {
@@ -1424,7 +1491,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func setQuickCopyTarget() {
-        guard mode == .text, let entry = selectedEntry() else {
+        guard mode != .files, let entry = selectedEntry() else {
             NSSound.beep()
             return
         }
@@ -1627,7 +1694,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func copySelectedEntries() {
         switch mode {
-        case .text:
+        case .text, .links:
             let entries = selectedEntries()
             guard !entries.isEmpty else { return }
             historyDelegate?.historyWindow(self, didCopy: entries)
@@ -1640,7 +1707,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func moveSelectedItems(direction: Int) {
         switch mode {
-        case .text:
+        case .text, .links:
             let entries = selectedEntries()
             guard !entries.isEmpty else {
                 NSSound.beep()
@@ -1670,7 +1737,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func cutSelectedEntries() {
-        guard mode == .text else {
+        guard mode != .files else {
             copySelectedEntries()
             return
         }
@@ -1681,7 +1748,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func pushSelectedToOtherMachines() {
-        guard mode == .text else {
+        guard mode != .files else {
             NSSound.beep()
             return
         }
@@ -1695,7 +1762,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func groupSelectedEntries() {
-        guard mode == .text else {
+        guard mode != .files else {
             NSSound.beep()
             return
         }
@@ -1729,7 +1796,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func groupSelectedEntriesToCurrentFilter() {
-        guard mode == .text, !isReservedGroupFilter(groupFilter) else {
+        guard mode != .files, !isReservedGroupFilter(groupFilter) else {
             NSSound.beep()
             return
         }
@@ -1743,7 +1810,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func pasteAfterSelectedEntry() {
-        guard mode == .text else {
+        guard mode != .files else {
             NSSound.beep()
             return
         }
@@ -1759,7 +1826,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func cleanSelectedEntriesForTracking() {
-        guard mode == .text else {
+        guard mode != .files else {
             NSSound.beep()
             return
         }
@@ -1772,7 +1839,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func cleanSelectedEntriesForSharing() {
-        guard mode == .text else {
+        guard mode != .files else {
             NSSound.beep()
             return
         }
@@ -1964,7 +2031,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func updateSelectedGroupStatus() {
-        guard mode == .text else { return }
+        guard mode != .files else { return }
         let entries = selectedEntries()
         let label: String
         if entries.isEmpty {
@@ -2042,7 +2109,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func focusEntry(id: String) {
-        setMode(.text, notify: true)
+        if let entry = allEntries.first(where: { $0.Id == id }),
+           linksHistoryEnabled,
+           LinkClassifier.isLinkOnlyText(entry.Text) {
+            setMode(.links, notify: true)
+        } else {
+            setMode(.text, notify: true)
+        }
         if !rows.contains(where: {
             if case .entry(let entry) = $0 { return entry.Id == id }
             return false

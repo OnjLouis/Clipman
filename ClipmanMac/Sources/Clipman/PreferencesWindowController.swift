@@ -56,8 +56,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds", target: nil, action: nil)
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
+    private let captureClipboardOnStartupCheckbox = NSButton(checkboxWithTitle: "Add current clipboard item to Clipman on start", target: nil, action: nil)
     private let rememberPasswordCheckbox = NSButton(checkboxWithTitle: "Remember history password in Keychain", target: nil, action: nil)
     private let autoCopyRemoteCheckbox = NSButton(checkboxWithTitle: "Copy latest remote text to this Mac clipboard", target: nil, action: nil)
+    private let linksHistoryCheckbox = NSButton(checkboxWithTitle: "Show Links history tab", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
     private let updateFrequencyPopup = NSPopUpButton()
     private let sensitiveDataModePopup = NSPopUpButton()
@@ -137,11 +139,23 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         runAtStartupCheckbox.setAccessibilityLabel("Run Clipman at login")
         grid.addRow(with: [NSGridCell.emptyContentView, runAtStartupCheckbox])
 
+        captureClipboardOnStartupCheckbox.target = nil
+        captureClipboardOnStartupCheckbox.action = nil
+        captureClipboardOnStartupCheckbox.setAccessibilityLabel("Add current clipboard item to Clipman on start")
+        captureClipboardOnStartupCheckbox.setAccessibilityHelp("When checked, Clipman tries to add the current Mac clipboard item to history once when Clipman starts. This is off by default and still follows monitoring, ignored application, concealed pasteboard, and sensitive data settings.")
+        grid.addRow(with: [NSGridCell.emptyContentView, captureClipboardOnStartupCheckbox])
+
         autoCopyRemoteCheckbox.target = nil
         autoCopyRemoteCheckbox.action = nil
         autoCopyRemoteCheckbox.setAccessibilityLabel("Copy latest remote text to this Mac clipboard")
         autoCopyRemoteCheckbox.setAccessibilityHelp("When enabled, new text copied on another machine sharing this database is placed on this Mac clipboard. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, autoCopyRemoteCheckbox])
+
+        linksHistoryCheckbox.target = nil
+        linksHistoryCheckbox.action = nil
+        linksHistoryCheckbox.setAccessibilityLabel("Show Links history tab")
+        linksHistoryCheckbox.setAccessibilityHelp("When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.")
+        grid.addRow(with: [NSGridCell.emptyContentView, linksHistoryCheckbox])
 
         updateFrequencyPopup.addItems(withTitles: ["Never", "At startup", "Hourly", "Daily"])
         updateFrequencyPopup.setAccessibilityLabel("Check for updates")
@@ -198,8 +212,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
         soundsCheckbox.state = settings.soundsEnabled ? .on : .off
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
+        captureClipboardOnStartupCheckbox.state = settings.captureClipboardOnStartup ? .on : .off
         rememberPasswordCheckbox.state = settings.rememberDatabasePassword ? .on : .off
         autoCopyRemoteCheckbox.state = settings.autoCopyLatestRemoteText ? .on : .off
+        linksHistoryCheckbox.state = settings.linksHistoryEnabled ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
         updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
         sensitiveDataModePopup.selectItem(withTitle: displaySensitiveDataMode(settings.sensitiveDataMode))
@@ -245,8 +261,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.monitoringEnabled = monitoringCheckbox.state == .on
         settings.soundsEnabled = soundsCheckbox.state == .on
         settings.runAtStartup = runAtStartupCheckbox.state == .on
+        settings.captureClipboardOnStartup = captureClipboardOnStartupCheckbox.state == .on
         settings.rememberDatabasePassword = rememberPasswordCheckbox.state == .on
         settings.autoCopyLatestRemoteText = autoCopyRemoteCheckbox.state == .on
+        settings.linksHistoryEnabled = linksHistoryCheckbox.state == .on
+        settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled)
         settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on
         settings.updateCheckFrequency = storedUpdateFrequency(updateFrequencyPopup.titleOfSelectedItem ?? "Never")
         settings.sensitiveDataMode = storedSensitiveDataMode(sensitiveDataModePopup.titleOfSelectedItem ?? "Off")

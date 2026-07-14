@@ -59,6 +59,7 @@
     <li><a href="#startup-state">Startup State</a></li>
     <li><a href="#pinned-entries">Pinned Entries</a></li>
     <li><a href="#entry-names-and-text">Entry Names and Text</a></li>
+    <li><a href="#links-history">Links History</a></li>
     <li><a href="#groups">Groups</a></li>
     <li><a href="#sorting-and-manual-order">Sorting and Manual Order</a></li>
     <li><a href="#cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</a></li>
@@ -109,8 +110,9 @@
       <tr><td>Show or hide clipboard history</td><td><code>Ctrl+Alt+\</code></td><td><code>Option+Shift+`</code></td></tr>
       <tr><td>Toggle monitoring on or off</td><td><code>Ctrl+Alt+`</code></td><td><code>Option+Shift+\</code></td></tr>
       <tr><td>Paste an entry assigned to Quick Paste</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
-      <tr><td>Switch to Text history</td><td><code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code></td><td><code>Control+1</code></td></tr>
-      <tr><td>Switch to File history</td><td><code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code></td><td><code>Control+2</code></td></tr>
+      <tr><td>Switch to Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+T</code></td><td><code>Control+1</code></td></tr>
+      <tr><td>Switch to Links history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+L</code> when Links history is enabled</td><td><code>Control+2</code> when Links history is enabled</td></tr>
+      <tr><td>Switch to File history</td><td><code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code></td><td><code>Control+2</code>, or <code>Control+3</code> when Links history is enabled</td></tr>
       <tr><td>Open Preferences</td><td><code>Ctrl+,</code></td><td><code>Command+,</code></td></tr>
       <tr><td>Open search</td><td><code>Ctrl+F</code></td><td><code>Command+F</code></td></tr>
       <tr><td>Find next search result</td><td><code>F3</code></td><td><code>F3</code></td></tr>
@@ -156,7 +158,7 @@
   </table>
 
   <h2 id="preferences">Preferences</h2>
-  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
+  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, optional Links history, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
 
   <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
 
@@ -193,13 +195,15 @@
 
   <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
 
-  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu, <code>Control+1</code> and <code>Control+2</code> switch Text and File history, <code>Command+F</code> opens search, and pressing <code>Enter</code> from search returns focus to the history list.</p>
+  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu, <code>Control+1</code> switches Text history, and <code>Command+F</code> opens search. With Links history disabled, <code>Control+2</code> switches File history. With Links history enabled, <code>Control+2</code> switches Links history and <code>Control+3</code> switches File history. Pressing <code>Enter</code> from search returns focus to the history list.</p>
 
   <p>Mac global hotkeys are stored by physical key code so the displayed shortcut remains readable on different keyboard layouts. Default Mac global hotkeys avoid common VoiceOver conflicts, but they can be changed in Preferences.</p>
   <h2 id="startup-state">Startup State</h2>
   <p>Clipman remembers whether monitoring was on or off. When sounds are enabled, it plays the on or off sound at launch so you know the app is running and which state it restored.</p>
 
   <p>Use <strong>Preferences, Startup and updates, Run Clipman at Windows startup</strong> on Windows or <strong>Run Clipman at login</strong> on Mac to start Clipman automatically when you sign in. Windows creates a per-user startup entry for the current <code>clipman.exe</code> path. Mac creates a per-user LaunchAgent for the current <code>Clipman.app</code>. Neither requires administrator permission.</p>
+
+  <p>Use <strong>Add current clipboard item to Clipman on start</strong> if you want Clipman to try to save whatever is already on the system clipboard when Clipman launches. This is off by default. When enabled, it still follows normal monitoring state, ignored-application rules, clipboard privacy signals where supported, concealed pasteboard handling where supported, and Sensitive Data preferences.</p>
 
   <h2 id="pinned-entries">Pinned Entries</h2>
   <p>Pinned entries are grouped at the top of the history list. A separator marks the start of normal entries. Pinned entries are numbered when they can be copied by shortcut, so the first pinned entry starts with 1, the second with 2, and so on through 0 for the tenth. Pinned state is still shown in the Pinned column or metadata, but not before the item text.</p>
@@ -214,6 +218,13 @@
   <p>Type-to-jump navigation uses the original clipboard text, not the entry name. If <code>1234</code> is named <code>Test</code>, typing <code>123</code> jumps to that entry, while typing <code>Test</code> does not jump to it because the clipboard text does not start with Test. Search with <code>Ctrl+F</code> checks both names and clipboard text.</p>
 
   <p>For quick named lookup, type a slash followed by the entry name prefix, such as <code>/Test</code>. Clipman jumps to the matching named entry when it is visible in the current group filter.</p>
+
+  <h2 id="links-history">Links History</h2>
+  <p>Links history is optional and off by default. Enable it in Preferences with <strong>Show Links history tab</strong>. When enabled, Clipman adds a separate Links history view for entries where the whole clipboard text is a single absolute <code>http</code> or <code>https</code> URL. Prose that merely contains a link, multiline text, <code>mailto:</code>, <code>file:</code>, and custom schemes remain in Text history.</p>
+
+  <p>Links are not stored in a separate database and are not removed from shared text history. The Links tab is a filtered view of the same entries, so copy, cut, paste after selected, grouping, pinning, Quick Paste, templates, search, sorting, cleanup actions, and sharing across machines work like Text history wherever applicable. If the Links tab is disabled, links simply appear in Text history as before.</p>
+
+  <p>With Links history disabled, File history remains the second history area. With Links history enabled, Links history becomes the second area and File history moves to the third. On Mac this means <code>Control+2</code> opens Links and <code>Control+3</code> opens Files only when Links is enabled. On Windows, <code>Alt+L</code> opens Links when enabled, and <code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code> moves through the visible history areas.</p>
 
   <h2 id="groups">Groups</h2>
   <p>Use <code>Ctrl+G</code> on Windows, <code>Command+G</code> on Mac, or the group command in the history window to assign selected entries to a group. Type a new group name, or choose an existing group from the list and press <code>Enter</code> or OK. Choose No group, or leave the group name blank, to remove the group. The Group filter can show all entries, pinned entries, named entries, ungrouped entries, or one of your custom groups.</p>
@@ -297,7 +308,7 @@
       <tr><td>Credit card number</td><td>13 to 19 digits, with optional spaces or dashes</td><td>Uses a Luhn checksum, so random 16-digit numbers usually do not match.</td></tr>
       <tr><td>US Social Security number</td><td>Three digits, two digits, four digits</td><td>Can match dashed, spaced, or run-together forms.</td></tr>
       <tr><td>International phone number</td><td>A plus sign followed by 8 to 15 digits, allowing common separators</td><td>Examples include compact E.164-style numbers such as <code>+447890123456</code>.</td></tr>
-      <tr><td>Long API key or token</td><td>A run of 32 or more letters and numbers</td><td>Useful for many tokens, but can also match long IDs or hashes.</td></tr>
+      <tr><td>Long API key or token</td><td>A run of 32 or more letters and numbers</td><td>Useful for many raw tokens. Full <code>http</code> and <code>https</code> URLs are not matched by this broad preset, so ordinary shopping/search links with long tracking parameters are not excluded as tokens.</td></tr>
       <tr><td>Software license key</td><td>Five groups of five letters or numbers separated by hyphens</td><td>Covers common Windows-style product keys and similar software serials. Clipman checks the shape only; it does not validate vendor-specific keys.</td></tr>
       <tr><td>US driver license, approximate</td><td>One letter followed by 6 to 13 digits</td><td>Approximate because US license formats vary by state.</td></tr>
     </tbody>
@@ -494,6 +505,16 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>1.9.0</h3>
+  <ul>
+    <li>Added an optional Links history tab for clipboard entries where the whole text is a single <code>http</code> or <code>https</code> link. Links history is off by default, and links remain part of the normal shared text-history database. Closes <a href="https://github.com/OnjLouis/Clipman/issues/18">issue #18</a>.</li>
+    <li>When Links history is enabled, the history areas are Text, Links, then Files. When Links history is disabled, the history areas remain Text then Files, preserving the existing File history shortcut.</li>
+    <li>Improved history tab remembering so Clipman remembers Text, Links, or Files by name rather than by a raw tab number.</li>
+    <li>Adjusted the Long API key or token sensitive-data preset so ordinary full web links with long tracking parameters are not excluded as raw tokens.</li>
+    <li>Added an opt-in startup preference on Windows and Mac to add the current clipboard item to Clipman once when the app starts. It is off by default and still follows monitoring, ignored-application, privacy, and sensitive-data rules.</li>
+    <li>Windows now plays the normal copy sound when an entry is chosen from Clipman history, matching the Mac confirmation behavior.</li>
+  </ul>
+
   <h3>1.8.2</h3>
   <ul>
     <li>Fixed the Windows Preferences duplicate-handling combo box so its choices read as “Move to top”, “Ignore”, and “Keep both”, and so Up/Down navigation visits each option normally. Closes <a href="https://github.com/OnjLouis/Clipman/issues/14">issue #14</a> and closes <a href="https://github.com/OnjLouis/Clipman/issues/15">issue #15</a>.</li>

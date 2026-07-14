@@ -105,11 +105,13 @@ namespace Clipman
         public bool RemoveDuplicates { get; set; }
         public bool SoundsEnabled { get; set; }
         public bool SaveListPosition { get; set; }
+        public bool LinksHistoryEnabled { get; set; }
         public bool Active { get; set; }
         public string DatabasePath { get; set; }
         public bool UseDefaultDatabasePath { get; set; }
         public int LastSelectedIndex { get; set; }
         public int LastSelectedTab { get; set; }
+        public string LastSelectedHistoryTab { get; set; }
         public int LastPreferencesTab { get; set; }
         public int MaxHistoryEntries { get; set; }
         public int MaxHistoryDays { get; set; }
@@ -125,6 +127,7 @@ namespace Clipman
         public bool AutoGroupByApp { get; set; }
         public bool AutoRemoveUrlTracking { get; set; }
         public bool RunAtStartup { get; set; }
+        public bool CaptureClipboardOnStartup { get; set; }
         public string UpdateCheckFrequency { get; set; }
         public bool InstallUpdatesSilently { get; set; }
         public bool DatabaseEncryptionEnabled { get; set; }
@@ -146,11 +149,13 @@ namespace Clipman
             RemoveDuplicates = true;
             SoundsEnabled = true;
             SaveListPosition = true;
+            LinksHistoryEnabled = false;
             Active = true;
             DatabasePath = string.Empty;
             UseDefaultDatabasePath = true;
             LastSelectedIndex = -1;
             LastSelectedTab = 0;
+            LastSelectedHistoryTab = HistoryTabs.Text;
             LastPreferencesTab = 0;
             MaxHistoryEntries = 1000;
             MaxHistoryDays = 0;
@@ -166,6 +171,7 @@ namespace Clipman
             AutoGroupByApp = true;
             AutoRemoveUrlTracking = false;
             RunAtStartup = false;
+            CaptureClipboardOnStartup = false;
             UpdateCheckFrequency = "Never";
             InstallUpdatesSilently = false;
             DatabaseEncryptionEnabled = false;

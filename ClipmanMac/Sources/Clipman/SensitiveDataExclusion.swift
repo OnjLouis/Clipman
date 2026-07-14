@@ -41,6 +41,9 @@ enum SensitiveDataExclusion {
         if preset.id == "international-phone" {
             return matchesInternationalPhone(text)
         }
+        if preset.id == "api-token", isFullHTTPURL(text) {
+            return false
+        }
         guard let regex = try? NSRegularExpression(pattern: compile(pattern: preset.pattern, separatorsOptional: preset.separatorsOptional)) else {
             return false
         }
@@ -53,6 +56,16 @@ enum SensitiveDataExclusion {
             }
         }
         return false
+    }
+
+    private static func isFullHTTPURL(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased() else {
+            return false
+        }
+        return scheme == "http" || scheme == "https"
     }
 
     private static func matchesInternationalPhone(_ text: String) -> Bool {

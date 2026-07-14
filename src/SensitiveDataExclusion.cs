@@ -88,6 +88,10 @@ namespace Clipman
             {
                 return MatchesInternationalPhone(text);
             }
+            if (string.Equals(preset.Id, "api-token", StringComparison.OrdinalIgnoreCase) && IsFullHttpUrl(text))
+            {
+                return false;
+            }
 
             Regex regex;
             try
@@ -109,6 +113,16 @@ namespace Clipman
             }
 
             return false;
+        }
+
+        private static bool IsFullHttpUrl(string text)
+        {
+            var trimmed = (text ?? string.Empty).Trim();
+            if (trimmed.Length == 0 || trimmed.Any(char.IsWhiteSpace)) return false;
+            Uri uri;
+            return Uri.TryCreate(trimmed, UriKind.Absolute, out uri) &&
+                (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase));
         }
 
         private static bool MatchesInternationalPhone(string text)

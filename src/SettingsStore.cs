@@ -31,7 +31,12 @@ namespace Clipman
             var hadFileHistorySortDescending = SettingsFileContainsProperty(SettingsPath, "FileHistorySortDescending");
             var hadUseDefaultDatabasePath = SettingsFileContainsProperty(SettingsPath, "UseDefaultDatabasePath");
             var hadRememberDatabasePassword = SettingsFileContainsProperty(SettingsPath, "RememberDatabasePassword");
+            var hadLastSelectedHistoryTab = SettingsFileContainsProperty(SettingsPath, "LastSelectedHistoryTab");
             var settings = loaded.Settings;
+            if (!hadLastSelectedHistoryTab)
+            {
+                settings.LastSelectedHistoryTab = settings.LastSelectedTab == 1 ? HistoryTabs.Files : HistoryTabs.Text;
+            }
             if (!hadRememberDatabasePassword && !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 settings.RememberDatabasePassword = true;
@@ -133,6 +138,7 @@ namespace Clipman
             {
                 settings.LastSelectedTab = 0;
             }
+            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
             if (settings.LastPreferencesTab < 0 || settings.LastPreferencesTab > 5)
             {
                 settings.LastPreferencesTab = 0;
