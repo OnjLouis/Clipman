@@ -30,6 +30,9 @@ ClipmanShared.md
 CLIPMAN_AGENT_SYNC.md
 CLIPMAN_SHARED_CONTRACT.md
 GITHUB-RELEASE-RULES.md
+SmokeTest.ps1
+Test-ReleasePrivacy.ps1
+CommunitySearch.ps1
 
 # Editor and OS noise
 .DS_Store
