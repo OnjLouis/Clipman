@@ -2,28 +2,6 @@
 
 Native macOS implementation of Clipman, sharing the same text-history `.clipdb` database contract as the Windows Clipman project.
 
-## Required Coordination
-
-Before changing database, settings, sync, password, or shared-history behavior, read:
-
-```text
-<repo root>\CLIPMAN_SHARED_CONTRACT.md
-```
-
-Before changing product parity, keyboard behavior, menus, or cross-platform workflow, also read:
-
-```text
-<repo root>\CLIPMAN_AGENT_SYNC.md
-```
-
-On the Mac, the same file should be reachable from the sibling folder under Dropbox, for example:
-
-```text
-<repo root>/CLIPMAN_SHARED_CONTRACT.md
-```
-
-Both Windows and macOS implementations must stay compatible with that contract. If a shared behavior changes, update both implementations and the contract document in the same work cycle, or clearly mark the feature as platform-specific.
-
 ## Project Shape
 
 Swift package targets:

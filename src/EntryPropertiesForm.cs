@@ -166,6 +166,7 @@ namespace Clipman
                 AccessibleName = "Clipboard text",
                 AccessibleDescription = "Clipboard text stored for this entry. Editing this field changes what Clipman copies for this entry."
             };
+            TextBoundaryNavigator.Attach(textBox);
             Controls.Add(textBox);
 
             var insertPreset = new Button

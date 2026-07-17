@@ -12,6 +12,8 @@ ClipmanMac/dist/
 *.pdb
 *.obj
 *.dll
+*.pyc
+__pycache__/
 !Assets/sqlite/sqlite3.dll
 
 # Runtime data

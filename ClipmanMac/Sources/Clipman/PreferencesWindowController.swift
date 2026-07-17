@@ -53,6 +53,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private var historyIsEncrypted: Bool
     private var rememberedPasswordExists: Bool
     private let databasePathField = NSTextField()
+    private let storageModePopup = NSPopUpButton()
+    private let serverUrlField = NSTextField()
+    private let serverTokenField = NSSecureTextField()
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds", target: nil, action: nil)
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
@@ -113,6 +116,14 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
 
         addRow("Settings folder", databasePathField, button(title: "Choose...", action: #selector(chooseSettingsFolder)))
         databasePathField.setAccessibilityHelp("Choose the Clipman data/settings folder. Clipman will use clipman-history.clipdb inside that folder.")
+        storageModePopup.addItems(withTitles: ["Local or shared folder", "Clipman Server"])
+        storageModePopup.setAccessibilityLabel("History storage type")
+        addRow("History storage type", storageModePopup)
+        serverUrlField.setAccessibilityLabel("Clipman Server host")
+        addRow("Server host", serverUrlField)
+        serverTokenField.setAccessibilityLabel("Clipman Server token")
+        serverTokenField.setAccessibilityHelp("Server authentication token. The token is hidden on screen and saved in this Mac user's Keychain.")
+        addRow("Server token", serverTokenField)
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("History password", passwordField)
@@ -209,6 +220,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
 
     private func loadFields() {
         databasePathField.stringValue = settingsFolderPath(fromDatabasePath: settings.databasePath)
+        storageModePopup.selectItem(withTitle: displayStorageMode(settings.storageMode))
+        serverUrlField.stringValue = settings.serverUrl
+        serverTokenField.stringValue = settings.serverToken
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
         soundsCheckbox.state = settings.soundsEnabled ? .on : .off
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
@@ -258,6 +272,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             return
         }
         settings.databasePath = normalizedDatabasePath(databasePathField.stringValue)
+        settings.storageMode = storedStorageMode(storageModePopup.titleOfSelectedItem ?? "")
+        settings.serverUrl = ServerSettingsSanitizer.cleanURL(serverUrlField.stringValue)
+        settings.serverToken = ServerSettingsSanitizer.cleanToken(serverTokenField.stringValue)
+        serverUrlField.stringValue = settings.serverUrl
+        serverTokenField.stringValue = settings.serverToken
         settings.monitoringEnabled = monitoringCheckbox.state == .on
         settings.soundsEnabled = soundsCheckbox.state == .on
         settings.runAtStartup = runAtStartupCheckbox.state == .on
@@ -344,6 +363,19 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             return url.deletingLastPathComponent().path
         }
         return trimmed
+    }
+
+    private func displayStorageMode(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Server") == .orderedSame
+            ? "Clipman Server"
+            : "Local or shared folder"
+    }
+
+    private func storedStorageMode(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Clipman Server") == .orderedSame ||
+            value.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Server") == .orderedSame
+            ? "Server"
+            : "File"
     }
 
     private func displayUpdateFrequency(_ value: String) -> String {

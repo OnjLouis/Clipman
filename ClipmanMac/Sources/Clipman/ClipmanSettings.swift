@@ -4,6 +4,9 @@ import Carbon
 struct ClipmanSettings: Codable, Equatable {
     var machineName: String
     var databasePath: String
+    var storageMode: String
+    var serverUrl: String
+    var serverToken: String
     var monitoringEnabled: Bool
     var soundsEnabled: Bool
     var showHistoryHotkey: HotkeyDescriptor
@@ -31,7 +34,7 @@ struct ClipmanSettings: Codable, Equatable {
     var sensitiveDataPresetIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case machineName, databasePath, monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
+        case machineName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, linksHistoryEnabled, groupFilter, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
@@ -47,6 +50,9 @@ struct ClipmanSettings: Codable, Equatable {
     init(
         machineName: String,
         databasePath: String,
+        storageMode: String,
+        serverUrl: String,
+        serverToken: String,
         monitoringEnabled: Bool,
         soundsEnabled: Bool,
         showHistoryHotkey: HotkeyDescriptor,
@@ -75,6 +81,9 @@ struct ClipmanSettings: Codable, Equatable {
     ) {
         self.machineName = machineName
         self.databasePath = databasePath
+        self.storageMode = storageMode
+        self.serverUrl = serverUrl
+        self.serverToken = serverToken
         self.monitoringEnabled = monitoringEnabled
         self.soundsEnabled = soundsEnabled
         self.showHistoryHotkey = showHistoryHotkey
@@ -107,6 +116,9 @@ struct ClipmanSettings: Codable, Equatable {
         let fallback = ClipmanSettings.defaults(applicationSupport: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Clipman", isDirectory: true))
         machineName = try container.decodeIfPresent(String.self, forKey: .machineName) ?? fallback.machineName
         databasePath = try container.decodeIfPresent(String.self, forKey: .databasePath) ?? fallback.databasePath
+        storageMode = ClipmanSettings.normalizeStorageMode(try container.decodeIfPresent(String.self, forKey: .storageMode))
+        serverUrl = ServerSettingsSanitizer.cleanURL(try container.decodeIfPresent(String.self, forKey: .serverUrl) ?? "")
+        serverToken = ServerSettingsSanitizer.cleanToken(try container.decodeIfPresent(String.self, forKey: .serverToken) ?? "")
         monitoringEnabled = try container.decodeIfPresent(Bool.self, forKey: .monitoringEnabled) ?? fallback.monitoringEnabled
         soundsEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundsEnabled) ?? true
         showHistoryHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .showHistoryHotkey) ?? fallback.showHistoryHotkey
@@ -153,6 +165,8 @@ struct ClipmanSettings: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(machineName, forKey: .machineName)
         try container.encode(databasePath, forKey: .databasePath)
+        try container.encode(storageMode, forKey: .storageMode)
+        try container.encode(serverUrl, forKey: .serverUrl)
         try container.encode(monitoringEnabled, forKey: .monitoringEnabled)
         try container.encode(soundsEnabled, forKey: .soundsEnabled)
         try container.encode(showHistoryHotkey, forKey: .showHistoryHotkey)
@@ -184,6 +198,9 @@ struct ClipmanSettings: Codable, Equatable {
         ClipmanSettings(
             machineName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
             databasePath: applicationSupport.appendingPathComponent("clipman-history.clipdb").path,
+            storageMode: "File",
+            serverUrl: "",
+            serverToken: "",
             monitoringEnabled: true,
             soundsEnabled: true,
             showHistoryHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ANSI_Grave), modifiers: [.option, .shift]),
@@ -210,6 +227,12 @@ struct ClipmanSettings: Codable, Equatable {
             sensitiveDataMode: SensitiveDataExclusion.modeOff,
             sensitiveDataPresetIds: []
         )
+    }
+
+    static func normalizeStorageMode(_ value: String?) -> String {
+        (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Server") == .orderedSame
+            ? "Server"
+            : "File"
     }
 }
 

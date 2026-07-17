@@ -10,9 +10,10 @@ private enum ExportPasswordChoice {
 }
 
 @MainActor
-final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, FileHistoryStoreDelegate, ClipboardMonitorDelegate, HistoryWindowControllerDelegate, PreferencesWindowControllerDelegate {
+final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, FileHistoryStoreDelegate, ClipboardMonitorDelegate, HistoryWindowControllerDelegate, PreferencesWindowControllerDelegate, SecretsWindowControllerDelegate {
     private let settingsStore = SettingsStore()
     private let keychain = KeychainPasswordStore()
+    private let serverTokenKeychain = KeychainPasswordStore(service: "Clipman.server.token")
     private let monitor = ClipboardMonitor()
     private let hotkeys = HotkeyManager()
     private let startup = StartupService()
@@ -21,33 +22,55 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var settings: ClipmanSettings!
     private var store: ClipStore!
     private var fileStore: FileHistoryStore!
+    private var secretStore: SecretStore!
     private var statusItem: NSStatusItem!
     private var historyWindow: HistoryWindowController!
     private var preferencesWindow: PreferencesWindowController?
+    private var secretsWindow: SecretsWindowController?
     private weak var previousFrontmostApplication: NSRunningApplication?
     private var sessionDatabasePassword = ""
     private var sessionPasswordDatabasePath = ""
     private var cancelledPasswordPaths = Set<String>()
     private var remoteClipboardBaseline: (id: String, stamp: Int64)?
     private var updateTimer: Timer?
+    private var serverRecoveryTimer: Timer?
     private var storageUnavailableReasons: [String: String] = [:]
+    private var serverSyncWarning = ""
     private var monitoringPausedForStorage = false
+    private var databaseErrorAlertShown = false
+    private var databasePasswordRecoveryInProgress = false
 
     private var storageUnavailableReason: String {
         storageUnavailableReasons.values.sorted().joined(separator: "; ")
     }
 
+    private var statusWarningReason: String {
+        ([storageUnavailableReason, serverSyncWarning].filter { !$0.isEmpty }).joined(separator: "; ")
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard enforceSingleRunningInstance() else {
+            NSApp.terminate(nil)
+            return
+        }
+
         settings = settingsStore.load()
+        migrateServerTokenToKeychainIfNeeded()
+        settings.serverToken = currentServerToken(for: settings)
         sounds.useDataFolder(settingsStore.dataFolder(for: settings))
         migrateLegacyKeychainPasswordIfNeeded()
         let initialPassword = initialDatabasePassword()
-        store = ClipStore(databaseURL: URL(fileURLWithPath: settings.databasePath), machineName: settings.machineName)
+        seedServerCacheFromConfiguredDatabase()
+        store = ClipStore(databaseURL: textHistoryURL(for: settings), machineName: settings.machineName)
         store.delegate = self
-        store.setDatabaseURL(URL(fileURLWithPath: settings.databasePath), password: initialPassword)
+        store.setDatabaseURL(textHistoryURL(for: settings), password: initialPassword)
+        configureTextHistoryServerStorage()
         fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.machineName, password: initialPassword)
         fileStore.delegate = self
         fileStore.load()
+        secretStore = SecretStore(databaseURL: secretsURL(for: settings), passwordProvider: { [weak self] in
+            self?.currentDatabasePassword(for: self?.settings.databasePath ?? "") ?? ""
+        })
 
         historyWindow = HistoryWindowController()
         historyWindow.historyDelegate = self
@@ -79,26 +102,71 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             case .showHistory: self?.toggleHistoryFromHotkey()
             case .toggleMonitoring: self?.toggleMonitoring(nil)
             case .quickCopy(let entryID): self?.quickPasteEntry(id: entryID)
+            case .secret(let entryID): self?.quickPasteSecret(id: entryID)
             }
         }
         registerHotkeys()
         NSApp.setActivationPolicy(.accessory)
         buildMainMenu()
         scheduleUpdateChecks()
+        scheduleServerRecoveryChecks()
+    }
+
+    private func enforceSingleRunningInstance() -> Bool {
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.andrelouis.clipman"
+        let otherInstances = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .filter { $0.processIdentifier != currentPID && !$0.isTerminated }
+        guard let existing = otherInstances.first else {
+            return true
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Clipman is already running"
+        alert.informativeText = "Another copy of Clipman is already running. Running two copies at the same time can cause duplicate clipboard monitoring and database conflicts. Quit the existing copy and continue with this one?"
+        alert.addButton(withTitle: "Quit Existing and Continue")
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            return false
+        }
+
+        existing.terminate()
+        let deadline = Date().addingTimeInterval(5)
+        while !existing.isTerminated && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+        }
+        if existing.isTerminated {
+            return true
+        }
+
+        let failedAlert = NSAlert()
+        failedAlert.messageText = "Could Not Quit Existing Clipman"
+        failedAlert.informativeText = "The existing Clipman copy did not close. This copy will quit so two clipboard monitors do not run at the same time."
+        failedAlert.addButton(withTitle: "OK")
+        failedAlert.runModal()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor.stop()
         hotkeys.unregisterAll()
         updateTimer?.invalidate()
+        serverRecoveryTimer?.invalidate()
     }
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "Clipman"
-        statusItem.button?.toolTip = "Clipman"
-        statusItem.button?.setAccessibilityLabel("Clipman")
+        updateStatusItem()
         rebuildMenu()
+    }
+
+    private func updateStatusItem() {
+        guard let button = statusItem?.button else { return }
+        let title = settings.monitoringEnabled ? "Clipman: On" : "Clipman: Off"
+        button.title = title
+        button.setAccessibilityLabel(title)
+        button.toolTip = statusWarningReason.isEmpty ? title : "Clipman: \(statusWarningReason)"
     }
 
     private func buildMainMenu() {
@@ -108,6 +176,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         appMenu.addItem(NSMenuItem(title: "Show History", action: #selector(showHistory(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Toggle Monitoring", action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
+        let appSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
+        appSecretsItem.keyEquivalentModifierMask = [.command, .shift]
+        appMenu.addItem(appSecretsItem)
         appMenu.addItem(NSMenuItem(title: "Open Manual", action: #selector(openManual(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: ""))
@@ -131,12 +202,19 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     private func rebuildMenu() {
+        guard statusItem != nil else { return }
         let menu = NSMenu(title: "Clipman")
         if !storageUnavailableReason.isEmpty {
             let item = NSMenuItem(title: "Storage unavailable", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
             menu.addItem(NSMenuItem(title: "Retry Storage", action: #selector(retryStorage(_:)), keyEquivalent: ""))
+            menu.addItem(.separator())
+        } else if !serverSyncWarning.isEmpty {
+            let item = NSMenuItem(title: "Server sync unavailable", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            menu.addItem(NSMenuItem(title: "Retry Server Sync", action: #selector(retryStorage(_:)), keyEquivalent: ""))
             menu.addItem(.separator())
         }
         menu.addItem(NSMenuItem(title: "Show History", action: #selector(showHistory(_:)), keyEquivalent: ""))
@@ -145,6 +223,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             ? (settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On")
             : "Monitoring Paused Until Storage Returns"
         menu.addItem(NSMenuItem(title: monitorTitle, action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
+        let statusSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
+        statusSecretsItem.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(statusSecretsItem)
         menu.addItem(NSMenuItem(title: "Open Manual", action: #selector(openManual(_:)), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: ""))
@@ -185,6 +266,72 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         historyWindow.showFileHistory()
     }
 
+    @objc private func showSecrets(_ sender: Any?) {
+        let currentPassword = currentDatabasePassword(for: settings.databasePath)
+        guard !currentPassword.isEmpty else {
+            showInformationalAlert(
+                title: "Clipman Secrets",
+                message: "Secrets require a history password. Open Preferences, set a history password, and remember it in Keychain if you want secrets available after restart."
+            )
+            return
+        }
+        guard confirmSecretsPassword(currentPassword: currentPassword) else { return }
+        if secretsWindow == nil {
+            secretsWindow = SecretsWindowController(store: secretStore)
+            secretsWindow?.secretsDelegate = self
+        }
+        secretsWindow?.showWindow(sender)
+    }
+
+    private func confirmSecretsPassword(currentPassword: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Unlock Clipman Secrets"
+        alert.informativeText = "Enter the current history password to open Secrets."
+        alert.addButton(withTitle: "Unlock")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.setAccessibilityLabel("Current history password")
+        alert.accessoryView = field
+        guard runModalWithTextEditingShortcuts(alert) == .alertFirstButtonReturn else { return false }
+        if field.stringValue == currentPassword {
+            return true
+        }
+        showInformationalAlert(title: "Clipman Secrets", message: "The history password did not match. Secrets were not opened.")
+        return false
+    }
+
+    private func runModalWithTextEditingShortcuts(_ alert: NSAlert) -> NSApplication.ModalResponse {
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard modifiers == [.command],
+                  let command = event.charactersIgnoringModifiers?.lowercased() else {
+                return event
+            }
+            switch command {
+            case "a":
+                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                return nil
+            case "x":
+                NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+                return nil
+            case "c":
+                NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+                return nil
+            case "v":
+                NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+                return nil
+            default:
+                return event
+            }
+        }
+        defer {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+        return alert.runModal()
+    }
+
     @objc private func toggleMonitoring(_ sender: Any?) {
         guard storageUnavailableReason.isEmpty else {
             retryStorage(sender)
@@ -194,6 +341,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.isEnabled = settings.monitoringEnabled
         try? settingsStore.save(settings)
         sounds.play(settings.monitoringEnabled ? .on : .off)
+        updateStatusItem()
         rebuildMenu()
     }
 
@@ -219,6 +367,25 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         store.markUsed(entry.Id)
     }
 
+    private func quickPasteSecret(id: String) {
+        guard let secret = secretStore.entry(id: id) else {
+            NSSound.beep()
+            return
+        }
+        quickPaste(secret: secret)
+    }
+
+    private func quickPaste(secret: SecretEntry) {
+        guard !secret.Value.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        monitor.writeTemporaryInternalText(secret.Value, restoreAfter: 0.35) {
+            self.sendPasteKeystroke()
+        }
+        sounds.play(.copy)
+    }
+
     private func sendPasteKeystroke() {
         let source = CGEventSource(stateID: .hidSystemState)
         let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
@@ -240,6 +407,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             alert.runModal()
         }
     }
+
+    private func formatDiagnosticTime(_ unixMs: Int64) -> String {
+        guard unixMs > 0 else { return "Never" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(unixMs) / 1000.0))
+    }
+
     @objc private func checkForUpdates(_ sender: Any?) {
         runUpdateCheck(manual: true)
     }
@@ -269,19 +444,34 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     @objc private func showDiagnostics(_ sender: Any?) {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let buildStamp = Bundle.main.object(forInfoDictionaryKey: "ClipmanBuildStampUtcMs") as? String ?? "unknown"
         let dataFolder = URL(fileURLWithPath: settings.databasePath).deletingLastPathComponent().path
+        let serverStatus = store.serverSyncStatus()
         let report = [
             "Clipman diagnostics",
             "",
             "Version: \(version)",
             "Build: \(build)",
+            "Build stamp: \(buildStamp)",
             "Machine: \(settings.machineName)",
             "Monitoring: \(settings.monitoringEnabled ? "On" : "Off")",
             "Data folder: \(dataFolder)",
+            "Storage mode: \(settings.storageMode)",
+            "Server host: \(settings.serverUrl.isEmpty ? "not set" : settings.serverUrl)",
+            "Server sync enabled: \(serverStatus.enabled)",
+            "Server sync configured: \(serverStatus.configured)",
+            "Server sync revision: \(serverStatus.revision.isEmpty ? "None" : serverStatus.revision)",
+            "Server sync last poll: \(formatDiagnosticTime(serverStatus.lastPollUnixMs))",
+            "Server sync last success: \(formatDiagnosticTime(serverStatus.lastSuccessUnixMs))",
+            "Server sync last upload: \(formatDiagnosticTime(serverStatus.lastUploadUnixMs))",
+            "Server sync next retry: \(formatDiagnosticTime(serverStatus.nextPollUnixMs))",
+            "Server sync consecutive failures: \(serverStatus.consecutiveFailures)",
             "Text history: \(settings.databasePath)",
+            "Local text cache: \(textHistoryURL(for: settings).path)",
             "Text entries: \(store.entryCount())",
             "File history: \(fileHistoryURL(for: settings).path)",
             "File events: \(fileStore.eventCount())",
+            "Secrets: \(secretStore.entries().count) configured",
             "Runtime crash log: \(RuntimeLogger.logURL.path)",
             "Text sort: \(settings.sortMode), \(settings.sortDescending ? "descending" : "ascending")",
             "File sort: \(settings.fileHistorySortMode), \(settings.fileHistorySortDescending ? "descending" : "ascending")",
@@ -389,6 +579,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipStoreDidChange() {
+        databaseErrorAlertShown = false
+        clearServerSyncWarningIfNeeded()
         clearStorageFailureIfNeeded(area: "text history")
         historyWindow.update(entries: sortedTextEntries())
         copyLatestRemoteTextIfNeeded()
@@ -400,19 +592,25 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func fileHistoryStoreDidFail(error: Error) {
+        RuntimeLogger.write("File history store failed.", error: error, details: "Area: file history")
+        if isDatabasePasswordError(error) {
+            recoverHistoryPassword(after: error, area: "file history")
+            return
+        }
         handleStorageFailure(error: error, area: "file history")
     }
 
     func clipStoreNeedsPassword(for path: String) -> String? {
-        if let password = sessionPassword(for: path), !password.isEmpty {
+        let identityPath = databasePasswordIdentityPath(for: path)
+        if let password = sessionPassword(for: identityPath), !password.isEmpty {
             return password
         }
-        guard !cancelledPasswordPaths.contains(path) else { return nil }
-        guard let password = promptForDatabasePassword(path: path) else {
-            cancelledPasswordPaths.insert(path)
+        guard !cancelledPasswordPaths.contains(identityPath) else { return nil }
+        guard let password = promptForDatabasePassword(path: identityPath) else {
+            cancelledPasswordPaths.insert(identityPath)
             return nil
         }
-        applyDatabasePassword(password, for: path)
+        applyDatabasePassword(password, for: identityPath)
         return password
     }
 
@@ -432,16 +630,32 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipStoreDidFail(error: Error) {
+        RuntimeLogger.write("Text history store failed.", error: error, details: "Area: text history")
+        if isDatabasePasswordError(error) {
+            recoverHistoryPassword(after: error, area: "text history")
+            return
+        }
+        if isServerSyncError(error) {
+            handleServerSyncFailure(error)
+            return
+        }
         if isRecoverableStorageError(error) {
             handleStorageFailure(error: error, area: "text history")
             return
         }
+        guard !databaseErrorAlertShown else { return }
+        databaseErrorAlertShown = true
         let alert = NSAlert(error: error)
         alert.messageText = "Clipman Database Error"
         alert.runModal()
     }
 
     @objc private func retryStorage(_ sender: Any?) {
+        clearServerSyncWarningIfNeeded()
+        seedServerCacheFromConfiguredDatabase()
+        let password = currentDatabasePassword(for: settings.databasePath)
+        store.setDatabaseURL(textHistoryURL(for: settings), password: password)
+        configureTextHistoryServerStorage()
         store.load()
         fileStore.load()
     }
@@ -454,29 +668,73 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             return
         }
 
-        let message = "\(area) storage is unavailable: \(error.localizedDescription)"
+        markStorageUnavailable(area: area, message: "\(area) storage is unavailable: \(error.localizedDescription)")
+    }
+
+    private func markStorageUnavailable(area: String, message: String) {
         let wasAvailable = storageUnavailableReason.isEmpty
         storageUnavailableReasons[area] = message
         if settings.monitoringEnabled && monitor.isEnabled {
             monitor.isEnabled = false
             monitoringPausedForStorage = true
         }
-        statusItem?.button?.toolTip = "Clipman: \(storageUnavailableReason)"
+        updateStatusItem()
         rebuildMenu()
         if wasAvailable {
             sounds.play(.skip)
         }
     }
 
+    private func handleServerSyncFailure(_ error: Error) {
+        let message = "Server sync is unavailable: \(error.localizedDescription)"
+        let wasEmpty = serverSyncWarning.isEmpty
+        serverSyncWarning = message
+        updateStatusItem()
+        rebuildMenu()
+        if wasEmpty && storageUnavailableReason.isEmpty {
+            sounds.play(.skip)
+        }
+    }
+
+    private func clearServerSyncWarningIfNeeded() {
+        guard !serverSyncWarning.isEmpty else { return }
+        serverSyncWarning = ""
+        updateStatusItem()
+        rebuildMenu()
+    }
+
+    private func recoverHistoryPassword(after _: Error, area: String) {
+        guard !databasePasswordRecoveryInProgress else { return }
+        databasePasswordRecoveryInProgress = true
+        defer { databasePasswordRecoveryInProgress = false }
+
+        let identityPath = databasePasswordIdentityPath(for: settings.databasePath)
+        sessionDatabasePassword = ""
+        sessionPasswordDatabasePath = ""
+        guard let password = promptForDatabasePassword(path: identityPath) else {
+            cancelledPasswordPaths.insert(identityPath)
+            markStorageUnavailable(area: area, message: "\(area) is locked because the history password was not supplied.")
+            return
+        }
+
+        applyDatabasePassword(password, for: identityPath)
+        databaseErrorAlertShown = false
+        clearStorageFailureIfNeeded(area: area)
+        store.setDatabaseURL(textHistoryURL(for: settings), password: password)
+        configureTextHistoryServerStorage()
+        store.load()
+        fileStore.load()
+    }
+
     private func clearStorageFailureIfNeeded(area: String) {
         guard !storageUnavailableReason.isEmpty else { return }
         storageUnavailableReasons.removeValue(forKey: area)
         guard storageUnavailableReason.isEmpty else {
-            statusItem?.button?.toolTip = "Clipman: \(storageUnavailableReason)"
+            updateStatusItem()
             rebuildMenu()
             return
         }
-        statusItem?.button?.toolTip = "Clipman"
+        updateStatusItem()
         if monitoringPausedForStorage {
             monitoringPausedForStorage = false
             monitor.isEnabled = settings.monitoringEnabled
@@ -493,8 +751,32 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 return true
             }
         }
+        if error is ServerStorageError {
+            return true
+        }
         let nsError = error as NSError
         return nsError.domain == NSCocoaErrorDomain || nsError.domain == NSPOSIXErrorDomain
+    }
+
+    private func isServerSyncError(_ error: Error) -> Bool {
+        if error is ServerSyncFailureError {
+            return true
+        }
+        if error is ServerStorageError {
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain
+    }
+
+    private func isDatabasePasswordError(_ error: Error) -> Bool {
+        guard let databaseError = error as? ClipDatabaseError else { return false }
+        switch databaseError {
+        case .passwordRequired, .incorrectPassword:
+            return true
+        default:
+            return false
+        }
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry) {
@@ -777,6 +1059,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         transformSelectedEntries(entries, transform: URLTrackingCleaner.cleanForSharing(_:))
     }
 
+    func historyWindow(_ controller: HistoryWindowController, didNormalizeLineEndings entries: [ClipEntry], style: LineEndingStyle) {
+        transformSelectedEntries(entries) { text in
+            LineEndingNormalizer.normalize(text, to: style)
+        }
+    }
+
     func historyWindow(_ controller: HistoryWindowController, didSetGroup group: String, for entries: [ClipEntry]) {
         store.setGroup(ids: entries.map(\.Id), group: group)
     }
@@ -947,13 +1235,27 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         openSettingsFolder(nil)
     }
 
+    func historyWindowDidRequestSecrets(_ controller: HistoryWindowController) {
+        showSecrets(nil)
+    }
+
     func historyWindowDidHide(_ controller: HistoryWindowController) {
         restorePreviousFrontmostApplication()
     }
 
+    func secretsWindow(_ controller: SecretsWindowController, quickPaste secret: SecretEntry) {
+        quickPaste(secret: secret)
+    }
+
+    func secretsWindowDidChangeSecrets(_ controller: SecretsWindowController) {
+        registerHotkeys()
+    }
+
     func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) {
-        let previousDatabasePath = self.settings.databasePath
+        let previousSettings = self.settings!
+        let previousDatabasePath = previousSettings.databasePath
         self.settings = settings
+        saveServerTokenForSettings(settings, previousSettings: previousSettings)
         if let passwordToSave, !passwordToSave.isEmpty {
             applyDatabasePassword(passwordToSave, for: settings.databasePath)
         } else if settings.rememberDatabasePassword,
@@ -965,21 +1267,30 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             try? keychain.delete(for: settings.databasePath)
             try? keychain.delete(for: previousDatabasePath)
         }
+        if passwordToSave?.isEmpty == false {
+            try? secretStore.changeDatabasePassword()
+        }
         try? settingsStore.save(settings)
         sounds.useDataFolder(settingsStore.dataFolder(for: settings))
         sounds.isEnabled = settings.soundsEnabled
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
+        updateStatusItem()
         applyStartupRegistration(showErrors: true)
         registerHotkeys()
         configureHistoryQuickCopyState()
         resetRemoteClipboardBaseline()
         scheduleUpdateChecks()
+        scheduleServerRecoveryChecks()
+        seedServerCacheFromConfiguredDatabase()
         let password = currentDatabasePassword(for: settings.databasePath)
-        store.setDatabaseURL(URL(fileURLWithPath: settings.databasePath), password: password)
+        store.setDatabaseURL(textHistoryURL(for: settings), password: password)
+        configureTextHistoryServerStorage()
         fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.machineName, password: password)
         fileStore.delegate = self
         fileStore.load()
+        secretStore.setDatabaseURL(secretsURL(for: settings))
+        secretsWindow = nil
         historyWindow.configureSort(
             textSortMode: settings.sortMode,
             textDescending: settings.sortDescending,
@@ -1041,8 +1352,16 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         hotkeys.register(
             showHistory: settings.showHistoryHotkey,
             toggleMonitoring: settings.toggleMonitoringHotkey,
-            quickCopies: settings.quickCopyHotkeys
+            quickCopies: settings.quickCopyHotkeys,
+            secrets: secretHotkeys()
         )
+    }
+
+    private func secretHotkeys() -> [String: HotkeyDescriptor] {
+        Dictionary(uniqueKeysWithValues: secretStore.entries().compactMap { entry in
+            guard let descriptor = HotkeyDescriptor.parse(entry.Hotkey), descriptor.isValid else { return nil }
+            return (entry.Id, descriptor)
+        })
     }
 
     private func copyLatestRemoteTextIfNeeded() {
@@ -1101,6 +1420,31 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
     }
 
+    private func scheduleServerRecoveryChecks() {
+        serverRecoveryTimer?.invalidate()
+        serverRecoveryTimer = nil
+        guard isServerStorageEnabled(settings) else { return }
+        serverRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.recoverServerSyncIfNeeded() }
+        }
+    }
+
+    private func recoverServerSyncIfNeeded() {
+        guard isServerStorageEnabled(settings) else { return }
+        let status = store.serverSyncStatus()
+        let now = TimeUtil.nowUnixMs()
+        let stalePoll = status.configured
+            && status.lastPollUnixMs > 0
+            && now - status.lastPollUnixMs > 120_000
+        guard !serverSyncWarning.isEmpty || stalePoll else { return }
+
+        clearServerSyncWarningIfNeeded()
+        seedServerCacheFromConfiguredDatabase()
+        let password = currentDatabasePassword(for: settings.databasePath)
+        store.setDatabaseURL(textHistoryURL(for: settings), password: password)
+        configureTextHistoryServerStorage()
+    }
+
     private func runUpdateCheckIfDue(intervalSeconds: Int64) {
         let now = TimeUtil.nowUnixMs()
         guard settings.lastUpdateCheckUnixMs == 0 || now - settings.lastUpdateCheckUnixMs >= intervalSeconds * 1000 else { return }
@@ -1143,6 +1487,103 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             .joined(separator: "-")
         let fileName = "\(safeMachine.isEmpty ? "Mac" : safeMachine)-file-history.clipdb"
         return URL(fileURLWithPath: settings.databasePath).deletingLastPathComponent().appendingPathComponent(fileName)
+    }
+
+    private func secretsURL(for settings: ClipmanSettings) -> URL {
+        let safeMachine = settings.machineName
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        let fileName = "\(safeMachine.isEmpty ? "Mac" : safeMachine)-secrets.clipdb"
+        return URL(fileURLWithPath: settings.databasePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent(fileName)
+    }
+
+    private func textHistoryURL(for settings: ClipmanSettings) -> URL {
+        guard isServerStorageEnabled(settings) else {
+            return URL(fileURLWithPath: settings.databasePath)
+        }
+        let safeMachine = settings.machineName
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return settingsStore.applicationSupportURL
+            .appendingPathComponent("ServerCache", isDirectory: true)
+            .appendingPathComponent(safeMachine.isEmpty ? "Mac" : safeMachine, isDirectory: true)
+            .appendingPathComponent("clipman-history.clipdb")
+    }
+
+    private func seedServerCacheFromConfiguredDatabase() {
+        guard isServerStorageEnabled(settings) else { return }
+        let cacheURL = textHistoryURL(for: settings)
+        guard !FileManager.default.fileExists(atPath: cacheURL.path) else { return }
+        let configuredURL = URL(fileURLWithPath: settings.databasePath)
+        guard FileManager.default.fileExists(atPath: configuredURL.path) else { return }
+        do {
+            try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: configuredURL, to: cacheURL)
+        } catch {
+            storageUnavailableReasons["text"] = error.localizedDescription
+            rebuildMenu()
+        }
+    }
+
+    private func isServerStorageEnabled(_ settings: ClipmanSettings) -> Bool {
+        settings.storageMode.caseInsensitiveCompare("Server") == .orderedSame
+    }
+
+    private func configureTextHistoryServerStorage() {
+        store.configureServerStorage(
+            enabled: isServerStorageEnabled(settings),
+            serverURL: settings.serverUrl,
+            serverToken: settings.serverToken
+        )
+    }
+
+    private func serverTokenAccount(for settings: ClipmanSettings) -> String {
+        "server-token:" + settings.databasePath
+    }
+
+    private func currentServerToken(for settings: ClipmanSettings) -> String {
+        let plain = ServerSettingsSanitizer.cleanToken(settings.serverToken)
+        if !plain.isEmpty {
+            return plain
+        }
+        return ServerSettingsSanitizer.cleanToken(serverTokenKeychain.password(for: serverTokenAccount(for: settings)))
+    }
+
+    private func saveServerTokenForSettings(_ settings: ClipmanSettings, previousSettings: ClipmanSettings? = nil) {
+        let account = serverTokenAccount(for: settings)
+        let token = ServerSettingsSanitizer.cleanToken(settings.serverToken)
+        if token.isEmpty {
+            try? serverTokenKeychain.delete(for: account)
+        } else {
+            try? serverTokenKeychain.save(password: token, for: account)
+        }
+        if let previousSettings {
+            let previousAccount = serverTokenAccount(for: previousSettings)
+            if previousAccount != account {
+                try? serverTokenKeychain.delete(for: previousAccount)
+            }
+        }
+    }
+
+    private func migrateServerTokenToKeychainIfNeeded() {
+        let token = ServerSettingsSanitizer.cleanToken(settings.serverToken)
+        if token.isEmpty {
+            settings.serverToken = currentServerToken(for: settings)
+            return
+        }
+        saveServerTokenForSettings(settings)
+        try? settingsStore.save(settings)
+    }
+
+    private func databasePasswordIdentityPath(for path: String) -> String {
+        if isServerStorageEnabled(settings) {
+            return settings.databasePath
+        }
+        return path
     }
 
     private func migrateLegacyKeychainPasswordIfNeeded() {
@@ -1205,8 +1646,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     private func encryptedHistoryExists(for settings: ClipmanSettings) -> Bool {
-        ClipDatabaseFile.isEncryptedFile(URL(fileURLWithPath: settings.databasePath))
+        ClipDatabaseFile.isEncryptedFile(textHistoryURL(for: settings))
+            || ClipDatabaseFile.isEncryptedFile(URL(fileURLWithPath: settings.databasePath))
             || ClipDatabaseFile.isEncryptedFile(fileHistoryURL(for: settings))
+            || ClipDatabaseFile.isEncryptedFile(secretsURL(for: settings))
     }
 
     private func rememberPreviousFrontmostApplication() {

@@ -7,6 +7,7 @@ DIST="${CLIPMAN_MAC_DIST_DIR:-$ROOT/dist}"
 APP="$DIST/Clipman.app"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
+BUILD_STAMP="$(zsh "$ROOT/Scripts/shared-version.sh" stamp)"
 ZIP="$DIST/ClipmanMac-$VERSION.zip"
 
 rm -rf "$DIST"
@@ -44,10 +45,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
   <string>$BUILD_VERSION</string>
+  <key>ClipmanBuildStampUtcMs</key>
+  <string>$BUILD_STAMP</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>
   <true/>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
 </dict>
 </plist>
 PLIST

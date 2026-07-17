@@ -8,6 +8,25 @@ protocol ClipStoreDelegate: AnyObject {
     func clipStoreDidFail(error: Error)
 }
 
+struct ServerSyncStatus {
+    var enabled = false
+    var configured = false
+    var revision = ""
+    var lastPollUnixMs: Int64 = 0
+    var lastSuccessUnixMs: Int64 = 0
+    var lastUploadUnixMs: Int64 = 0
+    var nextPollUnixMs: Int64 = 0
+    var consecutiveFailures = 0
+}
+
+struct ServerSyncFailureError: Error, LocalizedError {
+    let underlying: Error
+
+    var errorDescription: String? {
+        underlying.localizedDescription
+    }
+}
+
 final class ClipStore: @unchecked Sendable {
     weak var delegate: ClipStoreDelegate?
 
@@ -19,10 +38,23 @@ final class ClipStore: @unchecked Sendable {
     private var password = ""
     private(set) var databaseURL: URL
     private let machineName: String
+    private var serverClient: ServerStorageClient?
+    private var serverRevision = ""
+    private var serverPollTimer: DispatchSourceTimer?
+    private var serverSyncInProgress = false
+    private var serverLastPollUnixMs: Int64 = 0
+    private var serverLastSuccessUnixMs: Int64 = 0
+    private var serverLastUploadUnixMs: Int64 = 0
+    private var serverNextPollUnixMs: Int64 = 0
+    private var serverConsecutiveFailures = 0
 
     init(databaseURL: URL, machineName: String) {
         self.databaseURL = databaseURL
         self.machineName = machineName
+    }
+
+    deinit {
+        serverPollTimer?.cancel()
     }
 
     func setDatabaseURL(_ url: URL, password: String = "") {
@@ -33,6 +65,34 @@ final class ClipStore: @unchecked Sendable {
             self.resetWatcherLocked()
             if loaded {
                 DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            }
+        }
+    }
+
+    func configureServerStorage(enabled: Bool, serverURL: String, serverToken: String) {
+        queue.async {
+            self.serverPollTimer?.cancel()
+            self.serverPollTimer = nil
+            self.serverRevision = ""
+            self.resetServerStatusLocked()
+            self.serverClient = enabled ? ServerStorageClient(serverURL: serverURL, token: serverToken, databasePassword: self.password) : nil
+            guard let client = self.serverClient, client.isConfigured else {
+                self.serverClient = nil
+                return
+            }
+
+            do {
+                try self.syncFromServerLocked(uploadLocalWhenMissing: true)
+                self.startServerPollTimerLocked()
+                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            } catch {
+                self.markServerFailureLocked()
+                self.reportServerFailureLocked(error)
+                if !self.isDatabasePasswordError(error) {
+                    self.startServerPollTimerLocked()
+                } else {
+                    self.serverClient = nil
+                }
             }
         }
     }
@@ -57,6 +117,21 @@ final class ClipStore: @unchecked Sendable {
 
     func entryCount() -> Int {
         queue.sync { database.Entries.count }
+    }
+
+    func serverSyncStatus() -> ServerSyncStatus {
+        queue.sync {
+            ServerSyncStatus(
+                enabled: serverClient != nil,
+                configured: serverClient?.isConfigured == true,
+                revision: serverRevision,
+                lastPollUnixMs: serverLastPollUnixMs,
+                lastSuccessUnixMs: serverLastSuccessUnixMs,
+                lastUploadUnixMs: serverLastUploadUnixMs,
+                nextPollUnixMs: serverNextPollUnixMs,
+                consecutiveFailures: serverConsecutiveFailures
+            )
+        }
     }
 
     func newestRemoteCreatedEntry(excluding sourceMachine: String) -> ClipEntry? {
@@ -174,7 +249,9 @@ final class ClipStore: @unchecked Sendable {
                   !self.database.Entries[index].Pinned else {
                 return
             }
+            let deletedText = self.database.Entries[index].Text
             self.database.Entries.remove(at: index)
+            SyncConflictResolver.addDeletedEntry(id: id, text: deletedText, machineName: self.machineName, to: &self.database)
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
         }
@@ -437,7 +514,7 @@ final class ClipStore: @unchecked Sendable {
     private func loadDatabaseWithPasswordLocked() throws -> ClipDatabase {
         do {
             return try ClipDatabaseFile.load(databaseURL, password: password)
-        } catch ClipDatabaseError.passwordRequired {
+        } catch ClipDatabaseError.passwordRequired, ClipDatabaseError.incorrectPassword {
             if let supplied = DispatchQueue.main.sync(execute: { delegate?.clipStoreNeedsPassword(for: databaseURL.path) }) {
                 password = supplied
                 return try ClipDatabaseFile.load(databaseURL, password: supplied)
@@ -448,6 +525,17 @@ final class ClipStore: @unchecked Sendable {
 
     private func mergeLatestBeforeWriteLocked() -> Bool {
         do {
+            if serverClient != nil && !serverSyncInProgress {
+                do {
+                    try syncFromServerLocked(uploadLocalWhenMissing: false)
+                } catch {
+                    markServerFailureLocked()
+                    reportServerFailureLocked(error)
+                    if isDatabasePasswordError(error) {
+                        return false
+                    }
+                }
+            }
             _ = try SyncConflictResolver.resolveDatabaseConflicts(databaseURL: databaseURL, password: password)
             let latest = try loadDatabaseWithPasswordLocked()
             SyncConflictResolver.merge(into: &database, source: latest)
@@ -462,12 +550,199 @@ final class ClipStore: @unchecked Sendable {
     @discardableResult
     private func saveLocked() -> Bool {
         do {
+            SyncConflictResolver.normalize(&database)
             database.UpdatedUnixMs = TimeUtil.nowUnixMs()
             try ClipDatabaseFile.saveAtomic(databaseURL, database: database, password: password)
+            if serverClient != nil && !serverSyncInProgress {
+                do {
+                    try uploadToServerLocked()
+                } catch {
+                    markServerFailureLocked()
+                    reportServerFailureLocked(error)
+                    if isDatabasePasswordError(error) {
+                        return false
+                    }
+                }
+            }
             resetWatcherLocked()
             return true
         } catch {
             DispatchQueue.main.async { self.delegate?.clipStoreDidFail(error: error) }
+            return false
+        }
+    }
+
+    private func resetServerStatusLocked() {
+        serverLastPollUnixMs = 0
+        serverLastSuccessUnixMs = 0
+        serverLastUploadUnixMs = 0
+        serverNextPollUnixMs = 0
+        serverConsecutiveFailures = 0
+    }
+
+    private func markServerSuccessLocked(upload: Bool) {
+        let now = TimeUtil.nowUnixMs()
+        serverLastSuccessUnixMs = now
+        if upload {
+            serverLastUploadUnixMs = now
+        }
+        serverConsecutiveFailures = 0
+        serverNextPollUnixMs = 0
+    }
+
+    private func markServerFailureLocked() {
+        let now = TimeUtil.nowUnixMs()
+        serverConsecutiveFailures = min(serverConsecutiveFailures + 1, 8)
+        let delay = min(60, 2 << min(serverConsecutiveFailures, 5))
+        serverNextPollUnixMs = now + Int64(delay * 1000)
+    }
+
+    private func reportServerFailureLocked(_ error: Error) {
+        let reported: Error = isDatabasePasswordError(error) ? error : ServerSyncFailureError(underlying: error)
+        DispatchQueue.main.async { self.delegate?.clipStoreDidFail(error: reported) }
+    }
+
+    private func startServerPollTimerLocked() {
+        serverPollTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .seconds(2), repeating: .seconds(2), leeway: .milliseconds(250))
+        timer.setEventHandler { [weak self] in
+            self?.pollServerLocked()
+        }
+        serverPollTimer = timer
+        timer.resume()
+    }
+
+    private func pollServerLocked() {
+        guard let client = serverClient, client.isConfigured, !serverSyncInProgress else { return }
+        do {
+            let now = TimeUtil.nowUnixMs()
+            if serverNextPollUnixMs > now { return }
+            serverLastPollUnixMs = now
+            let metadata = try client.metadata()
+            markServerSuccessLocked(upload: false)
+            if metadata.revision != serverRevision {
+                try syncFromServerLocked(uploadLocalWhenMissing: false)
+                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            }
+        } catch ServerStorageError.notFound {
+            do {
+                try syncFromServerLocked(uploadLocalWhenMissing: true)
+            } catch {
+                markServerFailureLocked()
+                reportServerFailureLocked(error)
+                if isDatabasePasswordError(error) {
+                    serverPollTimer?.cancel()
+                    serverPollTimer = nil
+                    serverClient = nil
+                }
+            }
+        } catch {
+            markServerFailureLocked()
+            reportServerFailureLocked(error)
+            if isDatabasePasswordError(error) {
+                serverPollTimer?.cancel()
+                serverPollTimer = nil
+                serverClient = nil
+            }
+        }
+    }
+
+    private func syncFromServerLocked(uploadLocalWhenMissing: Bool) throws {
+        guard let client = serverClient, client.isConfigured else { return }
+        if serverSyncInProgress { return }
+        serverSyncInProgress = true
+        defer { serverSyncInProgress = false }
+
+        do {
+            let download = try client.download()
+            let downloaded = try loadDownloadedDatabaseLocked(download.data)
+            let uploadMerged = hasLocalStateMissingFromServer(server: downloaded, local: database)
+            SyncConflictResolver.merge(into: &database, source: downloaded)
+            SyncConflictResolver.normalize(&database)
+            serverRevision = download.metadata.revision
+            try ClipDatabaseFile.saveAtomic(databaseURL, database: database, password: password)
+            resetWatcherLocked()
+            if uploadMerged {
+                let data = try Data(contentsOf: databaseURL)
+                let metadata = try client.upload(data: data, expectedRevision: serverRevision)
+                serverRevision = metadata.revision
+                markServerSuccessLocked(upload: true)
+            }
+            markServerSuccessLocked(upload: false)
+        } catch ServerStorageError.notFound {
+            if uploadLocalWhenMissing && (!database.Entries.isEmpty || !database.DeletedEntries.isEmpty) {
+                SyncConflictResolver.normalize(&database)
+                try ClipDatabaseFile.saveAtomic(databaseURL, database: database, password: password)
+                let data = try Data(contentsOf: databaseURL)
+                let metadata = try client.upload(data: data, expectedRevision: "")
+                serverRevision = metadata.revision
+                markServerSuccessLocked(upload: true)
+            } else {
+                throw ServerStorageError.notFound
+            }
+        }
+    }
+
+    private func uploadToServerLocked() throws {
+        guard let client = serverClient, client.isConfigured else { return }
+        let data = try Data(contentsOf: databaseURL)
+        do {
+            let metadata = try client.upload(data: data, expectedRevision: serverRevision)
+            serverRevision = metadata.revision
+            markServerSuccessLocked(upload: true)
+        } catch ServerStorageError.conflict {
+            try syncFromServerLocked(uploadLocalWhenMissing: false)
+            let mergedData = try Data(contentsOf: databaseURL)
+            let metadata = try client.upload(data: mergedData, expectedRevision: serverRevision)
+            serverRevision = metadata.revision
+            markServerSuccessLocked(upload: true)
+        } catch ServerStorageError.notFound {
+            let metadata = try client.upload(data: data, expectedRevision: "")
+            serverRevision = metadata.revision
+            markServerSuccessLocked(upload: true)
+        } catch {
+            markServerFailureLocked()
+            throw error
+        }
+    }
+
+    private func loadDownloadedDatabaseLocked(_ data: Data) throws -> ClipDatabase {
+        let temp = databaseURL.deletingLastPathComponent()
+            .appendingPathComponent(".clipman-server-download-\(UUID().uuidString).clipdb")
+        try FileManager.default.createDirectory(at: temp.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: temp, options: [.atomic])
+        defer { try? FileManager.default.removeItem(at: temp) }
+        return try ClipDatabaseFile.load(temp, password: password)
+    }
+
+    private func hasLocalStateMissingFromServer(server: ClipDatabase, local: ClipDatabase) -> Bool {
+        var normalizedServer = server
+        var normalizedLocal = local
+        SyncConflictResolver.normalize(&normalizedServer)
+        SyncConflictResolver.normalize(&normalizedLocal)
+
+        let serverDeleted = Set(normalizedServer.DeletedEntries.map(\.Id))
+        if normalizedLocal.DeletedEntries.contains(where: { !serverDeleted.contains($0.Id) }) {
+            return true
+        }
+
+        let serverIDs = Set(normalizedServer.Entries.map(\.Id))
+        for entry in normalizedLocal.Entries where !entry.Text.isEmpty {
+            if SyncConflictResolver.isDeleted(entry, in: normalizedServer) { continue }
+            if !serverIDs.contains(entry.Id) && !normalizedServer.Entries.contains(where: { $0.Text == entry.Text }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func isDatabasePasswordError(_ error: Error) -> Bool {
+        guard let databaseError = error as? ClipDatabaseError else { return false }
+        switch databaseError {
+        case .passwordRequired, .incorrectPassword:
+            return true
+        default:
             return false
         }
     }

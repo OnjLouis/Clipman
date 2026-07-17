@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Web.Script.Serialization;
 
 namespace Clipman
 {
@@ -23,6 +24,7 @@ namespace Clipman
         public AppSettings Load()
         {
             Directory.CreateDirectory(AppSettingsDirectory);
+            ResolveSettingsLocationConflicts();
             var loaded = LoadBestSettings();
             SettingsPath = loaded.Path;
             SettingsDirectory = Path.GetDirectoryName(SettingsPath) ?? AppSettingsDirectory;
@@ -33,6 +35,10 @@ namespace Clipman
             var hadRememberDatabasePassword = SettingsFileContainsProperty(SettingsPath, "RememberDatabasePassword");
             var hadLastSelectedHistoryTab = SettingsFileContainsProperty(SettingsPath, "LastSelectedHistoryTab");
             var settings = loaded.Settings;
+            if (string.IsNullOrWhiteSpace(settings.ProtectedServerToken))
+            {
+                settings.ServerToken = ReadStringProperty(SettingsPath, "ServerToken");
+            }
             if (!hadLastSelectedHistoryTab)
             {
                 settings.LastSelectedHistoryTab = settings.LastSelectedTab == 1 ? HistoryTabs.Files : HistoryTabs.Text;
@@ -81,6 +87,22 @@ namespace Clipman
                 settings.DatabasePath = DefaultDatabasePath();
                 settings.UseDefaultDatabasePath = true;
             }
+            settings.StorageMode = NormalizeStorageMode(settings.StorageMode);
+            settings.ServerUrl = ServerSettingsSanitizer.CleanUrl(settings.ServerUrl);
+            var plainServerToken = ServerSettingsSanitizer.CleanToken(settings.ServerToken);
+            if (plainServerToken.Length == 0 && !string.IsNullOrWhiteSpace(settings.ProtectedServerToken))
+            {
+                try
+                {
+                    plainServerToken = ServerSettingsSanitizer.CleanToken(ServerTokenProtector.Unprotect(settings.ProtectedServerToken));
+                }
+                catch
+                {
+                    settings.ProtectedServerToken = string.Empty;
+                }
+            }
+            settings.ServerToken = plainServerToken;
+            settings.ProtectedServerToken = plainServerToken.Length == 0 ? string.Empty : ServerTokenProtector.Protect(plainServerToken);
             if (string.IsNullOrWhiteSpace(settings.ShowHistoryHotkey))
             {
                 settings.ShowHistoryHotkey = "Ctrl+Alt+\\";
@@ -182,6 +204,35 @@ namespace Clipman
             settings.PlainDatabasePassword = string.Empty;
         }
 
+        private static string ReadStringProperty(string path, string propertyName)
+        {
+            try
+            {
+                if (!File.Exists(path)) return string.Empty;
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var data = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+                if (data == null) return string.Empty;
+                foreach (var pair in data)
+                {
+                    if (string.Equals(pair.Key, propertyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Convert.ToString(pair.Value) ?? string.Empty;
+                    }
+                }
+            }
+            catch
+            {
+            }
+            return string.Empty;
+        }
+
+        private static string NormalizeStorageMode(string mode)
+        {
+            return string.Equals((mode ?? string.Empty).Trim(), "Server", StringComparison.OrdinalIgnoreCase)
+                ? "Server"
+                : "File";
+        }
+
         private LoadedSettings LoadBestSettings()
         {
             var candidates = SettingsCandidates();
@@ -219,12 +270,13 @@ namespace Clipman
         private string LoadDataFolderPointer()
         {
             var path = Path.Combine(AppSettingsDirectory, PointerFileName);
+            ResolveSettingsLocationConflicts();
             if (!File.Exists(path)) return string.Empty;
 
             try
             {
                 var pointer = JsonUtil.Load<SettingsLocationPointer>(path);
-                return pointer == null ? string.Empty : pointer.DataFolder ?? string.Empty;
+                return pointer == null ? string.Empty : pointer.FolderForMachine(MachineNameSafe());
             }
             catch
             {
@@ -238,10 +290,170 @@ namespace Clipman
             try
             {
                 Directory.CreateDirectory(AppSettingsDirectory);
-                JsonUtil.SaveAtomic(Path.Combine(AppSettingsDirectory, PointerFileName), new SettingsLocationPointer { DataFolder = folder });
+                var path = Path.Combine(AppSettingsDirectory, PointerFileName);
+                ResolveSettingsLocationConflicts();
+                var pointer = LoadSettingsLocationPointer(path) ?? new SettingsLocationPointer();
+                pointer.SetFolderForMachine(MachineNameSafe(), folder);
+                DeleteSettingsLocationConflicts(path);
+                JsonUtil.SaveAtomic(path, pointer);
             }
             catch
             {
+            }
+        }
+
+        private void ResolveSettingsLocationConflicts()
+        {
+            try
+            {
+                var canonicalPath = Path.Combine(AppSettingsDirectory, PointerFileName);
+                var conflicts = SyncConflictResolver.FindConflictSiblings(canonicalPath).ToList();
+                if (conflicts.Count == 0) return;
+
+                var candidates = new List<Tuple<string, SettingsLocationPointer, DateTime>>();
+                AddSettingsLocationCandidate(candidates, canonicalPath);
+                foreach (var conflict in conflicts)
+                {
+                    AddSettingsLocationCandidate(candidates, conflict);
+                }
+
+                var merged = MergeSettingsLocationPointers(candidates);
+                if (merged != null)
+                {
+                    Directory.CreateDirectory(AppSettingsDirectory);
+                    JsonUtil.SaveAtomic(canonicalPath, merged);
+                }
+
+                DeleteSettingsLocationConflicts(canonicalPath);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void AddSettingsLocationCandidate(List<Tuple<string, SettingsLocationPointer, DateTime>> candidates, string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return;
+                candidates.Add(Tuple.Create(path, LoadSettingsLocationPointer(path), File.GetLastWriteTimeUtc(path)));
+            }
+            catch
+            {
+            }
+        }
+
+        private static SettingsLocationPointer LoadSettingsLocationPointer(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                var serializer = new JavaScriptSerializer();
+                var data = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+                if (data == null) return null;
+
+                var pointer = new SettingsLocationPointer();
+                object dataFolder;
+                if (TryGetCaseInsensitive(data, "dataFolder", out dataFolder))
+                {
+                    pointer.DataFolder = Convert.ToString(dataFolder) ?? string.Empty;
+                }
+
+                object clients;
+                if (TryGetCaseInsensitive(data, "clients", out clients))
+                {
+                    var clientDictionary = clients as Dictionary<string, object>;
+                    if (clientDictionary != null)
+                    {
+                        foreach (var pair in clientDictionary)
+                        {
+                            var value = Convert.ToString(pair.Value) ?? string.Empty;
+                            if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(value))
+                            {
+                                pointer.Clients[pair.Key.Trim()] = value;
+                            }
+                        }
+                    }
+                }
+
+                return pointer;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool TryGetCaseInsensitive(Dictionary<string, object> data, string key, out object value)
+        {
+            foreach (var pair in data)
+            {
+                if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = pair.Value;
+                    return true;
+                }
+            }
+
+            value = null;
+            return false;
+        }
+
+        private static SettingsLocationPointer MergeSettingsLocationPointers(IEnumerable<Tuple<string, SettingsLocationPointer, DateTime>> candidates)
+        {
+            var merged = new SettingsLocationPointer();
+            var sawAny = false;
+            foreach (var item in candidates
+                .Where(candidate => candidate.Item2 != null)
+                .OrderBy(candidate => candidate.Item3))
+            {
+                var pointer = item.Item2;
+                if (IsValidSettingsLocation(pointer.DataFolder))
+                {
+                    merged.DataFolder = pointer.DataFolder;
+                    sawAny = true;
+                }
+
+                foreach (var pair in pointer.Clients ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (string.IsNullOrWhiteSpace(pair.Key) || !IsValidSettingsLocation(pair.Value))
+                    {
+                        continue;
+                    }
+
+                    merged.Clients[pair.Key.Trim()] = pair.Value;
+                    sawAny = true;
+                }
+            }
+
+            return sawAny ? merged : null;
+        }
+
+        private static bool IsValidSettingsLocation(string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) return false;
+            try
+            {
+                var full = Path.GetFullPath(folder);
+                return Directory.Exists(full);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void DeleteSettingsLocationConflicts(string canonicalPath)
+        {
+            foreach (var conflict in SyncConflictResolver.FindConflictSiblings(canonicalPath))
+            {
+                try
+                {
+                    File.Delete(conflict);
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -350,6 +562,11 @@ namespace Clipman
             return Path.Combine(SettingsDirectory, MachineNameSafe() + "-file-history.clipdb");
         }
 
+        public string DefaultSecretsDatabasePath()
+        {
+            return Path.Combine(SettingsDirectory, MachineNameSafe() + "-secrets.clipdb");
+        }
+
         private bool ShouldTreatAsDefaultDatabasePath(string databasePath)
         {
             if (string.IsNullOrWhiteSpace(databasePath)) return true;
@@ -423,11 +640,63 @@ namespace Clipman
 
         private sealed class SettingsLocationPointer
         {
-            public string DataFolder { get; set; }
+            public string dataFolder { get; set; }
+            public Dictionary<string, string> clients { get; set; }
 
             public SettingsLocationPointer()
             {
-                DataFolder = string.Empty;
+                dataFolder = string.Empty;
+                clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            [ScriptIgnore]
+            public string DataFolder
+            {
+                get { return dataFolder ?? string.Empty; }
+                set { dataFolder = value ?? string.Empty; }
+            }
+
+            [ScriptIgnore]
+            public Dictionary<string, string> Clients
+            {
+                get
+                {
+                    if (clients == null)
+                    {
+                        clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    }
+                    return clients;
+                }
+                set { clients = value ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); }
+            }
+
+            public string FolderForMachine(string machineName)
+            {
+                if (!string.IsNullOrWhiteSpace(machineName) && Clients != null)
+                {
+                    foreach (var pair in Clients)
+                    {
+                        if (string.Equals(pair.Key, machineName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return pair.Value ?? string.Empty;
+                        }
+                    }
+                }
+
+                return DataFolder ?? string.Empty;
+            }
+
+            public void SetFolderForMachine(string machineName, string folder)
+            {
+                if (Clients == null)
+                {
+                    Clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                if (!string.IsNullOrWhiteSpace(machineName))
+                {
+                    Clients[machineName.Trim()] = folder ?? string.Empty;
+                }
             }
         }
     }

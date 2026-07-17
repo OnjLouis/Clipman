@@ -31,6 +31,7 @@ namespace Clipman
                 AccessibleName = accessibleName,
                 AccessibleDescription = accessibleDescription
             };
+            TextBoundaryNavigator.Attach(textBox);
             Controls.Add(textBox);
 
             var buttons = new FlowLayoutPanel

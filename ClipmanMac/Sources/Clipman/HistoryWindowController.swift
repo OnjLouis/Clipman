@@ -40,7 +40,95 @@ private final class QuickPasteModeRadioGroup: NSObject {
     }
 }
 
-private final class DialogTabTextView: NSTextView {
+private class BoundaryAwareTextView: NSTextView {
+    override func keyDown(with event: NSEvent) {
+        if handleBoundaryNavigation(event) {
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func handleBoundaryNavigation(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard modifiers.contains(.option),
+              !modifiers.contains(.command),
+              !modifiers.contains(.control),
+              event.keyCode == UInt16(kVK_LeftArrow) || event.keyCode == UInt16(kVK_RightArrow)
+        else {
+            return false
+        }
+
+        let extendSelection = modifiers.contains(.shift)
+        let direction = event.keyCode == UInt16(kVK_LeftArrow) ? -1 : 1
+        moveByTextBoundary(direction: direction, extendSelection: extendSelection)
+        return true
+    }
+
+    private func moveByTextBoundary(direction: Int, extendSelection: Bool) {
+        let nsText = string as NSString
+        let currentRange = selectedRange()
+        let anchor = extendSelection ? selectionAnchor(for: currentRange, direction: direction) : NSNotFound
+        let current = caretPosition(for: currentRange, direction: direction, extendSelection: extendSelection)
+        let next = direction < 0
+            ? previousBoundary(in: nsText, from: current)
+            : nextBoundary(in: nsText, from: current)
+
+        if extendSelection {
+            let start = min(anchor, next)
+            setSelectedRange(NSRange(location: start, length: abs(anchor - next)))
+        } else {
+            setSelectedRange(NSRange(location: next, length: 0))
+        }
+        scrollRangeToVisible(selectedRange())
+    }
+
+    private func selectionAnchor(for range: NSRange, direction: Int) -> Int {
+        guard range.length > 0 else { return range.location }
+        return direction < 0 ? range.location + range.length : range.location
+    }
+
+    private func caretPosition(for range: NSRange, direction: Int, extendSelection: Bool) -> Int {
+        guard range.length > 0 else { return range.location }
+        if extendSelection {
+            return direction < 0 ? range.location : range.location + range.length
+        }
+        return direction < 0 ? range.location : range.location + range.length
+    }
+
+    private func nextBoundary(in text: NSString, from position: Int) -> Int {
+        let length = text.length
+        guard position < length else { return length }
+        let category = characterCategory(text.character(at: position))
+        var index = position + 1
+        while index < length && characterCategory(text.character(at: index)) == category {
+            index += 1
+        }
+        return index
+    }
+
+    private func previousBoundary(in text: NSString, from position: Int) -> Int {
+        guard position > 0 else { return 0 }
+        var index = position - 1
+        let category = characterCategory(text.character(at: index))
+        while index > 0 && characterCategory(text.character(at: index - 1)) == category {
+            index -= 1
+        }
+        return index
+    }
+
+    private func characterCategory(_ value: unichar) -> Int {
+        guard let scalar = UnicodeScalar(Int(value)) else { return 0 }
+        if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+            return 2
+        }
+        if CharacterSet.alphanumerics.contains(scalar) {
+            return 1
+        }
+        return 0
+    }
+}
+
+private final class DialogTabTextView: BoundaryAwareTextView {
     override func insertTab(_ sender: Any?) {
         window?.selectNextKeyView(sender)
     }
@@ -104,6 +192,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindowDidRequestExport(_ controller: HistoryWindowController)
     func historyWindow(_ controller: HistoryWindowController, didCleanURLTracking entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCleanLinksForSharing entries: [ClipEntry])
+    func historyWindow(_ controller: HistoryWindowController, didNormalizeLineEndings entries: [ClipEntry], style: LineEndingStyle)
     func historyWindow(_ controller: HistoryWindowController, didSetGroup group: String, for entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didChooseFileEvent event: FileClipboardEvent)
     func historyWindow(_ controller: HistoryWindowController, didTogglePinFileEvent event: FileClipboardEvent)
@@ -125,6 +214,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindowDidRequestDonate(_ controller: HistoryWindowController)
     func historyWindowDidRequestDiagnostics(_ controller: HistoryWindowController)
     func historyWindowDidRequestSettingsFolder(_ controller: HistoryWindowController)
+    func historyWindowDidRequestSecrets(_ controller: HistoryWindowController)
     func historyWindowDidHide(_ controller: HistoryWindowController)
 }
 
@@ -160,6 +250,7 @@ final class HistoryWindow: NSWindow {
     var onUpdateCheck: (() -> Void)?
     var onProjectPage: (() -> Void)?
     var onDiagnostics: (() -> Void)?
+    var onSecrets: (() -> Void)?
     var onFirstRow: (() -> Void)?
     var onLastRow: (() -> Void)?
     var onPageUp: (() -> Void)?
@@ -205,6 +296,10 @@ final class HistoryWindow: NSWindow {
         }
         if event.keyCode == UInt16(kVK_ANSI_G), modifiers == [.option] {
             onGroupFilter?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_ANSI_E), modifiers == [.command, .shift] {
+            onSecrets?()
             return true
         }
         if event.keyCode == UInt16(kVK_UpArrow), modifiers == [.option] {
@@ -513,6 +608,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.onDiagnostics = { [weak self] in
             guard let self else { return }
             self.historyDelegate?.historyWindowDidRequestDiagnostics(self)
+        }
+        window.onSecrets = { [weak self] in
+            guard let self else { return }
+            self.historyDelegate?.historyWindowDidRequestSecrets(self)
         }
         window.onFirstRow = { [weak self] in self?.selectBoundaryRow(first: true) }
         window.onLastRow = { [weak self] in self?.selectBoundaryRow(first: false) }
@@ -1037,6 +1136,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if mode != .files {
             addMenuItem("Remove URL Tracking", action: #selector(menuCleanTracking), to: menu, shortcut: "Command+Shift+R")
             addMenuItem("Clean Link For Sharing", action: #selector(menuCleanForSharing), to: menu, shortcut: "Command+Shift+S")
+            addLineEndingItems(to: menu)
             menu.addItem(.separator())
             addMenuItem("Group Selected...", action: #selector(menuGroupSelected), to: menu, shortcut: "Command+G")
             if !isReservedGroupFilter(groupFilter) {
@@ -1071,6 +1171,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         addMenuItem("Find Next", action: #selector(menuFindNext), to: menu, shortcut: "F3")
         addMenuItem("Find Previous", action: #selector(menuFindPrevious), to: menu, shortcut: "Shift+F3")
         addMenuItem("Preferences...", action: #selector(menuPreferences), to: menu, shortcut: "Command+,")
+        addMenuItem("Secrets...", action: #selector(menuSecrets), to: menu, shortcut: "Command+Shift+E")
         addMenuItem("Manual", action: #selector(menuManual), to: menu, shortcut: "F1")
         addMenuItem("Check for Updates...", action: #selector(menuCheckForUpdates), to: menu, shortcut: "Shift+F1")
         addMenuItem("Project Page", action: #selector(menuProjectPage), to: menu, shortcut: "Command+F1")
@@ -1142,6 +1243,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         let root = NSMenuItem(title: "Quick Paste Targets", action: nil, keyEquivalent: "")
         root.submenu = targetMenu
+        menu.addItem(root)
+    }
+
+    private func addLineEndingItems(to menu: NSMenu) {
+        let lineMenu = NSMenu(title: "Line Endings")
+        addMenuItem("Convert To Windows CRLF", action: #selector(menuNormalizeLineEndingsWindows), to: lineMenu)
+        addMenuItem("Convert To Unix LF", action: #selector(menuNormalizeLineEndingsUnix), to: lineMenu)
+        addMenuItem("Convert To Old Mac CR", action: #selector(menuNormalizeLineEndingsOldMac), to: lineMenu)
+        let root = NSMenuItem(title: "Line Endings", action: nil, keyEquivalent: "")
+        root.submenu = lineMenu
         menu.addItem(root)
     }
 
@@ -1226,6 +1337,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuExport() { requestExport() }
     @objc private func menuCleanTracking() { cleanSelectedEntriesForTracking() }
     @objc private func menuCleanForSharing() { cleanSelectedEntriesForSharing() }
+    @objc private func menuNormalizeLineEndingsWindows() { normalizeSelectedLineEndings(.windows) }
+    @objc private func menuNormalizeLineEndingsUnix() { normalizeSelectedLineEndings(.unix) }
+    @objc private func menuNormalizeLineEndingsOldMac() { normalizeSelectedLineEndings(.oldMac) }
     @objc private func menuGoToFile() { goToSelectedFileEvent() }
     @objc private func menuEditSelected() { editSelectedEntry() }
     @objc private func menuViewSelected() { viewSelectedItem() }
@@ -1249,6 +1363,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuFindNext() { selectSearchResult(direction: 1) }
     @objc private func menuFindPrevious() { selectSearchResult(direction: -1) }
     @objc private func menuPreferences() { historyDelegate?.historyWindowDidRequestPreferences(self) }
+    @objc private func menuSecrets() { historyDelegate?.historyWindowDidRequestSecrets(self) }
     @objc private func menuManual() { historyDelegate?.historyWindowDidRequestManual(self) }
     @objc private func menuCheckForUpdates() { historyDelegate?.historyWindowDidRequestUpdateCheck(self) }
     @objc private func menuProjectPage() { historyDelegate?.historyWindowDidRequestProjectPage(self) }
@@ -1475,7 +1590,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let closeButton = alert.addButton(withTitle: "Close")
         closeButton.keyEquivalent = "\u{1b}"
         closeButton.keyEquivalentModifierMask = []
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 560, height: 280))
+        let textView = BoundaryAwareTextView(frame: NSRect(x: 0, y: 0, width: 560, height: 280))
         textView.string = text
         textView.isEditable = false
         textView.isSelectable = true
@@ -1849,6 +1964,19 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return
         }
         historyDelegate?.historyWindow(self, didCleanLinksForSharing: entries)
+    }
+
+    private func normalizeSelectedLineEndings(_ style: LineEndingStyle) {
+        guard mode != .files else {
+            NSSound.beep()
+            return
+        }
+        let entries = selectedEntries()
+        guard !entries.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        historyDelegate?.historyWindow(self, didNormalizeLineEndings: entries, style: style)
     }
 
     private func goToSelectedFileEvent() {

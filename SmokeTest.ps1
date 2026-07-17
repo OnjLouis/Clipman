@@ -3,9 +3,13 @@ param(
     [switch]$SkipBuild,
     [switch]$RunPostPublishUpdateSmoke,
     [switch]$RequireMacReleaseAsset,
+    [switch]$SkipMacReleaseAsset,
+    [switch]$SkipInstalledMacAppCheck,
     [string]$Version = '',
     [int[]]$ReviewedOpenIssue = @(),
-    [switch]$SkipGitHubActivityCheck
+    [switch]$SkipGitHubActivityCheck,
+    [switch]$ServerOnly,
+    [switch]$ClientOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +23,10 @@ $programBuilds = if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_PROGRAM_BUILDS)) 
 
 function Fail([string]$message) {
     throw "Clipman smoke test failed: $message"
+}
+
+if ($ServerOnly -and $ClientOnly) {
+    Fail 'Use either -ServerOnly or -ClientOnly, not both.'
 }
 
 function Is-SmokePath([string]$path) {
@@ -95,6 +103,7 @@ function Assert-CleanPortable([string]$path) {
     Assert-Exists (Join-Path $path 'sounds') 'Portable sounds folder'
     Assert-Exists (Join-Path $path 'sqlite3.dll') 'Portable SQLite runtime'
 
+    Assert-NotExists (Join-Path $path 'ClipmanServer.exe') 'Server executable in normal Clipman client portable output'
     Assert-NotExists (Join-Path $path 'README.md') 'Source README in portable output'
     Assert-NotExists (Join-Path $path 'clipman-history.clipdb') 'Root compressed history database in portable output'
     Assert-NotExists (Join-Path $path 'clipman-history.json') 'Root history database in portable output'
@@ -104,6 +113,7 @@ function Assert-CleanPortable([string]$path) {
     Assert-NotExists (Join-Path $path 'Reports') 'Runtime Reports folder in clean portable output'
     Assert-NotExists (Join-Path $path 'Backups') 'Runtime Backups folder in clean portable output'
     Assert-NotExists (Join-Path $path 'sounds\sounds') 'Nested duplicate sounds folder'
+    Assert-NotExists (Join-Path $path 'ClipmanServerLinux') 'Linux server folder in Windows portable output'
 
     $expectedSounds = @('copy.wav', 'exclude.wav', 'off.wav', 'on.wav', 'remote.wav', 'skip.wav')
     foreach ($sound in $expectedSounds) {
@@ -135,6 +145,8 @@ function Assert-LiveCopyReasonable([string]$path) {
     Assert-Exists (Join-Path $path 'sounds') 'Live sounds folder'
     Assert-Exists (Join-Path $path 'sqlite3.dll') 'Live SQLite runtime'
     Assert-Exists (Join-Path $path 'Settings') 'Live Settings folder'
+    Assert-NotExists (Join-Path $path 'ClipmanServer.exe') 'Server executable in normal Clipman client live copy'
+    Assert-NotExists (Join-Path $path 'ClipmanServerLinux') 'Linux server folder in Windows live copy'
 
     Assert-NotExists (Join-Path $path 'README.md') 'Source README in live copy'
     Assert-NotExists (Join-Path $path 'clipman-history.clipdb') 'Root compressed history database in live copy'
@@ -173,6 +185,8 @@ function Deploy-LiveCopy([string]$path) {
         }
     }
 
+    Remove-Item -LiteralPath (Join-Path $path 'ClipmanServer.exe') -Force -ErrorAction SilentlyContinue
+
     $soundSource = Join-Path $portable 'sounds'
     $soundTarget = Join-Path $path 'sounds'
     if (Test-Path -LiteralPath $soundSource) {
@@ -191,6 +205,239 @@ function Deploy-LiveCopy([string]$path) {
     }
 
     Write-Host "Deployed live copy to $path"
+}
+
+function Invoke-LiveServerDeploy {
+    $sshTarget = $env:CLIPMAN_LIVE_SERVER_SSH
+    $remoteDir = $env:CLIPMAN_LIVE_SERVER_DIR
+    $remoteConfig = $env:CLIPMAN_LIVE_SERVER_CONFIG
+    $serviceName = if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_LIVE_SERVER_SERVICE)) { 'clipman-server.service' } else { $env:CLIPMAN_LIVE_SERVER_SERVICE }
+
+    if ([string]::IsNullOrWhiteSpace($sshTarget) -or
+        [string]::IsNullOrWhiteSpace($remoteDir) -or
+        [string]::IsNullOrWhiteSpace($remoteConfig)) {
+        Write-Host 'No live Clipman Server deployment target configured, skipping server deployment.'
+        return
+    }
+
+    $normalizedRemoteDir = $remoteDir.TrimEnd('/')
+    $normalizedRemoteConfig = $remoteConfig.TrimEnd('/')
+    if ($normalizedRemoteConfig.StartsWith($normalizedRemoteDir + '/', [StringComparison]::Ordinal)) {
+        Fail "Live Clipman Server config must not live under the runtime program directory. Use a persistent config path such as ~/.config/clipman-server/clipman-server-settings.json, not $remoteConfig."
+    }
+
+    $serverScript = Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py'
+    $serverManual = Join-Path $repoRoot 'ClipmanServer\Manual.html'
+    Assert-Exists $serverScript 'Live server deployment script'
+    Assert-Exists $serverManual 'Live server deployment manual'
+
+    & ssh $sshTarget "mkdir -p '$remoteDir'"
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Could not create live Clipman Server directory $remoteDir on $sshTarget."
+    }
+
+    & scp $serverScript "${sshTarget}:${remoteDir}/clipman_server.py.new"
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Could not copy Clipman Server to live server target $sshTarget."
+    }
+    & scp $serverManual "${sshTarget}:${remoteDir}/Manual.html.new"
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Could not copy Clipman Server manual to live server target $sshTarget."
+    }
+
+$remote = @"
+set -e
+cd "$remoteDir"
+mv clipman_server.py.new clipman_server.py
+mv Manual.html.new Manual.html
+chmod 700 clipman_server.py
+chmod 600 Manual.html
+rm -f README.md
+mkdir -p "`$HOME/.local/bin"
+cat > "`$HOME/.local/bin/clipmanserver" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+SERVICE="$serviceName"
+PYTHON="/usr/bin/python3"
+SCRIPT="$remoteDir/clipman_server.py"
+CONFIG="$remoteConfig"
+
+usage() {
+  cat <<USAGE
+Usage: clipmanserver <command>
+
+Commands:
+  start       Start Clipman Server
+  stop        Stop Clipman Server
+  restart     Restart Clipman Server
+  status      Show service or process status
+  list        List database buckets
+  list-json   List database buckets with full IDs as JSON
+  delete      Move an inactive database bucket to DeletedDatabases
+  force-delete Move a database bucket even if recently active
+  console     Run Clipman Server in the current terminal
+  token       Print the server token
+  connection  Write and print the connection details file path
+  help        Show this help
+USAGE
+}
+
+has_system_service() {
+  command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files "`$SERVICE" --no-legend 2>/dev/null | grep -q "`$SERVICE"
+}
+
+case "`${1:-help}" in
+  start)
+    if has_system_service; then
+      sudo systemctl start "`$SERVICE"
+    else
+      nohup "`$PYTHON" "`$SCRIPT" --config "`$CONFIG" >/dev/null 2>&1 &
+      echo "Clipman Server started."
+    fi
+    ;;
+  stop)
+    if has_system_service; then
+      sudo systemctl stop "`$SERVICE"
+    else
+      pkill -f "clipman_server.py --config `$CONFIG" 2>/dev/null || true
+    fi
+    ;;
+  restart)
+    "`$0" stop
+    "`$0" start
+    ;;
+  status)
+    if has_system_service; then
+      systemctl status "`$SERVICE" --no-pager
+    else
+      pgrep -af "clipman_server.py --config `$CONFIG" || echo "Clipman Server is not running."
+    fi
+    ;;
+  list)
+    "`$PYTHON" "`$SCRIPT" --config "`$CONFIG" --list-databases
+    ;;
+  list-json)
+    "`$PYTHON" "`$SCRIPT" --config "`$CONFIG" --list-databases-json
+    ;;
+  delete)
+    if [ -z "`${2:-}" ]; then
+      echo "Usage: clipmanserver delete <database-id>" >&2
+      echo "Tip: run clipmanserver list first, then use --list-databases-json for full IDs." >&2
+      exit 2
+    fi
+    "`$PYTHON" "`$SCRIPT" --config "`$CONFIG" --delete-database "`$2" --confirm
+    ;;
+  force-delete)
+    if [ -z "`${2:-}" ]; then
+      echo "Usage: clipmanserver force-delete <database-id>" >&2
+      echo "This bypasses the 24-hour recent-activity safety guard." >&2
+      exit 2
+    fi
+    "`$PYTHON" "`$SCRIPT" --config "`$CONFIG" --delete-database "`$2" --confirm --force-recent
+    ;;
+  console)
+    exec "`$PYTHON" "`$SCRIPT" --config "`$CONFIG"
+    ;;
+  token)
+    "`$PYTHON" "`$SCRIPT" --config "`$CONFIG" --show-token
+    ;;
+  connection)
+    "`$PYTHON" "`$SCRIPT" --config "`$CONFIG" --write-connection-info
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
+EOF
+chmod 700 "`$HOME/.local/bin/clipmanserver"
+if command -v systemctl >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+  sudo tee /etc/systemd/system/$serviceName >/dev/null <<EOF
+[Unit]
+Description=Clipman Server
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=`$USER
+WorkingDirectory=$remoteDir
+ExecStart=/usr/bin/python3 $remoteDir/clipman_server.py --config $remoteConfig
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl enable "$serviceName"
+  sudo systemctl restart "$serviceName"
+  sleep 2
+  systemctl is-enabled "$serviceName"
+  systemctl is-active "$serviceName"
+else
+  nohup python3 ./clipman_server.py --config "$remoteConfig" >/dev/null 2>&1 &
+  sleep 2
+fi
+python3 -c "import json, urllib.request, sys; cfg=json.load(open(sys.argv[1], encoding='utf-8')); url='http://%s:%s/api/v1/health' % (cfg.get('Host', '127.0.0.1'), cfg.get('Port')); data=json.loads(urllib.request.urlopen(url, timeout=5).read().decode('utf-8')); ok=data.get('Status') == 'ok'; runtime=data.get('Runtime') or {}; print('Clipman Server health check: ' + ('ok' if ok else 'failed')); print('Requests: %s; Unique clients: %s; TLS enabled: %s' % (runtime.get('Requests', 0), runtime.get('UniqueClients', 0), data.get('TlsEnabled', False))); raise SystemExit(0 if ok else 1)" "$remoteConfig"
+"@
+
+    $remoteScript = Join-Path $env:TEMP ("clipman-server-deploy-" + [Guid]::NewGuid().ToString("N") + ".sh")
+    try {
+        [IO.File]::WriteAllText($remoteScript, ($remote -replace "`r`n", "`n" -replace "`r", ""), [Text.Encoding]::ASCII)
+        & scp $remoteScript "${sshTarget}:/tmp/clipman-server-deploy.sh"
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Could not copy live Clipman Server deploy script to $sshTarget."
+        }
+
+        & ssh $sshTarget 'bash /tmp/clipman-server-deploy.sh; status=$?; rm -f /tmp/clipman-server-deploy.sh; exit $status'
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Live Clipman Server deployment or health check failed on $sshTarget."
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $remoteScript -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "Deployed live Clipman Server to ${sshTarget}:${remoteDir}"
+}
+
+function Invoke-RemoteInteractiveStartSmoke {
+    $computerName = $env:CLIPMAN_REMOTE_START_HOST
+    if ([string]::IsNullOrWhiteSpace($computerName)) {
+        Write-Host 'Remote interactive start smoke skipped because CLIPMAN_REMOTE_START_HOST was not set.'
+        return
+    }
+
+    $scriptPath = $env:CLIPMAN_REMOTE_START_SCRIPT
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        $scriptPath = Join-Path $repoRoot 'tools\Start-ClipmanInteractive.ps1'
+    }
+
+    Assert-Exists $scriptPath 'Remote interactive Clipman launcher script'
+
+    $arguments = @(
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $scriptPath,
+        '-ComputerName', $computerName
+    )
+
+    if (![string]::IsNullOrWhiteSpace($env:CLIPMAN_REMOTE_START_EXE)) {
+        $arguments += @('-ExecutablePath', $env:CLIPMAN_REMOTE_START_EXE)
+    }
+    if (![string]::IsNullOrWhiteSpace($env:CLIPMAN_REMOTE_START_USER)) {
+        $arguments += @('-UserId', $env:CLIPMAN_REMOTE_START_USER)
+    }
+
+    Write-Host "Checking remote interactive Clipman start on $computerName."
+    & powershell @arguments
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Remote interactive Clipman start failed on $computerName."
+    }
 }
 
 function Read-AppVersion {
@@ -214,6 +461,17 @@ function Read-AppFileVersion {
         Fail 'Could not read Clipman file version from portable executable.'
     }
     return $version.Trim()
+}
+
+function Read-WindowsBuildStamp {
+    $buildInfo = Join-Path $repoRoot 'src\BuildInfo.cs'
+    Assert-Exists $buildInfo 'Windows build stamp source'
+    $text = Get-Content -LiteralPath $buildInfo -Raw -Encoding UTF8
+    $match = [regex]::Match($text, 'BuildStampUtcMs\s*=\s*(?<stamp>\d+)L')
+    if (!$match.Success) {
+        Fail 'Could not read Windows BuildStampUtcMs from src\BuildInfo.cs.'
+    }
+    return $match.Groups['stamp'].Value
 }
 
 function Get-ZipEntry($zip, [string]$entryName) {
@@ -255,6 +513,14 @@ function Assert-ZipTextMatches($zip, [string]$entryName, [string]$pattern, [stri
     }
 }
 
+function Assert-ZipEntryTextEquals($zip, [string]$leftEntryName, [string]$rightEntryName, [string]$description) {
+    $leftText = Read-ZipEntryText $zip $leftEntryName $description
+    $rightText = Read-ZipEntryText $zip $rightEntryName $description
+    if ($leftText -ne $rightText) {
+        Fail "$description differs between '$leftEntryName' and '$rightEntryName'."
+    }
+}
+
 function Get-LatestInputFile([string[]]$paths) {
     $files = @()
     foreach ($path in $paths) {
@@ -275,12 +541,14 @@ function Get-LatestInputFile([string[]]$paths) {
 }
 
 function Assert-MacReleaseAsset([string]$expectedVersion) {
-    if (!$RequireMacReleaseAsset) {
+    if ($SkipMacReleaseAsset) {
+        Write-Host 'Mac release asset parity check skipped explicitly.'
         return
     }
 
     Write-Host 'Checking Mac release asset parity.'
     $expectedBundleVersion = Read-AppFileVersion
+    $expectedBuildStamp = Read-WindowsBuildStamp
     $macZip = Join-Path $repoRoot "ClipmanMac\dist\ClipmanMac-$expectedVersion.zip"
     Assert-Exists $macZip 'Versioned Mac release ZIP'
 
@@ -311,6 +579,7 @@ function Assert-MacReleaseAsset([string]$expectedVersion) {
 
         Assert-ZipTextMatches $zip 'Clipman.app/Contents/Info.plist' "<key>CFBundleShortVersionString</key>\s*<string>$([regex]::Escape($expectedVersion))</string>" 'Mac short version'
         Assert-ZipTextMatches $zip 'Clipman.app/Contents/Info.plist' "<key>CFBundleVersion</key>\s*<string>$([regex]::Escape($expectedBundleVersion))</string>" 'Mac bundle version'
+        Assert-ZipTextMatches $zip 'Clipman.app/Contents/Info.plist' "<key>ClipmanBuildStampUtcMs</key>\s*<string>$([regex]::Escape($expectedBuildStamp))</string>" 'Mac build stamp parity'
 
         $rootManual = Get-Content -LiteralPath (Join-Path $repoRoot 'Manual.html') -Raw -Encoding UTF8
         $zipManual = Read-ZipEntryText $zip 'Clipman.app/Contents/Resources/Manual.html' 'Bundled Mac manual'
@@ -326,6 +595,69 @@ function Assert-MacReleaseAsset([string]$expectedVersion) {
     }
     finally {
         $zip.Dispose()
+    }
+}
+
+function Invoke-SshCapture([string]$target, [string]$command) {
+    $output = & ssh $target $command 2>&1
+    return [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output = ($output -join "`n")
+    }
+}
+
+function Assert-InstalledMacApp([string]$expectedVersion) {
+    if ($SkipInstalledMacAppCheck) {
+        Write-Host 'Installed Mac app parity check skipped explicitly.'
+        return
+    }
+
+    $target = if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_MAC_SSH)) { 'mac' } else { $env:CLIPMAN_MAC_SSH }
+    $probe = Invoke-SshCapture $target 'test -d /Applications/Clipman.app'
+    if ($probe.ExitCode -ne 0) {
+        if ($RequireMacReleaseAsset) {
+            Fail "Installed Mac app parity check required but /Applications/Clipman.app was not found on $target."
+        }
+        Write-Host "Installed Mac app not found on $target, skipping installed-app parity check."
+        return
+    }
+
+    Write-Host "Checking installed Mac app parity on $target."
+    $expectedBundleVersion = Read-AppFileVersion
+    $expectedBuildStamp = Read-WindowsBuildStamp
+    $script = @"
+set -e
+APP="/Applications/Clipman.app"
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "`$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "`$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Print :ClipmanBuildStampUtcMs' "`$APP/Contents/Info.plist"
+pgrep -fl '/Applications/Clipman.app/Contents/MacOS/Clipman' | head -n 1 || true
+"@
+    $result = Invoke-SshCapture $target $script
+    if ($result.ExitCode -ne 0) {
+        Fail "Could not inspect installed Mac app on $target. $($result.Output)"
+    }
+
+    $lines = @($result.Output -split "`n" | Where-Object { $_ -ne $null })
+    if ($lines.Count -lt 4) {
+        Fail "Installed Mac app inspection did not return version, build, stamp, and process lines. Output: $($result.Output)"
+    }
+
+    $actualVersion = $lines[0].Trim()
+    $actualBundleVersion = $lines[1].Trim()
+    $actualBuildStamp = $lines[2].Trim()
+    $processLine = $lines[3].Trim()
+    if ($actualVersion -ne $expectedVersion) {
+        Fail "Installed Mac app version is stale. Expected $expectedVersion, got $actualVersion."
+    }
+    if ($actualBundleVersion -ne $expectedBundleVersion) {
+        Fail "Installed Mac app bundle version is stale. Expected $expectedBundleVersion, got $actualBundleVersion."
+    }
+    if ($actualBuildStamp -ne $expectedBuildStamp) {
+        Fail "Installed Mac app build stamp is stale. Expected $expectedBuildStamp, got $actualBuildStamp."
+    }
+    if ($processLine -notmatch '/Applications/Clipman\.app/Contents/MacOS/Clipman') {
+        Fail "Installed Mac app is not the running Clipman process. Output: $($result.Output)"
     }
 }
 
@@ -637,21 +969,438 @@ function Assert-TextMatches([string]$path, [string]$pattern, [string]$descriptio
     }
 }
 
+function Invoke-LinuxServerSmoke {
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $python) {
+        Fail 'Python is required for the Linux Clipman Server smoke test.'
+    }
+
+    $root = Join-Path $env:TEMP ('clipman-linux-server-smoke-' + [Guid]::NewGuid().ToString('N'))
+    $config = Join-Path $root 'Settings\clipman-server-settings.json'
+    $dataRoot = Join-Path $root 'Data'
+    $databasePath = Join-Path $dataRoot 'clipman-history.clipdb'
+    $logPath = Join-Path $root 'Logs\clipman-server.log'
+    $stdout = Join-Path $root 'stdout.txt'
+    $stderr = Join-Path $root 'stderr.txt'
+    $port = 49152 + (Get-Random -Minimum 0 -Maximum 12000)
+    $token = 'smoke-token-' + [Guid]::NewGuid().ToString('N')
+    $script = Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $config), $dataRoot, (Split-Path -Parent $logPath) -Force | Out-Null
+
+    $firstRunConfig = Join-Path $root 'FirstRun\Settings\clipman-server-settings.json'
+    $firstRunConnection = Join-Path (Split-Path -Parent $firstRunConfig) 'clipman-server-connection.txt'
+    & $python.Source $script --config $firstRunConfig --host 127.0.0.1 --write-connection-info | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'Linux Clipman Server could not write first-run connection details.'
+    }
+    Assert-Exists $firstRunConnection 'Linux Clipman Server first-run connection details file'
+    $connectionText = Get-Content -LiteralPath $firstRunConnection -Raw
+    if ($connectionText -notmatch 'Server address:\s+clipman://127\.0\.0\.1:\d+' -or
+        $connectionText -notmatch 'Port:\s+\d+' -or
+        $connectionText -notmatch 'Token:\s+\S+') {
+        Fail 'Linux Clipman Server connection details file did not contain server address, port, and token.'
+    }
+    Remove-Item -LiteralPath $firstRunConnection -Force
+    & $python.Source $script --config $firstRunConfig --show-token | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'Linux Clipman Server could not read token after connection details deletion.'
+    }
+    Assert-NotExists $firstRunConnection 'Linux Clipman Server connection details file should stay deleted unless explicitly recreated'
+    & $python.Source $script --config $firstRunConfig --write-connection-info | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'Linux Clipman Server could not intentionally recreate connection details.'
+    }
+    Assert-Exists $firstRunConnection 'Linux Clipman Server explicitly recreated connection details file'
+
+    @{
+        Host = '127.0.0.1'
+        Port = $port
+        DatabasePath = $databasePath
+        AuthToken = $token
+        LogPath = $logPath
+        BackupIntervalMinutes = 0
+        BackupRetentionHours = 24
+        MaxBackups = 48
+        CreateBackupBeforeEveryUpload = $false
+    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $config -Encoding UTF8
+
+    $proc = $null
+    try {
+        $proc = Start-Process -FilePath $python.Source -ArgumentList @($script, '--config', $config) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        $base = "http://127.0.0.1:$port"
+        $ready = $false
+        for ($i = 0; $i -lt 40; $i++) {
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri "$base/api/v1/health" -Method Get -TimeoutSec 2 | Out-Null
+                $ready = $true
+                break
+            }
+            catch {
+                Start-Sleep -Milliseconds 250
+            }
+        }
+        if (!$ready) {
+            $exitText = if ($proc.HasExited) { "Exited with code $($proc.ExitCode)." } else { 'Still running.' }
+            $stdoutText = if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout -Raw } else { '' }
+            $stderrText = if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr -Raw } else { '' }
+            $logText = if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }
+            Fail "Linux Clipman Server smoke did not become ready. $exitText Stdout: $stdoutText Stderr: $stderrText Log: $logText"
+        }
+
+        $headers = @{ Authorization = "Bearer $token" }
+        $id1 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        $id2 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/api/v1/database/$id1" -Method Put -Headers $headers -Body ([Text.Encoding]::UTF8.GetBytes('database-one')) -ContentType 'application/octet-stream' | Out-Null
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/api/v1/database/$id2" -Method Put -Headers $headers -Body ([Text.Encoding]::UTF8.GetBytes('database-two')) -ContentType 'application/octet-stream' | Out-Null
+
+        $db1 = Join-Path $dataRoot "Databases\$id1\clipman-history.clipdb"
+        $db2 = Join-Path $dataRoot "Databases\$id2\clipman-history.clipdb"
+        Assert-Exists $db1 'Linux Clipman Server first database bucket'
+        Assert-Exists $db2 'Linux Clipman Server second database bucket'
+        if ((Get-Content -LiteralPath $db1 -Raw) -ne 'database-one') { Fail 'Linux Clipman Server first bucket stored wrong data.' }
+        if ((Get-Content -LiteralPath $db2 -Raw) -ne 'database-two') { Fail 'Linux Clipman Server second bucket stored wrong data.' }
+
+        $head1 = Invoke-WebRequest -UseBasicParsing -Uri "$base/api/v1/database/$id1" -Method Head -Headers $headers
+        $head2 = Invoke-WebRequest -UseBasicParsing -Uri "$base/api/v1/database/$id2" -Method Head -Headers $headers
+        if ([string]::IsNullOrWhiteSpace($head1.Headers['X-Clipman-Revision']) -or [string]::IsNullOrWhiteSpace($head2.Headers['X-Clipman-Revision'])) {
+            Fail 'Linux Clipman Server did not return database revisions.'
+        }
+
+        Assert-Exists $logPath 'Linux Clipman Server configured log file'
+        $logText = Get-Content -LiteralPath $logPath -Raw
+        if ($logText.Contains($id1) -or $logText.Contains($id2)) {
+            Fail 'Linux Clipman Server log exposed database IDs.'
+        }
+        if ($logText -notmatch '<database-id>') {
+            Fail 'Linux Clipman Server log did not redact database API paths.'
+        }
+
+        $listJson = & $python.Source $script --config $config --list-databases-json
+        if ($LASTEXITCODE -ne 0) {
+            Fail 'Linux Clipman Server list-databases-json command failed.'
+        }
+        $databaseList = ($listJson -join "`n") | ConvertFrom-Json
+        $databaseIds = @($databaseList.Databases | ForEach-Object { $_.DatabaseId })
+        if (!($databaseIds -contains $id1) -or !($databaseIds -contains $id2)) {
+            Fail 'Linux Clipman Server database list did not include both smoke database buckets.'
+        }
+        $firstInfo = @($databaseList.Databases | Where-Object { $_.DatabaseId -eq $id1 })[0]
+        if ($firstInfo.LastSeenUnixMs -le 0 -or $firstInfo.LastWrittenUnixMs -le 0) {
+            Fail 'Linux Clipman Server database metadata did not record last seen and last written timestamps.'
+        }
+
+        $oldErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $blockedDelete = & $python.Source $script --config $config --delete-database $id2 --confirm 2>&1
+            $blockedDeleteExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+        }
+        if ($blockedDeleteExitCode -eq 0) {
+            Fail 'Linux Clipman Server delete-database moved a recently active bucket without --force-recent.'
+        }
+        if (($blockedDelete -join "`n") -notmatch 'recently active database bucket') {
+            Fail 'Linux Clipman Server delete-database did not explain the 24-hour recent-activity guard.'
+        }
+        Assert-Exists $db2 'Linux Clipman Server recent database bucket should remain after guarded delete'
+
+        & $python.Source $script --config $config --delete-database $id2 --confirm --force-recent | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Fail 'Linux Clipman Server force-recent delete-database command failed.'
+        }
+        Assert-NotExists $db2 'Linux Clipman Server deleted database bucket should move out of active Databases'
+        $deletedMatches = @(Get-ChildItem -LiteralPath (Join-Path $dataRoot 'DeletedDatabases') -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$id2*" })
+        if ($deletedMatches.Count -ne 1) {
+            Fail 'Linux Clipman Server did not move deleted database bucket to DeletedDatabases.'
+        }
+    }
+    finally {
+        if ($proc -ne $null -and !$proc.HasExited) {
+            try { $proc.Kill() } catch { }
+            try { $proc.WaitForExit(5000) | Out-Null } catch { }
+        }
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Assert-ServerSmokeSurface {
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'ClipmanServer-\$version\.zip' 'Separate Clipman Server bundle builder names server ZIP by app version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'clipman_server\.py' 'Separate Clipman Server bundle includes Python reference server'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'Linux/install-clipman-server\.sh' 'Separate Clipman Server bundle includes Linux installer'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'clipman-server-settings\.example\.jsonc' 'Separate Clipman Server bundle includes commented settings example'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'Build-WindowsServerWrapper' 'Separate Clipman Server bundle builds the Windows notification-area wrapper'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'AssemblyInformationalVersion' 'Windows server wrapper build stamps version metadata'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'AssemblyProduct\("Clipman Server"\)' 'Windows server wrapper build stamps product metadata'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'Windows/Clipman Server\.exe' 'Separate Clipman Server bundle includes the Windows wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') '/resource:\$serverScript,ClipmanServerWrapper\.clipman_server\.py' 'Windows server wrapper embeds the shared Python server script'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'macOS/Clipman Server\.app' 'Separate Clipman Server bundle includes the macOS wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'package-combined-server\.sh' 'Windows server bundle build delegates final ZIP creation to macOS so app bundles remain launchable'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'Build-ServerBundle.ps1') "Join-Path \`$staging 'README\.md'" 'Separate Clipman Server bundle must not ship both README and Manual'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'README\.md' 'Linux server installer must not copy README into installed runtime'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'LOCALAPPDATA' 'Server uses native Windows data and log defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'Library.+Application Support.+Clipman Server' 'Server uses native macOS data defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'AdvertiseHost' 'Server can advertise a TLS DNS host separately from the bind host'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '%LOCALAPPDATA%\\Clipman Server' 'Server manual documents Windows data and log defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Library/Application Support/Clipman Server' 'Server manual documents macOS data defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--advertise-host' 'Server manual documents advertised host for direct TLS'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Windows\\Clipman Server\.exe' 'Server manual documents the Windows wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Windows EXE contains the shared server script' 'Server manual explains that Windows users do not need a loose Python script beside the EXE'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Python 3 must still be installed' 'Server manual explains Windows Python runtime requirement'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'macOS/Clipman Server\.app' 'Server manual documents the macOS wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Run at System Start' 'Server manual documents startup behavior'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '<h2 id="updates">Updates</h2>' 'Server manual documents server update behavior'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '<h2 id="settings-example">Commented Settings Example</h2>' 'Server manual documents the commented settings example'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'clipman-server-settings\.example\.jsonc' 'Server manual names the commented settings example'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\clipman-server-settings.example.jsonc') '"Host"' 'Server example config documents Host'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\clipman-server-settings.example.jsonc') '"AdvertiseHost"' 'Server example config documents AdvertiseHost'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\clipman-server-settings.example.jsonc') '"AuthToken"' 'Server example config documents AuthToken'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\clipman-server-settings.example.jsonc') '"CertFile"' 'Server example config documents TLS certificate'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\clipman-server-settings.example.jsonc') '"BackupIntervalMinutes"' 'Server example config documents backup interval'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--install-update --silent' 'Server manual documents silent server update switch'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'Clipman Server has its own update path' 'README documents separate server update path'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'CreateNoWindow = true' 'Windows server wrapper starts Python without a console window'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'NotifyIcon' 'Windows server wrapper runs from the notification area'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'Check for updates' 'Windows server wrapper exposes update checks from the tray menu'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') '--install-update' 'Windows server wrapper exposes CLI update install switch'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'ClipmanServer-' 'Windows server wrapper searches for the separate server release ZIP'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') '--write-connection-info' 'Windows server wrapper must not start Python with an exit-after-writing command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') 'setActivationPolicy\(\.accessory\)' 'Mac server wrapper does not appear as a normal foreground app'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') 'Check for Updates' 'Mac server wrapper exposes update checks from the menu bar'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') '--install-update' 'Mac server wrapper exposes CLI update install switch'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') 'ClipmanServer-' 'Mac server wrapper searches for the separate server release ZIP'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') '--write-connection-info' 'Mac server wrapper must not start Python with an exit-after-writing command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-release.sh') '<key>LSUIElement</key>' 'Mac server wrapper is packaged as a menu-bar app'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'Windows\\Run-ClipmanServer\.cmd' 'Separate Clipman Server bundle must not ship a second normal Windows entry point'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'Linux/run-clipman-server\.sh' 'Separate Clipman Server bundle includes Linux launcher'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'macOS/run-clipman-server\.command' 'Separate Clipman Server bundle must not rely on a macOS terminal launcher'
+    Assert-TextMatches (Join-Path $repoRoot 'SmokeTest.ps1') 'Manual\.html\.new' 'Live server deployment includes the HTML manual'
+    Assert-TextMatches (Join-Path $repoRoot 'SmokeTest.ps1') 'rm -f README\.md' 'Live server deployment removes stale server README from shipping folder'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '<title>Clipman Server Manual</title>' 'Separate server manual exists as HTML'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'same server program is used across platforms' 'Separate server manual documents cross-platform server parity'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'reference implementation|experimental native server|repository may contain' 'Separate server manual must not expose development wording'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'clipman-server-connection\.txt' 'Separate server manual documents connection details file'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'sh Linux/install-clipman-server\.sh' 'Separate server manual documents Linux installer'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Do not manually copy an existing <code>\.clipdb</code>' 'Separate server manual documents safe existing-history bootstrap'
+    Assert-NotExists (Join-Path $repoRoot 'ClipmanServer\README.md') 'Duplicate Windows server README in source tree'
+    Assert-NotExists (Join-Path $repoRoot 'ClipmanServerLinux\README.md') 'Duplicate Linux server README in source tree'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') '\.local/lib/clipman-server' 'Linux server installer uses user-local application directory'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') '\.local/bin' 'Linux server installer creates user-local launcher'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'database_id_from_path' 'Linux Clipman Server validates database-scoped paths'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'write_connection_info' 'Linux Clipman Server writes plain text connection details on first run'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'clipman-server-connection\.txt' 'Linux Clipman Server names connection details file'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'Databases' 'Linux Clipman Server stores password-scoped database buckets'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'st_mtime_ns' 'Linux Clipman Server revision uses cheap file metadata for polling'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'HEAD /api/v1/database/' 'Linux Clipman Server suppresses routine poll logging'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'os\.chmod\(path, 0o700\)' 'Linux Clipman Server creates private data directories where supported'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'os\.chmod\(path, 0o600\)' 'Linux Clipman Server creates private settings/database files where supported'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'ssl\.SSLContext\(ssl\.PROTOCOL_TLS_SERVER\)' 'Linux Clipman Server supports direct TLS'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'AllowInsecureRemote' 'Linux Clipman Server requires an explicit insecure remote override'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'RotatingFileHandler' 'Linux Clipman Server writes managed log files'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'DATABASE_LOG_PATTERN' 'Linux Clipman Server redacts database IDs from logs'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'except KeyboardInterrupt' 'Linux Clipman Server exits cleanly on Ctrl+C'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'server\.server_close\(\)' 'Linux Clipman Server closes socket on shutdown'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'METADATA_TOUCH_INTERVAL_MS' 'Linux Clipman Server throttles database metadata writes'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--list-databases' 'Linux Clipman Server can list database buckets'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--list-databases-json' 'Linux Clipman Server can list database buckets as JSON'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--delete-database' 'Linux Clipman Server can move a selected database bucket aside'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--prune-databases-days' 'Linux Clipman Server has dry-run stale database pruning'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--force-recent' 'Linux Clipman Server requires deliberate override for recently active bucket deletion'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'DeletedDatabases' 'Linux Clipman Server moves removed buckets to DeletedDatabases'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'clipmanserver' 'Linux server installer creates friendly helper command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'clipmanserver start' 'Linux server installer documents helper start command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'list-json' 'Linux server helper exposes JSON database list command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'force-delete' 'Linux server helper exposes deliberate force-delete command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Linux Helper Commands' 'Server manual documents Linux helper commands'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'clipmanserver list' 'Server manual documents database list helper command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'clipmanserver delete' 'Server manual documents database delete helper command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--list-databases-json' 'Server manual documents JSON database listing'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--prune-databases-days' 'Server manual documents stale database pruning'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '24 hours' 'Server manual documents recent database deletion safety guard'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'DeletedDatabases' 'Server manual documents safe deleted bucket holding area'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'clipmanserver list' 'README documents Linux database list helper'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'force-delete' 'README documents Linux helper force-delete safeguard'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'DeletedDatabases' 'README documents safe server bucket cleanup'
+    Assert-NotExists (Join-Path $repoRoot 'ClipmanServerLinux\__pycache__') 'Python bytecode cache in server source tree'
+    Invoke-LinuxServerSmoke
+}
+
+function Assert-ServerBundleZipParity([string]$expectedVersion) {
+    $serverZip = Join-Path $repoRoot "release\Server\ClipmanServer-$expectedVersion.zip"
+    Assert-Exists $serverZip 'Built Clipman Server release ZIP'
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($serverZip)
+    try {
+        $root = 'ClipmanServer'
+        Assert-ZipEntry $zip "$root/clipman_server.py" 'Top-level server script' | Out-Null
+        Assert-ZipEntry $zip "$root/Manual.html" 'Top-level server manual' | Out-Null
+        Assert-ZipEntry $zip "$root/clipman-server-settings.example.jsonc" 'Commented server settings example' | Out-Null
+        Assert-ZipEntry $zip "$root/macOS/Clipman Server.app/Contents/Resources/clipman_server.py" 'Bundled macOS server script' | Out-Null
+        Assert-ZipEntry $zip "$root/macOS/Clipman Server.app/Contents/Resources/Manual.html" 'Bundled macOS server manual' | Out-Null
+        Assert-ZipEntry $zip "$root/macOS/Clipman Server.app/Contents/Resources/LICENSE.txt" 'Bundled macOS server license' | Out-Null
+        Assert-ZipEntryTextEquals $zip "$root/clipman_server.py" "$root/macOS/Clipman Server.app/Contents/Resources/clipman_server.py" 'macOS server app embedded Python script'
+        Assert-ZipEntryTextEquals $zip "$root/Manual.html" "$root/macOS/Clipman Server.app/Contents/Resources/Manual.html" 'macOS server app embedded manual'
+        Assert-ZipTextMatches $zip "$root/clipman-server-settings.example.jsonc" '"AuthToken"\s*:' 'Commented server settings example AuthToken entry'
+        Assert-ZipTextMatches $zip "$root/clipman-server-settings.example.jsonc" '"BackupIntervalMinutes"\s*:' 'Commented server settings example backup interval entry'
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
 function Assert-UniqueWindowsControlMnemonics([string]$path, [string]$description) {
     Assert-Exists $path $description
     $text = Get-Content -LiteralPath $path -Raw
     $matches = [regex]::Matches($text, 'Text\s*=\s*"((?:[^"\\]|\\.)*)"')
+    Assert-UniqueMnemonicLabels ($matches | ForEach-Object { $_.Groups[1].Value }) $description
+}
+
+function Assert-UniqueWindowsMenuMnemonics([string]$path, [string]$description, [string[]]$MenuNames = @()) {
+    Assert-Exists $path $description
+    $text = Get-Content -LiteralPath $path -Raw
+    $labelsByVariable = @{}
+
+    foreach ($match in [regex]::Matches($text, 'var\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*new\s+ToolStripMenuItem\("(?<label>(?:[^"\\]|\\.)*)"')) {
+        $labelsByVariable[$match.Groups['name'].Value] = $match.Groups['label'].Value
+    }
+
+    $menuItems = @{}
+    foreach ($match in [regex]::Matches($text, '(?<parent>[A-Za-z_][A-Za-z0-9_]*)\.DropDownItems\.Add\("(?<label>(?:[^"\\]|\\.)*)"')) {
+        $parent = $match.Groups['parent'].Value
+        if (!$menuItems.ContainsKey($parent)) {
+            $menuItems[$parent] = New-Object System.Collections.Generic.List[string]
+        }
+        $menuItems[$parent].Add($match.Groups['label'].Value)
+    }
+
+    foreach ($match in [regex]::Matches($text, '(?<parent>[A-Za-z_][A-Za-z0-9_]*)\.DropDownItems\.Add\((?<child>[A-Za-z_][A-Za-z0-9_]*)\)')) {
+        $parent = $match.Groups['parent'].Value
+        $child = $match.Groups['child'].Value
+        if (!$labelsByVariable.ContainsKey($child)) {
+            continue
+        }
+        if (!$menuItems.ContainsKey($parent)) {
+            $menuItems[$parent] = New-Object System.Collections.Generic.List[string]
+        }
+        $menuItems[$parent].Add($labelsByVariable[$child])
+    }
+
+    foreach ($parent in $menuItems.Keys) {
+        if ($MenuNames.Count -gt 0 -and !($MenuNames -contains $parent)) {
+            continue
+        }
+        $seen = @{}
+        foreach ($label in $menuItems[$parent]) {
+            $cleanLabel = ($label -split '\\t')[0]
+            $mnemonicMatches = [regex]::Matches($cleanLabel, '&(?!&)([A-Za-z0-9])')
+            foreach ($mnemonicMatch in $mnemonicMatches) {
+                $key = $mnemonicMatch.Groups[1].Value.ToUpperInvariant()
+                if ($seen.ContainsKey($key)) {
+                    Fail "$description menu '$parent' has duplicate Alt+$key mnemonic: '$($seen[$key])' and '$cleanLabel'"
+                }
+                $seen[$key] = $cleanLabel
+            }
+        }
+    }
+}
+
+function Assert-UniqueMnemonicLabels([object[]]$labels, [string]$description) {
     $seen = @{}
-    foreach ($match in $matches) {
-        $label = $match.Groups[1].Value
-        $mnemonicMatches = [regex]::Matches($label, '&(?!&)([A-Za-z0-9])')
+    foreach ($labelObject in $labels) {
+        $label = ConvertTo-StringLabel $labelObject
+        if ([string]::IsNullOrWhiteSpace($label) -or $label -eq '-') {
+            continue
+        }
+
+        $cleanLabel = ($label -split '\\t')[0]
+        $mnemonicMatches = [regex]::Matches($cleanLabel, '&(?!&)([A-Za-z0-9])')
         foreach ($mnemonicMatch in $mnemonicMatches) {
             $key = $mnemonicMatch.Groups[1].Value.ToUpperInvariant()
             if ($seen.ContainsKey($key)) {
-                Fail "$description has duplicate Alt+$key mnemonic: '$($seen[$key])' and '$label'"
+                Fail "$description has duplicate Alt+$key mnemonic: '$($seen[$key])' and '$cleanLabel'"
             }
-            $seen[$key] = $label
+            $seen[$key] = $cleanLabel
         }
+    }
+}
+
+function ConvertTo-StringLabel($value) {
+    if ($null -eq $value) {
+        return ''
+    }
+    return [regex]::Unescape([string]$value)
+}
+
+function Get-CSharpStringLabels([string]$text) {
+    $labels = New-Object System.Collections.Generic.List[string]
+    foreach ($match in [regex]::Matches($text, '"(?<label>(?:[^"\\]|\\.)*)"')) {
+        $label = $match.Groups['label'].Value
+        if ($label.Contains('&')) {
+            $labels.Add($label)
+        }
+    }
+    return $labels
+}
+
+function Get-SourceRange([string]$text, [string]$start, [string]$end) {
+    $startIndex = $text.IndexOf($start, [StringComparison]::Ordinal)
+    if ($startIndex -lt 0) {
+        Fail "Could not find source range start: $start"
+    }
+    $endIndex = $text.IndexOf($end, $startIndex, [StringComparison]::Ordinal)
+    if ($endIndex -lt 0) {
+        Fail "Could not find source range end after $start`: $end"
+    }
+    return $text.Substring($startIndex, $endIndex - $startIndex)
+}
+
+function Assert-HistoryMenuMnemonics([string]$path) {
+    Assert-Exists $path 'History form source'
+    $text = Get-Content -LiteralPath $path -Raw
+    Assert-UniqueWindowsMenuMnemonics $path 'History menu' @('file', 'actions', 'lineEndings', 'options', 'view', 'sortMenuItem', 'help')
+
+    $editMethodBlock = Get-SourceRange $text 'private void PopulateEditMenu(ToolStripMenuItem edit)' 'private static void SetMenuItemsEnabled'
+
+    $textEditStart = $editMethodBlock.IndexOf('edit.DropDownItems.Add("Copy and c&lose', [StringComparison]::Ordinal)
+    if ($textEditStart -lt 0) {
+        Fail 'Could not find text history Edit menu block'
+    }
+    $textEditBlock = $editMethodBlock.Substring($textEditStart)
+    Assert-UniqueMnemonicLabels (Get-CSharpStringLabels $textEditBlock) 'Text history Edit menu'
+
+    $fileEditBlock = Get-SourceRange $editMethodBlock 'if (IsFileClipboardTabActive())' 'return;'
+    $filePinLabels = @('Pin or unp&in\tShift+Enter', 'Unp&in selected\tShift+Enter', 'P&in selected\tShift+Enter', 'Toggle p&inned state\tShift+Enter')
+    foreach ($pinLabel in $filePinLabels) {
+        Assert-UniqueMnemonicLabels (@(Get-CSharpStringLabels $fileEditBlock) + @($pinLabel)) "File history Edit menu with '$pinLabel'"
+    }
+
+    $textContextBlock = Get-SourceRange $text 'private void PopulateContextMenu(ContextMenuStrip menu)' 'private void PopulateFileEventsContextMenu'
+    foreach ($pinLabel in $filePinLabels) {
+        Assert-UniqueMnemonicLabels (@(Get-CSharpStringLabels $textContextBlock) + @($pinLabel)) "Text history context menu with '$pinLabel'"
+    }
+
+    $fileContextBlock = Get-SourceRange $text 'private void PopulateFileEventsContextMenu(ContextMenuStrip menu)' 'private int SelectedPinnedEntryShortcutPosition'
+    foreach ($pinLabel in $filePinLabels) {
+        Assert-UniqueMnemonicLabels (@(Get-CSharpStringLabels $fileContextBlock) + @($pinLabel)) "File history context menu with '$pinLabel'"
+    }
+}
+
+function Assert-PreferencesTabMnemonics([string]$path) {
+    Assert-Exists $path 'Preferences source'
+    $text = Get-Content -LiteralPath $path -Raw
+    $ranges = @(
+        @('General preferences tab', 'active = NewCheckBox', 'general.Controls.Add(generalLayout);'),
+        @('File history preferences tab', 'autoRemoveUnavailableFileHistoryEvents = NewCheckBox', 'fileHistory.Controls.Add(fileHistoryLayout);'),
+        @('Hotkeys preferences tab', 'showHotkey = NewHotkeyBox', 'hotkeys.Controls.Add(hotkeyLayout);'),
+        @('Storage and Password preferences tab', 'databasePath = NewTextBox', 'storage.Controls.Add(storageLayout);'),
+        @('Startup and updates preferences tab', 'runAtStartup = NewCheckBox', 'integration.Controls.Add(integrationLayout);'),
+        @('Sensitive data preferences tab', 'sensitiveDataMode = NewComboBox', 'sensitiveData.Controls.Add(sensitiveLayout);')
+    )
+
+    foreach ($range in $ranges) {
+        $block = Get-SourceRange $text $range[1] $range[2]
+        Assert-UniqueMnemonicLabels (Get-CSharpStringLabels $block) $range[0]
     }
 }
 
@@ -782,12 +1531,14 @@ function Assert-HandoverParity([string]$releaseVersion) {
 function Assert-ManualAndReadmeClean {
     $manual = Join-Path $repoRoot 'Manual.html'
     $readme = Join-Path $repoRoot 'README.md'
+    $serverManual = Join-Path $repoRoot 'ClipmanServer\Manual.html'
 
     Assert-TextMatches $manual '<h2 id="contents">Contents</h2>' 'Manual table of contents'
     Assert-TextMatches $manual 'Project page: <a href="https://github.com/OnjLouis/Clipman">' 'Manual project page link'
     Assert-TextMatches $manual 'Add, remove, move, rename, group, pin, or edit text entries on one machine' 'Manual opening shared database explanation'
     Assert-TextMatches $manual 'Remove URL tracking' 'Manual URL tracking documentation'
     Assert-TextMatches $manual 'Clean link for sharing' 'Manual clean-link documentation'
+    Assert-TextMatches $manual 'line endings' 'Manual line-ending transform documentation'
     Assert-TextMatches $manual 'machine-specific database named like <code>Settings\\Desktop-file-history\.clipdb</code>' 'Manual persistent file-history documentation'
     Assert-TextMatches $manual 'Remove selected unpinned file-history events</td><td><code>Del</code></td><td><code>Command\+Backspace</code>' 'Manual file-history delete shortcut'
     Assert-TextMatches $manual 'remove unavailable events' 'Manual unavailable event cleanup documentation'
@@ -885,6 +1636,33 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'choose a Clipman data folder instead of an individual <code>\.clipdb</code> file' 'Manual 1.5.11 data-folder changelog'
     Assert-TextMatches $manual 'Clipman stores shared text history as <code>clipman-history\.clipdb</code> inside the chosen folder' 'Manual data-folder storage documentation'
     Assert-TextMatches $manual 'settings-location\.json' 'Manual data-folder pointer documentation'
+    Assert-TextMatches $manual 'pointer stores locations per computer name' 'Manual per-computer data-folder pointer documentation'
+    Assert-TextMatches $manual 'merges the known clients back into one pointer file' 'Manual pointer conflict merge documentation'
+    Assert-TextMatches $manual '<h2 id="secrets">Secrets</h2>' 'Manual Secrets section'
+    Assert-TextMatches $manual '&lt;computer-name&gt;-secrets\.clipdb' 'Manual per-machine Secrets database documentation'
+    Assert-TextMatches $manual 'Opening the Secrets manager asks for the current history password' 'Manual Secrets unlock documentation'
+    Assert-TextMatches $manual 'Insert</code> to add a secret' 'Manual Secrets command documentation'
+    Assert-TextMatches $manual 'Ctrl\+A</code> on Windows and <code>Command\+A</code> on Mac' 'Manual Secrets select-all documentation'
+    Assert-TextMatches $manual 'Ctrl\+Shift\+E' 'Manual Windows Secrets shortcut'
+    Assert-TextMatches $manual 'Command\+Shift\+E' 'Manual Mac Secrets shortcut'
+    Assert-TextMatches $manual 'Alt\+I' 'Manual Windows File history shortcut'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'key == Keys\.I[\s\S]{0,120}SelectFileClipboardTab\(\);' 'Windows Alt+I opens File history'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Text history\\tAlt\+T' 'Windows View menu advertises Text history shortcut'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Links history\\tAlt\+L' 'Windows View menu advertises Links history shortcut'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'File history\\tAlt\+I' 'Windows View menu advertises File history shortcut'
+    Assert-TextMatches $manual 'View menu on Windows includes Text history, Links history, and File history commands' 'Manual documents Windows View history commands'
+    Assert-TextMatches $readme 'pointer stores locations per computer name' 'README per-computer data-folder pointer documentation'
+    Assert-TextMatches $readme 'merges the known clients back into one pointer file' 'README pointer conflict merge documentation'
+    Assert-TextMatches $readme 'Optional Secrets area' 'README Secrets feature summary'
+    Assert-TextMatches $readme '<computer-name>-secrets\.clipdb' 'README per-machine Secrets database documentation'
+    Assert-TextMatches $readme 'Opening the Secrets manager asks for the current history password' 'README Secrets unlock documentation'
+    Assert-TextMatches $readme 'Enter quick-pastes, Insert adds, F2 edits, Delete removes, and Esc closes' 'README Secrets command documentation'
+    Assert-TextMatches $readme 'Ctrl\+Shift\+E' 'README Windows Secrets shortcut'
+    Assert-TextMatches $readme 'Command\+Shift\+E' 'README Mac Secrets shortcut'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PasswordPromptForm.cs') 'TextBoxSelectAllKeyDown' 'Windows password prompt supports Ctrl+A'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SecretEditorForm.cs') 'TextBoxSelectAllKeyDown' 'Windows secret editor supports Ctrl+A'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'runModalWithTextEditingShortcuts' 'Mac Secrets unlock prompt supports Command+A'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SecretsWindowController.swift') 'runModalWithTextEditingShortcuts' 'Mac Secrets editor supports Command+A'
     Assert-TextMatches $manual 'active settings in that folder beside <code>clipman-history\.clipdb</code>' 'Manual active settings in selected data folder'
     Assert-TextDoesNotMatch $manual 'between ascending and descending|toggle ascending or descending order' 'Manual avoids unclear ascending/descending sort wording'
     Assert-TextMatches $manual '<h3>1\.5\.10</h3>' 'Manual 1.5.10 changelog'
@@ -931,6 +1709,29 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $manual 'same name or bundle/process prefix' 'Manual ignored helper matching documentation'
     Assert-TextMatches $manual 'Preferences reports whether database encryption is on and whether the password is saved in Keychain' 'Manual Mac encryption status documentation'
     Assert-TextMatches $manual '<h2 id="application-files">Application Files</h2>' 'Manual application files section'
+    Assert-TextMatches $manual '<li><a href="#clipman-server">Clipman Server</a></li>' 'Manual Clipman Server contents entry'
+    Assert-TextMatches $manual '<h2 id="clipman-server">Clipman Server</h2>' 'Manual Clipman Server section'
+    Assert-TextDoesNotMatch $manual '<code>ClipmanServer\.exe</code>' 'Manual must not document ClipmanServer.exe as part of the normal app package'
+    Assert-TextMatches $manual 'Linux/install-clipman-server\.sh' 'Manual documents the Linux server installer'
+    Assert-TextMatches $manual 'clipman-server-connection\.txt' 'Manual documents server connection details file'
+    Assert-TextMatches $manual 'Do not manually copy a <code>\.clipdb</code>' 'Manual documents safe existing-history server bootstrap'
+    Assert-TextMatches $manual 'normal Clipman app packages are client-only' 'Manual server separate-package documentation'
+    Assert-TextMatches $manual 'separate cross-platform server package' 'Manual cross-platform server package documentation'
+    Assert-TextMatches $manual 'same Python server on Linux, macOS, and Windows' 'Manual cross-platform server parity documentation'
+    Assert-TextDoesNotMatch $manual 'reference implementation|experimental native server|repository may contain' 'Manual must not expose server development wording'
+    Assert-TextMatches $manual 'random high port and random bearer token' 'Manual Clipman Server random port/token documentation'
+    Assert-TextMatches $manual 'set <strong>Storage type</strong> to <strong>Clipman Server</strong>' 'Manual Clipman Server client storage setting documentation'
+    Assert-TextMatches $manual '<code>Settings\\Databases\\&lt;database-id&gt;\\ServerBackups</code>|under each database bucket' 'Manual Clipman Server scoped backup documentation'
+    Assert-TextMatches $manual 'does not know, request, or store the history password' 'Manual Clipman Server password boundary documentation'
+    Assert-TextMatches $manual 'server token plus each history password maps to a separate server-side database bucket' 'Manual Clipman Server password-scoped bucket documentation'
+    Assert-TextMatches $manual 'host can be typed as <code>home-server:49152</code>' 'Manual Clipman Server host without protocol documentation'
+    Assert-TextDoesNotMatch $manual 'pi:62673|100\.113\.210\.31|OutsidePi' 'Manual must not contain private server details'
+    Assert-TextMatches $manual '<h3>2\.0\.0</h3>' 'Manual 2.0.0 changelog'
+    Assert-TextDoesNotMatch $manual 'Server sync now|Server clients now|Server uploads now|Server configs now|Server database buckets can now|Linux server installer now' 'Manual 2.0.0 changelog must not expose internal server iteration wording'
+    Assert-TextMatches $manual 'Clipman 2\.0 introduces optional Clipman Server support' 'Manual 2.0.0 server feature changelog'
+    Assert-TextMatches $manual 'rolling hourly backups' 'Manual Clipman Server backup changelog'
+    Assert-TextMatches $manual 'password-scoped database buckets' 'Manual 2.0.0 password-scoped bucket changelog'
+    Assert-TextMatches $manual 'delete propagation' 'Manual 2.0.0 server delete sync changelog'
     Assert-TextMatches $manual '<code>sqlite3\.dll</code>' 'Manual SQLite runtime file documentation'
     Assert-TextMatches $manual '<code>LICENSE\.txt</code>' 'Manual license file documentation'
     Assert-TextMatches $manual '<h2 id="license">License</h2>' 'Manual license section'
@@ -944,6 +1745,27 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme 'Project page: <https://github.com/OnjLouis/Clipman>' 'README project page link'
     Assert-TextMatches $readme 'Clipman is a small portable accessible clipboard management tool for Windows and macOS' 'README cross-platform project summary'
     Assert-TextMatches $readme 'Add, remove, move, rename, group, pin, or edit text entries on one machine' 'README opening shared database explanation'
+    Assert-TextMatches $readme '## Clipman Server' 'README Clipman Server section'
+    Assert-TextDoesNotMatch $readme '`ClipmanServer\.exe`' 'README must not document ClipmanServer.exe as part of the normal app package'
+    Assert-TextMatches $readme 'Linux/install-clipman-server\.sh' 'README documents the Linux server installer'
+    Assert-TextMatches $readme 'clipman-server-connection\.txt' 'README documents server connection details file'
+    Assert-TextMatches $readme 'Do not manually copy a `\.clipdb`' 'README documents safe existing-history server bootstrap'
+    Assert-TextMatches $readme 'normal Clipman app packages are client-only' 'README server separate-package documentation'
+    Assert-TextMatches $readme 'separate cross-platform server package' 'README cross-platform server package documentation'
+    Assert-TextMatches $readme 'same Python server on Linux, macOS, and Windows' 'README cross-platform server parity documentation'
+    Assert-TextDoesNotMatch $readme 'reference implementation|experimental native server|repository may contain' 'README must not expose server development wording'
+    Assert-TextMatches $readme 'random high port and random bearer token' 'README Clipman Server random port/token documentation'
+    Assert-TextMatches $readme 'Storage type to `Clipman Server`' 'README Clipman Server client storage setting documentation'
+    Assert-TextMatches $readme 'under each database bucket|Settings\\Databases\\<database-id>\\ServerBackups' 'README Clipman Server scoped backup documentation'
+    Assert-TextMatches $readme 'does not know, request, or store the history password' 'README Clipman Server password boundary documentation'
+    Assert-TextMatches $readme 'server token plus each history password maps to a separate server-side database bucket' 'README Clipman Server password-scoped bucket documentation'
+    Assert-TextMatches $readme 'host can be typed as `home-server:49152`' 'README Clipman Server host without protocol documentation'
+    Assert-TextDoesNotMatch $readme 'pi:62673|100\.113\.210\.31|OutsidePi' 'README must not contain private server details'
+    Assert-TextMatches $readme '### 2\.0\.0' 'README 2.0.0 changelog'
+    Assert-TextDoesNotMatch $readme 'Server sync now|Server clients now|Server uploads now|Server configs now|Server database buckets can now|Linux server installer now' 'README 2.0.0 changelog must not expose internal server iteration wording'
+    Assert-TextMatches $readme 'Clipman 2\.0 introduces optional Clipman Server support' 'README 2.0.0 server feature changelog'
+    Assert-TextMatches $readme 'rolling hourly backups' 'README Clipman Server backup changelog'
+    Assert-TextMatches $readme 'password-scoped database buckets' 'README 2.0.0 password-scoped bucket changelog'
     Assert-TextMatches $readme 'Optional Links history tab for whole-entry HTTP and HTTPS links' 'README Links history feature'
     Assert-TextMatches $readme 'Links history is optional and off by default' 'README Links history preference documentation'
     Assert-TextMatches $readme 'With Links history enabled, Links becomes the second area and File history moves to the third' 'README Links enabled shortcut behavior'
@@ -972,6 +1794,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches $readme '### 1\.7\.2' 'README 1.7.2 changelog'
     Assert-TextMatches $readme 'Retry Storage command to the status menu' 'README Mac unavailable storage retry documentation'
     Assert-TextMatches $readme 'notification-area menu and tooltip report that storage is unavailable' 'README Windows unavailable storage retry documentation'
+    Assert-TextMatches $readme 'line endings' 'README line-ending transform documentation'
     Assert-TextMatches $readme 'no longer shows blocking storage alerts or plays the success sound for a failed write' 'README unavailable storage changelog'
     Assert-TextMatches $readme '### 1\.7\.1' 'README 1.7.1 changelog'
     Assert-TextMatches $readme 'asks for that import file''s password' 'README encrypted import password documentation'
@@ -1092,7 +1915,14 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Paste &after selected' 'Paste after selected unique mnemonic'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') '&Paste after selected' 'Old Paste after selected duplicate mnemonic'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Find previou&s' 'Find previous unique mnemonic'
-    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort by &machine|&Trim leading|&URL encode|Find &previous|&Copy and close|&Clear file history' 'Avoid duplicate menu mnemonics'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'HTML enc&ode' 'Actions menu HTML encode unique mnemonic'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Clean link for sharin&g' 'Actions menu clean-link unique mnemonic'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Pin or unp&in' 'Pin menu text uses non-conflicting mnemonic'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'Sort by &machine|&Trim leading|HTML &encode|Clean link for &sharing|&URL encode|Find &previous|&Copy and close|&Clear file history|Pin or &unpin|&Unpin selected|&Pin selected|Toggle &pinned state' 'Avoid duplicate menu mnemonics'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Add runn&ing app' 'Storage tab Add running app unique mnemonic'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Add &running app' 'Storage tab avoids duplicate Alt+R mnemonic'
+    Assert-HistoryMenuMnemonics (Join-Path $repoRoot 'src\HistoryForm.cs')
+    Assert-PreferencesTabMnemonics (Join-Path $repoRoot 'src\PreferencesForm.cs')
     Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'Version .* has already been released as tag' 'Build guard for released version reuse'
     Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'AssemblyInformationalVersion' 'Build guard reads assembly version'
     Assert-TextMatches (Join-Path $repoRoot 'CommunitySearch.ps1') 'Clipman community search' 'Community search helper heading'
@@ -1158,6 +1988,16 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Paste and &restore previous clipboard' 'Entry Properties exposes paste-and-restore mode'
     Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Paste and &keep target on clipboard' 'Entry Properties exposes paste-and-keep mode'
     Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'Copy to clipboard &only' 'Entry Properties exposes copy-only mode'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TextBoundaryNavigator.cs') 'public static int NextBoundary' 'Windows text boundary navigation exposes testable next-boundary logic'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TextBoundaryNavigator.cs') 'public static int PreviousBoundary' 'Windows text boundary navigation exposes testable previous-boundary logic'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TextBoundaryNavigator.cs') 'SelectionState' 'Windows text boundary navigation tracks selection anchor and caret separately'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\TextBoundaryNavigator.cs') 'NotifyWinEvent' 'Windows text boundary navigation leaves edit selection announcements to NVDA'
+    Assert-TextMatches (Join-Path $repoRoot 'src\clipman.exe.manifest') 'Microsoft\.Windows\.Common-Controls' 'Windows manifest enables Common Controls v6 for accessible native controls'
+    Assert-TextMatches (Join-Path $repoRoot 'src\clipman.exe.manifest') '<dpiAware>true</dpiAware>' 'Windows manifest declares DPI awareness for reliable screen-reader caret geometry'
+    Assert-TextMatches (Join-Path $repoRoot 'src\TextViewerForm.cs') 'TextBoundaryNavigator\.Attach\(textBox\)' 'Windows F4 text viewer uses URL/code boundary navigation'
+    Assert-TextMatches (Join-Path $repoRoot 'src\EntryPropertiesForm.cs') 'TextBoundaryNavigator\.Attach\(textBox\)' 'Windows Entry Properties clipboard text uses URL/code boundary navigation'
+    Assert-TextMatches $manual 'URL/code-friendly word navigation' 'Manual documents URL/code boundary navigation'
+    Assert-TextMatches $readme 'URL/code-friendly word navigation' 'README documents URL/code boundary navigation'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'mode == QuickPasteModes\.CopyOnly' 'Quick Paste copy-only mode does not send paste'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'mode == QuickPasteModes\.PasteKeep' 'Quick Paste paste-and-keep mode sends paste without restore'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'list\.Columns\.Add\("Quick Paste"' 'Windows history list does not expose Quick Paste as a noisy per-row column'
@@ -1205,6 +2045,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'Date, year/month/day' 'Windows template presets include year/month/day'
     Assert-TextMatches (Join-Path $repoRoot 'src\TemplateResolver.cs') 'Date, day short-month year' 'Windows template presets include non-US date'
     Assert-TextMatches (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs') 'international-phone' 'Windows sensitive data presets include international phone'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs') 'if \(IsFullHttpUrl\(text\)\) return null;' 'Windows sensitive data exclusions bypass complete HTTP URLs'
     Assert-TextMatches (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs') 'software-license-key' 'Windows sensitive data presets include software license key'
     Assert-TextMatches (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs') 'PassesLuhn' 'Windows sensitive data credit-card preset validates Luhn'
     Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Sensitive data preferences' 'Windows Preferences exposes sensitive data tab'
@@ -1215,6 +2056,158 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ClipboardPrivacySignals\.Detect' 'Windows capture path checks clipboard privacy signals'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'SensitiveDataExclusion\.FindMatch' 'Windows capture path checks sensitive data exclusions'
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'sounds\.Exclude' 'Windows sensitive data exclusion plays exclude sound'
+    Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'PasteAfterSelected' 'Windows history exposes intentional paste into history'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\HistoryForm.cs') 'PasteAfterSelected[\s\S]{0,2200}SensitiveDataExclusion\.FindMatch' 'Intentional paste into Windows history bypasses automatic sensitive-data exclusion'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerSettingsSanitizer.cs') 'CleanUrl' 'Windows server settings sanitizer cleans pasted URL text'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerSettingsSanitizer.cs') 'AuthToken' 'Windows server settings sanitizer extracts copied JSON token lines'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerSettingsSanitizer.cs') '"clipman://" \+ cleaned' 'Windows server settings sanitizer infers local Clipman protocol for host:port values'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerSettingsSanitizer.cs') 'CleanTransportUrl' 'Windows server storage converts clipman protocol to transport URL internally'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'ServerSettingsSanitizer\.CleanUrl' 'Windows Preferences cleans server host before saving'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Server &host:' 'Windows Preferences labels server connection as host rather than URL'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'src\PreferencesForm.cs') 'Server &URL:' 'Windows Preferences no longer exposes URL wording for server host'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SettingsStore.cs') 'ServerSettingsSanitizer\.CleanToken' 'Windows SettingsStore cleans server token before saving'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') '\[ScriptIgnore\]\s*public string ServerToken' 'Windows settings do not serialize raw server token'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'ProtectedServerToken' 'Windows settings store protected server token'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SettingsStore.cs') 'ServerTokenProtector\.Protect' 'Windows SettingsStore protects server token before saving'
+    Assert-TextMatches (Join-Path $repoRoot 'src\SettingsStore.cs') 'ReadStringProperty\(SettingsPath, "ServerToken"\)' 'Windows SettingsStore migrates old plaintext server token'
+    Assert-TextMatches (Join-Path $repoRoot 'src\PreferencesForm.cs') 'serverToken\.UseSystemPasswordChar = true' 'Windows Preferences hides server token field'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerTokenProtector.cs') 'ProtectedData\.Protect' 'Windows server token uses DPAPI user protection'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerTokenProtector.cs') 'DataProtectionScope\.CurrentUser' 'Windows server token protection is per Windows user'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerDatabaseIdentity.cs') 'HMACSHA256' 'Windows server database identity is derived without exposing the history password'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerDatabaseIdentity.cs') 'NoPasswordMarker' 'Windows server database identity separates no-password histories'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ServerStorageClient.cs') 'api/v1/database/' 'Windows server client uses database-scoped endpoints'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'EffectiveTextHistoryDatabasePath' 'Windows server mode has an effective local text-history cache path'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ServerCache' 'Windows server mode cache avoids reusing the shared-folder database path'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'SeedServerCacheFromConfiguredDatabase' 'Windows server mode seeds local cache from the configured database before first server upload'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'server-download\.tmp' 'Server downloads validate in a temp file before replacing local cache'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'HasLocalStateMissingFromServer' 'Windows server sync merges local state into server downloads before upload'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'AddDeletedEntryLocked' 'Windows server sync records text-history deletions'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'MergeDeletedEntries' 'Windows server sync merges text-history deletion markers'
+    Assert-TextMatches (Join-Path $repoRoot 'src\Models.cs') 'DeletedClipEntry' 'Shared text-history database stores deletion markers'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'SyncFromServerLocked\(false\)' 'Reload retries server sync when server storage is configured'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'QueueInitialServerSync\(\)' 'Windows first server sync is queued outside the Preferences apply path'
+    Assert-TextMatches (Join-Path $repoRoot 'src\ClipStore.cs') 'ThreadPool\.QueueUserWorkItem' 'Windows first server sync uses a background worker'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\ClipmanCore\Models.swift') 'DeletedClipEntry' 'Mac shared model stores text-history deletion markers'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\ClipmanCore\SyncConflictResolver.swift') 'mergeDeletedEntries' 'Mac conflict resolver merges text-history deletion markers'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\ClipmanCore\ServerDatabaseIdentity.swift') 'Clipman\.ServerDatabaseId\.v1' 'Mac server database identity uses the shared server purpose string'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ServerSettingsSanitizer.swift') 'cleanURL' 'Mac server settings sanitizer cleans pasted host text'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ServerStorageClient.swift') 'api/v1/database/' 'Mac server client uses database-scoped endpoints'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ServerStorageClient.swift') 'ServerStorageError\.timeout' 'Mac server client has a hard timeout instead of hanging the store queue'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ServerStorageClient.swift') 'rawHTTPRequestWithTimeout' 'Mac raw socket transport is wrapped in a hard timeout for local clipman server URLs'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'enforceSingleRunningInstance' 'Mac app enforces a single running Clipman instance before starting the clipboard monitor'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'NSRunningApplication\.runningApplications\(withBundleIdentifier:' 'Mac app detects another running Clipman instance by bundle identifier'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'existing\.terminate\(\)' 'Mac app gracefully asks the existing Clipman instance to quit before takeover'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'two clipboard monitors do not run at the same time' 'Mac single-instance failure warning explains why the new copy exits'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipmanSettings.swift') 'StorageMode' 'Mac settings store server storage mode'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipmanSettings.swift') 'encode\(serverToken' 'Mac settings do not serialize raw server token'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'serverTokenField = NSSecureTextField' 'Mac Preferences hides server token field'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'KeychainPasswordStore\(service: "Clipman\.server\.token"\)' 'Mac stores server token in Keychain'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'migrateServerTokenToKeychainIfNeeded' 'Mac migrates old plaintext server token to Keychain'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Clipman Server' 'Mac Preferences exposes Clipman Server storage'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'ServerCache' 'Mac server mode cache avoids reusing the shared-folder database path'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'configureTextHistoryServerStorage' 'Mac AppController configures text-history server sync'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipStore.swift') 'configureServerStorage' 'Mac ClipStore exposes server sync configuration'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipStore.swift') '(?s)func configureServerStorage\(enabled: Bool, serverURL: String, serverToken: String\).*?queue\.async' 'Mac initial server sync is queued off the UI path'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipStore.swift') 'syncFromServerLocked' 'Mac ClipStore downloads and merges server state'
+    Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'Remove-Item -LiteralPath \(Join-Path \$portable ''ClipmanServer\.exe''\)' 'Normal Windows client build removes stale server executable'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'Build.ps1') 'Server build failed' 'Normal Windows client build must not build the server executable'
+    Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'CLIPMAN_REMOTE_WINDOWS_TARGETS' 'Windows build supports configured remote WinRM deployment targets'
+    Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'New-PSSession -ComputerName' 'Windows build deploys remote targets through WinRM'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'Build.ps1') 'Start-Process -FilePath \$liveExe -WorkingDirectory \$targetPath' 'Remote Windows deployment must not WinRM-launch the tray app'
+    Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'WinRM cannot reliably start an interactive notification-area process' 'Remote Windows deployment explains skipped tray launch'
+    Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'Copy-Item[\s\S]{0,120}-ToSession' 'Windows build copies live files through the remote session'
+    Assert-TextMatches (Join-Path $repoRoot 'Build.ps1') 'Deploy-RemoteWindowsCopies' 'Windows build invokes remote deployment after local live deployment'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'ClipmanServer-\$version\.zip' 'Separate Clipman Server bundle builder names server ZIP by app version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'clipman_server\.py' 'Separate Clipman Server bundle includes Python reference server'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'Linux/install-clipman-server\.sh' 'Separate Clipman Server bundle includes Linux installer'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'clipman-server-settings\.example\.jsonc' 'Separate Clipman Server bundle includes commented settings example'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'Build-WindowsServerWrapper' 'Separate Clipman Server bundle builds the Windows notification-area wrapper'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'AssemblyInformationalVersion' 'Windows server wrapper build stamps version metadata'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'AssemblyProduct\("Clipman Server"\)' 'Windows server wrapper build stamps product metadata'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'Windows/Clipman Server\.exe' 'Separate Clipman Server bundle includes the Windows wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') '/resource:\$serverScript,ClipmanServerWrapper\.clipman_server\.py' 'Windows server wrapper embeds the shared Python server script'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'macOS/Clipman Server\.app' 'Separate Clipman Server bundle includes the macOS wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'package-combined-server\.sh' 'Windows server bundle build delegates final ZIP creation to macOS so app bundles remain launchable'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'Build-ServerBundle.ps1') "Join-Path \`$staging 'README\.md'" 'Separate Clipman Server bundle must not ship both README and Manual'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'README\.md' 'Linux server installer must not copy README into installed runtime'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'LOCALAPPDATA' 'Server uses native Windows data and log defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'Library.+Application Support.+Clipman Server' 'Server uses native macOS data defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'AdvertiseHost' 'Server can advertise a TLS DNS host separately from the bind host'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '%LOCALAPPDATA%\\Clipman Server' 'Server manual documents Windows data and log defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Library/Application Support/Clipman Server' 'Server manual documents macOS data defaults'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--advertise-host' 'Server manual documents advertised host for direct TLS'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Windows\\Clipman Server\.exe' 'Server manual documents the Windows wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Windows EXE contains the shared server script' 'Server manual explains that Windows users do not need a loose Python script beside the EXE'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Python 3 must still be installed' 'Server manual explains Windows Python runtime requirement'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'macOS/Clipman Server\.app' 'Server manual documents the macOS wrapper app'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Run at System Start' 'Server manual documents startup behavior'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '<h2 id="updates">Updates</h2>' 'Server manual documents server update behavior'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--install-update --silent' 'Server manual documents silent server update switch'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'Clipman Server has its own update path' 'README documents separate server update path'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'CreateNoWindow = true' 'Windows server wrapper starts Python without a console window'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'NotifyIcon' 'Windows server wrapper runs from the notification area'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'Check for updates' 'Windows server wrapper exposes update checks from the tray menu'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') '--install-update' 'Windows server wrapper exposes CLI update install switch'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') 'ClipmanServer-' 'Windows server wrapper searches for the separate server release ZIP'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerWindows\Program.cs') '--write-connection-info' 'Windows server wrapper must not start Python with an exit-after-writing command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') 'setActivationPolicy\(\.accessory\)' 'Mac server wrapper does not appear as a normal foreground app'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') 'Check for Updates' 'Mac server wrapper exposes update checks from the menu bar'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') '--install-update' 'Mac server wrapper exposes CLI update install switch'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') 'ClipmanServer-' 'Mac server wrapper searches for the separate server release ZIP'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerMac\Sources\ClipmanServer\main.swift') '--write-connection-info' 'Mac server wrapper must not start Python with an exit-after-writing command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-release.sh') '<key>LSUIElement</key>' 'Mac server wrapper is packaged as a menu-bar app'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'Build-ServerBundle.ps1') 'Windows\\Run-ClipmanServer\.cmd' 'Separate Clipman Server bundle must not ship a second normal Windows entry point'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'Linux/run-clipman-server\.sh' 'Separate Clipman Server bundle includes Linux launcher'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServerMac\Scripts\package-combined-server.sh') 'macOS/run-clipman-server\.command' 'Separate Clipman Server bundle must not rely on a macOS terminal launcher'
+    Assert-TextMatches (Join-Path $repoRoot 'SmokeTest.ps1') 'Manual\.html\.new' 'Live server deployment includes the HTML manual'
+    Assert-TextMatches (Join-Path $repoRoot 'SmokeTest.ps1') 'rm -f README\.md' 'Live server deployment removes stale server README from shipping folder'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '<title>Clipman Server Manual</title>' 'Separate server manual exists as HTML'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'same server program is used across platforms' 'Separate server manual documents cross-platform server parity'
+    Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'reference implementation|experimental native server|repository may contain' 'Separate server manual must not expose development wording'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'clipman-server-connection\.txt' 'Separate server manual documents connection details file'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'sh Linux/install-clipman-server\.sh' 'Separate server manual documents Linux installer'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Do not manually copy an existing <code>\.clipdb</code>' 'Separate server manual documents safe existing-history bootstrap'
+    Assert-NotExists (Join-Path $repoRoot 'ClipmanServer\README.md') 'Duplicate Windows server README in source tree'
+    Assert-NotExists (Join-Path $repoRoot 'ClipmanServerLinux\README.md') 'Duplicate Linux server README in source tree'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') '\.local/lib/clipman-server' 'Linux server installer uses user-local application directory'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') '\.local/bin' 'Linux server installer creates user-local launcher'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'database_id_from_path' 'Linux Clipman Server validates database-scoped paths'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'write_connection_info' 'Linux Clipman Server writes plain text connection details on first run'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'clipman-server-connection\.txt' 'Linux Clipman Server names connection details file'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'Databases' 'Linux Clipman Server stores password-scoped database buckets'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'st_mtime_ns' 'Linux Clipman Server revision uses cheap file metadata for polling'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'HEAD /api/v1/database/' 'Linux Clipman Server suppresses routine poll logging'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'os\.chmod\(path, 0o700\)' 'Linux Clipman Server creates private data directories where supported'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'os\.chmod\(path, 0o600\)' 'Linux Clipman Server creates private settings/database files where supported'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'ssl\.SSLContext\(ssl\.PROTOCOL_TLS_SERVER\)' 'Linux Clipman Server supports direct TLS'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'AllowInsecureRemote' 'Linux Clipman Server requires an explicit insecure remote override'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'RotatingFileHandler' 'Linux Clipman Server writes managed log files'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'DATABASE_LOG_PATTERN' 'Linux Clipman Server redacts database IDs from logs'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'except KeyboardInterrupt' 'Linux Clipman Server exits cleanly on Ctrl+C'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'server\.server_close\(\)' 'Linux Clipman Server closes socket on shutdown'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'METADATA_TOUCH_INTERVAL_MS' 'Linux Clipman Server throttles database metadata writes'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--list-databases' 'Linux Clipman Server can list database buckets'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--list-databases-json' 'Linux Clipman Server can list database buckets as JSON'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--delete-database' 'Linux Clipman Server can move a selected database bucket aside'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--prune-databases-days' 'Linux Clipman Server has dry-run stale database pruning'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') '--force-recent' 'Linux Clipman Server requires deliberate override for recently active bucket deletion'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\clipman_server.py') 'DeletedDatabases' 'Linux Clipman Server moves removed buckets to DeletedDatabases'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'clipmanserver' 'Linux server installer creates friendly helper command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'clipmanserver start' 'Linux server installer documents helper start command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'list-json' 'Linux server helper exposes JSON database list command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServerLinux\install-clipman-server.sh') 'force-delete' 'Linux server helper exposes deliberate force-delete command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'Linux Helper Commands' 'Server manual documents Linux helper commands'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'clipmanserver list' 'Server manual documents database list helper command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'clipmanserver delete' 'Server manual documents database delete helper command'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--list-databases-json' 'Server manual documents JSON database listing'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '--prune-databases-days' 'Server manual documents stale database pruning'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') '24 hours' 'Server manual documents recent database deletion safety guard'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanServer\Manual.html') 'DeletedDatabases' 'Server manual documents safe deleted bucket holding area'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'clipmanserver list' 'README documents Linux database list helper'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'force-delete' 'README documents Linux helper force-delete safeguard'
+    Assert-TextMatches (Join-Path $repoRoot 'README.md') 'DeletedDatabases' 'README documents safe server bucket cleanup'
+    Assert-NotExists (Join-Path $repoRoot 'ClipmanServerLinux\__pycache__') 'Python bytecode cache in server source tree'
+    Invoke-LinuxServerSmoke
     Assert-TextMatches (Join-Path $repoRoot 'src\ClipmanApplicationContext.cs') 'ResolvedEntryText\(entry\)' 'Windows copy and Quick Paste resolve template entries at output time'
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'store\.SetTemplate\(entry\.Id, dialog\.EntryIsTemplate\)' 'Windows Entry Properties saves template flag'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\ClipmanCore\Models.swift') 'public var IsTemplate: Bool' 'Mac shared entries store template flag'
@@ -1227,6 +2220,7 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'Date, year/month/day' 'Mac template presets include year/month/day'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\TemplateResolver.swift') 'Date, day short-month year' 'Mac template presets include non-US date'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'international-phone' 'Mac sensitive data presets include international phone'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'if isFullHTTPURL\(text\) \{ return nil \}' 'Mac sensitive data exclusions bypass complete HTTP URLs'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'software-license-key' 'Mac sensitive data presets include software license key'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\SensitiveDataExclusion.swift') 'passesLuhn' 'Mac sensitive data credit-card preset validates Luhn'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\PreferencesWindowController.swift') 'Sensitive data mode' 'Mac Preferences exposes sensitive data mode'
@@ -1248,6 +2242,9 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Paste and restore previous clipboard' 'Mac Entry Properties exposes paste-and-restore mode'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Paste and keep target on clipboard' 'Mac Entry Properties exposes paste-and-keep mode'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'Copy to clipboard only' 'Mac Entry Properties exposes copy-only mode'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'private class BoundaryAwareTextView: NSTextView' 'Mac text dialogs use custom URL/code boundary navigation'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'private final class DialogTabTextView: BoundaryAwareTextView' 'Mac Entry Properties clipboard text uses boundary-aware text view'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'let textView = BoundaryAwareTextView' 'Mac read-only text viewer uses boundary-aware text view'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'sendPasteKeystroke\(\)' 'Mac Quick Paste sends paste keystroke'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\ClipboardMonitor.swift') 'writeTemporaryInternalText' 'Mac Quick Paste restores previous pasteboard where possible'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\HistoryWindowController.swift') 'addQuickPasteTargetItems\(to: menu\)' 'Mac Clipman menu exposes Quick Paste targets'
@@ -1380,11 +2377,15 @@ function Assert-ManualAndReadmeClean {
     Assert-TextMatches (Join-Path $repoRoot 'src\HistoryForm.cs') 'Based on earlier Clipman work by Tyler Spivey' 'About credits'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\shared-version.sh') 'AssemblyInformationalVersion' 'Mac shared version script reads Windows informational version'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\shared-version.sh') 'AssemblyFileVersion' 'Mac shared version script reads Windows file version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\shared-version.sh') 'BuildStampUtcMs' 'Mac shared version script reads Windows build stamp'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" version' 'Mac release package reads shared short version'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" build' 'Mac release package reads shared build version'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" stamp' 'Mac release package reads shared build stamp'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\AppController.swift') 'ClipmanBuildStampUtcMs' 'Mac diagnostics include shared build stamp'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Sources\Clipman\RuntimeLogger.swift') 'ClipmanBuildStampUtcMs' 'Mac runtime log includes shared build stamp'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') 'cp "\$ROOT/\.\./LICENSE\.txt" "\$APP/Contents/Resources/LICENSE\.txt"' 'Mac release package bundles root license'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Scripts\package-release.sh') '<string>0\.1</string>|<string>1</string>' 'Mac release package must not hard-code bundle version'
-    Assert-TextMatches (Join-Path $repoRoot 'CLIPMAN_AGENT_SYNC.md') 'verify the old `/Applications/Clipman\.app/Contents/MacOS/Clipman` process has actually exited, force-kill that old process if it did not quit' 'Agent sync requires verified Mac process restart after Mac builds'
+    Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') 'pkill -f "\$APP/Contents/MacOS/Clipman\|swift run\.\*Clipman"' 'Mac dev build restart closes the old app process before relaunch'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') 'zsh "\$ROOT/Scripts/shared-version\.sh" version' 'Mac dev package reads shared short version'
     Assert-TextMatches (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') 'cp "\$ROOT/\.\./LICENSE\.txt" "\$APP/Contents/Resources/LICENSE\.txt"' 'Mac dev package bundles root license'
     Assert-TextDoesNotMatch (Join-Path $repoRoot 'ClipmanMac\Scripts\build-dev-app.sh') '<string>0\.1</string>|<string>1</string>' 'Mac dev package must not hard-code bundle version'
@@ -1400,9 +2401,10 @@ function Assert-ManualAndReadmeClean {
         [regex]::Escape($privateMachineThree) + '|' +
         'D:' + [regex]::Escape($bs) + '|' +
         'E:' + [regex]::Escape($bs) + '|' +
-        '\bolder installs\b|\bolder versions\b|migration|migrate automatically|temporary workaround|Drop' + 'box'
+        '\bolder installs\b|\bolder versions\b|migration|migrate automatically|temporary workaround|2\.0 test|Future Linux helper|Drop' + 'box'
     Assert-TextDoesNotMatch $manual $forbidden 'Manual'
     Assert-TextDoesNotMatch $readme $forbidden 'README'
+    Assert-TextDoesNotMatch $serverManual $forbidden 'Server manual'
 }
 
 function Assert-CodeBehavior {
@@ -1434,6 +2436,16 @@ internal static class ClipmanSmokeHarness
 
         var youtubeShare = UrlTrackingCleaner.CleanForSharing("https://www.youtube.com/watch?v=A4jvHpegXHk&t=4s&pp=ygUVQXJlIHRoZSBmdW5kcyBnbGFyZGVk");
         Assert(youtubeShare == "https://www.youtube.com/watch?v=A4jvHpegXHk", "Share cleaner did not remove YouTube timestamp and share metadata.");
+
+        var boundaryText = "https://example.com/a-b?x=1";
+        Assert(TextBoundaryNavigator.NextBoundary(boundaryText, 0) == 5, "Text boundary navigator did not stop after URL scheme text.");
+        Assert(TextBoundaryNavigator.NextBoundary(boundaryText, 5) == 8, "Text boundary navigator did not stop after URL punctuation.");
+        Assert(TextBoundaryNavigator.NextBoundary(boundaryText, 21) == 22, "Text boundary navigator did not stop at URL dash.");
+        Assert(TextBoundaryNavigator.PreviousBoundary(boundaryText, 22) == 21, "Text boundary navigator did not move back to URL dash.");
+
+        Assert(LineEndingNormalizer.ToWindows("a\nb\rc\r\nd\u2028e\u2029f\u0085g") == "a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng", "Windows line-ending normalization failed.");
+        Assert(LineEndingNormalizer.ToUnix("a\r\nb\rc") == "a\nb\nc", "Unix line-ending normalization failed.");
+        Assert(LineEndingNormalizer.ToOldMac("a\r\nb\nc") == "a\rb\rc", "Old Mac line-ending normalization failed.");
 
         var sensitiveOffSettings = new AppSettings
         {
@@ -1475,6 +2487,8 @@ internal static class ClipmanSmokeHarness
         Assert(SensitiveDataExclusion.FindMatch("Token abcdefghijklmnopqrstuvwxyzABCDEF", tokenSettings) != null, "Sensitive data exclusions did not match a raw long API token.");
         var amazonUrl = "https://www.amazon.co.uk/EM7345-Module-Thinkpad-T431s-T440p-default/dp/B07QQZ899Y/ref=sr_1_1?crid=19SLV6CUQAJRO&dib=eyJ2IjoiMSJ9.IwA4NYkA3RbfsXGnAR-_nuQChbG5SN9bZYkUvhTgjSR6XBSPGX8GKZxD60U01mj9Dz5nLht6uFs-wXpXGCbVDEBhkWzUQ4oNhVAHpkY3bYRH2rkNZOax53v29X9hBD8guA1artIrv20knKx4qF7eu0tNQN0hXDosaGvi1Q3840cYapl55rYnW09VmW41D17dKGxLBDsc6zhUg6uSh330E8C8d3KuLBQ0mldFSug8N5g.boDRMrutCGh7SV-UoZjDNmNqglQ_cTbTnt9ihkmMTu0&dib_tag=se&keywords=Lenovo+WAN+card&qid=1783960991&sprefix=lenovo+wan+car%2Caps%2C165&sr=8-1";
         Assert(SensitiveDataExclusion.FindMatch(amazonUrl, tokenSettings) == null, "Sensitive data exclusions matched an ordinary Amazon URL as a long API token.");
+        var archiveUrl = "https://web.archive.org/web/20260714160005/https://www.erininthemorning.com/p/terf-activist-jk-rowling-threatens";
+        Assert(SensitiveDataExclusion.FindMatch(archiveUrl, new AppSettings { SensitiveDataMode = SensitiveDataExclusion.ModeExclude, SensitiveDataPresetIds = { "credit-card", "us-ssn", "international-phone", "api-token", "software-license-key", "us-drivers-license" } }) == null, "Sensitive data exclusions matched an ordinary full URL.");
 
         var path = Path.Combine(Path.GetTempPath(), "clipman-test-" + Guid.NewGuid().ToString("N") + ".clipdb");
         var secretText = "plain text should be compressed";
@@ -1490,6 +2504,17 @@ internal static class ClipmanSmokeHarness
         var loaded = ClipDatabaseFile.Load(path);
         Assert(loaded.Entries.Count == 1 && loaded.Entries[0].Text == secretText, ".clipdb round trip failed.");
         File.Delete(path);
+
+        var deleteSyncPath = Path.Combine(Path.GetTempPath(), "clipman-delete-sync-" + Guid.NewGuid().ToString("N") + ".clipdb");
+        using (var deleteStore = new ClipStore(deleteSyncPath, string.Empty))
+        {
+            var deleteEntry = deleteStore.AddText("delete marker smoke", "KeepBoth", 100, 0);
+            deleteStore.Delete(deleteEntry.Id);
+        }
+        var deleteSyncDatabase = ClipDatabaseFile.Load(deleteSyncPath);
+        Assert(deleteSyncDatabase.Entries.All(e => e.Text != "delete marker smoke"), "Deleted text entry remained in the local database.");
+        Assert(deleteSyncDatabase.DeletedEntries.Any(e => e.Id.Length > 0), "Deleted text entry did not leave a sync delete marker.");
+        File.Delete(deleteSyncPath);
 
         var encryptedPath = Path.Combine(Path.GetTempPath(), "clipman-test-" + Guid.NewGuid().ToString("N") + ".clipdb");
         var password = "correct horse battery staple";
@@ -1606,6 +2631,45 @@ internal static class ClipmanSmokeHarness
         Assert(merged.Entries.Any(e => e.Text == "main entry") && merged.Entries.Any(e => e.Text == "conflict entry"), "Database conflict merge failed.");
         Assert(!File.Exists(conflictDb), "Database conflict file was not removed.");
 
+        var pushMergeTarget = new ClipDatabase
+        {
+            Entries =
+            {
+                new ClipEntry { Id = "push-after-use", Text = "same text", SourceMachine = "Desktop", CreatedUnixMs = 100, LastUsedUnixMs = 500, ManualOrder = 1 }
+            }
+        };
+        var pushedMergeSource = new ClipDatabase
+        {
+            Entries =
+            {
+                new ClipEntry { Id = "push-after-use", Text = "same text", SourceMachine = "Laptop", CreatedUnixMs = 600, LastUsedUnixMs = 200, ManualOrder = 1 }
+            }
+        };
+        SyncConflictResolver.MergeInto(pushMergeTarget, pushedMergeSource);
+        Assert(pushMergeTarget.Entries[0].CreatedUnixMs == 600, "Newer pushed entry timestamp did not win merge when local last-used was newer.");
+        Assert(pushMergeTarget.Entries[0].SourceMachine == "Laptop", "Newer pushed entry source machine did not win merge when local last-used was newer.");
+
+        var storeMergeTarget = new ClipDatabase
+        {
+            Entries =
+            {
+                new ClipEntry { Id = "store-push-after-use", Text = "same store text", SourceMachine = "Desktop", CreatedUnixMs = 100, LastUsedUnixMs = 500, ManualOrder = 1 }
+            }
+        };
+        var storeMergeSource = new ClipDatabase
+        {
+            Entries =
+            {
+                new ClipEntry { Id = "store-push-after-use", Text = "same store text", SourceMachine = "Laptop", CreatedUnixMs = 600, LastUsedUnixMs = 200, ManualOrder = 1 }
+            }
+        };
+        var storeMergeMethod = typeof(ClipStore).GetMethod("MergeDatabaseIntoLocked", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert(storeMergeMethod != null, "Could not locate ClipStore server merge method for regression test.");
+        var storeMergeChanged = (bool)storeMergeMethod.Invoke(null, new object[] { storeMergeTarget, storeMergeSource });
+        Assert(storeMergeChanged, "ClipStore server merge did not report a changed pushed entry.");
+        Assert(storeMergeTarget.Entries[0].CreatedUnixMs == 600, "ClipStore server merge did not keep newer pushed timestamp.");
+        Assert(storeMergeTarget.Entries[0].SourceMachine == "Laptop", "ClipStore server merge did not keep newer pushed source machine.");
+
         var mainSettings = Path.Combine(conflictDir, "Desktop-settings.json");
         var conflictSettings = Path.Combine(conflictDir, "Desktop-settings (Laptop).json");
         JsonUtil.SaveAtomic(mainSettings, new AppSettings { MaxHistoryEntries = 111 });
@@ -1645,27 +2709,107 @@ internal static class ClipmanSmokeHarness
         var reloadedExplicitSettings = reloadedExplicitStore.Load();
         Assert(reloadedExplicitSettings.DatabasePath == explicitDb, "Settings location pointer did not reload the explicit database path.");
         Assert(reloadedExplicitStore.SettingsDirectory == explicitSettingsFolder, "Settings location pointer did not reload the explicit data folder.");
+        var settingsLocationPointer = File.ReadAllText(Path.Combine(portableApp, "Settings", "settings-location.json"), Encoding.UTF8);
+        Assert(settingsLocationPointer.Contains("\"clients\""), "Settings location pointer did not use per-client storage.");
+        Assert(settingsLocationPointer.Contains(Environment.MachineName), "Settings location pointer did not include this machine.");
 
+        var windOnjFolder = Path.Combine(conflictDir, "WindOnjSettings");
+        Directory.CreateDirectory(windOnjFolder);
+        var pointerConflict = Path.Combine(portableApp, "Settings", "settings-location (WindOnj).json");
+        File.WriteAllText(pointerConflict, "{\"clients\":{\"WindOnj\":\"" + EscapeJson(windOnjFolder) + "\"}}", Encoding.UTF8);
+        var conflictMergedStore = new SettingsStore(portableApp);
+        conflictMergedStore.Load();
+        var mergedPointer = File.ReadAllText(Path.Combine(portableApp, "Settings", "settings-location.json"), Encoding.UTF8);
+        Assert(mergedPointer.Contains(Environment.MachineName), "Settings location pointer merge lost this machine.");
+        Assert(mergedPointer.Contains("WindOnj"), "Settings location pointer merge lost WindOnj.");
+        Assert(mergedPointer.Contains(EscapeJson(windOnjFolder)), "Settings location pointer merge lost WindOnj folder.");
+        Assert(!File.Exists(pointerConflict), "Settings location pointer conflict file was not removed.");
+
+        var pastedServerSettingsStore = new SettingsStore(Path.Combine(conflictDir, "pasted-server-settings"));
+        var pastedServerSettings = new AppSettings
+        {
+            StorageMode = "Server",
+            ServerUrl = "http://home-server:49152, and using the token from that settings file.",
+            ServerToken = "\"AuthToken\": \"token-from-json-line\",",
+            UseDefaultDatabasePath = true
+        };
+        pastedServerSettingsStore.Save(pastedServerSettings);
+        var cleanedServerSettings = pastedServerSettingsStore.Load();
+        Assert(cleanedServerSettings.ServerUrl == "clipman://home-server:49152", "Pasted server URL prose was not cleaned.");
+        Assert(cleanedServerSettings.ServerToken == "token-from-json-line", "Copied server token JSON line was not cleaned.");
+        var cleanedServerSettingsJson = File.ReadAllText(pastedServerSettingsStore.SettingsPath);
+        Assert(!cleanedServerSettingsJson.Contains("\"ServerToken\""), "Raw server token was serialized to settings.");
+        Assert(!cleanedServerSettingsJson.Contains("token-from-json-line"), "Server token plaintext remained in settings.");
+        Assert(cleanedServerSettingsJson.Contains("\"ProtectedServerToken\""), "Protected server token was not serialized to settings.");
+        var reloadedProtectedServerSettingsStore = new SettingsStore(Path.Combine(conflictDir, "pasted-server-settings"));
+        var reloadedProtectedServerSettings = reloadedProtectedServerSettingsStore.Load();
+        Assert(reloadedProtectedServerSettings.ServerToken == "token-from-json-line", "Protected server token did not reload.");
+
+        var legacyServerSettingsStore = new SettingsStore(Path.Combine(conflictDir, "legacy-server-settings"));
+        Directory.CreateDirectory(legacyServerSettingsStore.AppSettingsDirectory);
+        var legacyServerSettingsPath = Path.Combine(legacyServerSettingsStore.AppSettingsDirectory, Environment.MachineName + "-settings.json");
+        File.WriteAllText(legacyServerSettingsPath, "{\"StorageMode\":\"Server\",\"ServerUrl\":\"home-server:49152\",\"ServerToken\":\"legacy-plaintext-token\"}");
+        var migratedLegacyServerSettings = legacyServerSettingsStore.Load();
+        Assert(migratedLegacyServerSettings.ServerToken == "legacy-plaintext-token", "Legacy plaintext server token did not migrate.");
+        var migratedLegacyServerJson = File.ReadAllText(legacyServerSettingsStore.SettingsPath);
+        Assert(!migratedLegacyServerJson.Contains("\"ServerToken\""), "Legacy raw server token property survived migration.");
+        Assert(!migratedLegacyServerJson.Contains("legacy-plaintext-token"), "Legacy raw server token value survived migration.");
+
+        var secretPath = Path.Combine(conflictDir, "Secrets", Environment.MachineName + "-secrets.clipdb");
+        Directory.CreateDirectory(Path.GetDirectoryName(secretPath));
+        var secretStore = new SecretStore(secretPath, () => "secret-password");
+        secretStore.SaveEntry(new SecretEntry { Id = "secret-one", Name = "Router", Value = "private-value", Hotkey = "Ctrl+Alt+F1" });
+        var reloadedSecretStore = new SecretStore(secretPath, () => "secret-password");
+        var secrets = reloadedSecretStore.GetEntries().ToList();
+        Assert(secrets.Count == 1, "Secret store did not reload saved secret.");
+        Assert(secrets[0].Name == "Router", "Secret store did not preserve secret name.");
+        Assert(secrets[0].Value == "private-value", "Secret store did not preserve secret value.");
+        Assert(secrets[0].Hotkey == "Ctrl+Alt+F1", "Secret store did not preserve quick-paste hotkey.");
+        Assert(!File.ReadAllText(secretPath, Encoding.UTF8).Contains("private-value"), "Secret store wrote secret value as plain text.");
+        var noPasswordSecretStore = new SecretStore(Path.Combine(conflictDir, "SecretsNoPassword", Environment.MachineName + "-secrets.clipdb"), () => "");
+        var secretPasswordRequired = false;
+        try
+        {
+            noPasswordSecretStore.SaveEntry(new SecretEntry { Name = "NoPassword", Value = "must-not-save" });
+        }
+        catch (DatabasePasswordRequiredException)
+        {
+            secretPasswordRequired = true;
+        }
+        Assert(secretPasswordRequired, "Secret store allowed saving without a history password.");
+
+        var sessionApp = Path.Combine(conflictDir, "SessionOnlyApp");
+        var sessionDb = Path.Combine(conflictDir, "SessionOnlyData", "clipman-history.clipdb");
+        Directory.CreateDirectory(Path.GetDirectoryName(sessionDb));
+        Directory.CreateDirectory(Path.Combine(sessionApp, "Settings"));
+        var sessionStore = new SettingsStore(sessionApp);
+        var sessionSettingsPath = Path.Combine(sessionApp, "Settings", Environment.MachineName + "-settings.json");
         var sessionOnlySettings = new AppSettings
         {
-            DatabasePath = explicitDb,
+            DatabasePath = sessionDb,
             UseDefaultDatabasePath = false,
             DatabaseEncryptionEnabled = true,
             RememberDatabasePassword = false,
             ProtectedDatabasePassword = "should-not-survive",
             PlainDatabasePassword = "session-only-secret"
         };
-        JsonUtil.SaveAtomic(reloadedExplicitStore.SettingsPath, sessionOnlySettings);
-        var sessionOnlyJson = File.ReadAllText(reloadedExplicitStore.SettingsPath, Encoding.UTF8);
+        JsonUtil.SaveAtomic(sessionSettingsPath, sessionOnlySettings);
+        var sessionOnlyJson = File.ReadAllText(sessionSettingsPath, Encoding.UTF8);
         Assert(!sessionOnlyJson.Contains("PlainDatabasePassword"), "Session-only database password was serialized to settings.");
-        var normalizedSessionOnly = reloadedExplicitStore.Load();
+        var normalizedSessionOnly = sessionStore.Load();
         Assert(normalizedSessionOnly.DatabaseEncryptionEnabled, "Session-only encrypted settings did not keep encryption enabled.");
         Assert(!normalizedSessionOnly.RememberDatabasePassword, "Session-only encrypted settings incorrectly enabled password remembering.");
         Assert(string.IsNullOrEmpty(normalizedSessionOnly.ProtectedDatabasePassword), "Session-only encrypted settings kept a protected password.");
 
-        var legacyJson = "{\"DatabasePath\":\"" + EscapeJson(explicitDb) + "\",\"UseDefaultDatabasePath\":false,\"DatabaseEncryptionEnabled\":true,\"ProtectedDatabasePassword\":\"legacy-protected-placeholder\"}";
-        File.WriteAllText(reloadedExplicitStore.SettingsPath, legacyJson, Encoding.UTF8);
-        var legacyLoaded = reloadedExplicitStore.Load();
+        var legacyPasswordApp = Path.Combine(conflictDir, "LegacyPasswordApp");
+        var legacyPasswordDb = Path.Combine(conflictDir, "LegacyPasswordData", "clipman-history.clipdb");
+        Directory.CreateDirectory(Path.Combine(legacyPasswordApp, "Settings"));
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyPasswordDb));
+        var legacyPasswordStore = new SettingsStore(legacyPasswordApp);
+        var legacyPasswordSettingsPath = Path.Combine(legacyPasswordApp, "Settings", Environment.MachineName + "-settings.json");
+        var legacyJson = "{\"DatabasePath\":\"" + EscapeJson(legacyPasswordDb) + "\",\"UseDefaultDatabasePath\":false,\"DatabaseEncryptionEnabled\":true,\"ProtectedDatabasePassword\":\"legacy-protected-placeholder\"}";
+        File.WriteAllText(legacyPasswordSettingsPath, legacyJson, Encoding.UTF8);
+        var legacyLoaded = legacyPasswordStore.Load();
         Assert(legacyLoaded.RememberDatabasePassword, "Legacy protected settings were not treated as remembered-password settings.");
 
         var stateDir = Path.Combine(conflictDir, "state");
@@ -1817,12 +2961,20 @@ internal static class ClipmanSmokeHarness
             (Join-Path $repoRoot 'src\ClipDatabaseFile.cs'),
             (Join-Path $repoRoot 'src\FileClipboardEventStore.cs'),
             (Join-Path $repoRoot 'src\UrlTrackingCleaner.cs'),
+            (Join-Path $repoRoot 'src\TextBoundaryNavigator.cs'),
+            (Join-Path $repoRoot 'src\LineEndingNormalizer.cs'),
             (Join-Path $repoRoot 'src\SensitiveDataExclusion.cs'),
             (Join-Path $repoRoot 'src\SqliteClipboardImporter.cs'),
             (Join-Path $repoRoot 'src\SyncConflictResolver.cs'),
             (Join-Path $repoRoot 'src\SharedUpdateState.cs'),
+            (Join-Path $repoRoot 'src\ServerSettingsSanitizer.cs'),
+            (Join-Path $repoRoot 'src\ServerDatabaseIdentity.cs'),
+            (Join-Path $repoRoot 'src\ServerStorageClient.cs'),
+            (Join-Path $repoRoot 'src\ClipStore.cs'),
             (Join-Path $repoRoot 'src\SettingsStore.cs'),
+            (Join-Path $repoRoot 'src\SecretStore.cs'),
             (Join-Path $repoRoot 'src\DatabasePasswordProtector.cs'),
+            (Join-Path $repoRoot 'src\ServerTokenProtector.cs'),
             (Join-Path $repoRoot 'src\BuildInfo.cs'),
             $testSource
         )
@@ -1844,6 +2996,28 @@ internal static class ClipmanSmokeHarness
 
 Clear-OldSmokeFolders
 
+if ($ServerOnly) {
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        $Version = Read-AppVersion
+    }
+
+    Assert-ServerSmokeSurface
+    powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'Test-ReleasePrivacy.ps1')
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'Release privacy check failed.'
+    }
+    if (!$SkipBuild) {
+        powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'Build-ServerBundle.ps1')
+        if ($LASTEXITCODE -ne 0) {
+            Fail 'Server bundle build failed.'
+        }
+    }
+    Assert-ServerBundleZipParity $Version
+    Invoke-LiveServerDeploy
+    Write-Host 'Clipman Server smoke test passed.'
+    return
+}
+
 if (!$SkipBuild) {
     & (Join-Path $repoRoot 'Build.ps1')
 }
@@ -1857,15 +3031,27 @@ powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'Test-ReleasePriva
 if ($LASTEXITCODE -ne 0) {
     Fail 'Release privacy check failed.'
 }
+if (!$ClientOnly -and (Test-Path -LiteralPath (Join-Path $repoRoot 'Build-ServerBundle.ps1'))) {
+    powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'Build-ServerBundle.ps1')
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'Server bundle build failed.'
+    }
+    Assert-ServerBundleZipParity $Version
+}
+if (!$ClientOnly) {
+    Invoke-LiveServerDeploy
+}
 Assert-GitHubActivityChecked $Version
 Write-CommunityMentionReminder
 Assert-HandoverParity $Version
 Assert-MacReleaseAsset $Version
+Assert-InstalledMacApp $Version
 Assert-CodeBehavior
 Assert-CleanPortable $portable
 Invoke-LocalUpdaterSmoke $Version
 Invoke-PostPublishUpdateSmoke $Version
 Deploy-LiveCopy $LivePath
 Assert-LiveCopyReasonable $LivePath
+Invoke-RemoteInteractiveStartSmoke
 
 Write-Host 'Clipman smoke test passed.'

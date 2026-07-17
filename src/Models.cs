@@ -36,12 +36,83 @@ namespace Clipman
         public int Version { get; set; }
         public long UpdatedUnixMs { get; set; }
         public List<ClipEntry> Entries { get; set; }
+        public List<DeletedClipEntry> DeletedEntries { get; set; }
 
         public ClipDatabase()
         {
             Version = 1;
             UpdatedUnixMs = TimeUtil.NowUnixMs();
             Entries = new List<ClipEntry>();
+            DeletedEntries = new List<DeletedClipEntry>();
+        }
+    }
+
+    public sealed class SecretEntry
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string Value { get; set; }
+        public string Hotkey { get; set; }
+        public long CreatedUnixMs { get; set; }
+        public long UpdatedUnixMs { get; set; }
+
+        public SecretEntry()
+        {
+            Id = Guid.NewGuid().ToString("N");
+            Name = string.Empty;
+            Value = string.Empty;
+            Hotkey = string.Empty;
+            CreatedUnixMs = TimeUtil.NowUnixMs();
+            UpdatedUnixMs = CreatedUnixMs;
+        }
+    }
+
+    public sealed class SecretDatabase
+    {
+        public int Version { get; set; }
+        public long UpdatedUnixMs { get; set; }
+        public List<SecretEntry> Entries { get; set; }
+
+        public SecretDatabase()
+        {
+            Version = 1;
+            UpdatedUnixMs = TimeUtil.NowUnixMs();
+            Entries = new List<SecretEntry>();
+        }
+    }
+
+    public sealed class DeletedClipEntry
+    {
+        public string Id { get; set; }
+        public string TextHash { get; set; }
+        public long DeletedUnixMs { get; set; }
+        public string SourceMachine { get; set; }
+
+        public DeletedClipEntry()
+        {
+            Id = string.Empty;
+            TextHash = string.Empty;
+            DeletedUnixMs = TimeUtil.NowUnixMs();
+            SourceMachine = string.Empty;
+        }
+    }
+
+    public sealed class ServerSyncStatus
+    {
+        public bool Enabled { get; set; }
+        public bool Configured { get; set; }
+        public string Revision { get; set; }
+        public long LastPollUnixMs { get; set; }
+        public long LastSuccessUnixMs { get; set; }
+        public long LastUploadUnixMs { get; set; }
+        public long NextPollUnixMs { get; set; }
+        public int ConsecutiveFailures { get; set; }
+        public string LastError { get; set; }
+
+        public ServerSyncStatus()
+        {
+            Revision = string.Empty;
+            LastError = string.Empty;
         }
     }
 
@@ -109,6 +180,11 @@ namespace Clipman
         public bool Active { get; set; }
         public string DatabasePath { get; set; }
         public bool UseDefaultDatabasePath { get; set; }
+        public string StorageMode { get; set; }
+        public string ServerUrl { get; set; }
+        [ScriptIgnore]
+        public string ServerToken { get; set; }
+        public string ProtectedServerToken { get; set; }
         public int LastSelectedIndex { get; set; }
         public int LastSelectedTab { get; set; }
         public string LastSelectedHistoryTab { get; set; }
@@ -153,6 +229,10 @@ namespace Clipman
             Active = true;
             DatabasePath = string.Empty;
             UseDefaultDatabasePath = true;
+            StorageMode = "File";
+            ServerUrl = string.Empty;
+            ServerToken = string.Empty;
+            ProtectedServerToken = string.Empty;
             LastSelectedIndex = -1;
             LastSelectedTab = 0;
             LastSelectedHistoryTab = HistoryTabs.Text;

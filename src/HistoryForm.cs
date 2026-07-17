@@ -27,6 +27,7 @@ namespace Clipman
         private readonly Action<List<string>, int> moveRecentClipboardEvents;
         private readonly Func<bool> clearTextHistory;
         private readonly Action showPreferences;
+        private readonly Action showSecrets;
         private readonly Action toggleActive;
         private readonly Action exitApp;
         private readonly Func<string> diagnosticsText;
@@ -66,7 +67,7 @@ namespace Clipman
         private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
@@ -82,6 +83,7 @@ namespace Clipman
             this.moveRecentClipboardEvents = moveRecentClipboardEvents;
             this.clearTextHistory = clearTextHistory;
             this.showPreferences = showPreferences;
+            this.showSecrets = showSecrets;
             this.toggleActive = toggleActive;
             this.exitApp = exitApp;
             this.diagnosticsText = diagnosticsText;
@@ -459,10 +461,15 @@ namespace Clipman
             actions.DropDownItems.Add("Convert to &single line\tCtrl+Shift+L", null, (s, e) => TransformSelected(SingleLineText, "Converted selected entry or entries to single line."));
             actions.DropDownItems.Add("Remove &blank lines\tCtrl+Shift+B", null, (s, e) => TransformSelected(RemoveBlankLines, "Removed blank lines from selected entry or entries."));
             actions.DropDownItems.Add("Remove URL trac&king\tCtrl+Shift+R", null, (s, e) => TransformSelected(UrlTrackingCleaner.CleanText, "Removed URL tracking from selected entry or entries."));
-            actions.DropDownItems.Add("Clean link for &sharing\tCtrl+Shift+S", null, (s, e) => TransformSelected(UrlTrackingCleaner.CleanForSharing, "Cleaned selected link or links for sharing."));
+            actions.DropDownItems.Add("Clean link for sharin&g\tCtrl+Shift+S", null, (s, e) => TransformSelected(UrlTrackingCleaner.CleanForSharing, "Cleaned selected link or links for sharing."));
+            var lineEndings = new ToolStripMenuItem("Line &endings");
+            lineEndings.DropDownItems.Add("Convert to Windows &CRLF", null, (s, e) => TransformSelected(LineEndingNormalizer.ToWindows, "Converted selected entry or entries to Windows CRLF line endings."));
+            lineEndings.DropDownItems.Add("Convert to Unix &LF", null, (s, e) => TransformSelected(LineEndingNormalizer.ToUnix, "Converted selected entry or entries to Unix LF line endings."));
+            lineEndings.DropDownItems.Add("Convert to old Mac C&R", null, (s, e) => TransformSelected(LineEndingNormalizer.ToOldMac, "Converted selected entry or entries to old Mac CR line endings."));
+            actions.DropDownItems.Add(lineEndings);
             actions.DropDownItems.Add("&Uppercase", null, (s, e) => TransformSelected(t => (t ?? string.Empty).ToUpperInvariant(), "Uppercased selected entry or entries."));
             actions.DropDownItems.Add("&Lowercase", null, (s, e) => TransformSelected(t => (t ?? string.Empty).ToLowerInvariant(), "Lowercased selected entry or entries."));
-            actions.DropDownItems.Add("HTML &encode", null, (s, e) => TransformSelected(System.Net.WebUtility.HtmlEncode, "HTML-encoded selected entry or entries."));
+            actions.DropDownItems.Add("HTML enc&ode", null, (s, e) => TransformSelected(System.Net.WebUtility.HtmlEncode, "HTML-encoded selected entry or entries."));
             actions.DropDownItems.Add("&HTML decode", null, (s, e) => TransformSelected(System.Net.WebUtility.HtmlDecode, "HTML-decoded selected entry or entries."));
             actions.DropDownItems.Add("HTML to readable te&xt\tCtrl+Shift+H", null, (s, e) => TransformSelected(HtmlToText, "Converted selected HTML entry or entries to readable text."));
             actions.DropDownItems.Add("URL e&ncode\tCtrl+Shift+U", null, (s, e) => TransformSelected(UrlEncode, "URL-encoded selected entry or entries."));
@@ -482,6 +489,7 @@ namespace Clipman
             preferencesMenuItem = new ToolStripMenuItem("&Preferences...\tCtrl+,", null, (s, e) => showPreferences());
             toggleMenuItem = new ToolStripMenuItem("&Toggle on/off", null, (s, e) => toggleActive());
             options.DropDownItems.Add(preferencesMenuItem);
+            options.DropDownItems.Add("Se&crets...\tCtrl+Shift+E", null, (s, e) => showSecrets());
             options.DropDownItems.Add("Open &settings folder", null, (s, e) => OpenSettingsFolder());
             options.DropDownItems.Add(toggleMenuItem);
 
@@ -495,6 +503,10 @@ namespace Clipman
             sortMachineMenuItem = new ToolStripMenuItem("Mac&hine", null, (s, e) => SetSortMode("Machine"));
             sortManualMenuItem = new ToolStripMenuItem("&Manual order", null, (s, e) => SetSortMode("Manual"));
             sortDirectionMenuItem = new ToolStripMenuItem("", null, (s, e) => ToggleSortDirection());
+            view.DropDownItems.Add("Text history\tAlt+T", null, (s, e) => SelectMainTab());
+            view.DropDownItems.Add("Links history\tAlt+L", null, (s, e) => SelectLinksTab());
+            view.DropDownItems.Add("File history\tAlt+I", null, (s, e) => SelectFileClipboardTab());
+            view.DropDownItems.Add("-");
             view.DropDownItems.Add(sortDirectionMenuItem);
             view.DropDownItems.Add("-");
             sortMenuItem.DropDownItems.Add(sortLastUsedMenuItem);
@@ -737,7 +749,7 @@ namespace Clipman
             edit.DropDownItems.Add("Set as &quick-paste target...", null, (s, e) => ShowEntryProperties(true));
             edit.DropDownItems.Add("Push to other &machines\tCtrl+P", null, (s, e) => PushSelectedToOtherMachines());
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
-            edit.DropDownItems.Add("Pin or &unpin\tShift+Enter", null, (s, e) => TogglePinned());
+            edit.DropDownItems.Add("Pin or unp&in\tShift+Enter", null, (s, e) => TogglePinned());
             edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelected());
             edit.DropDownItems.Add("&Find...\tCtrl+F", null, (s, e) => ShowSearchDialog(false));
             edit.DropDownItems.Add("Find &next\tF3", null, (s, e) => RepeatSearch(false));
@@ -1149,6 +1161,12 @@ namespace Clipman
                 e.Handled = true;
                 return;
             }
+            if (e.Control && e.Shift && e.KeyCode == Keys.E)
+            {
+                showSecrets();
+                e.Handled = true;
+                return;
+            }
             if (e.Control && e.KeyCode == Keys.E)
             {
                 Export();
@@ -1252,6 +1270,11 @@ namespace Clipman
                 if (key == Keys.L)
                 {
                     SelectLinksTab();
+                    return true;
+                }
+                if (key == Keys.I)
+                {
+                    SelectFileClipboardTab();
                     return true;
                 }
                 if (key == Keys.G)
@@ -2189,11 +2212,20 @@ namespace Clipman
                 return;
             }
 
+            if (selected.Count == 1)
+            {
+                copyEntry(selected[0]);
+            }
+            else
+            {
+                copyEntries(selected);
+            }
+
             Reload(firstSelectedId, -1);
             FocusHistoryList();
             statusText.Text = pushed == 1
-                ? "Pushed selected entry to other machines."
-                : "Pushed " + pushed + " selected entries to other machines.";
+                ? "Pushed selected entry to other machines and copied it to this clipboard."
+                : "Pushed " + pushed + " selected entries to other machines and copied them to this clipboard.";
         }
 
         private void CopyPinnedByPosition(int position)
@@ -2602,19 +2634,19 @@ namespace Clipman
         private string PinMenuText()
         {
             var selected = SelectedEntries();
-            if (selected.Count == 0) return "Pin or &unpin\tShift+Enter";
-            if (selected.All(e => e.Pinned)) return "&Unpin selected\tShift+Enter";
-            if (selected.All(e => !e.Pinned)) return "&Pin selected\tShift+Enter";
-            return "Toggle &pinned state\tShift+Enter";
+            if (selected.Count == 0) return "Pin or unp&in\tShift+Enter";
+            if (selected.All(e => e.Pinned)) return "Unp&in selected\tShift+Enter";
+            if (selected.All(e => !e.Pinned)) return "P&in selected\tShift+Enter";
+            return "Toggle p&inned state\tShift+Enter";
         }
 
         private string FilePinMenuText()
         {
             var selected = SelectedFileClipboardEvents();
-            if (selected.Count == 0) return "Pin or &unpin\tShift+Enter";
-            if (selected.All(e => e.Pinned)) return "&Unpin selected\tShift+Enter";
-            if (selected.All(e => !e.Pinned)) return "&Pin selected\tShift+Enter";
-            return "Toggle &pinned state\tShift+Enter";
+            if (selected.Count == 0) return "Pin or unp&in\tShift+Enter";
+            if (selected.All(e => e.Pinned)) return "Unp&in selected\tShift+Enter";
+            if (selected.All(e => !e.Pinned)) return "P&in selected\tShift+Enter";
+            return "Toggle p&inned state\tShift+Enter";
         }
 
         private void ViewSelectedText()

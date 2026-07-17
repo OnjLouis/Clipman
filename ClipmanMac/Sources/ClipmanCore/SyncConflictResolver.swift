@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public enum SyncConflictResolver {
     public static func resolveDatabaseConflicts(databaseURL: URL, password: String) throws -> Bool {
@@ -22,7 +23,10 @@ public enum SyncConflictResolver {
     }
 
     public static func merge(into target: inout ClipDatabase, source: ClipDatabase) {
+        _ = mergeDeletedEntries(into: &target, source: source)
+        applyDeletedEntries(&target)
         for incoming in source.Entries where !incoming.Text.isEmpty {
+            if isDeleted(incoming, in: target) { continue }
             if let idIndex = target.Entries.firstIndex(where: { !$0.Id.isEmpty && $0.Id.caseInsensitiveCompare(incoming.Id) == .orderedSame }) {
                 mergeEntry(existing: &target.Entries[idIndex], incoming: incoming)
                 continue
@@ -33,11 +37,14 @@ public enum SyncConflictResolver {
             }
             target.Entries.append(incoming)
         }
+        applyDeletedEntries(&target)
     }
 
     public static func normalize(_ database: inout ClipDatabase) {
         database.Version = max(1, database.Version)
         database.UpdatedUnixMs = TimeUtil.nowUnixMs()
+        normalizeDeletedEntries(&database)
+        applyDeletedEntries(&database)
         let orderedIDs = database.Entries
             .sorted {
                 let leftOrder = $0.ManualOrder <= 0 ? Int64.max : $0.ManualOrder
@@ -61,7 +68,100 @@ public enum SyncConflictResolver {
         }
     }
 
-    static func conflictSiblings(for canonicalURL: URL) -> [URL] {
+    public static func isDeleted(_ id: String, in database: ClipDatabase) -> Bool {
+        guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return database.DeletedEntries.contains { $0.Id == id }
+    }
+
+    public static func isDeleted(_ entry: ClipEntry, in database: ClipDatabase) -> Bool {
+        if isDeleted(entry.Id, in: database) { return true }
+        guard !entry.Text.isEmpty else { return false }
+        let hash = textHash(entry.Text)
+        return database.DeletedEntries.contains { !$0.TextHash.isEmpty && $0.TextHash == hash }
+    }
+
+    @discardableResult
+    public static func mergeDeletedEntries(into target: inout ClipDatabase, source: ClipDatabase) -> Bool {
+        normalizeDeletedEntries(&target)
+        var normalizedSource = source
+        normalizeDeletedEntries(&normalizedSource)
+        guard !normalizedSource.DeletedEntries.isEmpty else { return false }
+
+        var changed = false
+        for deleted in normalizedSource.DeletedEntries where !deleted.Id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let index = target.DeletedEntries.firstIndex(where: { $0.Id == deleted.Id }) {
+                if deleted.DeletedUnixMs > target.DeletedEntries[index].DeletedUnixMs {
+                    target.DeletedEntries[index] = deleted
+                    changed = true
+                } else if target.DeletedEntries[index].TextHash.isEmpty && !deleted.TextHash.isEmpty {
+                    target.DeletedEntries[index].TextHash = deleted.TextHash
+                    changed = true
+                }
+            } else {
+                target.DeletedEntries.append(deleted)
+                changed = true
+            }
+        }
+        normalizeDeletedEntries(&target)
+        return changed
+    }
+
+    public static func addDeletedEntry(id: String, text: String, machineName: String, to database: inout ClipDatabase) {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let marker = DeletedClipEntry(Id: trimmed, TextHash: textHash(text), DeletedUnixMs: TimeUtil.nowUnixMs(), SourceMachine: machineName)
+        if let index = database.DeletedEntries.firstIndex(where: { $0.Id == trimmed }) {
+            database.DeletedEntries[index] = marker
+        } else {
+            database.DeletedEntries.append(marker)
+        }
+        normalizeDeletedEntries(&database)
+        applyDeletedEntries(&database)
+    }
+
+    public static func applyDeletedEntries(_ database: inout ClipDatabase) {
+        guard !database.DeletedEntries.isEmpty else { return }
+        let deletedIds = Set(database.DeletedEntries.map(\.Id).filter { !$0.isEmpty })
+        let deletedHashes = Set(database.DeletedEntries.map(\.TextHash).filter { !$0.isEmpty })
+        guard !deletedIds.isEmpty || !deletedHashes.isEmpty else { return }
+        database.Entries.removeAll { entry in
+            deletedIds.contains(entry.Id) || deletedHashes.contains(textHash(entry.Text))
+        }
+    }
+
+    private static func normalizeDeletedEntries(_ database: inout ClipDatabase) {
+        let cutoff = TimeUtil.nowUnixMs() - Int64(90 * 24 * 60 * 60 * 1000)
+        var byID: [String: DeletedClipEntry] = [:]
+        for marker in database.DeletedEntries {
+            let id = marker.Id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { continue }
+            guard marker.DeletedUnixMs == 0 || marker.DeletedUnixMs >= cutoff else { continue }
+            var normalized = marker
+            normalized.Id = id
+            if normalized.TextHash.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                normalized.TextHash = ""
+            }
+            if normalized.DeletedUnixMs == 0 {
+                normalized.DeletedUnixMs = TimeUtil.nowUnixMs()
+            }
+            if let existing = byID[id], existing.DeletedUnixMs >= normalized.DeletedUnixMs {
+                continue
+            }
+            byID[id] = normalized
+        }
+        database.DeletedEntries = byID.values.sorted {
+            if $0.DeletedUnixMs == $1.DeletedUnixMs { return $0.Id < $1.Id }
+            return $0.DeletedUnixMs > $1.DeletedUnixMs
+        }
+    }
+
+    public static func textHash(_ text: String) -> String {
+        guard let data = text.data(using: .utf8), !data.isEmpty else { return "" }
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func conflictSiblings(for canonicalURL: URL) -> [URL] {
         let directory = canonicalURL.deletingLastPathComponent()
         let baseName = canonicalURL.deletingPathExtension().lastPathComponent
         let fileExtension = canonicalURL.pathExtension
@@ -77,19 +177,24 @@ public enum SyncConflictResolver {
 
     private static func mergeEntry(existing: inout ClipEntry, incoming: ClipEntry) {
         let incomingLastUsed = incoming.LastUsedUnixMs
+        let incomingWins = incomingLastUsed >= existing.LastUsedUnixMs
+        let incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs
         if incomingLastUsed > existing.LastUsedUnixMs {
             existing.LastUsedUnixMs = incomingLastUsed
         }
-        if incoming.CreatedUnixMs > 0 && (existing.CreatedUnixMs == 0 || incoming.CreatedUnixMs < existing.CreatedUnixMs) {
+        if incoming.CreatedUnixMs > 0
+            && (existing.CreatedUnixMs == 0
+                || incomingCreatedWins
+                || (!incomingWins && incoming.CreatedUnixMs < existing.CreatedUnixMs)) {
             existing.CreatedUnixMs = incoming.CreatedUnixMs
         }
-        if !incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingLastUsed >= existing.LastUsedUnixMs {
+        if !incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingWins {
             existing.Name = incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if !incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingLastUsed >= existing.LastUsedUnixMs {
+        if !incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingWins {
             existing.Group = incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if !incoming.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingLastUsed >= existing.LastUsedUnixMs {
+        if !incoming.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (incomingWins || incomingCreatedWins) {
             existing.SourceMachine = incoming.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         existing.Pinned = existing.Pinned || incoming.Pinned

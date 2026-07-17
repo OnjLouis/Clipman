@@ -65,6 +65,7 @@ namespace Clipman
         public static SensitiveDataMatch FindMatch(string text, AppSettings settings)
         {
             if (string.IsNullOrEmpty(text) || !IsEnabled(settings)) return null;
+            if (IsFullHttpUrl(text)) return null;
             var enabled = new HashSet<string>(settings.SensitiveDataPresetIds, StringComparer.OrdinalIgnoreCase);
             foreach (var preset in BuiltInPresets.Where(p => enabled.Contains(p.Id)))
             {
@@ -87,10 +88,6 @@ namespace Clipman
             if (string.Equals(preset.Id, "international-phone", StringComparison.OrdinalIgnoreCase))
             {
                 return MatchesInternationalPhone(text);
-            }
-            if (string.Equals(preset.Id, "api-token", StringComparison.OrdinalIgnoreCase) && IsFullHttpUrl(text))
-            {
-                return false;
             }
 
             Regex regex;

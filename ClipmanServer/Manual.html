@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Clipman Server Manual</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      max-width: 58rem;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    code, pre {
+      font-family: Consolas, "Liberation Mono", monospace;
+    }
+    pre {
+      border: 1px solid #bbb;
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid #bbb;
+      padding: 0.4rem;
+      text-align: left;
+      vertical-align: top;
+    }
+  </style>
+</head>
+<body>
+  <h1>Clipman Server Manual</h1>
+
+  <p>Clipman Server is optional infrastructure for Clipman. It hosts encrypted or compressed <code>.clipdb</code> history databases so multiple Clipman clients can synchronize through one server instead of relying only on a cloud-synced folder or network share.</p>
+
+  <p>The server does not know the Clipman history password and does not decrypt clipboard history. Clipman clients unlock, merge, and save history locally, then upload the resulting database blob with a revision check.</p>
+
+  <h2>Contents</h2>
+  <ul>
+    <li><a href="#downloads">Downloads and Client App</a></li>
+    <li><a href="#server-program">Server Program</a></li>
+    <li><a href="#security">Security Model</a></li>
+    <li><a href="#linux-install">Recommended Linux Install</a></li>
+    <li><a href="#first-run">First Run</a></li>
+    <li><a href="#startup">Run at System Start</a></li>
+    <li><a href="#updates">Updates</a></li>
+    <li><a href="#connection-info">Connection Details File</a></li>
+    <li><a href="#settings-example">Commented Settings Example</a></li>
+    <li><a href="#linux-helper">Linux Helper Commands</a></li>
+    <li><a href="#existing-history">Starting With Existing History</a></li>
+    <li><a href="#client-settings">Client Settings</a></li>
+    <li><a href="#private-network">Private LAN or VPN</a></li>
+    <li><a href="#public">VPS or Public Internet</a></li>
+    <li><a href="#paths">Files and Paths</a></li>
+    <li><a href="#multiple-databases">Multiple Databases</a></li>
+    <li><a href="#database-maintenance">Database Maintenance</a></li>
+    <li><a href="#backups">Backups</a></li>
+    <li><a href="#logs">Logs</a></li>
+    <li><a href="#api">API Summary</a></li>
+  </ul>
+
+  <h2 id="downloads">Downloads and Client App</h2>
+  <p>The normal Clipman app download is the client. It does not include the server. Download Clipman Server separately when you want to host shared history yourself.</p>
+
+  <p>Clipman releases are published at <a href="https://github.com/OnjLouis/Clipman/releases">https://github.com/OnjLouis/Clipman/releases</a>. The main project page is <a href="https://github.com/OnjLouis/Clipman">https://github.com/OnjLouis/Clipman</a>.</p>
+
+  <h2 id="server-program">Server Program</h2>
+  <p>The Clipman Server package runs:</p>
+
+  <pre><code>clipman_server.py</code></pre>
+
+  <p>It runs on Linux, macOS, and Windows with Python 3. The same server program is used across platforms so the safety model stays consistent: random first-run port, random bearer token, password-scoped database buckets, cheap revision polling, rolling backups, private file permissions where supported, rotating logs, database-ID log redaction, and optional direct TLS.</p>
+
+  <h2 id="security">Security Model</h2>
+  <p>The server stores raw <code>.clipdb</code> blobs. If you use a Clipman history password, clipboard text remains encrypted on the server. The server still has sensitive responsibilities:</p>
+
+  <ul>
+    <li>It holds the server bearer token.</li>
+    <li>It accepts uploads from clients that know that token.</li>
+    <li>It sees connection timing, database blob sizes, and client IP addresses.</li>
+    <li>If exposed insecurely, an attacker could try to replace or delete encrypted blobs even if they cannot read them.</li>
+  </ul>
+
+  <p>Use one of these deployment patterns:</p>
+
+  <table>
+    <thead>
+      <tr><th>Scenario</th><th>Recommended transport</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Testing on one machine</td><td>Localhost only.</td></tr>
+      <tr><td>Home LAN, Tailscale, or private VPN</td><td><code>clipman://host:port</code> in Clipman clients.</td></tr>
+      <tr><td>VPS or public internet</td><td>HTTPS, either direct TLS or a trusted reverse proxy.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Do not expose plain HTTP or plain <code>clipman://</code> directly to the public internet.</p>
+
+  <h2 id="linux-install">Recommended Linux Install</h2>
+  <p>On Linux, especially a Raspberry Pi or small always-on server, run the installer from the extracted server package:</p>
+
+  <pre><code>sh Linux/install-clipman-server.sh</code></pre>
+
+  <p>The installer copies the server into a user-local application folder, creates a launcher, writes first-run settings, and creates a plain text connection details file:</p>
+
+  <pre><code>Program:            ~/.local/lib/clipman-server/clipman_server.py
+Launcher:           ~/.local/bin/clipman-server
+Settings:           ~/.config/clipman-server/clipman-server-settings.json
+Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code></pre>
+
+  <p>If user systemd is available, the installer also writes a user service file and prints the commands needed to enable it. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
+
+  <h2 id="first-run">First Run</h2>
+  <p>Windows and macOS users should normally start Clipman Server through the app wrapper, not a terminal window. The wrapper starts the shared Python server in the background, keeps it out of Alt-Tab, the Dock, and Command-Tab, redirects output to logs, and provides a tray or status-menu interface for common actions.</p>
+
+  <h3>Windows</h3>
+  <p>Run:</p>
+
+  <pre><code>Windows\Clipman Server.exe</code></pre>
+
+  <p>Clipman Server appears in the Windows notification area. It does not open a console window and does not appear as a normal Alt-Tab window. Use its notification-area menu to copy connection details, open settings, open logs, restart the server, enable or disable startup, or quit.</p>
+
+  <p>The Windows EXE contains the shared server script and extracts it into <code>%LOCALAPPDATA%\Clipman Server\Runtime</code> when it starts. Windows users do not need to keep the Linux or macOS folders after extracting the package. Keep <code>Manual.html</code> and <code>LICENSE.txt</code> somewhere accessible for reference. Python 3 must still be installed because the EXE is a background wrapper around the shared Python server, not a bundled Python runtime.</p>
+
+  <h3>macOS</h3>
+  <p>Run:</p>
+
+  <pre><code>macOS/Clipman Server.app</code></pre>
+
+  <p>Clipman Server appears in the macOS menu bar. It does not keep a Terminal window open and does not appear in the Dock or Command-Tab. Use its status-menu commands to copy connection details, open settings, open logs, restart the server, enable or disable login startup, or quit.</p>
+
+  <h3>Linux</h3>
+  <p>For Linux, especially Raspberry Pi or VPS use, prefer the installer described above. For a temporary manual run from the extracted package, use:</p>
+
+  <pre><code>python3 clipman_server.py</code></pre>
+
+  <h3>Command-Line Diagnostics</h3>
+  <p>For troubleshooting only, users who kept the full server package can run the shared Python server directly from the package root:</p>
+
+  <pre><code>py -3 clipman_server.py</code></pre>
+
+  <p>This is useful when you deliberately want console output. It is not the recommended everyday way to run the server.</p>
+
+  <p>On first run, the server creates a settings file with a random high port, a random bearer token, a private data directory, a managed log file, and a plain text connection details file beside the settings file.</p>
+
+  <p>Show the token later with:</p>
+
+  <pre><code>python3 clipman_server.py --show-token</code></pre>
+
+  <h2 id="startup">Run at System Start</h2>
+  <p>Clipman Server is intended to run quietly in the background. Use the platform startup method below instead of leaving a terminal open.</p>
+
+  <h3>Windows Startup</h3>
+  <ol>
+    <li>Start <code>Windows\Clipman Server.exe</code>.</li>
+    <li>Open the Clipman Server notification-area menu.</li>
+    <li>Choose <strong>Run at Windows startup</strong>.</li>
+  </ol>
+
+  <p>The Windows wrapper writes a per-user startup entry and starts the Python server hidden. If you later move the server folder, turn startup off and back on so the startup entry points to the new location.</p>
+
+  <h3>macOS Login Startup</h3>
+  <ol>
+    <li>Start <code>macOS/Clipman Server.app</code>.</li>
+    <li>Open the Clipman Server status menu.</li>
+    <li>Choose <strong>Run at Login</strong>.</li>
+  </ol>
+
+  <p>The macOS wrapper creates a per-user LaunchAgent that starts the menu-bar server app at login. If you later move the app, turn Run at Login off and back on so the LaunchAgent points to the new location.</p>
+
+  <h3>Linux Startup</h3>
+  <p>The Linux installer writes a user systemd service when user systemd is available. Enable it with:</p>
+
+  <pre><code>systemctl --user enable --now clipman-server.service</code></pre>
+
+  <p>After that, use <code>clipmanserver status</code>, <code>clipmanserver restart</code>, and <code>clipmanserver stop</code> for everyday service control.</p>
+
+  <h2 id="updates">Updates</h2>
+  <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
+
+  <p>On Windows, use the Clipman Server notification-area menu and choose <strong>Check for updates</strong>. On macOS, use the Clipman Server menu-bar item and choose <strong>Check for Updates</strong>. If a newer server ZIP is available, the wrapper downloads the ZIP, closes the wrapper, replaces the platform-specific server app, and starts the updated wrapper again.</p>
+
+  <p>The Windows and macOS wrappers also support these command-line switches for scripts and diagnostics:</p>
+
+  <table>
+    <thead>
+      <tr><th>Switch</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>--version</code></td><td>Show the server wrapper version.</td></tr>
+      <tr><td><code>--check-updates</code></td><td>Check GitHub releases for a newer Clipman Server package.</td></tr>
+      <tr><td><code>--install-update</code></td><td>Check for a newer Clipman Server package and install it if one is available.</td></tr>
+      <tr><td><code>--install-update --silent</code></td><td>Install a newer server package without prompting when possible.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Linux installs should update by replacing the installed <code>clipman_server.py</code> from a newer server package, then restarting the user service. Keep settings, databases, logs, and backups outside the extracted release folder so updating the server program does not touch stored history.</p>
+
+  <h2 id="connection-info">Connection Details File</h2>
+  <p>The connection details file exists so users do not have to open or edit the JSON settings file just to configure clients. It contains:</p>
+
+  <pre><code>Server address:
+Port:
+Token:</code></pre>
+
+  <p>Keep this file private. After every Clipman client has been configured, delete it or move the details to a password manager. If it is deleted, the server will not recreate it on every launch. Recreate it intentionally with:</p>
+
+  <pre><code>clipman-server --write-connection-info</code></pre>
+
+  <p>Without the installer, run:</p>
+
+  <pre><code>python3 clipman_server.py --write-connection-info</code></pre>
+
+  <h2 id="settings-example">Commented Settings Example</h2>
+  <p>The server package includes a commented settings example:</p>
+
+  <pre><code>clipman-server-settings.example.jsonc</code></pre>
+
+  <p>This file lists every server setting, explains what it does, and shows common values for private networks, VPNs, direct HTTPS, logging, and backups. It is meant to be read beside the manual when the real settings file feels too terse.</p>
+
+  <p>The live settings file is ordinary JSON and does not support comments. Do not paste the whole commented example over the live settings file. Instead, copy the specific setting names and values you want into <code>clipman-server-settings.json</code>, then restart Clipman Server.</p>
+
+  <p>If you run Clipman Server through the Windows or macOS wrapper, use the wrapper menu to open the settings folder. On Linux installs, the settings file normally lives at:</p>
+
+  <pre><code>~/.config/clipman-server/clipman-server-settings.json</code></pre>
+
+  <h2 id="linux-helper">Linux Helper Commands</h2>
+  <p>The Linux installer creates two launchers in <code>~/.local/bin</code>:</p>
+
+  <table>
+    <thead>
+      <tr><th>Command</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>clipman-server</code></td><td>Runs the server program directly and accepts every advanced command-line switch.</td></tr>
+      <tr><td><code>clipmanserver</code></td><td>Friendly helper for common admin tasks.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Helper commands:</p>
+
+  <pre><code>clipmanserver start
+clipmanserver stop
+clipmanserver restart
+clipmanserver status
+clipmanserver list
+clipmanserver list-json
+clipmanserver delete &lt;database-id&gt;
+clipmanserver force-delete &lt;database-id&gt;
+clipmanserver console
+clipmanserver token
+clipmanserver connection</code></pre>
+
+  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully.</p>
+
+  <h2 id="existing-history">Starting With Existing History</h2>
+  <p>Do not manually copy an existing <code>.clipdb</code> into the server's database folders. Server database buckets are derived by Clipman clients from the server token and the Clipman history password. The server deliberately does not know that history password, so it cannot safely decide which bucket an imported file belongs in.</p>
+
+  <p>To start a new server from an existing history, use the Clipman client that already has the history you want:</p>
+
+  <ol>
+    <li>Install and start Clipman Server.</li>
+    <li>Copy the server address and token from <code>clipman-server-connection.txt</code>.</li>
+    <li>On the Clipman client that already has the desired history, open Preferences.</li>
+    <li>Set Storage type to <strong>Clipman Server</strong>, enter the server address and token, and keep the same Clipman history password.</li>
+    <li>Let that client connect first. It will upload or merge the existing history into the correct password-scoped server bucket.</li>
+    <li>Then connect the other clients using the same server token and history password.</li>
+  </ol>
+
+  <h2 id="client-settings">Client Settings</h2>
+  <p>In Clipman Preferences:</p>
+
+  <ol>
+    <li>Set Storage type to <strong>Clipman Server</strong>.</li>
+    <li>Enter the server host.</li>
+    <li>Enter the server token.</li>
+    <li>Keep the Clipman data folder local to that machine. It is used for settings and cache.</li>
+  </ol>
+
+  <p>The server path is an additional storage path, not a replacement for local cache and settings.</p>
+
+  <h2 id="private-network">Private LAN or VPN</h2>
+  <p>For a private network or Tailscale-only server, bind to the intended private address or all interfaces and deliberately allow insecure remote HTTP:</p>
+
+  <pre><code>python3 clipman_server.py --host 0.0.0.0 --allow-insecure-remote</code></pre>
+
+  <p>Then configure Clipman clients with:</p>
+
+  <pre><code>clipman://server-name-or-tailscale-ip:port</code></pre>
+
+  <p>Only use this when the port is reachable only from trusted private networks or VPN clients.</p>
+
+  <h2 id="public">VPS or Public Internet</h2>
+  <p>For a VPS or any internet-facing deployment, use HTTPS.</p>
+
+  <p>Direct TLS example:</p>
+
+  <pre><code>python3 clipman_server.py \
+  --host 0.0.0.0 \
+  --advertise-host example.com \
+  --cert-file /etc/letsencrypt/live/example.com/fullchain.pem \
+  --key-file /etc/letsencrypt/live/example.com/privkey.pem</code></pre>
+
+  <p><code>--host</code> controls where the server listens. <code>--advertise-host</code> controls what host name is written to <code>clipman-server-connection.txt</code>. Use the certificate's DNS name as the advertised host when the server binds to a private IP address.</p>
+
+  <p>You can also run the server on localhost and put it behind a reverse proxy such as nginx, Caddy, or Apache. In that case, the public client address should still be HTTPS.</p>
+
+  <h2 id="paths">Files and Paths</h2>
+  <p>When run directly from the extracted server package, the settings file and connection details file stay beside that package:</p>
+
+  <pre><code>Settings file:      ./Settings/clipman-server-settings.json
+Connection details: ./Settings/clipman-server-connection.txt</code></pre>
+
+  <p>Default data and log locations depend on the operating system:</p>
+
+  <h3>Linux</h3>
+
+  <pre><code>Databases: ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/clipman-history.clipdb
+Backups:   ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/ServerBackups/
+Logs:      ~/.local/state/clipman-server/logs/clipman-server.log</code></pre>
+
+  <h3>Windows</h3>
+
+  <pre><code>Databases: %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\clipman-history.clipdb
+Backups:   %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\ServerBackups\
+Logs:      %LOCALAPPDATA%\Clipman Server\logs\clipman-server.log</code></pre>
+
+  <h3>macOS</h3>
+
+  <pre><code>Databases: ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/clipman-history.clipdb
+Backups:   ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/ServerBackups/
+Logs:      ~/Library/Logs/Clipman Server/logs/clipman-server.log</code></pre>
+
+  <p>For a system service, use admin-owned paths such as:</p>
+
+  <pre><code>/etc/clipman-server/clipman-server-settings.json
+/var/lib/clipman-server
+/var/log/clipman-server/clipman-server.log</code></pre>
+
+  <h2 id="multiple-databases">Multiple Databases</h2>
+  <p>The server can serve multiple separate Clipman histories. Clients derive a server-side database ID from the server token and the Clipman history password.</p>
+
+  <p>Clients using the same token and same history password use the same database bucket. Clients using a wrong or different history password use a different bucket and cannot overwrite the existing history.</p>
+
+  <h2 id="database-maintenance">Database Maintenance</h2>
+  <p>The server records small metadata beside each database bucket, including when the bucket was first seen, last seen, and last written. This helps you spot old wrong-password buckets or test databases without opening the clipboard database itself. Last-seen metadata is throttled so routine polling does not write to disk every few seconds.</p>
+
+  <p>List active database buckets:</p>
+
+  <pre><code>clipmanserver list</code></pre>
+
+  <p>To show full IDs for delete or scripts:</p>
+
+  <pre><code>clipmanserver list-json</code></pre>
+
+  <p>Or, without the Linux helper:</p>
+
+  <pre><code>python3 clipman_server.py --list-databases
+python3 clipman_server.py --list-databases-json</code></pre>
+
+  <p>The server cannot reliably know that a database is permanently abandoned. A laptop might be turned off, a user might be travelling, or a client might only connect occasionally. For that reason, Clipman Server never silently deletes database buckets.</p>
+
+  <p>To review stale buckets without changing anything:</p>
+
+  <pre><code>clipman-server --prune-databases-days 30</code></pre>
+
+  <p>To move those stale buckets out of the active database folder:</p>
+
+  <pre><code>clipman-server --prune-databases-days 30 --confirm</code></pre>
+
+  <p>To move one known bucket by ID on Linux:</p>
+
+  <pre><code>clipmanserver delete &lt;database-id&gt;</code></pre>
+
+  <p>This command refuses to move a bucket touched in the last 24 hours. That protects a real active database from being removed by mistake. If you have checked the full ID and are certain the recent bucket is disposable, use the deliberate override:</p>
+
+  <pre><code>clipmanserver force-delete &lt;database-id&gt;</code></pre>
+
+  <p>Without the Linux helper, use:</p>
+
+  <pre><code>clipman-server --delete-database &lt;database-id&gt; --confirm</code></pre>
+
+  <p>To bypass the 24-hour guard without the helper, add <code>--force-recent</code>.</p>
+
+  <p>These commands move database folders into <code>DeletedDatabases</code>. They do not shred or permanently erase them. Keep or delete that folder according to your own backup policy after you are certain the data is no longer needed.</p>
+
+  <h2 id="backups">Backups</h2>
+  <p>Backups are raw <code>.clipdb</code> copies. The server does not decrypt them.</p>
+
+  <pre><code>BackupIntervalMinutes: 60
+BackupRetentionHours: 24
+MaxBackups: 48
+CreateBackupBeforeEveryUpload: true</code></pre>
+
+  <p>Backups live under each database bucket:</p>
+
+  <pre><code>Databases/&lt;database-id&gt;/ServerBackups/</code></pre>
+
+  <p>When an upload is byte-for-byte identical to the database already on the server, the server returns the current revision without rewriting the file or creating another backup. This avoids unnecessary disk writes on small hosts such as Raspberry Pi systems.</p>
+
+  <h2 id="logs">Logs</h2>
+  <p>The server writes rotating logs. Database IDs are redacted from request logs as:</p>
+
+  <pre><code>/api/v1/database/&lt;database-id&gt;</code></pre>
+
+  <p>Routine successful polling requests are suppressed so a busy set of clients does not create excessive log noise.</p>
+
+  <p>The health endpoint includes lightweight in-memory runtime counters such as uptime, request count, unique clients, uploaded bytes, downloaded bytes, and conflict count. These counters reset when the server restarts. They are kept in RAM so the server does not constantly write statistics to disk on small hosts.</p>
+
+  <p>When the server shuts down cleanly, it writes a one-line runtime summary to the log. This is useful for checking how much traffic the server handled between runs without creating another data file.</p>
+
+  <h2 id="api">API Summary</h2>
+  <p>Unauthenticated:</p>
+
+  <pre><code>GET /api/v1/health</code></pre>
+
+  <p>Authenticated with <code>Authorization: Bearer &lt;server-token&gt;</code>:</p>
+
+  <pre><code>HEAD /api/v1/database/&lt;database-id&gt;
+GET  /api/v1/database/&lt;database-id&gt;
+PUT  /api/v1/database/&lt;database-id&gt;</code></pre>
+
+  <p>Downloads return <code>X-Clipman-Revision</code> and <code>ETag</code>. Uploads may include <code>If-Match</code>. If another client wrote first, the server returns HTTP 409 so the client can download, merge, and retry instead of overwriting newer history.</p>
+  <p>Clients normally poll with <code>HEAD</code>. If polling fails repeatedly, clients back off and retry later while continuing to use their local cache.</p>
+</body>
+</html>

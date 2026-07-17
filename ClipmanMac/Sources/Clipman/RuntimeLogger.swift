@@ -21,6 +21,7 @@ enum RuntimeLogger {
         lines.append("App: \(Bundle.main.bundlePath)")
         lines.append("Version: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")")
         lines.append("Build: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown")")
+        lines.append("Build stamp: \(Bundle.main.object(forInfoDictionaryKey: "ClipmanBuildStampUtcMs") as? String ?? "unknown")")
         lines.append("OS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
         lines.append("Machine: \(Host.current().localizedName ?? ProcessInfo.processInfo.hostName)")
         if let error {

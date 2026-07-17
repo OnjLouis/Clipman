@@ -16,6 +16,7 @@ namespace Clipman
         private const int ToggleHotkeyId = 1002;
         private const int ToggleHotkeyAlternateId = 1004;
         private const int QuickCopyHotkeyBaseId = 2000;
+        private const int SecretHotkeyBaseId = 3000;
 
         private readonly string appDirectory;
         private readonly SettingsStore settingsStore;
@@ -40,14 +41,18 @@ namespace Clipman
         private AppSettings settings;
         private ClipStore store;
         private FileClipboardEventStore fileEventStore;
+        private SecretStore secretStore;
         private HistoryForm historyForm;
         private PreferencesForm preferencesForm;
+        private SecretsForm secretsForm;
         private int ignoredClipboardChangeCount;
         private bool showHotkeyRegistered;
         private bool toggleHotkeyRegistered;
         private bool toggleAlternateHotkeyRegistered;
         private readonly Dictionary<int, string> quickCopyHotkeyEntryIds = new Dictionary<int, string>();
+        private readonly Dictionary<int, string> secretHotkeyEntryIds = new Dictionary<int, string>();
         private int quickCopyHotkeysRegistered;
+        private int secretHotkeysRegistered;
         private string lastClipboardPrivacySignal = "None";
         private string lastHandledCloseRequestId = string.Empty;
         private string lastAutoCopiedRemoteEntryId = string.Empty;
@@ -61,13 +66,16 @@ namespace Clipman
             settings = settingsStore.Load();
             ResolveDatabaseLocation();
             ResolveDatabasePassword();
+            SeedServerCacheFromConfiguredDatabase();
             SharedUpdateStateStore.PublishCurrentBuild(settingsStore.SettingsDirectory);
             sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
-            store = new ClipStore(settings.DatabasePath, CurrentDatabasePassword);
+            store = new ClipStore(EffectiveTextHistoryDatabasePath(), CurrentDatabasePassword);
             store.Changed += StoreChanged;
+            ConfigureTextHistoryServerStorage();
             ResetRemoteAutoCopyBaseline();
             fileEventStore = new FileClipboardEventStore(settingsStore.DefaultFileHistoryDatabasePath(), CurrentDatabasePassword);
             fileEventStore.Changed += FileEventStoreChanged;
+            secretStore = new SecretStore(DefaultSecretsDatabasePath(), CurrentDatabasePassword);
 
             invoker = new Control();
             invoker.CreateControl();
@@ -117,7 +125,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, BuildDiagnosticsText);
                 created = true;
             }
 
@@ -271,7 +279,11 @@ namespace Clipman
 
         private void ApplyPreferences(AppSettings updated)
         {
-            var databaseChanged = !string.Equals(settings.DatabasePath, updated.DatabasePath, StringComparison.OrdinalIgnoreCase);
+            var databaseChanged =
+                !string.Equals(settings.DatabasePath, updated.DatabasePath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(settings.StorageMode, updated.StorageMode, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(settings.ServerUrl, updated.ServerUrl, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(settings.ServerToken, updated.ServerToken, StringComparison.Ordinal);
             var activeChanged = settings.Active != updated.Active;
             var sendToChanged = settings.SendToEnabled != updated.SendToEnabled;
             var encryptionChanged =
@@ -299,6 +311,9 @@ namespace Clipman
             settings.Active = updated.Active;
             settings.DatabasePath = updated.DatabasePath;
             settings.UseDefaultDatabasePath = updated.UseDefaultDatabasePath;
+            settings.StorageMode = updated.StorageMode;
+            settings.ServerUrl = updated.ServerUrl;
+            settings.ServerToken = updated.ServerToken;
             settings.MaxHistoryEntries = updated.MaxHistoryEntries;
             settings.MaxHistoryDays = updated.MaxHistoryDays;
             settings.IgnoredProcesses = updated.IgnoredProcesses;
@@ -354,6 +369,7 @@ namespace Clipman
                 RestartSharedUpdateWatchers();
                 sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
                 ReopenFileHistoryStore();
+                ReopenSecretStore();
             }
             if (sendToChanged)
             {
@@ -369,17 +385,27 @@ namespace Clipman
             if (databaseChanged)
             {
                 ResolveDatabasePassword();
-                store.SetDatabasePath(settings.DatabasePath, CurrentDatabasePassword);
+                ResolveDatabaseLocation();
+                SeedServerCacheFromConfiguredDatabase();
+                store.SetDatabasePath(EffectiveTextHistoryDatabasePath(), CurrentDatabasePassword);
+                ConfigureTextHistoryServerStorage();
                 ResetRemoteAutoCopyBaseline();
+                ReopenSecretStore();
             }
             else if (encryptionChanged)
             {
                 ResolveDatabasePassword();
                 store.ChangeDatabasePassword();
+                ConfigureTextHistoryServerStorage();
                 if (!settingsDirectoryChanged)
                 {
                     fileEventStore.ChangeDatabasePassword();
                 }
+                if (secretStore != null)
+                {
+                    secretStore.ChangeDatabasePassword();
+                }
+                ReopenSecretStore();
             }
             RegisterHotkeys();
             if (startupChanged)
@@ -403,6 +429,59 @@ namespace Clipman
             {
                 historyForm.RefreshTabsAndReload();
             }
+        }
+
+        private void ShowSecrets()
+        {
+            var password = CurrentDatabasePassword();
+            if (string.IsNullOrEmpty(password))
+            {
+                MessageBox.Show(
+                    "Secrets require a history password. Open Preferences, set a history password, and enable Remember history password on this computer if you want secrets available after restart.",
+                    "Clipman Secrets",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+            if (!ConfirmSecretsPassword(password))
+            {
+                return;
+            }
+
+            if (secretStore == null)
+            {
+                secretStore = new SecretStore(DefaultSecretsDatabasePath(), CurrentDatabasePassword);
+            }
+
+            if (secretsForm == null || secretsForm.IsDisposed)
+            {
+                secretsForm = new SecretsForm(secretStore, RegisterHotkeys, QuickPasteSecret);
+                secretsForm.FormClosed += (s, e) => secretsForm = null;
+            }
+            if (historyForm != null && !historyForm.IsDisposed && historyForm.Visible)
+            {
+                secretsForm.ShowDialog(historyForm);
+            }
+            else
+            {
+                secretsForm.ShowDialog();
+            }
+            secretsForm = null;
+        }
+
+        private bool ConfirmSecretsPassword(string currentPassword)
+        {
+            var entered = PasswordPromptForm.Ask(
+                "Unlock Clipman Secrets",
+                "Enter the current history password to open Secrets.");
+            if (entered.Length == 0) return false;
+            if (string.Equals(entered, currentPassword, StringComparison.Ordinal)) return true;
+            MessageBox.Show(
+                "The history password did not match. Secrets were not opened.",
+                "Clipman Secrets",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
         }
 
         public void CopyEntryToClipboard(ClipEntry entry)
@@ -448,6 +527,10 @@ namespace Clipman
             else if (quickCopyHotkeyEntryIds.ContainsKey(id))
             {
                 QuickPasteEntry(quickCopyHotkeyEntryIds[id]);
+            }
+            else if (secretHotkeyEntryIds.ContainsKey(id))
+            {
+                QuickPasteSecret(secretStore.GetEntryById(secretHotkeyEntryIds[id]));
             }
         }
 
@@ -753,6 +836,7 @@ namespace Clipman
 
             menu.Items.Add("&Show or hide history\t" + settings.ShowHistoryHotkey, null, (s, e) => ToggleHistoryWindow());
             menu.Items.Add((settings.Active ? "Turn &off" : "Turn &on") + "\t" + settings.ToggleActiveHotkey, null, (s, e) => ToggleActive());
+            menu.Items.Add("&Secrets...\tCtrl+Shift+E", null, (s, e) => ShowSecrets());
             menu.Items.Add("&Preferences...", null, (s, e) => ShowPreferencesFromTray());
             menu.Items.Add("Open &settings folder", null, (s, e) => OpenSettingsFolder());
             menu.Items.Add("-");
@@ -793,11 +877,17 @@ namespace Clipman
             {
                 NativeMethods.UnregisterHotKey(messageWindow.Handle, hotkeyId);
             }
+            foreach (var hotkeyId in secretHotkeyEntryIds.Keys.ToList())
+            {
+                NativeMethods.UnregisterHotKey(messageWindow.Handle, hotkeyId);
+            }
             quickCopyHotkeyEntryIds.Clear();
+            secretHotkeyEntryIds.Clear();
             showHotkeyRegistered = false;
             toggleHotkeyRegistered = false;
             toggleAlternateHotkeyRegistered = false;
             quickCopyHotkeysRegistered = 0;
+            secretHotkeysRegistered = 0;
             PruneInvalidQuickPasteBindings();
 
             HotkeyDefinition show;
@@ -839,6 +929,30 @@ namespace Clipman
                     quickCopyHotkeysRegistered++;
                 }
                 quickCopyId++;
+            }
+
+            var secretId = SecretHotkeyBaseId;
+            foreach (var secret in GetSecretEntriesSafe()
+                .Where(s => s != null && !string.IsNullOrWhiteSpace(s.Id) && !string.IsNullOrWhiteSpace(s.Hotkey))
+                .OrderBy(s => s.Id, StringComparer.OrdinalIgnoreCase))
+            {
+                var normalizedHotkey = secret.Hotkey.Trim();
+                if (!usedHotkeys.Add(normalizedHotkey)) continue;
+
+                HotkeyDefinition secretHotkey;
+                if (!HotkeyDefinition.TryParse(normalizedHotkey, out secretHotkey)) continue;
+
+                while (secretHotkeyEntryIds.ContainsKey(secretId))
+                {
+                    secretId++;
+                }
+
+                if (NativeMethods.RegisterHotKey(messageWindow.Handle, secretId, secretHotkey.Modifiers, secretHotkey.Key))
+                {
+                    secretHotkeyEntryIds[secretId] = secret.Id.Trim();
+                    secretHotkeysRegistered++;
+                }
+                secretId++;
             }
         }
 
@@ -985,9 +1099,16 @@ namespace Clipman
             return normalized.Substring(0, 1).ToUpperInvariant() + (normalized.Length > 1 ? normalized.Substring(1) : string.Empty);
         }
 
+        private static string FormatDiagnosticTime(long unixMs)
+        {
+            if (unixMs <= 0) return "Never";
+            return TimeUtil.FromUnixMs(unixMs).ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
         private string BuildDiagnosticsText()
         {
             var sharedState = SharedUpdateStateStore.Load(settingsStore.SettingsDirectory);
+            var serverStatus = store.GetServerSyncStatus();
             var ignored = settings.IgnoredProcesses == null || settings.IgnoredProcesses.Count == 0
                 ? "None"
                 : string.Join(", ", settings.IgnoredProcesses);
@@ -995,6 +1116,16 @@ namespace Clipman
                 "Clipman diagnostics\r\n\r\n" +
                 "Active: " + settings.Active + "\r\n" +
                 "Sounds enabled: " + settings.SoundsEnabled + "\r\n" +
+                "Storage mode: " + settings.StorageMode + "\r\n" +
+                "Server host: " + (string.IsNullOrWhiteSpace(settings.ServerUrl) ? "not set" : ServerSettingsSanitizer.CleanTransportUrl(settings.ServerUrl)) + "\r\n" +
+                "Server sync enabled: " + serverStatus.Enabled + "\r\n" +
+                "Server sync configured: " + serverStatus.Configured + "\r\n" +
+                "Server sync revision: " + (string.IsNullOrWhiteSpace(serverStatus.Revision) ? "None" : serverStatus.Revision) + "\r\n" +
+                "Server sync last poll: " + FormatDiagnosticTime(serverStatus.LastPollUnixMs) + "\r\n" +
+                "Server sync last success: " + FormatDiagnosticTime(serverStatus.LastSuccessUnixMs) + "\r\n" +
+                "Server sync last upload: " + FormatDiagnosticTime(serverStatus.LastUploadUnixMs) + "\r\n" +
+                "Server sync next retry: " + FormatDiagnosticTime(serverStatus.NextPollUnixMs) + "\r\n" +
+                "Server sync consecutive failures: " + serverStatus.ConsecutiveFailures + "\r\n" +
                 "Database path: " + settings.DatabasePath + "\r\n" +
                 "Database path type: " + (settings.UseDefaultDatabasePath ? "Default beside Clipman" : "Explicit") + "\r\n" +
                 "Database storage status: " + (string.IsNullOrWhiteSpace(store.LastStorageError) ? "OK" : "Unavailable: " + store.LastStorageError) + "\r\n" +
@@ -1008,6 +1139,7 @@ namespace Clipman
                 "Toggle hotkey: " + settings.ToggleActiveHotkey + " (" + (toggleHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle alternate UK key: " + (toggleAlternateHotkeyRegistered ? "registered" : "not registered or not needed") + "\r\n" +
                 "Quick Paste bindings: " + ((settings.QuickCopyHotkeys == null ? 0 : settings.QuickCopyHotkeys.Count) + " configured, " + quickCopyHotkeysRegistered + " registered") + "\r\n" +
+                "Secrets: " + (GetSecretEntriesSafe().Count + " configured, " + secretHotkeysRegistered + " hotkeys registered") + "\r\n" +
                 "Auto-copy latest remote text: " + (settings.AutoCopyLatestRemoteText ? "on" : "off") + "\r\n" +
                 "Build stamp: " + BuildInfo.BuildStampUtcMs + "\r\n" +
                 "Executable hash: " + SharedUpdateStateStore.CurrentExeHash() + "\r\n" +
@@ -1187,6 +1319,52 @@ namespace Clipman
             var binding = settings.QuickCopyHotkeys.FirstOrDefault(b =>
                 b != null && string.Equals(b.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
             return binding == null ? QuickPasteModes.PasteRestore : QuickPasteModes.Normalize(binding.Mode);
+        }
+
+        private void QuickPasteSecret(SecretEntry secret)
+        {
+            if (secret == null || string.IsNullOrEmpty(secret.Value))
+            {
+                sounds.Skip(settings.SoundsEnabled);
+                return;
+            }
+
+            try
+            {
+                IDataObject previousClipboard = null;
+                try
+                {
+                    previousClipboard = SnapshotClipboardData();
+                }
+                catch
+                {
+                    previousClipboard = null;
+                }
+
+                IgnoreClipboardChanges(2);
+                Clipboard.SetText(secret.Value, TextDataFormat.UnicodeText);
+                sounds.Copy(settings.SoundsEnabled);
+                BeginPasteThenRestore(previousClipboard);
+            }
+            catch
+            {
+                ClearIgnoredClipboardChanges();
+                sounds.Skip(settings.SoundsEnabled);
+            }
+        }
+
+        private List<SecretEntry> GetSecretEntriesSafe()
+        {
+            if (secretStore == null) return new List<SecretEntry>();
+            try
+            {
+                return secretStore.GetEntries();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Could not read secrets store: " + ex);
+                return new List<SecretEntry>();
+            }
         }
 
         private void BeginPasteOnly()
@@ -1739,6 +1917,7 @@ namespace Clipman
         {
             var databaseIsEncrypted = false;
             var fileHistoryIsEncrypted = false;
+            var secretsAreEncrypted = false;
             try
             {
                 databaseIsEncrypted = ClipDatabaseFile.IsEncryptedFile(settings.DatabasePath);
@@ -1753,8 +1932,15 @@ namespace Clipman
             catch
             {
             }
+            try
+            {
+                secretsAreEncrypted = ClipDatabaseFile.IsEncryptedFile(DefaultSecretsDatabasePath());
+            }
+            catch
+            {
+            }
 
-            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !settings.DatabaseEncryptionEnabled && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !secretsAreEncrypted && !settings.DatabaseEncryptionEnabled && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 databasePassword = string.Empty;
                 settings.DatabaseEncryptionEnabled = false;
@@ -1792,7 +1978,7 @@ namespace Clipman
                 return;
             }
 
-            if (!databaseIsEncrypted && !fileHistoryIsEncrypted)
+            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !secretsAreEncrypted)
             {
                 settings.DatabaseEncryptionEnabled = false;
                 settings.RememberDatabasePassword = false;
@@ -1823,6 +2009,17 @@ namespace Clipman
 
         private void ResolveDatabaseLocation()
         {
+            if (IsServerStorageEnabled())
+            {
+                if (settings.UseDefaultDatabasePath || string.IsNullOrWhiteSpace(settings.DatabasePath))
+                {
+                    settings.UseDefaultDatabasePath = true;
+                    settings.DatabasePath = settingsStore.DefaultDatabasePath();
+                    settingsStore.Save(settings);
+                }
+                return;
+            }
+
             if (settings.UseDefaultDatabasePath || string.IsNullOrWhiteSpace(settings.DatabasePath))
             {
                 settings.UseDefaultDatabasePath = true;
@@ -1889,9 +2086,78 @@ namespace Clipman
             settingsStore.Save(settings);
         }
 
+        private string EffectiveTextHistoryDatabasePath()
+        {
+            if (!IsServerStorageEnabled())
+            {
+                return settings.DatabasePath;
+            }
+
+            var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                root = Path.GetTempPath();
+            }
+            return Path.Combine(root, "Clipman", "ServerCache", Environment.MachineName, "clipman-history.clipdb");
+        }
+
+        private void SeedServerCacheFromConfiguredDatabase()
+        {
+            if (!IsServerStorageEnabled()) return;
+            var cachePath = EffectiveTextHistoryDatabasePath();
+            if (File.Exists(cachePath)) return;
+            if (string.IsNullOrWhiteSpace(settings.DatabasePath)) return;
+            if (!File.Exists(settings.DatabasePath)) return;
+            if (string.Equals(Path.GetFullPath(cachePath), Path.GetFullPath(settings.DatabasePath), StringComparison.OrdinalIgnoreCase)) return;
+
+            try
+            {
+                var dir = Path.GetDirectoryName(cachePath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                File.Copy(settings.DatabasePath, cachePath, false);
+            }
+            catch
+            {
+            }
+        }
+
         private string CurrentDatabasePassword()
         {
             return databasePassword ?? string.Empty;
+        }
+
+        private string DefaultSecretsDatabasePath()
+        {
+            return settingsStore.DefaultSecretsDatabasePath();
+        }
+
+        private void ReopenSecretStore()
+        {
+            try
+            {
+                secretStore = new SecretStore(DefaultSecretsDatabasePath(), CurrentDatabasePassword);
+                if (secretsForm != null && !secretsForm.IsDisposed)
+                {
+                    secretsForm.Close();
+                    secretsForm = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Could not reopen secrets store: " + ex);
+                secretStore = null;
+            }
+        }
+
+        private bool IsServerStorageEnabled()
+        {
+            return string.Equals(settings.StorageMode, "Server", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ConfigureTextHistoryServerStorage()
+        {
+            if (store == null) return;
+            store.ConfigureServerStorage(IsServerStorageEnabled(), settings.ServerUrl, settings.ServerToken);
         }
 
         private IWin32Window UpdateWindowOwner()

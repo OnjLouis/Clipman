@@ -84,5 +84,6 @@ namespace Clipman
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, UIntPtr dwExtraInfo);
+
     }
 }

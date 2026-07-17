@@ -28,6 +28,9 @@ namespace Clipman
         private readonly CheckBox installUpdatesSilently;
         private readonly TabControl preferencesTabs;
         private readonly TextBox databasePath;
+        private readonly ComboBox storageMode;
+        private readonly TextBox serverUrl;
+        private readonly TextBox serverToken;
         private readonly TextBox databasePassword;
         private readonly TextBox databasePasswordConfirm;
         private readonly CheckBox showDatabasePassword;
@@ -137,6 +140,15 @@ namespace Clipman
 
             databasePath = NewTextBox(DisplayDatabaseFolder(settings.DatabasePath));
             databasePath.Leave += (s, e) => ApplyNow();
+            storageMode = NewComboBox("History storage type", new[] { "Local or shared folder", "Clipman Server" }, DisplayStorageMode(settings.StorageMode));
+            serverUrl = NewTextBox(settings.ServerUrl);
+            serverUrl.AccessibleName = "Clipman Server host";
+            serverUrl.Leave += (s, e) => ApplyNow();
+            serverToken = NewTextBox(settings.ServerToken);
+            serverToken.UseSystemPasswordChar = true;
+            serverToken.AccessibleName = "Clipman Server token";
+            serverToken.AccessibleDescription = "Server authentication token. The token is hidden on screen and saved with Windows user protection.";
+            serverToken.Leave += (s, e) => ApplyNow();
             databasePassword = new TextBox
             {
                 Width = 260,
@@ -168,9 +180,9 @@ namespace Clipman
             browse.Click += (s, e) => BrowseDatabase();
             var generatePassword = new Button { Text = "&Generate password", Width = 130 };
             generatePassword.Click += (s, e) => GenerateDatabasePassword();
-            var clearPassword = new Button { Text = "&Use no password", Width = 130 };
+            var clearPassword = new Button { Text = "Use &no password", Width = 130 };
             clearPassword.Click += (s, e) => UseNoDatabasePassword();
-            var addRunningApp = new Button { Text = "Add &running app...", Width = 125 };
+            var addRunningApp = new Button { Text = "Add runn&ing app...", Width = 125 };
             addRunningApp.Click += (s, e) => AddRunningApplication();
 
             var dbPanel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
@@ -189,8 +201,12 @@ namespace Clipman
             ignoredPanel.Controls.Add(addRunningApp);
 
             var storageLayout = NewRows();
+            AddRow(storageLayout, "Storage &type:", storageMode);
             AddRow(storageLayout, "&Data folder:", dbPanel);
-            AddFullRow(storageLayout, NewNote("Choose the folder that contains Clipman's settings and history files. Clipman uses clipman-history.clipdb inside this folder, plus machine-specific settings and file-history files."));
+            AddFullRow(storageLayout, NewNote("Choose the folder that contains Clipman's settings, sounds, logs, file history, and local text-history cache. In server mode, Clipman syncs that text-history cache with a Clipman Server."));
+            AddRow(storageLayout, "Server &host:", serverUrl);
+            AddRow(storageLayout, "Server t&oken:", serverToken);
+            AddFullRow(storageLayout, NewNote("Enter a host and port such as home-server:49152. Clipman will infer the local server protocol. Server mode stores the raw clipman-history.clipdb on a Clipman Server. The server never knows the history password; encryption still happens on this computer."));
             AddRow(storageLayout, "History &password:", passwordPanel);
             AddRow(storageLayout, "&Confirm password:", passwordConfirmPanel);
             AddFullRow(storageLayout, rememberDatabasePassword);
@@ -289,6 +305,7 @@ namespace Clipman
         {
             showHotkey.TextChanged += (s, e) => ApplyNow();
             toggleHotkey.TextChanged += (s, e) => ApplyNow();
+            storageMode.SelectedIndexChanged += (s, e) => ApplyNow();
             removeDuplicates.CheckedChanged += (s, e) =>
             {
                 if (!loading)
@@ -327,6 +344,7 @@ namespace Clipman
             autoRemoveUnavailableFileHistoryEvents.CheckedChanged += (s, e) => ApplyNow();
             diagnosticsFileHistoryLimit.ValueChanged += (s, e) => ApplyNow();
             runAtStartup.CheckedChanged += (s, e) => ApplyNow();
+            captureClipboardOnStartup.CheckedChanged += (s, e) => ApplyNow();
             updateCheckFrequency.SelectedIndexChanged += (s, e) => ApplyNow();
             installUpdatesSilently.CheckedChanged += (s, e) => ApplyNow();
             rememberDatabasePassword.CheckedChanged += (s, e) => ApplyNow();
@@ -391,6 +409,14 @@ namespace Clipman
             }
             settings.DatabasePath = DatabasePathFromFolderOrFile(databasePath.Text);
             settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(settings.DatabasePath);
+            settings.StorageMode = StoredStorageMode(Convert.ToString(storageMode.SelectedItem));
+            settings.ServerUrl = ServerSettingsSanitizer.CleanUrl(serverUrl.Text);
+            settings.ServerToken = ServerSettingsSanitizer.CleanToken(serverToken.Text);
+            if (!loading)
+            {
+                UpdateTextIfChanged(serverUrl, settings.ServerUrl);
+                UpdateTextIfChanged(serverToken, settings.ServerToken);
+            }
             settings.MaxHistoryEntries = (int)maxHistoryEntries.Value;
             settings.MaxHistoryDays = (int)maxHistoryDays.Value;
             settings.SendToEnabled = sendToEnabled.Checked;
@@ -637,6 +663,10 @@ namespace Clipman
                 SaveListPosition = current.SaveListPosition,
                 Active = current.Active,
                 DatabasePath = current.DatabasePath,
+                StorageMode = current.StorageMode,
+                ServerUrl = current.ServerUrl,
+                ServerToken = current.ServerToken,
+                ProtectedServerToken = current.ProtectedServerToken,
                 LastSelectedIndex = current.LastSelectedIndex,
                 LastSelectedTab = current.LastSelectedTab,
                 LastPreferencesTab = current.LastPreferencesTab,
@@ -871,6 +901,32 @@ namespace Clipman
                 return "KeepBoth";
             }
             return "MoveToTop";
+        }
+
+        private static string DisplayStorageMode(string value)
+        {
+            return string.Equals(value, "Server", StringComparison.OrdinalIgnoreCase)
+                ? "Clipman Server"
+                : "Local or shared folder";
+        }
+
+        private static string StoredStorageMode(string value)
+        {
+            return string.Equals(value, "Clipman Server", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "Server", StringComparison.OrdinalIgnoreCase)
+                ? "Server"
+                : "File";
+        }
+
+        private static void UpdateTextIfChanged(TextBox box, string value)
+        {
+            var normalized = value ?? string.Empty;
+            if (box != null && !string.Equals(box.Text, normalized, StringComparison.Ordinal))
+            {
+                var selectionStart = Math.Min(box.SelectionStart, normalized.Length);
+                box.Text = normalized;
+                box.SelectionStart = selectionStart;
+            }
         }
 
         private static string DisplaySensitiveDataMode(string value)

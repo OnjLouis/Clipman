@@ -7,6 +7,7 @@ final class HotkeyManager {
         case showHistory
         case toggleMonitoring
         case quickCopy(entryID: String)
+        case secret(entryID: String)
     }
 
     var handler: ((Action) -> Void)?
@@ -32,9 +33,9 @@ final class HotkeyManager {
         }, 1, &eventType, nil, nil)
     }
 
-    func register(showHistory: HotkeyDescriptor, toggleMonitoring: HotkeyDescriptor, quickCopies: [String: HotkeyDescriptor]) {
+    func register(showHistory: HotkeyDescriptor, toggleMonitoring: HotkeyDescriptor, quickCopies: [String: HotkeyDescriptor], secrets: [String: HotkeyDescriptor] = [:]) {
         unregisterAll()
-        let reserved = Set(quickCopies.values)
+        let reserved = Set(quickCopies.values).union(Set(secrets.values))
         register(showHistory, action: .showHistory, id: 1)
         for alias in showHistory.layoutFallbacks {
             if alias != showHistory && alias != toggleMonitoring && !reserved.contains(alias) {
@@ -54,6 +55,19 @@ final class HotkeyManager {
             }
             register(descriptor, action: .quickCopy(entryID: entryID), id: nextQuickCopyID)
             nextQuickCopyID += 1
+        }
+        var nextSecretID: UInt32 = 3000
+        var usedHotkeys = Set(quickCopies.values)
+        usedHotkeys.insert(showHistory)
+        usedHotkeys.insert(toggleMonitoring)
+        for (entryID, descriptor) in secrets.sorted(by: { $0.key < $1.key }) where descriptor.isValid {
+            guard !usedHotkeys.contains(descriptor) else { continue }
+            usedHotkeys.insert(descriptor)
+            while actionsByID[nextSecretID] != nil {
+                nextSecretID += 1
+            }
+            register(descriptor, action: .secret(entryID: entryID), id: nextSecretID)
+            nextSecretID += 1
         }
     }
 

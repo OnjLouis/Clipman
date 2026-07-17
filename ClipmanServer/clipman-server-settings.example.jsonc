@@ -1,0 +1,74 @@
+{
+  // Clipman Server example settings.
+  //
+  // The real settings file is normal JSON and is created automatically on first
+  // run. JSON does not support comments, so do not paste this entire commented
+  // file over the live settings file. Instead, copy the setting names and values
+  // you want into clipman-server-settings.json, then restart the server.
+  //
+  // Common locations:
+  // Linux:   ~/.config/clipman-server/clipman-server-settings.json
+  // Windows: %LOCALAPPDATA%\Clipman Server\clipman-server-settings.json
+  // macOS:   ~/Library/Application Support/Clipman Server/clipman-server-settings.json
+
+  // Where the server listens.
+  //
+  // Keep 127.0.0.1 for same-machine testing only.
+  // Use a private LAN or VPN address for other devices on your network.
+  // Clipman Server refuses public non-TLS HTTP listeners unless
+  // AllowInsecureRemote is deliberately set to true.
+  "Host": "127.0.0.1",
+
+  // Optional host name or address written to the connection details file.
+  //
+  // Leave blank to use Host. Set this when Host is a private bind address but
+  // clients should connect through a DNS name or VPN address.
+  "AdvertiseHost": "",
+
+  // TCP port for the server. A fresh settings file gets a random high port.
+  "Port": 49152,
+
+  // The server stores password-scoped database buckets next to this path.
+  //
+  // You normally do not point clients directly at this file. Clients compute a
+  // bucket from the server token and the history password, then upload/download
+  // encrypted .clipdb blobs through the server.
+  "DatabasePath": "/home/pi/.local/share/clipman-server/clipman-history.clipdb",
+
+  // Bearer token used by Clipman clients.
+  //
+  // Keep this private. The first-run connection details file exists so users do
+  // not have to manually copy this from JSON.
+  "AuthToken": "replace-with-your-server-token",
+
+  // Rotating server log path.
+  //
+  // Linux default:   ~/.local/state/clipman-server/logs/clipman-server.log
+  // Windows default: %LOCALAPPDATA%\Clipman Server\logs\clipman-server.log
+  // macOS default:   ~/Library/Logs/Clipman Server/logs/clipman-server.log
+  "LogPath": "/home/pi/.local/state/clipman-server/logs/clipman-server.log",
+
+  // Direct HTTPS certificate and key.
+  //
+  // Leave both blank for loopback, private LAN, or VPN use.
+  // For VPS/public use, configure TLS directly here or put Clipman Server behind
+  // a TLS reverse proxy. If these are set, clients should use https://.
+  "CertFile": "",
+  "KeyFile": "",
+
+  // Permit public HTTP without TLS.
+  //
+  // Strongly discouraged. Prefer a VPN, firewall, direct HTTPS, or reverse proxy.
+  "AllowInsecureRemote": false,
+
+  // Backup behavior.
+  //
+  // Before writes, Clipman Server creates rolling backups under:
+  // Databases/<database-id>/ServerBackups/
+  //
+  // Identical uploads do not rewrite the database and do not create a backup.
+  "CreateBackupBeforeEveryUpload": true,
+  "BackupIntervalMinutes": 60,
+  "BackupRetentionHours": 24,
+  "MaxBackups": 48
+}

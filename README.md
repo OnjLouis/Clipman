@@ -18,6 +18,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Global hotkeys for showing history and toggling monitoring.
 - User-configurable hotkeys.
 - Optional per-entry Quick Paste global hotkeys that paste chosen text entries into the active app from anywhere without opening history.
+- Optional Secrets area for short private snippets that are stored separately from clipboard history, require the history password, and can be pasted with their own global hotkeys.
 - Optional Links history tab for whole-entry HTTP and HTTPS links. Links remain in the normal shared text-history database; the tab is a filtered view that can be enabled in Preferences.
 - Optional template entries. Mark a text entry as a template in Entry Properties and Clipman resolves variables such as `{{year_full}}`, `{{month_num_padded}}`, `{{day_of_month_padded}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}` when that entry is copied or quick-pasted. Entry Properties includes sample templates and field insertion.
 - Press Enter on a history entry to copy it back to the clipboard and close history.
@@ -28,6 +29,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Press Backspace in the history list to jump to the first normal entry below pinned entries.
 - Use Home, End, Page Up, and Page Down for larger list jumps. Page size follows the visible list height.
 - Press F2 to open Entry Properties for a selected entry, including name, group, Quick Paste assignment, and stored clipboard text.
+- Entry Properties and F4 text review use URL/code-friendly word navigation. `Ctrl+Left`/`Ctrl+Right` on Windows and `Option+Left`/`Option+Right` on Mac stop at punctuation and symbol boundaries inside long links, paths, and tokens.
 - Press Ctrl+F to search clipboard history. Press F3 for next result and Shift+F3 for previous result.
 - Text history records the machine that added or most recently re-added an entry, and can sort by machine.
 - Sort direction uses clearer first-style labels from the View menu, such as oldest first, newest first, A first, or Z first depending on the active sort field.
@@ -48,12 +50,15 @@ Windows and macOS downloads are attached to releases in this repository.
 - Optional per-user Windows startup entry.
 - Optional startup capture, so Clipman can add the current clipboard item once when it starts if you choose.
 - Optional automatic update checks at startup, hourly, or daily, with silent install support when a release ZIP is available.
+- Optional Clipman Server support for hosting a shared `.clipdb` database with token authentication, password-scoped database buckets, revision checks, rolling backups, and explicit security rules for private-network versus HTTPS deployment. The server is a separate download; the normal Clipman app package is client-only.
 
 ## Default Hotkeys
 
 - Show clipboard history: `Ctrl+Alt+\`
 - Toggle monitoring on/off: <code>Ctrl+Alt+`</code>
 - Quick Paste: user-assigned per entry from Entry Properties.
+- Secrets Quick Paste: user-assigned per secret from the Secrets window.
+- Open Secrets: `Ctrl+Shift+E` on Windows, `Command+Shift+E` on Mac.
 - Preferences: `Ctrl+,` in the history window only.
 - Import clipboard entries: `Ctrl+I`
 - Export clipboard entries: `Ctrl+E`
@@ -72,6 +77,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Push selected text entry to other synced machines: `Ctrl+P`
 - Search: `Ctrl+F`, then `F3` or `Shift+F3`
 - Open Entry Properties: `F2`
+- Move by URL/code boundary in Entry Properties or F4 text review: `Ctrl+Left`/`Ctrl+Right` on Windows, `Option+Left`/`Option+Right` on Mac.
 
 Hotkeys can be changed from Options > Preferences. In hotkey fields, press a valid shortcut to assign it, or press Delete or Backspace to clear it. Two modifiers are safest. For compatibility with existing clipboard-manager habits, Clipman also allows one modifier with function keys or with the grave/accent and backslash-style punctuation keys. Single-modifier letters, numbers, comma, space, Tab, Delete, Backspace, Escape, and reserved operating-system shortcuts are rejected. Windows hotkey fields accept the Windows key as a modifier for combinations Windows allows.
 
@@ -91,6 +97,8 @@ File and non-text clipboard history is stored separately in a machine-specific f
 
 To share a database between machines, open Options > Preferences on each machine and set the data folder to the same synced or network-shared folder. Clipman uses `clipman-history.clipdb` inside that folder. When that file changes, Clipman reloads it without needing to restart. Existing explicit `.clipdb` paths remain readable for compatibility, but the Preferences Browse button now chooses a folder so users do not accidentally select a machine-specific file-history database.
 
+When a custom data folder is selected, Clipman leaves a small `settings-location.json` pointer beside the app so it can find that folder next time. That pointer stores locations per computer name. This means one computer can use one local cloud or network path, another computer can use a different local path to the same synced data, and both can still share the same history without overwriting each other's location pointer. If a cloud service creates a conflict copy of that pointer, Clipman merges the known clients back into one pointer file.
+
 If the shared database file is missing but its folder is available, Clipman creates it when it next saves. If the folder or drive is temporarily unavailable, Clipman keeps running and reports the storage problem in diagnostics. Background clipboard captures do not display blocking error dialogs while storage is missing. On Mac, Clipman pauses monitoring and adds a Retry Storage command to the status menu until the data folder returns. On Windows, the notification-area menu and tooltip report that storage is unavailable and offer Retry storage. When the location returns, Clipman merges the existing database before saving.
 
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
@@ -101,11 +109,13 @@ Quick Paste is machine-specific. Use Entry Properties or the entry menu to assig
 
 Use the Quick Paste menu on Windows, or Quick Paste Targets from the Mac `Option+M` Clipman menu, to review every entry that currently has a Quick Paste hotkey. Choosing a target moves focus to that entry so the hotkey or mode can be edited or removed with Entry Properties. Entries with Quick Paste targets show the assigned hotkey and mode in the row text.
 
+Secrets are deliberately typed private snippets, not automatic clipboard captures. They live in a separate per-machine `<computer-name>-secrets.clipdb` file beside the active settings/history files, require the history password, and are not shown in normal Text history or ordinary history import/export. Opening the Secrets manager asks for the current history password so names and assigned hotkeys are not shown casually from an unlocked desktop. Open Options > Secrets on Windows, Secrets from the Mac status menu, or Secrets from the Mac in-window Clipman menu to add named secrets and optional Quick Paste hotkeys. In the Secrets manager, Enter quick-pastes, Insert adds, F2 edits, Delete removes, and Esc closes. A secret Quick Paste temporarily places the secret on the clipboard, pastes it, then restores the previous clipboard where the platform allows it.
+
 Template entries are shared text entries with one extra flag. The stored text remains unchanged in the database, exports, search, and Entry Properties. Clipman resolves variables only when the entry is copied, quick-pasted, or automatically copied as a new remote entry. This makes templates useful for dates, system/version snippets, and repeatable support text without creating a new history entry every day. Entry Properties can insert sample templates such as `{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}`, `{{day_of_month_padded}} {{month_name_short}} {{year_full}}`, `{{month_name_short}} {{day_of_month_padded}}, {{year_full}}`, a Today sentence, and an operating-system version snippet.
 
 Supported template variables include `{{year_full}}`, `{{year_short}}`, `{{month_name}}`, `{{month_name_full}}`, `{{month_name_short}}`, `{{month_num}}`, `{{month_num_padded}}`, `{{day_of_month}}`, `{{day_of_month_padded}}`, `{{day_name_full}}`, `{{day_name_short}}`, `{{hour_24}}`, `{{hour_24_padded}}`, `{{hour_12}}`, `{{hour_12_padded}}`, `{{minute}}`, `{{minute_padded}}`, `{{second}}`, `{{second_padded}}`, `{{utc_offset}}`, `{{time_zone}}`, `{{time_zone_short}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}`. Unknown variables are left alone.
 
-Sensitive-data exclusions are machine-specific and off by default. When enabled in Preferences, they apply only to automatic clipboard text capture. They do not alter the system clipboard, existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman. Built-in presets include credit card numbers with a Luhn check, US Social Security numbers, international phone numbers such as `+447890123456` and common spaced/dashed/bracketed variants, long API keys or tokens, software license keys shaped like `AAAAA-BBBBB-CCCCC-DDDDD-EEEEE`, and approximate US driver-license shapes. The broad long-token preset ignores full `http` and `https` URLs, so ordinary shopping/search links with long tracking parameters are not excluded as raw tokens. When a match is excluded, Clipman plays `exclude.wav` if sounds are enabled, falling back to `skip.wav` if that sound is missing. The manual includes harmless test values and copy buttons so users can check that their selected presets and exclude sound are working.
+Sensitive-data exclusions are machine-specific and off by default. When enabled in Preferences, they apply only to automatic clipboard text capture. They do not alter the system clipboard, existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman. Built-in presets include credit card numbers with a Luhn check, US Social Security numbers, international phone numbers such as `+447890123456` and common spaced/dashed/bracketed variants, long API keys or tokens, software license keys shaped like `AAAAA-BBBBB-CCCCC-DDDDD-EEEEE`, and approximate US driver-license shapes. Complete `http` and `https` URLs are not excluded by these presets, so ordinary shopping/search/archive links with long tracking parameters or date-like path segments can still be saved as links. When a match is excluded, Clipman plays `exclude.wav` if sounds are enabled, falling back to `skip.wav` if that sound is missing. The manual includes harmless test values and copy buttons so users can check that their selected presets and exclude sound are working.
 
 On Windows, Clipman also honors clipboard privacy signals added by the application that placed data on the clipboard. Clipboard updates marked with `Clipboard Viewer Ignore`, `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` set to zero, or `CanUploadToCloudClipboard` set to zero are excluded before Clipman records text history or file history. This can help with password managers and secure-copy workflows that mark their own clipboard data. It is cooperative: if an app puts only ordinary text on the clipboard with no privacy format, Clipman cannot reliably know whether that text came from a password field or a normal document or webpage.
 
@@ -119,20 +129,65 @@ The File history tab can delete selected unpinned file events with `Del`, clear 
 
 File history rows start with the file or folder name, followed by the operation and file count. File history supports buffered type-to-jump navigation by file name, so typing `13.t` keeps looking for that full prefix rather than jumping separately on `t`. It also supports standard Windows multi-selection. Select multiple file events, then press `Enter` to restore all existing files and folders from those events to the Windows clipboard, or `Ctrl+C` to copy their paths as text. Restored file events include both Windows file-drop data and a text version of the paths. Use the View menu to sort normal file events by time captured, file count, name, operation, source application, or manual order. The direction command names the next result plainly, such as oldest first, newest first, fewest files first, most files first, A first, or Z first. Press `Backspace` to jump to the first normal file event below pinned file events. Use `Shift+Enter` to pin or unpin selected file events, `Ctrl+Enter` to open Explorer at one selected file or folder, and `Alt+Up` or `Alt+Down` to move selected file events within the pinned or normal section. Use `Ctrl+Shift+1` through `Ctrl+Shift+0` to copy paths from one of the first ten pinned file events as text and close history. When one of those pinned file events is selected, its Application key menu shows the matching restore and copy-path shortcuts. Pinned file events are kept during delete, clear, unavailable-event cleanup, and file-history size trimming.
 
-The Actions menu includes cleanups for selected text entries. `Ctrl+Shift+R` removes ordinary URL tracking parameters. `Ctrl+Shift+S` cleans links for sharing by removing tracking plus share-state parameters such as YouTube timestamps, so a copied video link can be shared from the start rather than the current playback position.
+The Actions menu includes cleanups for selected text entries. `Ctrl+Shift+R` removes ordinary URL tracking parameters. `Ctrl+Shift+S` cleans links for sharing by removing tracking plus share-state parameters such as YouTube timestamps, so a copied video link can be shared from the start rather than the current playback position. Line endings transforms can normalize selected entries to Windows CRLF, Unix LF, or old Mac CR when text from another platform appears as one long line in older editors.
 
 File history preferences can automatically remove unavailable unpinned events as new file-history events arrive. Diagnostics include the total file-history count, but only list the configured number of recent events so copied file operations do not make diagnostics excessively long.
 
 If a sync service creates conflict copies of Clipman's own settings or history database, Clipman attempts to tidy them automatically. History database conflicts are merged by entry, and machine settings conflicts keep the newest settings copy for that machine.
 
+## Clipman Server
+
+Clipman 2.0 adds optional Clipman Server support for people who want to host the shared history database from one machine, a Raspberry Pi, or a VPS instead of relying only on a cloud service, synced folder, or network share. This is an additional storage path, not a replacement for the existing local and shared-folder workflow.
+
+The normal Clipman app packages are client-only. Clipman Server is distributed as a separate cross-platform server package from the releases page. That package uses the same Python server on Linux, macOS, and Windows so the safety model stays consistent: random high port and random bearer token on first run, password-scoped database buckets, cheap revision polling, rolling backups, private file permissions where supported, rotating logs, database-ID log redaction, lightweight runtime counters, and optional direct TLS.
+
+Windows and macOS users should launch the included wrapper apps rather than leaving a terminal open. `Windows\Clipman Server.exe` runs as a notification-area app with no Alt-Tab window, and `macOS/Clipman Server.app` runs as a menu-bar app with no Dock or Command-Tab presence. Both wrappers start the shared Python server in the background, redirect output to logs, and provide menu commands for connection details, settings, logs, update checks, restart, startup/login, and quit. The Windows EXE contains the shared server script and extracts it to the user's local app-data folder at run time, but it still requires Python 3 to be installed. The Mac app bundles the shared server script in its Resources folder. Linux users should use the included installer, which creates the user-local program files, helper commands, and user systemd service where available.
+
+Clipman Server has its own update path. Windows and macOS server wrappers include a Check for Updates menu item and command-line switches such as `--check-updates` and `--install-update`; they look for the versioned `ClipmanServer-...zip` release asset and replace only the platform wrapper while keeping server settings, databases, logs, and backups in the per-user data folder. Linux servers can be updated by replacing the installed `clipman_server.py` from a newer server package and restarting the service.
+
+The server stores and serves raw `.clipdb` files. It does not know, request, or store the history password. Encrypted databases remain encrypted on the server; Clipman clients unlock, merge, and save history locally, then upload the updated database with a revision check. If another client has already uploaded a newer copy, the server rejects the stale upload so the client can download, merge, and try again instead of overwriting newer history.
+
+Each server token plus each history password maps to a separate server-side database bucket. A wrong password or intentionally different password creates a different bucket instead of overwriting the existing history.
+
+The server records small metadata beside each database bucket so an administrator can list buckets, see when each was first seen, last checked, and last written, and identify obvious wrong-password or abandoned test buckets. It never silently deletes a database. Maintenance commands are explicit, dry-run first, and confirmed cleanup moves buckets to `DeletedDatabases` instead of permanently shredding them.
+
+Server backups are raw `.clipdb` copies written under each database bucket, so each password-scoped history has its own backup set.
+
+For private LAN, localhost, or VPN-only use, clients can use `clipman://host:port`. Do not expose plain `clipman://` or plain HTTP to the public internet. For VPS or internet-facing use, put the server behind HTTPS or start the server with `--cert-file` and `--key-file` so clients connect using an `https://` address.
+
+On Linux, the server package includes `Linux/install-clipman-server.sh`. The installer copies the server into a user-local application folder, creates a launcher, creates first-run settings, and writes `clipman-server-connection.txt` beside the settings file. That text file contains the server address, port, and token so users do not have to copy values from JSON. Delete it or move the details to a password manager once every client is configured.
+
+The Linux installer also creates a `clipmanserver` helper command for everyday administration. Use `clipmanserver start`, `clipmanserver stop`, `clipmanserver restart`, `clipmanserver status`, `clipmanserver list`, `clipmanserver list-json`, `clipmanserver delete <database-id>`, `clipmanserver force-delete <database-id>`, `clipmanserver console`, `clipmanserver token`, and `clipmanserver connection` instead of remembering the full Python command. Normal delete refuses buckets touched in the last 24 hours; force-delete is the deliberate override after checking the full database ID.
+
+To start a server from an existing history, connect first from the Clipman client that already has the desired history and history password. Do not manually copy a `.clipdb` into the server's database folders; clients derive the correct server bucket from the server token and the history password, and the server deliberately does not know the history password.
+
+To use a server from the Windows or Mac client, open Preferences, set Storage type to `Clipman Server`, enter the server host and token, and keep the data folder set to a local cache/settings folder. The host can be typed as `home-server:49152`; Clipman infers the local server protocol. The server token field is hidden on screen and saved with per-user protection: Windows uses current-user DPAPI protection, and Mac uses the user's Keychain. The client still watches and saves a local cache, but text history is synchronized through the server.
+
+Clients poll the server by checking the database revision. If the server, network, or VPN is temporarily unavailable, Clipman keeps using its local cache, backs off repeated polling failures, and retries automatically. Diagnostics show the last server poll, last successful sync, last upload, current revision, next retry, and failure count.
+
+Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
+
 ## Changelog
+
+### 2.0.0
+
+- Clipman 2.0 introduces optional Clipman Server support, letting Windows and Mac clients share text history through a self-hosted server instead of relying only on cloud-synced folders or network shares.
+- The separate Clipman Server package supports Linux, macOS, Windows, Raspberry Pi, and VPS use. It includes setup helpers, startup helpers, readable connection details, logs, manual backups, rolling hourly backups, and database maintenance tools.
+- Server storage is designed for shared clipboard history: it uses token authentication, password-scoped database buckets, encrypted history support, revision checks, merge-before-upload behavior, delete propagation, retry/backoff handling, and reduced duplicate writes to avoid unnecessary disk churn on small always-on hosts.
+- Clipman Server can be used on a private network, over VPN, or with HTTPS for public/VPS deployments. Server settings generate a random high port and bearer token on first run instead of using a predictable fixed port.
+- Windows and Mac clients can connect to Clipman Server from Preferences while keeping each computer's local settings and cache folder separate from the shared server database. Diagnostics show server sync status when troubleshooting is needed.
+- Saved Clipman Server tokens are hidden in Preferences and protected per user: Windows uses DPAPI and Mac uses Keychain.
+- Server addresses can be entered as plain `host:port`; Clipman saves private-network addresses as `clipman://host:port`. Public or VPS deployments should use HTTPS.
+- Added an optional Secrets area for short private snippets that are stored in per-machine encrypted secret databases, kept out of normal clipboard history, unlocked with the current history password, and optionally pasted with their own global hotkeys.
+- Changed the data-folder pointer to remember locations per computer name and merge cloud conflict copies, so machines with different local paths do not overwrite each other's selected data folder.
+- Text review and Entry Properties text fields now use URL/code-friendly word navigation. `Ctrl+Left`/`Ctrl+Right` on Windows and `Option+Left`/`Option+Right` on Mac stop at punctuation and symbol boundaries inside long links, paths, and tokens.
 
 ### 1.9.0
 
 - Added an optional Links history tab for clipboard entries where the whole text is a single `http` or `https` link. Links history is off by default, and links remain part of the normal shared text-history database. Closes issue #18.
 - When Links history is enabled, the history areas are Text, Links, then Files. When Links history is disabled, the history areas remain Text then Files, preserving the existing File history shortcut.
 - Improved history tab remembering so Clipman remembers Text, Links, or Files by name rather than by a raw tab number.
-- Adjusted the Long API key or token sensitive-data preset so ordinary full web links with long tracking parameters are not excluded as raw tokens.
+- Adjusted sensitive-data exclusions so ordinary full web links with long tracking parameters or date-like path segments are not excluded as raw secrets.
 - Added an opt-in startup preference on Windows and Mac to add the current clipboard item to Clipman once when the app starts. It is off by default and still follows monitoring, ignored-application, privacy, and sensitive-data rules.
 - Windows now plays the normal copy sound when an entry is chosen from Clipman history, matching the Mac confirmation behavior.
 

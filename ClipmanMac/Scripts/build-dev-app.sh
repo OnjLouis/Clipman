@@ -6,6 +6,7 @@ SCRATCH="${CLIPMAN_MAC_BUILD_DIR:-/tmp/ClipmanMac-build}"
 APP="${CLIPMAN_MAC_APP:-$ROOT/build/Clipman.app}"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
+BUILD_STAMP="$(zsh "$ROOT/Scripts/shared-version.sh" stamp)"
 
 swift build --package-path "$ROOT" --scratch-path "$SCRATCH"
 swift run --package-path "$ROOT" --scratch-path "$SCRATCH" ClipmanCodecSmoke
@@ -39,8 +40,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
   <string>$BUILD_VERSION</string>
+  <key>ClipmanBuildStampUtcMs</key>
+  <string>$BUILD_STAMP</string>
   <key>LSUIElement</key>
   <true/>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
 </dict>
 </plist>
 PLIST

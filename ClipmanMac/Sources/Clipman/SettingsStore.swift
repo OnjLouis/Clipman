@@ -1,5 +1,6 @@
 import Foundation
 import Carbon
+import ClipmanCore
 
 final class SettingsStore {
     let applicationSupportURL: URL
@@ -18,6 +19,7 @@ final class SettingsStore {
     func load() -> ClipmanSettings {
         do {
             try FileManager.default.createDirectory(at: applicationSupportURL, withIntermediateDirectories: true)
+            resolveSettingsLocationConflicts()
             let candidates = settingsCandidates()
             let loaded = candidates
                 .compactMap { url -> (settings: ClipmanSettings, url: URL)? in
@@ -121,6 +123,21 @@ final class SettingsStore {
             settings.databasePath = normalizedDatabasePath
             changed = true
         }
+        let normalizedStorageMode = ClipmanSettings.normalizeStorageMode(settings.storageMode)
+        if normalizedStorageMode != settings.storageMode {
+            settings.storageMode = normalizedStorageMode
+            changed = true
+        }
+        let normalizedServerURL = ServerSettingsSanitizer.cleanURL(settings.serverUrl)
+        if normalizedServerURL != settings.serverUrl {
+            settings.serverUrl = normalizedServerURL
+            changed = true
+        }
+        let normalizedServerToken = ServerSettingsSanitizer.cleanToken(settings.serverToken)
+        if normalizedServerToken != settings.serverToken {
+            settings.serverToken = normalizedServerToken
+            changed = true
+        }
         let normalizedSort = normalizeTextSortMode(settings.sortMode)
         if normalizedSort != settings.sortMode {
             settings.sortMode = normalizedSort
@@ -192,7 +209,9 @@ final class SettingsStore {
         let folder = dataFolder(for: settings)
         let historyExists = FileManager.default.fileExists(atPath: folder.appendingPathComponent("clipman-history.clipdb").path)
         let inApplicationSupport = folder.path.hasPrefix(applicationSupportURL.path)
+        let pointerFolder = loadDataFolderPointer()?.standardizedFileURL.path
         var value = 0
+        if pointerFolder == folder.standardizedFileURL.path { value += 1000 }
         if historyExists { value += 100 }
         if !inApplicationSupport { value += 50 }
         if settings.databasePath.contains("/Dropbox/") { value += 25 }
@@ -204,9 +223,9 @@ final class SettingsStore {
     }
 
     private func loadDataFolderPointer() -> URL? {
-        guard let data = try? Data(contentsOf: pointerURL),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-              let path = object["dataFolder"],
+        resolveSettingsLocationConflicts()
+        guard let pointer = loadSettingsLocationPointer(pointerURL),
+              let path = pointer.folder(for: safeMachineName(machine)),
               !path.isEmpty
         else { return nil }
         return URL(fileURLWithPath: path)
@@ -214,8 +233,76 @@ final class SettingsStore {
 
     private func saveDataFolderPointer(_ folder: URL) throws {
         try FileManager.default.createDirectory(at: applicationSupportURL, withIntermediateDirectories: true)
-        let data = try JSONSerialization.data(withJSONObject: ["dataFolder": folder.path], options: [.prettyPrinted, .withoutEscapingSlashes])
+        resolveSettingsLocationConflicts()
+        var pointer = loadSettingsLocationPointer(pointerURL) ?? SettingsLocationPointer()
+        pointer.setFolder(folder.path, for: safeMachineName(machine))
+        let data = try JSONSerialization.data(withJSONObject: pointer.jsonObject, options: [.prettyPrinted, .withoutEscapingSlashes])
         try data.write(to: pointerURL, options: [.atomic])
+        deleteSettingsLocationConflicts()
+    }
+
+    private func resolveSettingsLocationConflicts() {
+        let conflicts = SyncConflictResolver.conflictSiblings(for: pointerURL)
+        guard !conflicts.isEmpty else { return }
+
+        var candidates: [(url: URL, folder: URL, modified: Date)] = []
+        addSettingsLocationCandidate(pointerURL, to: &candidates)
+        for conflict in conflicts {
+            addSettingsLocationCandidate(conflict, to: &candidates)
+        }
+
+        if let merged = mergeSettingsLocationPointers(candidates) {
+            if let data = try? JSONSerialization.data(withJSONObject: merged.jsonObject, options: [.prettyPrinted, .withoutEscapingSlashes]) {
+                try? data.write(to: pointerURL, options: [.atomic])
+            }
+        }
+
+        deleteSettingsLocationConflicts()
+    }
+
+    private func addSettingsLocationCandidate(_ url: URL, to candidates: inout [(url: URL, folder: URL, modified: Date)]) {
+        guard let pointer = loadSettingsLocationPointer(url) else { return }
+
+        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        if let folder = pointer.dataFolder, !folder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            candidates.append((url, URL(fileURLWithPath: folder), modified))
+        }
+        for folder in pointer.clients.values where !folder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            candidates.append((url, URL(fileURLWithPath: folder), modified))
+        }
+    }
+
+    private func loadSettingsLocationPointer(_ url: URL) -> SettingsLocationPointer? {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return SettingsLocationPointer(jsonObject: object)
+    }
+
+    private func mergeSettingsLocationPointers(_ candidates: [(url: URL, folder: URL, modified: Date)]) -> SettingsLocationPointer? {
+        var merged = SettingsLocationPointer()
+        var sawAny = false
+        for candidate in candidates.sorted(by: { $0.modified < $1.modified }) {
+            guard FileManager.default.fileExists(atPath: candidate.folder.path) else { continue }
+            if let pointer = loadSettingsLocationPointer(candidate.url) {
+                if let dataFolder = pointer.dataFolder,
+                   FileManager.default.fileExists(atPath: dataFolder) {
+                    merged.dataFolder = dataFolder
+                    sawAny = true
+                }
+                for (client, folder) in pointer.clients where FileManager.default.fileExists(atPath: folder) {
+                    merged.clients[client] = folder
+                    sawAny = true
+                }
+            }
+        }
+        return sawAny ? merged : nil
+    }
+
+    private func deleteSettingsLocationConflicts() {
+        for conflict in SyncConflictResolver.conflictSiblings(for: pointerURL) {
+            try? FileManager.default.removeItem(at: conflict)
+        }
     }
 
     private func normalizeDatabasePath(_ value: String) -> String {
@@ -272,5 +359,40 @@ final class SettingsStore {
             }
         let result = String(safe).trimmingCharacters(in: CharacterSet(charactersIn: "-_ "))
         return result.isEmpty ? "Mac" : result
+    }
+}
+
+private struct SettingsLocationPointer {
+    var dataFolder: String?
+    var clients: [String: String] = [:]
+
+    init() {
+        dataFolder = nil
+        clients = [:]
+    }
+
+    init(jsonObject: [String: Any]) {
+        dataFolder = jsonObject["dataFolder"] as? String
+        clients = jsonObject["clients"] as? [String: String] ?? [:]
+    }
+
+    var jsonObject: [String: Any] {
+        var object: [String: Any] = [:]
+        if let dataFolder, !dataFolder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            object["dataFolder"] = dataFolder
+        }
+        object["clients"] = clients
+        return object
+    }
+
+    func folder(for machineName: String) -> String? {
+        if let match = clients.first(where: { $0.key.caseInsensitiveCompare(machineName) == .orderedSame }) {
+            return match.value
+        }
+        return dataFolder
+    }
+
+    mutating func setFolder(_ folder: String, for machineName: String) {
+        clients[machineName] = folder
     }
 }

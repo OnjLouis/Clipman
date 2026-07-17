@@ -38,6 +38,7 @@ namespace Clipman
                 UseSystemPasswordChar = true,
                 AccessibleName = "History password"
             };
+            passwordBox.KeyDown += TextBoxSelectAllKeyDown;
             Controls.Add(passwordBox);
 
             var ok = new Button { Text = "OK", Left = 270, Top = 98, Width = 80, DialogResult = DialogResult.OK };
@@ -53,6 +54,20 @@ namespace Clipman
             using (var dialog = new PasswordPromptForm(title, message))
             {
                 return dialog.ShowDialog() == DialogResult.OK ? dialog.Password : string.Empty;
+            }
+        }
+
+        private static void TextBoxSelectAllKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode == Keys.A)
+            {
+                var textBox = sender as TextBox;
+                if (textBox != null)
+                {
+                    textBox.SelectAll();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                }
             }
         }
     }

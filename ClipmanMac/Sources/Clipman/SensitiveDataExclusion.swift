@@ -28,6 +28,7 @@ enum SensitiveDataExclusion {
 
     static func matchName(in text: String, mode: String, presetIds: [String]) -> String? {
         guard normalizeMode(mode) == modeExclude, !text.isEmpty, !presetIds.isEmpty else { return nil }
+        if isFullHTTPURL(text) { return nil }
         let enabled = Set(presetIds.map { $0.lowercased() })
         for preset in builtInPresets where enabled.contains(preset.id.lowercased()) {
             if matches(text, preset: preset) {
@@ -40,9 +41,6 @@ enum SensitiveDataExclusion {
     private static func matches(_ text: String, preset: SensitiveDataPreset) -> Bool {
         if preset.id == "international-phone" {
             return matchesInternationalPhone(text)
-        }
-        if preset.id == "api-token", isFullHTTPURL(text) {
-            return false
         }
         guard let regex = try? NSRegularExpression(pattern: compile(pattern: preset.pattern, separatorsOptional: preset.separatorsOptional)) else {
             return false

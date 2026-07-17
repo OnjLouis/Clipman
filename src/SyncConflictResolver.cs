@@ -69,7 +69,7 @@ namespace Clipman
             }
         }
 
-        private static IEnumerable<string> FindConflictSiblings(string canonicalPath)
+        public static IEnumerable<string> FindConflictSiblings(string canonicalPath)
         {
             if (string.IsNullOrWhiteSpace(canonicalPath)) yield break;
             var directory = Path.GetDirectoryName(canonicalPath);
@@ -126,7 +126,7 @@ namespace Clipman
             return value.All(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_');
         }
 
-        private static void MergeInto(ClipDatabase target, ClipDatabase source)
+        public static void MergeInto(ClipDatabase target, ClipDatabase source)
         {
             if (target == null || source == null || source.Entries == null) return;
             foreach (var entry in source.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
@@ -151,11 +151,19 @@ namespace Clipman
 
         private static void MergeEntry(ClipEntry existing, ClipEntry incoming)
         {
+            var incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs;
+            var incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs;
             if (incoming.LastUsedUnixMs > existing.LastUsedUnixMs) existing.LastUsedUnixMs = incoming.LastUsedUnixMs;
-            if (incoming.CreatedUnixMs > 0 && (existing.CreatedUnixMs == 0 || incoming.CreatedUnixMs < existing.CreatedUnixMs)) existing.CreatedUnixMs = incoming.CreatedUnixMs;
-            if (!string.IsNullOrWhiteSpace(incoming.Name) && incoming.LastUsedUnixMs >= existing.LastUsedUnixMs) existing.Name = incoming.Name.Trim();
-            if (!string.IsNullOrWhiteSpace(incoming.Group) && incoming.LastUsedUnixMs >= existing.LastUsedUnixMs) existing.Group = incoming.Group.Trim();
-            if (!string.IsNullOrWhiteSpace(incoming.SourceMachine) && incoming.LastUsedUnixMs >= existing.LastUsedUnixMs) existing.SourceMachine = incoming.SourceMachine.Trim();
+            if (incoming.CreatedUnixMs > 0 &&
+                (existing.CreatedUnixMs == 0 ||
+                 incomingCreatedWins ||
+                 (!incomingWins && incoming.CreatedUnixMs < existing.CreatedUnixMs)))
+            {
+                existing.CreatedUnixMs = incoming.CreatedUnixMs;
+            }
+            if (!string.IsNullOrWhiteSpace(incoming.Name) && incomingWins) existing.Name = incoming.Name.Trim();
+            if (!string.IsNullOrWhiteSpace(incoming.Group) && incomingWins) existing.Group = incoming.Group.Trim();
+            if (!string.IsNullOrWhiteSpace(incoming.SourceMachine) && (incomingWins || incomingCreatedWins)) existing.SourceMachine = incoming.SourceMachine.Trim();
             existing.Pinned = existing.Pinned || incoming.Pinned;
             if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder)) existing.ManualOrder = incoming.ManualOrder;
         }

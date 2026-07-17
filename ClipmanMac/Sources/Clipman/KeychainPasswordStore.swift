@@ -2,7 +2,11 @@ import Foundation
 import Security
 
 final class KeychainPasswordStore {
-    private let service = "Clipman.clipdb.password"
+    private let service: String
+
+    init(service: String = "Clipman.clipdb.password") {
+        self.service = service
+    }
 
     func password(for databasePath: String) -> String {
         let query: [String: Any] = [

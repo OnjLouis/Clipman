@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 
 namespace Clipman
@@ -11,15 +14,43 @@ namespace Clipman
         private readonly object sync = new object();
         private FileSystemWatcher watcher;
         private Timer reloadTimer;
+        private Timer serverPollTimer;
         private ClipDatabase database = new ClipDatabase();
         private Func<string> passwordProvider;
+        private ServerStorageClient serverClient;
+        private string serverRevision = string.Empty;
+        private bool serverSyncInProgress;
         private bool storageUnavailable;
+        private long serverLastPollUnixMs;
+        private long serverLastSuccessUnixMs;
+        private long serverLastUploadUnixMs;
+        private long serverNextPollUnixMs;
+        private int serverConsecutiveFailures;
         private bool lastChangeWasExternal;
 
         public event EventHandler Changed;
 
         public string DatabasePath { get; private set; }
         public string LastStorageError { get; private set; }
+
+        public ServerSyncStatus GetServerSyncStatus()
+        {
+            lock (sync)
+            {
+                return new ServerSyncStatus
+                {
+                    Enabled = serverClient != null,
+                    Configured = serverClient != null && serverClient.IsConfigured,
+                    Revision = serverRevision,
+                    LastPollUnixMs = serverLastPollUnixMs,
+                    LastSuccessUnixMs = serverLastSuccessUnixMs,
+                    LastUploadUnixMs = serverLastUploadUnixMs,
+                    NextPollUnixMs = serverNextPollUnixMs,
+                    ConsecutiveFailures = serverConsecutiveFailures,
+                    LastError = LastStorageError
+                };
+            }
+        }
         public bool LastChangeWasExternal
         {
             get
@@ -75,6 +106,36 @@ namespace Clipman
             OnChanged();
         }
 
+        public void ConfigureServerStorage(bool enabled, string serverUrl, string serverToken)
+        {
+            var queueInitialSync = false;
+            lock (sync)
+            {
+                if (serverPollTimer != null)
+                {
+                    serverPollTimer.Dispose();
+                    serverPollTimer = null;
+                }
+
+                serverClient = enabled ? new ServerStorageClient(serverUrl, serverToken, CurrentPassword()) : null;
+                serverRevision = string.Empty;
+                ResetServerStatusLocked();
+                if (serverClient == null || !serverClient.IsConfigured)
+                {
+                    return;
+                }
+
+                serverPollTimer = new Timer(delegate { PollServer(); }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+                queueInitialSync = true;
+            }
+
+            if (queueInitialSync)
+            {
+                QueueInitialServerSync();
+            }
+            OnChanged();
+        }
+
         public void ChangeDatabasePassword()
         {
             lock (sync)
@@ -88,6 +149,10 @@ namespace Clipman
             lock (sync)
             {
                 LoadLocked();
+                if (serverClient != null && serverClient.IsConfigured)
+                {
+                    SyncFromServerLocked(false);
+                }
                 ResetWatcherLocked();
             }
 
@@ -299,6 +364,7 @@ namespace Clipman
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
                 database.Entries.Remove(entry);
+                AddDeletedEntryLocked(id, entry.Text);
                 SaveLocked();
                 OnChanged();
             }
@@ -311,8 +377,16 @@ namespace Clipman
 
             lock (sync)
             {
+                var removedIds = database.Entries
+                    .Where(e => idSet.Contains(e.Id))
+                    .Select(e => new { e.Id, e.Text })
+                    .ToList();
                 var removed = database.Entries.RemoveAll(e => idSet.Contains(e.Id));
                 if (removed == 0) return 0;
+                foreach (var removedEntry in removedIds)
+                {
+                    AddDeletedEntryLocked(removedEntry.Id, removedEntry.Text);
+                }
                 SaveLocked();
                 OnChanged();
                 return removed;
@@ -723,6 +797,8 @@ namespace Clipman
                 SyncConflictResolver.ResolveDatabaseConflicts(DatabasePath, password);
                 database = ClipDatabaseFile.Load(DatabasePath, password);
                 if (database.Entries == null) database.Entries = new List<ClipEntry>();
+                NormalizeDeletedEntriesLocked();
+                ApplyDeletedEntriesLocked();
                 NormalizeManualOrderLocked();
                 storageUnavailable = false;
                 LastStorageError = string.Empty;
@@ -746,6 +822,8 @@ namespace Clipman
                     MergeExistingDatabaseIfAvailableLocked();
                 }
 
+                NormalizeDeletedEntriesLocked();
+                ApplyDeletedEntriesLocked();
                 ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
                 storageUnavailable = false;
                 LastStorageError = string.Empty;
@@ -753,10 +831,11 @@ namespace Clipman
                 {
                     ResetWatcherLocked();
                 }
+                UploadToServerLocked();
             }
             catch (Exception ex)
             {
-                if (!IsStorageAccessException(ex)) throw;
+                if (!IsStorageAccessException(ex) && !IsRecoverableServerException(ex)) throw;
                 storageUnavailable = true;
                 LastStorageError = ex.Message;
             }
@@ -848,6 +927,363 @@ namespace Clipman
             }
         }
 
+        private void ResetServerStatusLocked()
+        {
+            serverLastPollUnixMs = 0;
+            serverLastSuccessUnixMs = 0;
+            serverLastUploadUnixMs = 0;
+            serverNextPollUnixMs = 0;
+            serverConsecutiveFailures = 0;
+        }
+
+        private void MarkServerSuccessLocked(bool upload)
+        {
+            var now = TimeUtil.NowUnixMs();
+            serverLastSuccessUnixMs = now;
+            if (upload)
+            {
+                serverLastUploadUnixMs = now;
+            }
+            serverConsecutiveFailures = 0;
+            serverNextPollUnixMs = 0;
+        }
+
+        private void MarkServerFailureLocked()
+        {
+            var now = TimeUtil.NowUnixMs();
+            serverConsecutiveFailures = Math.Min(serverConsecutiveFailures + 1, 8);
+            var delaySeconds = Math.Min(60, 2 << Math.Min(serverConsecutiveFailures, 5));
+            serverNextPollUnixMs = now + delaySeconds * 1000L;
+        }
+
+        private void PollServer()
+        {
+            var changed = false;
+            lock (sync)
+            {
+                try
+                {
+                    if (serverClient == null || !serverClient.IsConfigured || serverSyncInProgress) return;
+                    var now = TimeUtil.NowUnixMs();
+                    if (serverNextPollUnixMs > now) return;
+                    serverLastPollUnixMs = now;
+                    var metadata = serverClient.GetMetadata();
+                    storageUnavailable = false;
+                    LastStorageError = string.Empty;
+                    MarkServerSuccessLocked(false);
+                    if (!string.IsNullOrWhiteSpace(metadata.Revision) &&
+                        !string.Equals(metadata.Revision, serverRevision, StringComparison.Ordinal))
+                    {
+                        changed = SyncFromServerLocked(false);
+                    }
+                }
+                catch (WebException ex)
+                {
+                    if (serverClient != null && serverClient.IsNotFound(ex))
+                    {
+                        try
+                        {
+                            changed = SyncFromServerLocked(true);
+                            return;
+                        }
+                        catch (WebException retryEx)
+                        {
+                            if (serverClient != null && serverClient.IsNotFound(retryEx)) return;
+                            storageUnavailable = true;
+                            LastStorageError = "Server poll failed: " + retryEx.Message;
+                            MarkServerFailureLocked();
+                            return;
+                        }
+                    }
+                    storageUnavailable = true;
+                    LastStorageError = "Server poll failed: " + ex.Message;
+                    MarkServerFailureLocked();
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    if (!IsRecoverableServerException(ex)) return;
+                    storageUnavailable = true;
+                    LastStorageError = "Server poll failed: " + ex.Message;
+                    MarkServerFailureLocked();
+                    return;
+                }
+            }
+
+            if (changed)
+            {
+                OnChanged(true);
+            }
+        }
+
+        private bool SyncFromServerLocked(bool uploadLocalWhenMissing)
+        {
+            if (serverClient == null || !serverClient.IsConfigured) return false;
+            if (serverSyncInProgress) return false;
+
+            serverSyncInProgress = true;
+            try
+            {
+                ServerDatabaseDownload download;
+                try
+                {
+                    download = serverClient.Download();
+                }
+                catch (WebException ex)
+                {
+                    if (serverClient.IsNotFound(ex))
+                    {
+                        if (uploadLocalWhenMissing && !storageUnavailable && database.Entries.Count > 0)
+                        {
+                            ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
+                            var metadata = serverClient.Upload(File.ReadAllBytes(DatabasePath), string.Empty);
+                            serverRevision = metadata == null ? string.Empty : metadata.Revision;
+                            storageUnavailable = false;
+                            LastStorageError = string.Empty;
+                            MarkServerSuccessLocked(true);
+                        }
+                        return false;
+                    }
+                    throw;
+                }
+
+                if (download.Data == null || download.Data.Length == 0) return false;
+                var tempPath = DatabasePath + ".server-download.tmp";
+                WriteBytesAtomic(tempPath, download.Data);
+                var downloadedDatabase = ClipDatabaseFile.Load(tempPath, CurrentPassword());
+                TryDelete(tempPath);
+                var uploadMerged = HasLocalStateMissingFromServer(downloadedDatabase, database);
+                var changed = MergeDatabaseIntoLocked(database, downloadedDatabase);
+                if (database.Entries == null) database.Entries = new List<ClipEntry>();
+                NormalizeManualOrderLocked();
+                serverRevision = download.Metadata == null ? string.Empty : download.Metadata.Revision;
+                ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
+                if (uploadMerged)
+                {
+                    var mergedMetadata = serverClient.Upload(File.ReadAllBytes(DatabasePath), serverRevision);
+                    serverRevision = mergedMetadata == null ? string.Empty : mergedMetadata.Revision;
+                }
+                storageUnavailable = false;
+                LastStorageError = string.Empty;
+                MarkServerSuccessLocked(uploadMerged);
+                return changed;
+            }
+            finally
+            {
+                serverSyncInProgress = false;
+            }
+        }
+
+        private void QueueInitialServerSync()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var changed = false;
+                lock (sync)
+                {
+                    try
+                    {
+                        changed = SyncFromServerLocked(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        storageUnavailable = true;
+                        LastStorageError = "Server sync failed: " + ex.Message;
+                        MarkServerFailureLocked();
+                    }
+                }
+
+                OnChanged(changed);
+            });
+        }
+
+        private void UploadToServerLocked()
+        {
+            if (serverClient == null || !serverClient.IsConfigured || serverSyncInProgress) return;
+            if (!File.Exists(DatabasePath)) return;
+
+            serverSyncInProgress = true;
+            try
+            {
+                try
+                {
+                    var metadata = serverClient.Upload(File.ReadAllBytes(DatabasePath), serverRevision);
+                    serverRevision = metadata == null ? string.Empty : metadata.Revision;
+                    storageUnavailable = false;
+                    LastStorageError = string.Empty;
+                    MarkServerSuccessLocked(true);
+                    return;
+                }
+                catch (WebException ex)
+                {
+                    if (!serverClient.IsConflict(ex)) throw;
+                }
+
+                var server = serverClient.Download();
+                var localDatabase = database;
+                WriteBytesAtomic(DatabasePath + ".server.tmp", server.Data);
+                var serverDatabase = ClipDatabaseFile.Load(DatabasePath + ".server.tmp", CurrentPassword());
+                MergeDatabaseIntoLocked(localDatabase, serverDatabase);
+                database = localDatabase;
+                NormalizeManualOrderLocked();
+                ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
+                var retry = serverClient.Upload(File.ReadAllBytes(DatabasePath), server.Metadata == null ? string.Empty : server.Metadata.Revision);
+                serverRevision = retry == null ? string.Empty : retry.Revision;
+                TryDelete(DatabasePath + ".server.tmp");
+                storageUnavailable = false;
+                LastStorageError = string.Empty;
+                MarkServerSuccessLocked(true);
+            }
+            catch
+            {
+                MarkServerFailureLocked();
+                throw;
+            }
+            finally
+            {
+                serverSyncInProgress = false;
+            }
+        }
+
+        private static bool MergeDatabaseIntoLocked(ClipDatabase target, ClipDatabase source)
+        {
+            if (target == null || source == null || source.Entries == null) return false;
+            if (target.Entries == null) target.Entries = new List<ClipEntry>();
+            var changed = false;
+            changed = MergeDeletedEntries(target, source) || changed;
+            ApplyDeletedEntries(target);
+            foreach (var entry in source.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
+            {
+                if (IsDeleted(target, entry)) continue;
+                var existing = target.Entries.FirstOrDefault(e =>
+                    !string.IsNullOrEmpty(e.Id) &&
+                    string.Equals(e.Id, entry.Id, StringComparison.Ordinal));
+                if (existing == null)
+                {
+                    existing = target.Entries.FirstOrDefault(e => string.Equals(e.Text, entry.Text, StringComparison.Ordinal));
+                }
+                if (existing == null)
+                {
+                    target.Entries.Add(Clone(entry));
+                    changed = true;
+                    continue;
+                }
+
+                changed = MergeEntryMetadata(existing, entry) || changed;
+            }
+            ApplyDeletedEntries(target);
+            return changed;
+        }
+
+        private static bool MergeEntryMetadata(ClipEntry existing, ClipEntry incoming)
+        {
+            var changed = false;
+            var incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs;
+            var incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs;
+
+            if (incoming.LastUsedUnixMs > existing.LastUsedUnixMs)
+            {
+                existing.LastUsedUnixMs = incoming.LastUsedUnixMs;
+                changed = true;
+            }
+            if (incoming.CreatedUnixMs > 0 &&
+                (existing.CreatedUnixMs == 0 ||
+                 incomingCreatedWins ||
+                 (!incomingWins && incoming.CreatedUnixMs < existing.CreatedUnixMs)))
+            {
+                existing.CreatedUnixMs = incoming.CreatedUnixMs;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(incoming.Name) && incomingWins && !string.Equals(existing.Name ?? string.Empty, incoming.Name.Trim(), StringComparison.Ordinal))
+            {
+                existing.Name = incoming.Name.Trim();
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(incoming.Group) && incomingWins && !string.Equals(existing.Group ?? string.Empty, incoming.Group.Trim(), StringComparison.Ordinal))
+            {
+                existing.Group = incoming.Group.Trim();
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(incoming.SourceMachine) &&
+                (incomingWins || incomingCreatedWins) &&
+                !string.Equals(existing.SourceMachine ?? string.Empty, incoming.SourceMachine.Trim(), StringComparison.Ordinal))
+            {
+                existing.SourceMachine = incoming.SourceMachine.Trim();
+                changed = true;
+            }
+            if (incoming.Pinned && !existing.Pinned)
+            {
+                existing.Pinned = true;
+                changed = true;
+            }
+            if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder))
+            {
+                if (existing.ManualOrder != incoming.ManualOrder)
+                {
+                    existing.ManualOrder = incoming.ManualOrder;
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        private static bool HasLocalStateMissingFromServer(ClipDatabase target, ClipDatabase source)
+        {
+            if (target == null || source == null || source.Entries == null) return false;
+            NormalizeDeletedEntries(target);
+            NormalizeDeletedEntries(source);
+
+            if (source.DeletedEntries != null)
+            {
+                foreach (var deleted in source.DeletedEntries.Where(d => d != null && !string.IsNullOrWhiteSpace(d.Id)))
+                {
+                    var targetDeleted = target.DeletedEntries == null
+                        ? null
+                        : target.DeletedEntries.FirstOrDefault(d => string.Equals(d.Id, deleted.Id, StringComparison.Ordinal));
+                    if (targetDeleted == null || deleted.DeletedUnixMs > targetDeleted.DeletedUnixMs)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            var targetEntries = target.Entries ?? new List<ClipEntry>();
+            foreach (var entry in source.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
+            {
+                if (IsDeleted(target, entry)) continue;
+                if (!targetEntries.Any(e =>
+                    (!string.IsNullOrEmpty(e.Id) && string.Equals(e.Id, entry.Id, StringComparison.Ordinal)) ||
+                    string.Equals(e.Text, entry.Text, StringComparison.Ordinal)))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static void WriteBytesAtomic(string path, byte[] data)
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var temp = path + ".download.tmp";
+            File.WriteAllBytes(temp, data ?? new byte[0]);
+            if (File.Exists(path))
+            {
+                File.Replace(temp, path, null);
+            }
+            else
+            {
+                File.Move(temp, path);
+            }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch { }
+        }
+
         private void WatcherChanged(object sender, FileSystemEventArgs e)
         {
             if (reloadTimer != null) reloadTimer.Change(500, Timeout.Infinite);
@@ -920,8 +1356,11 @@ namespace Clipman
             var existing = ClipDatabaseFile.Load(DatabasePath, CurrentPassword());
             if (existing == null || existing.Entries == null || existing.Entries.Count == 0) return;
 
+            MergeDeletedEntries(database, existing);
+            ApplyDeletedEntriesLocked();
             foreach (var entry in existing.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
             {
+                if (IsDeleted(database, entry)) continue;
                 if (database.Entries.Any(e =>
                     (!string.IsNullOrEmpty(e.Id) && string.Equals(e.Id, entry.Id, StringComparison.Ordinal)) ||
                     string.Equals(e.Text, entry.Text, StringComparison.Ordinal)))
@@ -933,6 +1372,140 @@ namespace Clipman
             }
 
             NormalizeManualOrderLocked();
+        }
+
+        private void AddDeletedEntryLocked(string id, string text)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return;
+            if (database.DeletedEntries == null) database.DeletedEntries = new List<DeletedClipEntry>();
+            var textHash = ComputeTextHash(text);
+            var existing = database.DeletedEntries.FirstOrDefault(d => string.Equals(d.Id, id, StringComparison.Ordinal));
+            if (existing == null)
+            {
+                database.DeletedEntries.Add(new DeletedClipEntry
+                {
+                    Id = id,
+                    TextHash = textHash,
+                    DeletedUnixMs = TimeUtil.NowUnixMs(),
+                    SourceMachine = CurrentMachineName()
+                });
+            }
+            else
+            {
+                existing.TextHash = textHash;
+                existing.DeletedUnixMs = TimeUtil.NowUnixMs();
+                existing.SourceMachine = CurrentMachineName();
+            }
+            NormalizeDeletedEntriesLocked();
+        }
+
+        private void NormalizeDeletedEntriesLocked()
+        {
+            NormalizeDeletedEntries(database);
+        }
+
+        private static void NormalizeDeletedEntries(ClipDatabase target)
+        {
+            if (target == null) return;
+            if (target.DeletedEntries == null)
+            {
+                target.DeletedEntries = new List<DeletedClipEntry>();
+                return;
+            }
+
+            var cutoff = TimeUtil.NowUnixMs() - (long)TimeSpan.FromDays(90).TotalMilliseconds;
+            target.DeletedEntries = target.DeletedEntries
+                .Where(d => d != null && !string.IsNullOrWhiteSpace(d.Id) && (d.DeletedUnixMs == 0 || d.DeletedUnixMs >= cutoff))
+                .Select(d =>
+                {
+                    d.TextHash = d.TextHash ?? string.Empty;
+                    return d;
+                })
+                .GroupBy(d => d.Id, StringComparer.Ordinal)
+                .Select(g => g.OrderByDescending(d => d.DeletedUnixMs).First())
+                .ToList();
+        }
+
+        private void ApplyDeletedEntriesLocked()
+        {
+            ApplyDeletedEntries(database);
+        }
+
+        private static void ApplyDeletedEntries(ClipDatabase target)
+        {
+            if (target == null || target.Entries == null || target.DeletedEntries == null || target.DeletedEntries.Count == 0) return;
+            var deletedIds = new HashSet<string>(target.DeletedEntries.Select(d => d.Id).Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.Ordinal);
+            var deletedHashes = new HashSet<string>(target.DeletedEntries.Select(d => d.TextHash).Where(hash => !string.IsNullOrWhiteSpace(hash)), StringComparer.Ordinal);
+            if (deletedIds.Count == 0 && deletedHashes.Count == 0) return;
+            target.Entries.RemoveAll(e =>
+                e != null &&
+                (deletedIds.Contains(e.Id) || deletedHashes.Contains(ComputeTextHash(e.Text))));
+        }
+
+        private static bool IsDeleted(ClipDatabase target, string id)
+        {
+            return target != null &&
+                   !string.IsNullOrWhiteSpace(id) &&
+                   target.DeletedEntries != null &&
+                   target.DeletedEntries.Any(d => string.Equals(d.Id, id, StringComparison.Ordinal));
+        }
+
+        private static bool IsDeleted(ClipDatabase target, ClipEntry entry)
+        {
+            if (entry == null) return false;
+            if (IsDeleted(target, entry.Id)) return true;
+            if (target == null || target.DeletedEntries == null || string.IsNullOrEmpty(entry.Text)) return false;
+            var textHash = ComputeTextHash(entry.Text);
+            return target.DeletedEntries.Any(d => !string.IsNullOrWhiteSpace(d.TextHash) && string.Equals(d.TextHash, textHash, StringComparison.Ordinal));
+        }
+
+        private static bool MergeDeletedEntries(ClipDatabase target, ClipDatabase source)
+        {
+            if (target == null || source == null) return false;
+            NormalizeDeletedEntries(target);
+            NormalizeDeletedEntries(source);
+            if (source.DeletedEntries == null || source.DeletedEntries.Count == 0) return false;
+
+            var changed = false;
+            foreach (var sourceDeleted in source.DeletedEntries)
+            {
+                if (sourceDeleted == null || string.IsNullOrWhiteSpace(sourceDeleted.Id)) continue;
+                var targetDeleted = target.DeletedEntries.FirstOrDefault(d => string.Equals(d.Id, sourceDeleted.Id, StringComparison.Ordinal));
+                if (targetDeleted == null)
+                {
+                    target.DeletedEntries.Add(new DeletedClipEntry
+                    {
+                        Id = sourceDeleted.Id,
+                        TextHash = sourceDeleted.TextHash ?? string.Empty,
+                        DeletedUnixMs = sourceDeleted.DeletedUnixMs,
+                        SourceMachine = sourceDeleted.SourceMachine ?? string.Empty
+                    });
+                    changed = true;
+                }
+                else if (sourceDeleted.DeletedUnixMs > targetDeleted.DeletedUnixMs)
+                {
+                    targetDeleted.DeletedUnixMs = sourceDeleted.DeletedUnixMs;
+                    targetDeleted.SourceMachine = sourceDeleted.SourceMachine ?? string.Empty;
+                    targetDeleted.TextHash = sourceDeleted.TextHash ?? targetDeleted.TextHash ?? string.Empty;
+                    changed = true;
+                }
+                else if (string.IsNullOrWhiteSpace(targetDeleted.TextHash) && !string.IsNullOrWhiteSpace(sourceDeleted.TextHash))
+                {
+                    targetDeleted.TextHash = sourceDeleted.TextHash;
+                    changed = true;
+                }
+            }
+            NormalizeDeletedEntries(target);
+            return changed;
+        }
+
+        private static string ComputeTextHash(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
+            using (var sha = SHA256.Create())
+            {
+                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text))).Replace("-", string.Empty).ToLowerInvariant();
+            }
         }
 
         private static bool IsStorageAccessException(Exception ex)
@@ -972,6 +1545,16 @@ namespace Clipman
         {
             if (watcher != null) watcher.Dispose();
             if (reloadTimer != null) reloadTimer.Dispose();
+            if (serverPollTimer != null) serverPollTimer.Dispose();
+        }
+
+        private static bool IsRecoverableServerException(Exception ex)
+        {
+            return ex is WebException ||
+                   ex is IOException ||
+                   ex is UnauthorizedAccessException ||
+                   ex is DatabasePasswordRequiredException ||
+                   ex is InvalidOperationException;
         }
     }
 }
