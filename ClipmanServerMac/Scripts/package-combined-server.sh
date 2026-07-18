@@ -14,9 +14,13 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$PACKAGE_ROOT/Windows" "$PACKAGE_ROOT/Linux" "$PACKAGE_ROOT/macOS" "$DIST"
+mkdir -p "$PACKAGE_ROOT/Docker"
 
 cp "$ROOT/ClipmanServerLinux/clipman_server.py" "$PACKAGE_ROOT/clipman_server.py"
 cp "$ROOT/ClipmanServerLinux/install-clipman-server.sh" "$PACKAGE_ROOT/Linux/install-clipman-server.sh"
+cp "$ROOT/ClipmanServerDocker/Dockerfile.package" "$PACKAGE_ROOT/Docker/Dockerfile"
+cp "$ROOT/ClipmanServerDocker/docker-entrypoint.sh" "$PACKAGE_ROOT/Docker/docker-entrypoint.sh"
+chmod +x "$PACKAGE_ROOT/Docker/docker-entrypoint.sh"
 cp "$ROOT/ClipmanServer/Manual.html" "$PACKAGE_ROOT/Manual.html"
 cp "$ROOT/ClipmanServer/clipman-server-settings.example.jsonc" "$PACKAGE_ROOT/clipman-server-settings.example.jsonc"
 cp "$ROOT/LICENSE.txt" "$PACKAGE_ROOT/LICENSE.txt"
@@ -39,7 +43,7 @@ if [[ ! -d "$MAC_APP" ]]; then
   echo "Mac Clipman Server app is missing. Run ClipmanServerMac/Scripts/package-release.sh first." >&2
   exit 1
 fi
-ditto "$MAC_APP" "$PACKAGE_ROOT/macOS/Clipman Server.app"
+COPYFILE_DISABLE=1 ditto --norsrc "$MAC_APP" "$PACKAGE_ROOT/macOS/Clipman Server.app"
 
 cat > "$PACKAGE_ROOT/manifest.json" <<JSON
 {
@@ -55,11 +59,13 @@ cat > "$PACKAGE_ROOT/manifest.json" <<JSON
     "Manual.html",
     "clipman-server-settings.example.jsonc"
   ],
+  "Dockerfile": "Docker\\\\Dockerfile",
   "WindowsApp": "Windows\\\\Clipman Server.exe",
   "MacApp": "macOS\\\\Clipman Server.app"
 }
 JSON
 
 rm -f "$ZIP"
-ditto -c -k --keepParent "$PACKAGE_ROOT" "$ZIP"
+find "$PACKAGE_ROOT" \( -name '._*' -o -name '.DS_Store' \) -delete
+COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent "$PACKAGE_ROOT" "$ZIP"
 echo "Built $ZIP"

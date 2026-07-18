@@ -1,0 +1,41 @@
+name: Publish Clipman Server container
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/clipman-server"
+          version="${GITHUB_REF_NAME#v}"
+
+          docker build \
+            -f ClipmanServerDocker/Dockerfile \
+            -t "${image}:latest" \
+            -t "${image}:${version}" \
+            .
+
+          docker push "${image}:latest"
+          docker push "${image}:${version}"

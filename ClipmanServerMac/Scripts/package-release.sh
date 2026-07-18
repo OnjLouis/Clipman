@@ -52,5 +52,5 @@ PLIST
 
 codesign --force --deep --sign - "$APP" >/dev/null
 
-ditto -c -k --keepParent "$APP" "$DIST/ClipmanServerMac-$VERSION.zip"
+COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent "$APP" "$DIST/ClipmanServerMac-$VERSION.zip"
 echo "Built $DIST/ClipmanServerMac-$VERSION.zip"

@@ -44,6 +44,7 @@
     <li><a href="#server-program">Server Program</a></li>
     <li><a href="#security">Security Model</a></li>
     <li><a href="#linux-install">Recommended Linux Install</a></li>
+    <li><a href="#docker">Docker and GHCR</a></li>
     <li><a href="#first-run">First Run</a></li>
     <li><a href="#startup">Run at System Start</a></li>
     <li><a href="#updates">Updates</a></li>
@@ -112,6 +113,46 @@ Settings:           ~/.config/clipman-server/clipman-server-settings.json
 Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code></pre>
 
   <p>If user systemd is available, the installer also writes a user service file and prints the commands needed to enable it. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
+
+  <h2 id="docker">Docker and GHCR</h2>
+  <p>Clipman Server can also run as a container. This is useful for NAS, VPS, homelab, or reverse-proxy setups where services are managed as containers instead of directly installed programs.</p>
+
+  <p>The published image is:</p>
+
+  <pre><code>ghcr.io/onjlouis/clipman-server:latest</code></pre>
+
+  <p>A typical reverse-proxy deployment looks like this:</p>
+
+  <pre><code>docker run --detach \
+  --name clipman-server \
+  --restart unless-stopped \
+  --network dockernet \
+  -e CLIPMAN_IS_BEHIND_REVERSE_PROXY=true \
+  -e CLIPMAN_PORT=8080 \
+  -v /data/docker/clipman:/data \
+  ghcr.io/onjlouis/clipman-server:latest</code></pre>
+
+  <p>The container stores settings, connection details, databases, backups, and logs under the mounted <code>/data</code> volume. Keep that volume backed up. The container listens on <code>0.0.0.0:8080</code> by default inside the container so a reverse proxy or Docker network can reach it.</p>
+
+  <p>If you are using Caddy, nginx, Traefik, or another TLS reverse proxy, leave Clipman Server as plain HTTP inside the private Docker network and expose only the reverse proxy to the public internet. Set <code>CLIPMAN_IS_BEHIND_REVERSE_PROXY=true</code> so the server permits that private container listener. Clipman clients should use the public HTTPS address from the reverse proxy.</p>
+
+  <p>Useful container environment variables:</p>
+
+  <table>
+    <thead>
+      <tr><th>Variable</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>CLIPMAN_DATA_DIR</code></td><td>Container data folder. Defaults to <code>/data</code>.</td></tr>
+      <tr><td><code>CLIPMAN_HOST</code></td><td>Listen host inside the container. Defaults to <code>0.0.0.0</code>.</td></tr>
+      <tr><td><code>CLIPMAN_PORT</code></td><td>Listen port inside the container. Defaults to <code>8080</code>.</td></tr>
+      <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Optional host written into the connection details file.</td></tr>
+      <tr><td><code>CLIPMAN_IS_BEHIND_REVERSE_PROXY</code></td><td>Set to <code>true</code> when TLS is handled by a reverse proxy.</td></tr>
+      <tr><td><code>CLIPMAN_CERT_FILE</code> and <code>CLIPMAN_KEY_FILE</code></td><td>Optional direct TLS certificate and key paths inside the container.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The server ZIP also includes a <code>Docker</code> folder with a Dockerfile for users who prefer to build the image locally from the downloaded package.</p>
 
   <h2 id="first-run">First Run</h2>
   <p>Windows and macOS users should normally start Clipman Server through the app wrapper, not a terminal window. The wrapper starts the shared Python server in the background, keeps it out of Alt-Tab, the Dock, and Command-Tab, redirects output to logs, and provides a tray or status-menu interface for common actions.</p>
