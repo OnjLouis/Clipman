@@ -6,6 +6,8 @@ ClipmanMac/.build/
 ClipmanMac/.swiftpm/
 ClipmanMac/build/
 ClipmanMac/dist/
+ClipmanAndroid/
+ClipmanIOS/
 *.zip
 *.7z
 *.exe

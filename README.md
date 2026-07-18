@@ -171,6 +171,10 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 ## Changelog
 
+### 2.0.1
+
+- Fixed the Windows Preferences dialog so changing Clipman Server storage fields no longer applies expensive storage changes while tabbing through the dialog, preventing several-second screen-reader and UI stalls. Closes issue #23.
+
 ### 2.0.0
 
 - Clipman 2.0 introduces optional Clipman Server support, letting Windows and Mac clients share text history through a self-hosted server instead of relying only on cloud-synced folders or network shares.

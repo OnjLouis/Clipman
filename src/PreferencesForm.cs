@@ -139,16 +139,13 @@ namespace Clipman
             hotkeys.Controls.Add(hotkeyLayout);
 
             databasePath = NewTextBox(DisplayDatabaseFolder(settings.DatabasePath));
-            databasePath.Leave += (s, e) => ApplyNow();
             storageMode = NewComboBox("History storage type", new[] { "Local or shared folder", "Clipman Server" }, DisplayStorageMode(settings.StorageMode));
             serverUrl = NewTextBox(settings.ServerUrl);
             serverUrl.AccessibleName = "Clipman Server host";
-            serverUrl.Leave += (s, e) => ApplyNow();
             serverToken = NewTextBox(settings.ServerToken);
             serverToken.UseSystemPasswordChar = true;
             serverToken.AccessibleName = "Clipman Server token";
             serverToken.AccessibleDescription = "Server authentication token. The token is hidden on screen and saved with Windows user protection.";
-            serverToken.Leave += (s, e) => ApplyNow();
             databasePassword = new TextBox
             {
                 Width = 260,
@@ -305,7 +302,6 @@ namespace Clipman
         {
             showHotkey.TextChanged += (s, e) => ApplyNow();
             toggleHotkey.TextChanged += (s, e) => ApplyNow();
-            storageMode.SelectedIndexChanged += (s, e) => ApplyNow();
             removeDuplicates.CheckedChanged += (s, e) =>
             {
                 if (!loading)
