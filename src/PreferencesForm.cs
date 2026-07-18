@@ -343,7 +343,6 @@ namespace Clipman
             captureClipboardOnStartup.CheckedChanged += (s, e) => ApplyNow();
             updateCheckFrequency.SelectedIndexChanged += (s, e) => ApplyNow();
             installUpdatesSilently.CheckedChanged += (s, e) => ApplyNow();
-            rememberDatabasePassword.CheckedChanged += (s, e) => ApplyNow();
             maxHistoryEntries.ValueChanged += (s, e) => ApplyNow();
             maxHistoryDays.ValueChanged += (s, e) => ApplyNow();
             showDatabasePassword.CheckedChanged += (s, e) => ToggleDatabasePasswordVisibility();
