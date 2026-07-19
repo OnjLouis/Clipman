@@ -33,7 +33,7 @@
   // You normally do not point clients directly at this file. Clients compute a
   // bucket from the server token and the history password, then upload/download
   // encrypted .clipdb blobs through the server.
-  "DatabasePath": "/home/pi/.local/share/clipman-server/clipman-history.clipdb",
+  "DatabasePath": "/home/clipman/.local/share/clipman-server/clipman-history.clipdb",
 
   // Bearer token used by Clipman clients.
   //
@@ -46,7 +46,7 @@
   // Linux default:   ~/.local/state/clipman-server/logs/clipman-server.log
   // Windows default: %LOCALAPPDATA%\Clipman Server\logs\clipman-server.log
   // macOS default:   ~/Library/Logs/Clipman Server/logs/clipman-server.log
-  "LogPath": "/home/pi/.local/state/clipman-server/logs/clipman-server.log",
+  "LogPath": "/home/clipman/.local/state/clipman-server/logs/clipman-server.log",
 
   // Direct HTTPS certificate and key.
   //
@@ -70,5 +70,15 @@
   "CreateBackupBeforeEveryUpload": true,
   "BackupIntervalMinutes": 60,
   "BackupRetentionHours": 24,
-  "MaxBackups": 48
+  "MaxBackups": 48,
+
+  // Optional stale database cleanup.
+  //
+  // Leave DatabasePruneDays at 0 to never move old database buckets
+  // automatically. Set it to a positive number to move buckets whose last
+  // client activity is older than that many days into DeletedDatabases.
+  //
+  // The server checks on startup and then every DatabasePruneIntervalHours.
+  "DatabasePruneDays": 0,
+  "DatabasePruneIntervalHours": 24
 }

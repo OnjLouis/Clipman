@@ -2,6 +2,31 @@ import AppKit
 import Carbon
 import ClipmanCore
 
+private final class MetadataTableDataSource: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    private let rows: [(String, String)]
+
+    init(rows: [(String, String)]) {
+        self.rows = rows
+        super.init()
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        rows.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard rows.indices.contains(row) else { return nil }
+        let value = tableColumn?.identifier.rawValue == "value" ? rows[row].1 : rows[row].0
+        let identifier = NSUserInterfaceItemIdentifier(tableColumn?.identifier.rawValue ?? "detail")
+        let field = (tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField) ?? NSTextField(labelWithString: "")
+        field.identifier = identifier
+        field.stringValue = value
+        field.lineBreakMode = .byTruncatingTail
+        field.setAccessibilityLabel(value)
+        return field
+    }
+}
+
 @MainActor
 private final class QuickPasteModeRadioGroup: NSObject {
     private let pasteRestoreButton: NSButton
@@ -1519,32 +1544,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func viewSelectedItem() {
         if let entry = selectedEntry() {
-            var lines: [String] = []
-            if !entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append("Name: \(entry.Name)")
-            }
-            if !entry.Group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append("Group: \(entry.Group)")
-            }
-            if !entry.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append("Machine: \(entry.SourceMachine)")
-            }
-            if entry.CreatedUnixMs > 0 {
-                let date = Date(timeIntervalSince1970: TimeInterval(entry.CreatedUnixMs) / 1000.0)
-                lines.append("Created: \(dateFormatter.string(from: date))")
-            }
-            if entry.LastUsedUnixMs > 0 {
-                let date = Date(timeIntervalSince1970: TimeInterval(entry.LastUsedUnixMs) / 1000.0)
-                lines.append("Last used: \(dateFormatter.string(from: date))")
-            }
-            if entry.Pinned {
-                lines.append("Pinned: Yes")
-            }
-            if !lines.isEmpty {
-                lines.append("")
-            }
-            lines.append(entry.Text)
-            showReadOnlyText(title: "Clipboard Entry Text", accessibilityLabel: "Selected clipboard entry text", text: lines.joined(separator: "\n"))
+            showReadOnlyText(
+                title: "Clipboard Entry Text",
+                accessibilityLabel: "Selected clipboard entry text",
+                text: entry.Text,
+                details: clipboardEntryDetails(entry)
+            )
             return
         }
 
@@ -1584,7 +1589,46 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         NSSound.beep()
     }
 
-    private func showReadOnlyText(title: String, accessibilityLabel: String, text: String) {
+    private func clipboardEntryDetails(_ entry: ClipEntry) -> [(String, String)] {
+        var details: [(String, String)] = []
+        addDetail(&details, "Name", entry.Name)
+        addDetail(&details, "Group", entry.Group)
+        addDetail(&details, "Machine", entry.SourceMachine)
+        details.append(("Pinned", entry.Pinned ? "Yes" : "No"))
+        details.append(("Template", entry.IsTemplate ? "Yes" : "No"))
+        if entry.CreatedUnixMs > 0 {
+            let date = Date(timeIntervalSince1970: TimeInterval(entry.CreatedUnixMs) / 1000.0)
+            details.append(("Added", dateFormatter.string(from: date)))
+        }
+        if entry.LastUsedUnixMs > 0 {
+            let date = Date(timeIntervalSince1970: TimeInterval(entry.LastUsedUnixMs) / 1000.0)
+            details.append(("Last used", dateFormatter.string(from: date)))
+        }
+        if entry.ManualOrder > 0 {
+            details.append(("Manual order", String(entry.ManualOrder)))
+        }
+        details.append(("Text length", String(entry.Text.count)))
+        details.append(("Links", String(countLinks(in: entry.Text))))
+        addDetail(&details, "Entry ID", entry.Id)
+        return details
+    }
+
+    private func addDetail(_ details: inout [(String, String)], _ name: String, _ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            details.append((name, trimmed))
+        }
+    }
+
+    private func countLinks(in text: String) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: #"https?://[^\s<>'"]+"#, options: [.caseInsensitive]) else {
+            return 0
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.numberOfMatches(in: text, options: [], range: range)
+    }
+
+    private func showReadOnlyText(title: String, accessibilityLabel: String, text: String, details: [(String, String)] = []) {
         let alert = NSAlert()
         alert.messageText = title
         let closeButton = alert.addButton(withTitle: "Close")
@@ -1601,7 +1645,53 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         scroll.borderType = .bezelBorder
         scroll.hasVerticalScroller = true
         scroll.documentView = textView
-        alert.accessoryView = scroll
+
+        if details.isEmpty {
+            alert.accessoryView = scroll
+        } else {
+            let stack = NSStackView()
+            stack.orientation = .vertical
+            stack.spacing = 8
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(scroll)
+            scroll.widthAnchor.constraint(equalToConstant: 560).isActive = true
+            scroll.heightAnchor.constraint(equalToConstant: 260).isActive = true
+
+            let detailsLabel = NSTextField(labelWithString: "Details")
+            detailsLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+            stack.addArrangedSubview(detailsLabel)
+
+            let detailsTable = NSTableView()
+            detailsTable.headerView = nil
+            detailsTable.allowsColumnReordering = false
+            detailsTable.allowsColumnResizing = true
+            detailsTable.allowsMultipleSelection = false
+            detailsTable.setAccessibilityLabel("Entry details")
+            let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+            nameColumn.title = "Property"
+            nameColumn.width = 160
+            let valueColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("value"))
+            valueColumn.title = "Value"
+            valueColumn.width = 380
+            detailsTable.addTableColumn(nameColumn)
+            detailsTable.addTableColumn(valueColumn)
+            let dataSource = MetadataTableDataSource(rows: details)
+            detailsTable.dataSource = dataSource
+            detailsTable.delegate = dataSource
+
+            let detailsScroll = NSScrollView()
+            detailsScroll.borderType = .bezelBorder
+            detailsScroll.hasVerticalScroller = true
+            detailsScroll.documentView = detailsTable
+            stack.addArrangedSubview(detailsScroll)
+            detailsScroll.widthAnchor.constraint(equalToConstant: 560).isActive = true
+            detailsScroll.heightAnchor.constraint(equalToConstant: 135).isActive = true
+
+            alert.accessoryView = stack
+            alert.window.initialFirstResponder = textView
+            alert.layout()
+            _ = dataSource
+        }
         alert.runModal()
     }
 

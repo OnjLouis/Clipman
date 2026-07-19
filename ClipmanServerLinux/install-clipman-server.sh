@@ -55,6 +55,7 @@ Commands:
   status      Show service or process status
   list        List database buckets
   list-json   List database buckets with full IDs as JSON
+  prune       Move database buckets inactive for configured or specified days
   delete      Move an inactive database bucket to DeletedDatabases
   force-delete Move a database bucket even if recently active
   console     Run Clipman Server in the current terminal
@@ -101,6 +102,26 @@ case "\${1:-help}" in
     ;;
   list-json)
     "\$LAUNCHER" --list-databases-json
+    ;;
+  prune)
+    DAYS="\${2:-}"
+    if [ -z "\$DAYS" ]; then
+      DAYS="\$(python3 - "\$CONFIG_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+settings = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8-sig"))
+print(settings.get("DatabasePruneDays", 0))
+PY
+)"
+    fi
+    if [ -z "\$DAYS" ] || [ "\$DAYS" = "0" ]; then
+      echo "DatabasePruneDays is 0, so automatic stale database cleanup is disabled." >&2
+      echo "Run clipmanserver prune <days> to prune manually." >&2
+      exit 2
+    fi
+    "\$LAUNCHER" --prune-databases-days "\$DAYS" --confirm
     ;;
   delete)
     if [ -z "\${2:-}" ]; then

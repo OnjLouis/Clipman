@@ -545,6 +545,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             sounds.play(.skip)
             return
         }
+        if store.hasRecentlyTouchedRemoteText(text, excluding: settings.machineName) {
+            return
+        }
         if SensitiveDataExclusion.matchName(in: text, mode: settings.sensitiveDataMode, presetIds: settings.sensitiveDataPresetIds) != nil {
             sounds.play(.exclude)
             return

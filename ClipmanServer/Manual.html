@@ -289,13 +289,14 @@ clipmanserver restart
 clipmanserver status
 clipmanserver list
 clipmanserver list-json
+clipmanserver prune [days]
 clipmanserver delete &lt;database-id&gt;
 clipmanserver force-delete &lt;database-id&gt;
 clipmanserver console
 clipmanserver token
 clipmanserver connection</code></pre>
 
-  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully.</p>
+  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>prune</code> moves buckets inactive for the configured number of days, or for the number you type after the command. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully.</p>
 
   <h2 id="existing-history">Starting With Existing History</h2>
   <p>Do not manually copy an existing <code>.clipdb</code> into the server's database folders. Server database buckets are derived by Clipman clients from the server token and the Clipman history password. The server deliberately does not know that history password, so it cannot safely decide which bucket an imported file belongs in.</p>
@@ -402,13 +403,23 @@ Logs:      ~/Library/Logs/Clipman Server/logs/clipman-server.log</code></pre>
   <pre><code>python3 clipman_server.py --list-databases
 python3 clipman_server.py --list-databases-json</code></pre>
 
-  <p>The server cannot reliably know that a database is permanently abandoned. A laptop might be turned off, a user might be travelling, or a client might only connect occasionally. For that reason, Clipman Server never silently deletes database buckets.</p>
+  <p>The server cannot reliably know that a database is permanently abandoned. A laptop might be turned off, a user might be travelling, or a client might only connect occasionally. For that reason, Clipman Server never silently erases database buckets. Stale cleanup moves old buckets into <code>DeletedDatabases</code> so you can restore or permanently remove them later.</p>
+
+  <p>Automatic stale cleanup is disabled by default. To enable it, set <code>DatabasePruneDays</code> in the server settings file. For example, <code>DatabasePruneDays: 30</code> moves buckets that have not been seen or written for 30 days. The server checks once on startup and then every <code>DatabasePruneIntervalHours</code>, which defaults to 24 hours.</p>
 
   <p>To review stale buckets without changing anything:</p>
 
   <pre><code>clipman-server --prune-databases-days 30</code></pre>
 
-  <p>To move those stale buckets out of the active database folder:</p>
+  <p>To move stale buckets out of the active database folder on Linux using the configured number of days:</p>
+
+  <pre><code>clipmanserver prune</code></pre>
+
+  <p>To specify the number of days directly:</p>
+
+  <pre><code>clipmanserver prune 30</code></pre>
+
+  <p>Without the Linux helper, use:</p>
 
   <pre><code>clipman-server --prune-databases-days 30 --confirm</code></pre>
 

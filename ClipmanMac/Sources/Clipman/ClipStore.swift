@@ -150,6 +150,19 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
+    func hasRecentlyTouchedRemoteText(_ text: String, excluding sourceMachine: String, within milliseconds: Int64 = 90_000) -> Bool {
+        guard !text.isEmpty else { return false }
+        let cutoff = TimeUtil.nowUnixMs() - milliseconds
+        return queue.sync {
+            database.Entries.contains {
+                $0.Text == text
+                && !$0.SourceMachine.isEmpty
+                && $0.SourceMachine.caseInsensitiveCompare(sourceMachine) != .orderedSame
+                && max($0.CreatedUnixMs, $0.LastUsedUnixMs) >= cutoff
+            }
+        }
+    }
+
     func entry(id: String) -> ClipEntry? {
         let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }

@@ -171,6 +171,13 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 ## Changelog
 
+### 2.0.3
+
+- Improved cross-device clipboard handoff so text copied on iPhone or iPad through Apple Universal Clipboard is not re-added by the Mac as a new local clipboard entry after it has already synced through Clipman.
+- The F4 text review window now includes a separate Details list or table after the text, showing metadata such as source machine, added and last-used times, text length, link count, pinned/template state, and entry ID.
+- Fixed Windows history-password removal so choosing Use no password no longer causes Clipman to ask for the old history password again on restart. Closes issue #27.
+- Fixed Windows server-to-local storage switching so Clipman merges the current server cache into the selected local database instead of falling back to an older local database. Closes issue #28.
+
 ### 2.0.2
 
 - Fixed the Windows Preferences dialog so checking or unchecking Remember history password no longer applies expensive storage changes immediately, preventing another source of screen-reader and UI stalls. Closes issue #24.
@@ -278,7 +285,7 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 - Fixed Windows Alt+number group-filter shortcuts so they jump to the selected group without also moving focus to the menu bar.
 - Added an opt-in setting to put newly created text entries received from another machine onto this machine's clipboard. The setting is off by default, baselines current history when enabled, and ignores older entries that are merely reused on another machine.
 - Improved cross-platform parity with the Mac build: Quick Paste and latest-remote-text behavior are stored in machine-specific settings, not in the shared clipboard database.
-- Updated Mac packaging and release rules so macOS release assets use a versioned ZIP name while the app inside remains `Clipman.app`.
+- Updated Mac release packaging so macOS downloads use a versioned ZIP name while the app inside remains `Clipman.app`.
 
 ### 1.5.12
 

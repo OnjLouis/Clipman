@@ -95,6 +95,8 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     settings.setdefault("BackupRetentionHours", 24)
     settings.setdefault("MaxBackups", 48)
     settings.setdefault("CreateBackupBeforeEveryUpload", True)
+    settings.setdefault("DatabasePruneDays", 0)
+    settings.setdefault("DatabasePruneIntervalHours", 24)
     save_settings(config_path, settings)
     return settings, created
 
@@ -523,6 +525,42 @@ def prune_database_buckets(settings: Dict[str, Any], older_than_days: int, confi
     return 0
 
 
+def run_configured_database_prune(settings: Dict[str, Any]) -> None:
+    older_than_days = int(settings.get("DatabasePruneDays", 0) or 0)
+    if older_than_days <= 0:
+        return
+    matches = matching_stale_databases(settings, older_than_days)
+    if not matches:
+        logging.info("No database buckets older than %s days.", older_than_days)
+        return
+    for item in matches:
+        database_id = str(item["DatabaseId"])
+        target = move_database_bucket_to_deleted(settings, database_id)
+        logging.info(
+            "Moved stale database bucket %s to %s after %s days without activity.",
+            database_id,
+            target,
+            older_than_days,
+        )
+
+
+def start_database_prune_thread(settings: Dict[str, Any]) -> None:
+    older_than_days = int(settings.get("DatabasePruneDays", 0) or 0)
+    if older_than_days <= 0:
+        return
+    interval_hours = max(1, int(settings.get("DatabasePruneIntervalHours", 24) or 24))
+
+    def worker() -> None:
+        while True:
+            try:
+                run_configured_database_prune(settings)
+            except Exception:
+                logging.exception("Configured database prune pass failed.")
+            time.sleep(interval_hours * 60 * 60)
+
+    Thread(target=worker, daemon=True).start()
+
+
 class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
@@ -859,6 +897,7 @@ def main() -> int:
     logging.info("Clipman Server %s listening on %s", APP_VERSION, listen_prefix(settings))
     logging.info("Settings: %s", config_path)
     logging.info("Data root: %s", Path(settings["DatabasePath"]).parent / "Databases")
+    start_database_prune_thread(settings)
     print(f"Clipman Server {APP_VERSION} listening on {listen_prefix(settings)}")
     print("Use --show-token to print the bearer token for client setup.")
     if connection_info:

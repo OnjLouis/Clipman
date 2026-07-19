@@ -39,12 +39,18 @@ protocol ClipboardMonitorDelegate: AnyObject {
 
 @MainActor
 final class ClipboardMonitor: @unchecked Sendable {
+    private struct SuppressedText {
+        let text: String
+        let expires: Date
+    }
+
     weak var delegate: ClipboardMonitorDelegate?
     var isEnabled = true
     var ignoredApplications: [String] = []
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var ignoredChangeCount: Int?
+    private var suppressedRemoteTexts: [SuppressedText] = []
     private var lastClipboardDiagnostic = "No clipboard changes have been inspected in this Clipman session."
 
     func start() {
@@ -70,6 +76,7 @@ final class ClipboardMonitor: @unchecked Sendable {
     }
 
     func writeInternalText(_ text: String) {
+        suppressRemoteEchoText(text)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -103,6 +110,14 @@ final class ClipboardMonitor: @unchecked Sendable {
         }
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
+    }
+
+    func suppressRemoteEchoText(_ text: String, for seconds: TimeInterval = 60) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        let now = Date()
+        suppressedRemoteTexts.removeAll { $0.expires <= now || $0.text == text }
+        suppressedRemoteTexts.append(SuppressedText(text: text, expires: now.addingTimeInterval(seconds)))
     }
 
     func diagnosticsReport() -> String {
@@ -175,12 +190,26 @@ final class ClipboardMonitor: @unchecked Sendable {
             )
             return
         }
+        if shouldSuppressRemoteEcho(text) {
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Skipped because this text matches a recently auto-copied remote entry.",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
+            return
+        }
         lastClipboardDiagnostic = clipboardDiagnostic(
             result: "Captured text clipboard event. Text length: \(text.count) characters.",
             appDiagnostic: appDiagnostic,
             pasteboardDiagnostic: pasteboardDiagnostic
         )
         delegate?.clipboardMonitor(self, didCapture: text, sourceApplication: sourceApplicationName())
+    }
+
+    private func shouldSuppressRemoteEcho(_ text: String) -> Bool {
+        let now = Date()
+        suppressedRemoteTexts.removeAll { $0.expires <= now }
+        return suppressedRemoteTexts.contains { $0.text == text }
     }
 
     private func clipboardDiagnostic(result: String, appDiagnostic: String, pasteboardDiagnostic: String) -> String {

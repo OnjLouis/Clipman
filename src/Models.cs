@@ -211,6 +211,8 @@ namespace Clipman
         public string ProtectedDatabasePassword { get; set; }
         [ScriptIgnore]
         public string PlainDatabasePassword { get; set; }
+        [ScriptIgnore]
+        public bool PasswordClearRequested { get; set; }
         public bool AutoRemoveUnavailableFileHistoryEvents { get; set; }
         public int DiagnosticsFileHistoryLimit { get; set; }
         public string SensitiveDataMode { get; set; }

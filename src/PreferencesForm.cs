@@ -35,6 +35,7 @@ namespace Clipman
         private readonly TextBox databasePasswordConfirm;
         private readonly CheckBox showDatabasePassword;
         private readonly CheckBox rememberDatabasePassword;
+        private bool passwordClearRequested;
         private readonly Action<string> copySensitiveText;
         private readonly ShortcutButton closeButton;
         private readonly NumericUpDown maxHistoryEntries;
@@ -388,8 +389,10 @@ namespace Clipman
             settings.LastPreferencesTab = preferencesTabs == null ? 0 : preferencesTabs.SelectedIndex;
             settings.RememberDatabasePassword = rememberDatabasePassword.Checked;
             settings.PlainDatabasePassword = string.Empty;
+            settings.PasswordClearRequested = passwordClearRequested;
             if (databasePassword.Text.Length > 0)
             {
+                settings.PasswordClearRequested = false;
                 settings.PlainDatabasePassword = databasePassword.Text;
                 settings.ProtectedDatabasePassword = settings.RememberDatabasePassword ? DatabasePasswordProtector.Protect(databasePassword.Text) : string.Empty;
                 settings.DatabaseEncryptionEnabled = true;
@@ -431,6 +434,8 @@ namespace Clipman
             {
                 var focused = ActiveControl;
                 applySettings(settings);
+                passwordClearRequested = false;
+                settings.PasswordClearRequested = false;
                 BeginInvoke(new Action(() =>
                 {
                     if (IsDisposed) return;
@@ -628,9 +633,11 @@ namespace Clipman
             databasePasswordConfirm.Text = string.Empty;
             settings.ProtectedDatabasePassword = string.Empty;
             settings.PlainDatabasePassword = string.Empty;
+            passwordClearRequested = true;
+            settings.PasswordClearRequested = true;
             settings.RememberDatabasePassword = false;
-            rememberDatabasePassword.Checked = false;
             settings.DatabaseEncryptionEnabled = false;
+            rememberDatabasePassword.Checked = false;
             ApplyNow();
             MessageBox.Show(this, "Clipman will use this database without a history password.", "Clipman history password", MessageBoxButtons.OK, MessageBoxIcon.Information);
             databasePassword.Focus();
@@ -690,6 +697,7 @@ namespace Clipman
                 RememberDatabasePassword = current.RememberDatabasePassword,
                 ProtectedDatabasePassword = current.ProtectedDatabasePassword,
                 PlainDatabasePassword = string.Empty,
+                PasswordClearRequested = false,
                 UseDefaultDatabasePath = current.UseDefaultDatabasePath,
                 SensitiveDataMode = SensitiveDataExclusion.NormalizeMode(current.SensitiveDataMode),
                 SensitiveDataPresetIds = current.SensitiveDataPresetIds == null ? new List<string>() : new List<string>(current.SensitiveDataPresetIds)

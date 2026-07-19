@@ -220,6 +220,8 @@
 
   <p>In Entry Properties and the <code>F4</code> text review window, word navigation is tuned for URLs and code-like strings. On Windows, <code>Ctrl+Left</code> and <code>Ctrl+Right</code> stop at punctuation and symbol boundaries such as slashes, question marks, ampersands, equals signs, dashes, and underscores. On Mac, use <code>Option+Left</code> and <code>Option+Right</code>. Add <code>Shift</code> on either platform to extend the selection.</p>
 
+  <p>The <code>F4</code> text review window shows the clipboard text first, followed by a separate Details list or table in tab order. Details include useful metadata such as name, group, source machine, pinned/template state, added and last-used times, manual order where present, text length, link count, and entry ID.</p>
+
   <p>For example, an entry containing <code>1234</code> can be shown as <code>Test: 1234</code>. The name is metadata only: copying, cutting, exporting to text, and viewing full text use the clipboard text without the name.</p>
 
   <p>Type-to-jump navigation uses the original clipboard text, not the entry name. If <code>1234</code> is named <code>Test</code>, typing <code>123</code> jumps to that entry, while typing <code>Test</code> does not jump to it because the clipboard text does not start with Test. Search with <code>Ctrl+F</code> checks both names and clipboard text.</p>
@@ -481,7 +483,7 @@
       </tr>
     </tbody>
   </table>
-  <p>The source package also includes <code>README.md</code>, source files, build scripts, and release rules for developers. Those source-only files are not required in the portable runtime folder.</p>
+  <p>The source package also includes <code>README.md</code>, source files, and build project files. Those source-only files are not required in the portable runtime folder.</p>
 
   <h2 id="non-text-clipboard-events">Non-text Clipboard Events</h2>
   <p>Clipman stores text history in the main history database and stores file or non-text clipboard events in a separate machine-specific file-history database. Use the File history tab to review those events. It can show files copied or cut in Windows Explorer or macOS Finder, file-like clipboard operations from other programs, and specialist formats such as audio-editor clipboard data. Clipman cannot retrieve events from before it was running, and file events are useful only while the referenced files still exist at the same paths.</p>
@@ -546,6 +548,14 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.0.3</h3>
+  <ul>
+    <li>Improved cross-device clipboard handoff so text copied on iPhone or iPad through Apple Universal Clipboard is not re-added by the Mac as a new local clipboard entry after it has already synced through Clipman.</li>
+    <li>The <code>F4</code> text review window now includes a separate Details list or table after the text, showing metadata such as source machine, added and last-used times, text length, link count, pinned/template state, and entry ID.</li>
+    <li>Fixed Windows history-password removal so choosing <strong>Use no password</strong> no longer causes Clipman to ask for the old history password again on restart. Closes <a href="https://github.com/OnjLouis/Clipman/issues/27">issue #27</a>.</li>
+    <li>Fixed Windows server-to-local storage switching so Clipman merges the current server cache into the selected local database instead of falling back to an older local database. Closes <a href="https://github.com/OnjLouis/Clipman/issues/28">issue #28</a>.</li>
+  </ul>
+
   <h3>2.0.2</h3>
   <ul>
     <li>Fixed the Windows Preferences dialog so checking or unchecking Remember history password no longer applies expensive storage changes immediately, preventing another source of screen-reader and UI stalls. Closes <a href="https://github.com/OnjLouis/Clipman/issues/24">issue #24</a>.</li>
@@ -668,7 +678,7 @@
     <li>Fixed Windows Alt+number group-filter shortcuts so they jump to the selected group without also moving focus to the menu bar.</li>
     <li>Added an opt-in setting to put newly created text entries received from another machine onto this machine's clipboard. The setting is off by default, baselines current history when enabled, and ignores older entries that are merely reused on another machine.</li>
     <li>Improved cross-platform parity with the Mac build: Quick Paste and latest-remote-text behavior are stored in machine-specific settings, not in the shared clipboard database.</li>
-    <li>Updated Mac packaging and release rules so macOS release assets use a versioned ZIP name while the app inside remains <code>Clipman.app</code>.</li>
+    <li>Updated Mac release packaging so macOS downloads use a versioned ZIP name while the app inside remains <code>Clipman.app</code>.</li>
   </ul>
 
   <h3>1.5.12</h3>

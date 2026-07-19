@@ -2656,10 +2656,64 @@ namespace Clipman
             var text = selected.Count == 1
                 ? selected[0].Text
                 : string.Join("\r\n\r\n----- Next clipboard entry -----\r\n\r\n", selected.Select(e => e.Text));
-            using (var viewer = new TextViewerForm(text))
+            var details = selected.Count == 1
+                ? ClipboardEntryDetails(selected[0])
+                : new List<KeyValuePair<string, string>>
+                {
+                    new KeyValuePair<string, string>("Selected entries", selected.Count.ToString(CultureInfo.InvariantCulture)),
+                    new KeyValuePair<string, string>("Combined text length", text.Length.ToString(CultureInfo.InvariantCulture)),
+                    new KeyValuePair<string, string>("Combined links", CountLinks(text).ToString(CultureInfo.InvariantCulture))
+                };
+            using (var viewer = new TextViewerForm(
+                "Clipman Entry Text",
+                text,
+                "Clipboard entry text",
+                "Read-only clipboard entry text.",
+                false,
+                details))
             {
                 viewer.ShowDialog(this);
             }
+        }
+
+        private static List<KeyValuePair<string, string>> ClipboardEntryDetails(ClipEntry entry)
+        {
+            var details = new List<KeyValuePair<string, string>>();
+            AddDetail(details, "Name", entry.Name);
+            AddDetail(details, "Group", entry.Group);
+            AddDetail(details, "Machine", entry.SourceMachine);
+            details.Add(new KeyValuePair<string, string>("Pinned", entry.Pinned ? "Yes" : "No"));
+            details.Add(new KeyValuePair<string, string>("Template", entry.IsTemplate ? "Yes" : "No"));
+            if (entry.CreatedUnixMs > 0)
+            {
+                details.Add(new KeyValuePair<string, string>("Added", TimeUtil.FromUnixMs(entry.CreatedUnixMs).ToString("yyyy-MM-dd HH:mm:ss")));
+            }
+            if (entry.LastUsedUnixMs > 0)
+            {
+                details.Add(new KeyValuePair<string, string>("Last used", TimeUtil.FromUnixMs(entry.LastUsedUnixMs).ToString("yyyy-MM-dd HH:mm:ss")));
+            }
+            if (entry.ManualOrder > 0)
+            {
+                details.Add(new KeyValuePair<string, string>("Manual order", entry.ManualOrder.ToString(CultureInfo.InvariantCulture)));
+            }
+            details.Add(new KeyValuePair<string, string>("Text length", (entry.Text ?? string.Empty).Length.ToString(CultureInfo.InvariantCulture)));
+            details.Add(new KeyValuePair<string, string>("Links", CountLinks(entry.Text).ToString(CultureInfo.InvariantCulture)));
+            AddDetail(details, "Entry ID", entry.Id);
+            return details;
+        }
+
+        private static void AddDetail(List<KeyValuePair<string, string>> details, string name, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                details.Add(new KeyValuePair<string, string>(name, value.Trim()));
+            }
+        }
+
+        private static int CountLinks(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return 0;
+            return Regex.Matches(text, @"https?://[^\s<>'""]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count;
         }
 
         private void ShowSearchDialog(bool backwards)

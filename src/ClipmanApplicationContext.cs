@@ -284,13 +284,16 @@ namespace Clipman
                 !string.Equals(settings.StorageMode, updated.StorageMode, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(settings.ServerUrl, updated.ServerUrl, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(settings.ServerToken, updated.ServerToken, StringComparison.Ordinal);
+            var wasServerStorageEnabled = IsServerStorageEnabled();
+            var serverCacheBeforeStorageChange = wasServerStorageEnabled ? ServerCacheDatabasePath() : string.Empty;
             var activeChanged = settings.Active != updated.Active;
             var sendToChanged = settings.SendToEnabled != updated.SendToEnabled;
             var encryptionChanged =
                 settings.DatabaseEncryptionEnabled != updated.DatabaseEncryptionEnabled ||
                 settings.RememberDatabasePassword != updated.RememberDatabasePassword ||
                 !string.Equals(settings.ProtectedDatabasePassword, updated.ProtectedDatabasePassword, StringComparison.Ordinal) ||
-                !string.IsNullOrEmpty(updated.PlainDatabasePassword);
+                !string.IsNullOrEmpty(updated.PlainDatabasePassword) ||
+                updated.PasswordClearRequested;
             var startupChanged = settings.RunAtStartup != updated.RunAtStartup;
             var updatePolicyChanged =
                 !string.Equals(settings.UpdateCheckFrequency, updated.UpdateCheckFrequency, StringComparison.OrdinalIgnoreCase) ||
@@ -337,7 +340,11 @@ namespace Clipman
             settings.InstallUpdatesSilently = updated.InstallUpdatesSilently;
             settings.DatabaseEncryptionEnabled = updated.DatabaseEncryptionEnabled;
             settings.RememberDatabasePassword = updated.RememberDatabasePassword;
-            if (!string.IsNullOrEmpty(updated.PlainDatabasePassword))
+            if (updated.PasswordClearRequested)
+            {
+                databasePassword = string.Empty;
+            }
+            else if (!string.IsNullOrEmpty(updated.PlainDatabasePassword))
             {
                 databasePassword = updated.PlainDatabasePassword;
             }
@@ -384,6 +391,10 @@ namespace Clipman
             }
             if (databaseChanged)
             {
+                if (wasServerStorageEnabled && !IsServerStorageEnabled())
+                {
+                    MergeServerCacheIntoConfiguredDatabase(serverCacheBeforeStorageChange);
+                }
                 ResolveDatabasePassword();
                 ResolveDatabaseLocation();
                 SeedServerCacheFromConfiguredDatabase();
@@ -394,7 +405,10 @@ namespace Clipman
             }
             else if (encryptionChanged)
             {
-                ResolveDatabasePassword();
+                if (!updated.PasswordClearRequested)
+                {
+                    ResolveDatabasePassword();
+                }
                 store.ChangeDatabasePassword();
                 ConfigureTextHistoryServerStorage();
                 if (!settingsDirectoryChanged)
@@ -594,6 +608,11 @@ namespace Clipman
             }
 
             if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            if (store.HasRecentlyTouchedRemoteText(text, Environment.MachineName, 90000))
             {
                 return;
             }
@@ -1917,7 +1936,6 @@ namespace Clipman
         {
             var databaseIsEncrypted = false;
             var fileHistoryIsEncrypted = false;
-            var secretsAreEncrypted = false;
             try
             {
                 databaseIsEncrypted = ClipDatabaseFile.IsEncryptedFile(settings.DatabasePath);
@@ -1932,15 +1950,7 @@ namespace Clipman
             catch
             {
             }
-            try
-            {
-                secretsAreEncrypted = ClipDatabaseFile.IsEncryptedFile(DefaultSecretsDatabasePath());
-            }
-            catch
-            {
-            }
-
-            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !secretsAreEncrypted && !settings.DatabaseEncryptionEnabled && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !settings.DatabaseEncryptionEnabled && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 databasePassword = string.Empty;
                 settings.DatabaseEncryptionEnabled = false;
@@ -1978,7 +1988,7 @@ namespace Clipman
                 return;
             }
 
-            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !secretsAreEncrypted)
+            if (!databaseIsEncrypted && !fileHistoryIsEncrypted)
             {
                 settings.DatabaseEncryptionEnabled = false;
                 settings.RememberDatabasePassword = false;
@@ -2093,12 +2103,42 @@ namespace Clipman
                 return settings.DatabasePath;
             }
 
+            return ServerCacheDatabasePath();
+        }
+
+        private string ServerCacheDatabasePath()
+        {
             var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (string.IsNullOrWhiteSpace(root))
             {
                 root = Path.GetTempPath();
             }
             return Path.Combine(root, "Clipman", "ServerCache", Environment.MachineName, "clipman-history.clipdb");
+        }
+
+        private void MergeServerCacheIntoConfiguredDatabase(string serverCachePath)
+        {
+            if (string.IsNullOrWhiteSpace(serverCachePath) || !File.Exists(serverCachePath)) return;
+            if (string.IsNullOrWhiteSpace(settings.DatabasePath)) return;
+            try
+            {
+                var targetPath = settings.DatabasePath;
+                if (string.Equals(Path.GetFullPath(serverCachePath), Path.GetFullPath(targetPath), StringComparison.OrdinalIgnoreCase)) return;
+
+                var targetDatabase = File.Exists(targetPath)
+                    ? ClipDatabaseFile.Load(targetPath, CurrentDatabasePassword())
+                    : new ClipDatabase();
+                var cacheDatabase = ClipDatabaseFile.Load(serverCachePath, CurrentDatabasePassword());
+                SyncConflictResolver.MergeInto(targetDatabase, cacheDatabase);
+
+                var dir = Path.GetDirectoryName(targetPath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                ClipDatabaseFile.SaveAtomic(targetPath, targetDatabase, CurrentDatabasePassword());
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Could not merge the server cache into the selected local database: " + ex.Message);
+            }
         }
 
         private void SeedServerCacheFromConfiguredDatabase()

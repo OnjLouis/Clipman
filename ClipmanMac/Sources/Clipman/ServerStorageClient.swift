@@ -95,7 +95,7 @@ final class ServerStorageClient: @unchecked Sendable {
         request.httpMethod = method
         request.timeoutInterval = 8
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("ClipmanMac/2.0.2", forHTTPHeaderField: "User-Agent")
+        request.setValue("ClipmanMac/2.0.3", forHTTPHeaderField: "User-Agent")
         if let expectedRevision, !expectedRevision.isEmpty {
             request.setValue(expectedRevision, forHTTPHeaderField: "If-Match")
         }
@@ -167,7 +167,7 @@ final class ServerStorageClient: @unchecked Sendable {
             "\(method) \(path) HTTP/1.1",
             "Host: \(host):\(port)",
             "Authorization: Bearer \(token)",
-            "User-Agent: ClipmanMac/2.0.2",
+            "User-Agent: ClipmanMac/2.0.3",
             "Connection: close"
         ]
         if let expectedRevision, !expectedRevision.isEmpty {

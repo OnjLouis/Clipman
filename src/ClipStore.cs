@@ -214,6 +214,22 @@ namespace Clipman
             }
         }
 
+        public bool HasRecentlyTouchedRemoteText(string text, string localMachineName, long withinMilliseconds)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            var local = (localMachineName ?? string.Empty).Trim();
+            var cutoff = TimeUtil.NowUnixMs() - Math.Max(1, withinMilliseconds);
+            lock (sync)
+            {
+                return database.Entries.Any(e =>
+                    e != null &&
+                    string.Equals(e.Text ?? string.Empty, text, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(e.SourceMachine) &&
+                    !string.Equals((e.SourceMachine ?? string.Empty).Trim(), local, StringComparison.OrdinalIgnoreCase) &&
+                    Math.Max(e.CreatedUnixMs, e.LastUsedUnixMs) >= cutoff);
+            }
+        }
+
         private static IEnumerable<ClipEntry> SortNormalEntries(IEnumerable<ClipEntry> entries, string sortMode, bool descending)
         {
             switch ((sortMode ?? string.Empty).Trim().ToUpperInvariant())
