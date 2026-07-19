@@ -73,7 +73,7 @@
 
   <pre><code>clipman_server.py</code></pre>
 
-  <p>It runs on Linux, macOS, and Windows with Python 3. The same server program is used across platforms so the safety model stays consistent: random first-run port, random bearer token, password-scoped database buckets, cheap revision polling, rolling backups, private file permissions where supported, rotating logs, database-ID log redaction, and optional direct TLS.</p>
+  <p>It runs on Linux, macOS, and Windows with Python 3. The Windows EXE and macOS app are background wrappers around this same Python server, not separate native server implementations. The same server program is used across platforms so the safety model stays consistent: random first-run port, random bearer token, password-scoped database buckets, cheap revision polling, rolling backups, private file permissions where supported, rotating logs, database-ID log redaction, and optional direct TLS.</p>
 
   <h2 id="security">Security Model</h2>
   <p>The server stores raw <code>.clipdb</code> blobs. If you use a Clipman history password, clipboard text remains encrypted on the server. The server still has sensitive responsibilities:</p>
@@ -162,7 +162,7 @@ Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code
 
   <pre><code>Windows\Clipman Server.exe</code></pre>
 
-  <p>Clipman Server appears in the Windows notification area. It does not open a console window and does not appear as a normal Alt-Tab window. Use its notification-area menu to copy connection details, open settings, open logs, restart the server, enable or disable startup, or quit.</p>
+  <p>Clipman Server appears in the Windows notification area. It does not open a console window and does not appear as a normal Alt-Tab window. Right-click the Clipman Server notification-area icon to copy connection details, open settings, open logs, restart the server, enable or disable startup, or quit.</p>
 
   <p>The Windows EXE contains the shared server script and extracts it into <code>%LOCALAPPDATA%\Clipman Server\Runtime</code> when it starts. Windows users do not need to keep the Linux or macOS folders after extracting the package. Keep <code>Manual.html</code> and <code>LICENSE.txt</code> somewhere accessible for reference. Python 3 must still be installed because the EXE is a background wrapper around the shared Python server, not a bundled Python runtime.</p>
 
@@ -171,7 +171,9 @@ Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code
 
   <pre><code>macOS/Clipman Server.app</code></pre>
 
-  <p>Clipman Server appears in the macOS menu bar. It does not keep a Terminal window open and does not appear in the Dock or Command-Tab. Use its status-menu commands to copy connection details, open settings, open logs, restart the server, enable or disable login startup, or quit.</p>
+  <p>Clipman Server appears in the macOS menu bar. It does not keep a Terminal window open and does not appear in the Dock or Command-Tab. Click the Clipman Server menu-bar item to copy connection details, open settings, open logs, restart the server, enable or disable login startup, or quit.</p>
+
+  <p>The macOS app bundles the shared server script in its Resources folder and runs it with Python 3. Python 3 must be installed. The wrapper looks for <code>/opt/homebrew/bin/python3</code>, <code>/usr/local/bin/python3</code>, and <code>/usr/bin/python3</code>. On a clean Mac, install Python 3 with Homebrew, or install Apple's Command Line Tools if that provides <code>/usr/bin/python3</code> on your system.</p>
 
   <h3>Linux</h3>
   <p>For Linux, especially Raspberry Pi or VPS use, prefer the installer described above. For a temporary manual run from the extracted package, use:</p>
@@ -181,9 +183,10 @@ Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code
   <h3>Command-Line Diagnostics</h3>
   <p>For troubleshooting only, users who kept the full server package can run the shared Python server directly from the package root:</p>
 
-  <pre><code>py -3 clipman_server.py</code></pre>
+  <pre><code>python3 clipman_server.py        # macOS or Linux
+py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
 
-  <p>This is useful when you deliberately want console output. It is not the recommended everyday way to run the server.</p>
+  <p>This is useful when you deliberately want console output. It is not the recommended everyday way to run the server. On Windows and macOS, the wrapper menu's <strong>Open settings folder</strong>, <strong>Open logs folder</strong>, and <strong>Copy connection details</strong> commands are usually easier than running the server by hand.</p>
 
   <p>On first run, the server creates a settings file with a random high port, a random bearer token, a private data directory, a managed log file, and a plain text connection details file beside the settings file.</p>
 
@@ -247,13 +250,30 @@ Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code
 Port:
 Token:</code></pre>
 
-  <p>Keep this file private. After every Clipman client has been configured, delete it or move the details to a password manager. If it is deleted, the server will not recreate it on every launch. Recreate it intentionally with:</p>
+  <p>Keep this file private. After every Clipman client has been configured, delete it or move the details to a password manager. If it is deleted, the server will not recreate it on every launch. On Windows and macOS, use the wrapper menu's <strong>Copy connection details</strong> command when you need the address, port, and token again.</p>
+
+  <p>Default connection-details locations are:</p>
+
+  <table>
+    <thead>
+      <tr><th>Platform</th><th>Connection details file</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Windows wrapper</td><td><code>%LOCALAPPDATA%\Clipman Server\clipman-server-connection.txt</code></td></tr>
+      <tr><td>macOS wrapper</td><td><code>~/Library/Application Support/Clipman Server/clipman-server-connection.txt</code></td></tr>
+      <tr><td>Linux installer</td><td><code>~/.config/clipman-server/clipman-server-connection.txt</code></td></tr>
+      <tr><td>Direct package run</td><td><code>./Settings/clipman-server-connection.txt</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>On Linux installs, recreate the file intentionally with:</p>
 
   <pre><code>clipman-server --write-connection-info</code></pre>
 
-  <p>Without the installer, run:</p>
+  <p>Without the Linux installer, run the Python server directly:</p>
 
-  <pre><code>python3 clipman_server.py --write-connection-info</code></pre>
+  <pre><code>python3 clipman_server.py --write-connection-info        # macOS or Linux
+py -3 clipman_server.py --write-connection-info          # Windows with the Python launcher</code></pre>
 
   <h2 id="settings-example">Commented Settings Example</h2>
   <p>The server package includes a commented settings example:</p>
@@ -277,7 +297,7 @@ Token:</code></pre>
     </thead>
     <tbody>
       <tr><td><code>clipman-server</code></td><td>Runs the server program directly and accepts every advanced command-line switch.</td></tr>
-      <tr><td><code>clipmanserver</code></td><td>Friendly helper for common admin tasks.</td></tr>
+      <tr><td><code>clipmanserver</code></td><td>Linux-only friendly helper for common admin tasks.</td></tr>
     </tbody>
   </table>
 
@@ -360,21 +380,29 @@ Connection details: ./Settings/clipman-server-connection.txt</code></pre>
 
   <h3>Linux</h3>
 
-  <pre><code>Databases: ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/clipman-history.clipdb
-Backups:   ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/ServerBackups/
-Logs:      ~/.local/state/clipman-server/logs/clipman-server.log</code></pre>
+  <pre><code>Settings:           ~/.config/clipman-server/clipman-server-settings.json
+Connection details: ~/.config/clipman-server/clipman-server-connection.txt
+Databases:          ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/clipman-history.clipdb
+Backups:            ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/ServerBackups/
+Logs:               ~/.local/state/clipman-server/logs/clipman-server.log</code></pre>
 
   <h3>Windows</h3>
 
-  <pre><code>Databases: %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\clipman-history.clipdb
-Backups:   %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\ServerBackups\
-Logs:      %LOCALAPPDATA%\Clipman Server\logs\clipman-server.log</code></pre>
+  <pre><code>Settings:           %LOCALAPPDATA%\Clipman Server\clipman-server-settings.json
+Connection details: %LOCALAPPDATA%\Clipman Server\clipman-server-connection.txt
+Runtime script:     %LOCALAPPDATA%\Clipman Server\Runtime\clipman_server.py
+Databases:          %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\clipman-history.clipdb
+Backups:            %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\ServerBackups\
+Logs:               %LOCALAPPDATA%\Clipman Server\logs\clipman-server.log</code></pre>
 
   <h3>macOS</h3>
 
-  <pre><code>Databases: ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/clipman-history.clipdb
-Backups:   ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/ServerBackups/
-Logs:      ~/Library/Logs/Clipman Server/logs/clipman-server.log</code></pre>
+  <pre><code>Settings:           ~/Library/Application Support/Clipman Server/clipman-server-settings.json
+Connection details: ~/Library/Application Support/Clipman Server/clipman-server-connection.txt
+Runtime script:     Clipman Server.app/Contents/Resources/clipman_server.py
+Databases:          ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/clipman-history.clipdb
+Backups:            ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/ServerBackups/
+Logs:               ~/Library/Logs/Clipman Server/logs/clipman-server.log</code></pre>
 
   <p>For a system service, use admin-owned paths such as:</p>
 
@@ -409,7 +437,8 @@ python3 clipman_server.py --list-databases-json</code></pre>
 
   <p>To review stale buckets without changing anything:</p>
 
-  <pre><code>clipman-server --prune-databases-days 30</code></pre>
+  <pre><code>clipman-server --prune-databases-days 30              # Linux installed launcher
+python3 clipman_server.py --prune-databases-days 30   # direct package run</code></pre>
 
   <p>To move stale buckets out of the active database folder on Linux using the configured number of days:</p>
 
@@ -419,9 +448,10 @@ python3 clipman_server.py --list-databases-json</code></pre>
 
   <pre><code>clipmanserver prune 30</code></pre>
 
-  <p>Without the Linux helper, use:</p>
+  <p>Without the Linux helper, use the direct server command:</p>
 
-  <pre><code>clipman-server --prune-databases-days 30 --confirm</code></pre>
+  <pre><code>clipman-server --prune-databases-days 30 --confirm              # Linux installed launcher
+python3 clipman_server.py --prune-databases-days 30 --confirm   # direct package run</code></pre>
 
   <p>To move one known bucket by ID on Linux:</p>
 
@@ -431,9 +461,10 @@ python3 clipman_server.py --list-databases-json</code></pre>
 
   <pre><code>clipmanserver force-delete &lt;database-id&gt;</code></pre>
 
-  <p>Without the Linux helper, use:</p>
+  <p>Without the Linux helper, use the direct server command:</p>
 
-  <pre><code>clipman-server --delete-database &lt;database-id&gt; --confirm</code></pre>
+  <pre><code>clipman-server --delete-database &lt;database-id&gt; --confirm              # Linux installed launcher
+python3 clipman_server.py --delete-database &lt;database-id&gt; --confirm   # direct package run</code></pre>
 
   <p>To bypass the 24-hour guard without the helper, add <code>--force-recent</code>.</p>
 
