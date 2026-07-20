@@ -484,6 +484,8 @@ CreateBackupBeforeEveryUpload: true</code></pre>
 
   <p>When an upload is byte-for-byte identical to the database already on the server, the server returns the current revision without rewriting the file or creating another backup. This avoids unnecessary disk writes on small hosts such as Raspberry Pi systems.</p>
 
+  <p><code>MaxDatabaseBytes</code> limits the size of one uploaded database. The default is 67108864 bytes, or 64 MiB. Requests above that limit are rejected without changing the stored database. Increase it only if a legitimate Clipman history grows beyond that size.</p>
+
   <h2 id="logs">Logs</h2>
   <p>The server writes rotating logs. Database IDs are redacted from request logs as:</p>
 

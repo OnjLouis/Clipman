@@ -99,6 +99,8 @@ To share a database between machines, open Options > Preferences on each machine
 
 When a custom data folder is selected, Clipman leaves a small `settings-location.json` pointer beside the app so it can find that folder next time. That pointer stores locations per computer name. This means one computer can use one local cloud or network path, another computer can use a different local path to the same synced data, and both can still share the same history without overwriting each other's location pointer. If a cloud service creates a conflict copy of that pointer, Clipman merges the known clients back into one pointer file.
 
+If the selected data folder is unavailable when Clipman starts, Clipman reports that location and stops instead of silently switching back to its default folder. Reconnect the drive, cloud service, WebDAV mount, or network share, then start Clipman again.
+
 If the shared database file is missing but its folder is available, Clipman creates it when it next saves. If the folder or drive is temporarily unavailable, Clipman keeps running and reports the storage problem in diagnostics. Background clipboard captures do not display blocking error dialogs while storage is missing. On Mac, Clipman pauses monitoring and adds a Retry Storage command to the status menu until the data folder returns. On Windows, the notification-area menu and tooltip report that storage is unavailable and offer Retry storage. When the location returns, Clipman merges the existing database before saving.
 
 Multiple machines can write to the same history database. Clipman saves the database atomically, reloads changed files when they arrive, and records the machine name on each text entry so shared setups can tell where an entry came from.
@@ -172,6 +174,12 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.0.4
+
+- Fixed custom data-folder changes so Windows and Mac keep the selected folder authoritative across restarts. If a WebDAV mount, cloud folder, network share, or settings file is unavailable at startup, Clipman now reports the problem instead of silently reverting to the default folder. Closes issue #30.
+- Improved Clipman Server write safety by serializing simultaneous uploads to the same database, rejecting stale concurrent revisions, and applying an adjustable database upload-size limit.
+- Improved iOS server refresh reliability by preventing overlapping background refreshes and bounding conflict retries when creating a server database.
 
 ### 2.0.3
 
@@ -331,24 +339,6 @@ Questions and feedback can be sent through `Help` > `Contact` in the app or <htt
 Clipman is free software. If you want to support Andre's work, use `Help` > `Donate` in the app or visit <https://onj.me/donate>.
 
 Clipman is based on earlier Clipman work by Tyler Spivey. SQLite import support uses the public-domain SQLite runtime from the SQLite project.
-
-## Development and Release Checks
-
-Before preparing a GitHub push or release, run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\SmokeTest.ps1
-```
-
-Before release, also run the community search checklist:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\CommunitySearch.ps1
-```
-
-This checks GitHub for Clipman activity and writes web/community search links for public feedback that may not have arrived as a GitHub issue.
-
-Release packaging is guarded by the smoke test and release privacy check.
 
 ## License
 

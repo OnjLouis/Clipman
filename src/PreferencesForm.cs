@@ -174,6 +174,7 @@ namespace Clipman
                 AccessibleName = "Ignored applications"
             };
             ignoredProcesses.Leave += (s, e) => ApplyNow();
+            databasePath.Leave += (s, e) => ApplyNow();
             var browse = new Button { Text = "&Browse...", Width = 90 };
             browse.Click += (s, e) => BrowseDatabase();
             var generatePassword = new Button { Text = "&Generate password", Width = 130 };
@@ -433,7 +434,20 @@ namespace Clipman
             if (applySettings != null)
             {
                 var focused = ActiveControl;
-                applySettings(settings);
+                try
+                {
+                    applySettings(settings);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        this,
+                        "Clipman could not save these preferences. The previous settings are still active.\r\n\r\n" + ex.Message,
+                        "Clipman Preferences",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
                 passwordClearRequested = false;
                 settings.PasswordClearRequested = false;
                 BeginInvoke(new Action(() =>

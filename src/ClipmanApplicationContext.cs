@@ -279,6 +279,32 @@ namespace Clipman
 
         private void ApplyPreferences(AppSettings updated)
         {
+            var nextDatabasePassword = databasePassword;
+            if (updated.PasswordClearRequested)
+            {
+                nextDatabasePassword = string.Empty;
+            }
+            else if (!string.IsNullOrEmpty(updated.PlainDatabasePassword))
+            {
+                nextDatabasePassword = updated.PlainDatabasePassword;
+            }
+            if (!updated.DatabaseEncryptionEnabled)
+            {
+                nextDatabasePassword = string.Empty;
+                updated.ProtectedDatabasePassword = string.Empty;
+                updated.RememberDatabasePassword = false;
+            }
+            else if (updated.RememberDatabasePassword &&
+                     string.IsNullOrWhiteSpace(updated.ProtectedDatabasePassword) &&
+                     !string.IsNullOrEmpty(nextDatabasePassword))
+            {
+                updated.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(nextDatabasePassword);
+            }
+            else if (!updated.RememberDatabasePassword)
+            {
+                updated.ProtectedDatabasePassword = string.Empty;
+            }
+
             var databaseChanged =
                 !string.Equals(settings.DatabasePath, updated.DatabasePath, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(settings.StorageMode, updated.StorageMode, StringComparison.OrdinalIgnoreCase) ||
@@ -302,6 +328,8 @@ namespace Clipman
             var saveListPositionTurnedOff = settings.SaveListPosition && !updated.SaveListPosition;
             var linksHistoryVisibilityChanged = settings.LinksHistoryEnabled != updated.LinksHistoryEnabled;
             var oldSettingsDirectory = settingsStore.SettingsDirectory;
+            settingsStore.Save(updated);
+            databasePassword = nextDatabasePassword;
             settings.ShowHistoryHotkey = updated.ShowHistoryHotkey;
             settings.ToggleActiveHotkey = updated.ToggleActiveHotkey;
             settings.QuickCopyHotkeys = updated.QuickCopyHotkeys == null
@@ -340,35 +368,12 @@ namespace Clipman
             settings.InstallUpdatesSilently = updated.InstallUpdatesSilently;
             settings.DatabaseEncryptionEnabled = updated.DatabaseEncryptionEnabled;
             settings.RememberDatabasePassword = updated.RememberDatabasePassword;
-            if (updated.PasswordClearRequested)
-            {
-                databasePassword = string.Empty;
-            }
-            else if (!string.IsNullOrEmpty(updated.PlainDatabasePassword))
-            {
-                databasePassword = updated.PlainDatabasePassword;
-            }
             settings.ProtectedDatabasePassword = updated.ProtectedDatabasePassword;
-            if (!settings.DatabaseEncryptionEnabled)
-            {
-                databasePassword = string.Empty;
-                settings.ProtectedDatabasePassword = string.Empty;
-                settings.RememberDatabasePassword = false;
-            }
-            else if (settings.RememberDatabasePassword && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword) && !string.IsNullOrEmpty(databasePassword))
-            {
-                settings.ProtectedDatabasePassword = DatabasePasswordProtector.Protect(databasePassword);
-            }
-            else if (!settings.RememberDatabasePassword)
-            {
-                settings.ProtectedDatabasePassword = string.Empty;
-            }
             settings.LastPreferencesTab = updated.LastPreferencesTab;
             if (saveListPositionTurnedOff)
             {
                 settings.LastSelectedIndex = -1;
             }
-            settingsStore.Save(settings);
             var settingsDirectoryChanged = !string.Equals(oldSettingsDirectory, settingsStore.SettingsDirectory, StringComparison.OrdinalIgnoreCase);
             if (settingsDirectoryChanged)
             {

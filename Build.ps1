@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $csc)) {
     throw "Could not find the .NET Framework C# compiler at $csc"
 }
 
-$portable = Join-Path $PSScriptRoot 'portable'
+$portable = Split-Path -Parent ([IO.Path]::GetFullPath($OutputPath))
 New-Item -ItemType Directory -Force -Path $portable | Out-Null
 
 function Get-ClipmanVersion {
@@ -320,6 +320,27 @@ $buildStamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     '    }',
     '}'
 ) -join [Environment]::NewLine | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
+
+$iOSInfoPath = Join-Path $PSScriptRoot 'ClipmanIOS\ClipmanIOS\Support\Info.plist'
+$iOSInfoText = [IO.File]::ReadAllText($iOSInfoPath)
+$iOSBuildPattern = '(<key>ClipmanBuildStampUtcMs</key>\s*<string>)\d+(</string>)'
+$iOSBuildMatches = [regex]::Matches($iOSInfoText, $iOSBuildPattern)
+if ($iOSBuildMatches.Count -ne 1) {
+    throw "Expected one iOS ClipmanBuildStampUtcMs value; found $($iOSBuildMatches.Count)."
+}
+$iOSInfoText = [regex]::Replace(
+    $iOSInfoText,
+    $iOSBuildPattern,
+    { param($match) $match.Groups[1].Value + [string]$buildStamp + $match.Groups[2].Value }
+)
+[IO.File]::WriteAllText($iOSInfoPath, $iOSInfoText, [Text.UTF8Encoding]::new($false))
+try {
+    $validatedIOSInfo = [Xml.XmlDocument]::new()
+    $validatedIOSInfo.Load($iOSInfoPath)
+}
+catch {
+    throw "The updated iOS Info.plist is invalid: $($_.Exception.Message)"
+}
 
 $sources = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' | Sort-Object Name | ForEach-Object { $_.FullName }
 

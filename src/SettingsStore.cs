@@ -25,7 +25,8 @@ namespace Clipman
         {
             Directory.CreateDirectory(AppSettingsDirectory);
             ResolveSettingsLocationConflicts();
-            var loaded = LoadBestSettings();
+            var pointerFolder = LoadDataFolderPointer();
+            var loaded = LoadBestSettings(pointerFolder);
             SettingsPath = loaded.Path;
             SettingsDirectory = Path.GetDirectoryName(SettingsPath) ?? AppSettingsDirectory;
             SyncConflictResolver.ResolveSettingsConflicts(SettingsPath);
@@ -67,11 +68,22 @@ namespace Clipman
 
         public void Save(AppSettings settings)
         {
-            PrepareSettingsDirectoryFor(settings);
-            Directory.CreateDirectory(SettingsDirectory);
-            Normalize(settings);
-            JsonUtil.SaveAtomic(SettingsPath, settings);
-            SaveDataFolderPointer(SettingsDirectory);
+            var previousDirectory = SettingsDirectory;
+            var previousPath = SettingsPath;
+            try
+            {
+                PrepareSettingsDirectoryFor(settings);
+                Directory.CreateDirectory(SettingsDirectory);
+                Normalize(settings);
+                JsonUtil.SaveAtomic(SettingsPath, settings);
+                SaveDataFolderPointer(SettingsDirectory);
+            }
+            catch
+            {
+                SettingsDirectory = previousDirectory;
+                SettingsPath = previousPath;
+                throw;
+            }
         }
 
         public string DatabasePassword(AppSettings settings)
@@ -233,38 +245,68 @@ namespace Clipman
                 : "File";
         }
 
-        private LoadedSettings LoadBestSettings()
+        private LoadedSettings LoadBestSettings(string pointerFolder)
         {
-            var candidates = SettingsCandidates();
-            foreach (var path in candidates.Where(File.Exists))
+            if (!string.IsNullOrWhiteSpace(pointerFolder))
+            {
+                var pointerSettingsPath = Path.Combine(pointerFolder, MachineSettingsFileName());
+                if (File.Exists(pointerSettingsPath))
+                {
+                    try
+                    {
+                        return new LoadedSettings(pointerSettingsPath, JsonUtil.Load<AppSettings>(pointerSettingsPath));
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new IOException(
+                            "Clipman could not read the settings file in the configured data folder:\r\n\r\n" +
+                            pointerSettingsPath +
+                            "\r\n\r\nClipman did not switch to a different data folder. Restore access to this file, then start Clipman again.",
+                            ex);
+                    }
+                }
+
+                if (!Directory.Exists(pointerFolder))
+                {
+                    throw new IOException(
+                        "Clipman cannot reach the configured data folder:\r\n\r\n" +
+                        pointerFolder +
+                        "\r\n\r\nReconnect the drive, cloud service, or network share, then start Clipman again. " +
+                        "Clipman did not switch to the default data folder.");
+                }
+
+                var localPath = Path.Combine(AppSettingsDirectory, MachineSettingsFileName());
+                AppSettings settings;
+                try
+                {
+                    settings = File.Exists(localPath)
+                        ? JsonUtil.Load<AppSettings>(localPath)
+                        : new AppSettings();
+                }
+                catch (Exception ex)
+                {
+                    throw new IOException("Clipman could not read the local settings needed to initialize the selected data folder.", ex);
+                }
+
+                settings.DatabasePath = Path.Combine(pointerFolder, "clipman-history.clipdb");
+                settings.UseDefaultDatabasePath = false;
+                return new LoadedSettings(pointerSettingsPath, settings);
+            }
+
+            var appSettingsPath = Path.Combine(AppSettingsDirectory, MachineSettingsFileName());
+            if (File.Exists(appSettingsPath))
             {
                 try
                 {
-                    var settings = JsonUtil.Load<AppSettings>(path);
-                    return new LoadedSettings(path, settings);
+                    return new LoadedSettings(appSettingsPath, JsonUtil.Load<AppSettings>(appSettingsPath));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    throw new IOException("Clipman could not read its settings file:\r\n\r\n" + appSettingsPath, ex);
                 }
             }
 
-            return new LoadedSettings(Path.Combine(AppSettingsDirectory, MachineSettingsFileName()), new AppSettings());
-        }
-
-        private IEnumerable<string> SettingsCandidates()
-        {
-            var candidates = new List<string>();
-            var pointerFolder = LoadDataFolderPointer();
-            if (!string.IsNullOrWhiteSpace(pointerFolder))
-            {
-                candidates.Add(Path.Combine(pointerFolder, MachineSettingsFileName()));
-            }
-            candidates.Add(Path.Combine(AppSettingsDirectory, MachineSettingsFileName()));
-
-            return candidates
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return new LoadedSettings(appSettingsPath, new AppSettings());
         }
 
         private string LoadDataFolderPointer()
@@ -276,29 +318,49 @@ namespace Clipman
             try
             {
                 var pointer = JsonUtil.Load<SettingsLocationPointer>(path);
-                return pointer == null ? string.Empty : pointer.FolderForMachine(MachineNameSafe());
+                if (pointer == null)
+                {
+                    throw new InvalidDataException("The settings location pointer is empty or invalid.");
+                }
+                return pointer.FolderForMachine(MachineNameSafe());
             }
-            catch
+            catch (Exception ex)
             {
-                return string.Empty;
+                throw new IOException(
+                    "Clipman could not read its data-folder pointer:\r\n\r\n" +
+                    path +
+                    "\r\n\r\nClipman did not switch to the default data folder.",
+                    ex);
             }
         }
 
         private void SaveDataFolderPointer(string folder)
         {
             if (string.IsNullOrWhiteSpace(folder)) return;
+            Directory.CreateDirectory(AppSettingsDirectory);
+            var path = Path.Combine(AppSettingsDirectory, PointerFileName);
+            ResolveSettingsLocationConflicts();
+            var pointer = LoadSettingsLocationPointer(path);
+            if (pointer == null && File.Exists(path))
+            {
+                throw new IOException(
+                    "Clipman could not update its data-folder pointer because the existing file is unreadable:\r\n\r\n" +
+                    path);
+            }
+            pointer = pointer ?? new SettingsLocationPointer();
+            pointer.SetFolderForMachine(MachineNameSafe(), folder);
             try
             {
-                Directory.CreateDirectory(AppSettingsDirectory);
-                var path = Path.Combine(AppSettingsDirectory, PointerFileName);
-                ResolveSettingsLocationConflicts();
-                var pointer = LoadSettingsLocationPointer(path) ?? new SettingsLocationPointer();
-                pointer.SetFolderForMachine(MachineNameSafe(), folder);
-                DeleteSettingsLocationConflicts(path);
                 JsonUtil.SaveAtomic(path, pointer);
+                DeleteSettingsLocationConflicts(path);
             }
-            catch
+            catch (Exception ex)
             {
+                throw new IOException(
+                    "Clipman saved the settings but could not save the data-folder pointer:\r\n\r\n" +
+                    path +
+                    "\r\n\r\nThe selected data folder cannot be used safely until this pointer can be written.",
+                    ex);
             }
         }
 
@@ -322,9 +384,8 @@ namespace Clipman
                 {
                     Directory.CreateDirectory(AppSettingsDirectory);
                     JsonUtil.SaveAtomic(canonicalPath, merged);
+                    DeleteSettingsLocationConflicts(canonicalPath);
                 }
-
-                DeleteSettingsLocationConflicts(canonicalPath);
             }
             catch
             {
@@ -356,7 +417,7 @@ namespace Clipman
                 object dataFolder;
                 if (TryGetCaseInsensitive(data, "dataFolder", out dataFolder))
                 {
-                    pointer.DataFolder = Convert.ToString(dataFolder) ?? string.Empty;
+                    pointer.dataFolder = Convert.ToString(dataFolder) ?? string.Empty;
                 }
 
                 object clients;
@@ -370,7 +431,7 @@ namespace Clipman
                             var value = Convert.ToString(pair.Value) ?? string.Empty;
                             if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(value))
                             {
-                                pointer.Clients[pair.Key.Trim()] = value;
+                                pointer.clients[pair.Key.Trim()] = value;
                             }
                         }
                     }
@@ -408,20 +469,20 @@ namespace Clipman
                 .OrderBy(candidate => candidate.Item3))
             {
                 var pointer = item.Item2;
-                if (IsValidSettingsLocation(pointer.DataFolder))
+                if (IsValidSettingsLocation(pointer.dataFolder))
                 {
-                    merged.DataFolder = pointer.DataFolder;
+                    merged.dataFolder = pointer.dataFolder;
                     sawAny = true;
                 }
 
-                foreach (var pair in pointer.Clients ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))
+                foreach (var pair in pointer.clients ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))
                 {
                     if (string.IsNullOrWhiteSpace(pair.Key) || !IsValidSettingsLocation(pair.Value))
                     {
                         continue;
                     }
 
-                    merged.Clients[pair.Key.Trim()] = pair.Value;
+                    merged.clients[pair.Key.Trim()] = pair.Value;
                     sawAny = true;
                 }
             }
@@ -434,8 +495,8 @@ namespace Clipman
             if (string.IsNullOrWhiteSpace(folder)) return false;
             try
             {
-                var full = Path.GetFullPath(folder);
-                return Directory.Exists(full);
+                Path.GetFullPath(folder);
+                return true;
             }
             catch
             {
@@ -649,32 +710,11 @@ namespace Clipman
                 clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
 
-            [ScriptIgnore]
-            public string DataFolder
-            {
-                get { return dataFolder ?? string.Empty; }
-                set { dataFolder = value ?? string.Empty; }
-            }
-
-            [ScriptIgnore]
-            public Dictionary<string, string> Clients
-            {
-                get
-                {
-                    if (clients == null)
-                    {
-                        clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    }
-                    return clients;
-                }
-                set { clients = value ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); }
-            }
-
             public string FolderForMachine(string machineName)
             {
-                if (!string.IsNullOrWhiteSpace(machineName) && Clients != null)
+                if (!string.IsNullOrWhiteSpace(machineName) && clients != null)
                 {
-                    foreach (var pair in Clients)
+                    foreach (var pair in clients)
                     {
                         if (string.Equals(pair.Key, machineName, StringComparison.OrdinalIgnoreCase))
                         {
@@ -683,19 +723,19 @@ namespace Clipman
                     }
                 }
 
-                return DataFolder ?? string.Empty;
+                return dataFolder ?? string.Empty;
             }
 
             public void SetFolderForMachine(string machineName, string folder)
             {
-                if (Clients == null)
+                if (clients == null)
                 {
-                    Clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 }
 
                 if (!string.IsNullOrWhiteSpace(machineName))
                 {
-                    Clients[machineName.Trim()] = folder ?? string.Empty;
+                    clients[machineName.Trim()] = folder ?? string.Empty;
                 }
             }
         }

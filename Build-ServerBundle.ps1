@@ -1,10 +1,15 @@
 param(
-    [string]$OutputDirectory = "$PSScriptRoot\release\Server",
+    [string]$OutputDirectory = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_SERVER_PACKAGE_DIR)) { Join-Path ([IO.Path]::GetTempPath()) 'Clipman-server-package' } else { $env:CLIPMAN_SERVER_PACKAGE_DIR }),
     [string]$MacHost = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_MAC_HOST)) { 'mac' } else { $env:CLIPMAN_MAC_HOST }),
     [string]$MacRepo = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_MAC_REPO)) { '$HOME/clipman' } else { $env:CLIPMAN_MAC_REPO })
 )
 
 $ErrorActionPreference = 'Stop'
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$repoFullPath = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+if ($OutputDirectory.TrimEnd('\').StartsWith($repoFullPath + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputDirectory must be outside the source repository: $OutputDirectory"
+}
 
 function Get-ClipmanVersion {
     $assemblyInfo = Join-Path $PSScriptRoot 'src\AssemblyInfo.cs'
@@ -25,7 +30,7 @@ function Build-WindowsServerWrapper([string]$outputPath) {
 
     $version = Get-ClipmanVersion
     $assemblyVersion = if ($version -match '^\d+\.\d+\.\d+$') { "$version.0" } else { $version }
-    $generatedDirectory = Join-Path $PSScriptRoot 'ClipmanServerWindows\obj'
+    $generatedDirectory = Join-Path ([IO.Path]::GetTempPath()) 'Clipman-server-build'
     $generatedAssemblyInfo = Join-Path $generatedDirectory 'GeneratedAssemblyInfo.cs'
     New-Item -ItemType Directory -Force -Path $generatedDirectory | Out-Null
     @(
@@ -74,17 +79,18 @@ $zipPath = Join-Path $OutputDirectory "ClipmanServer-$version.zip"
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
-$windowsWrapperDist = Join-Path $PSScriptRoot 'ClipmanServerWindows\dist\Clipman Server.exe'
+$windowsWrapperDist = Join-Path ([IO.Path]::GetTempPath()) 'Clipman-server-build\Clipman Server.exe'
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $windowsWrapperDist) | Out-Null
 Build-WindowsServerWrapper $windowsWrapperDist
 
 Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 
-$remoteZip = "$MacRepo/release/Server/ClipmanServer-$version.zip"
 $remoteTempWindowsExe = "/tmp/clipman-server-wrapper-$version.exe"
+$remoteMacDist = "/tmp/clipman-server-mac-$version"
+$remoteCombinedDist = "/tmp/clipman-server-combined-$version"
 $remoteTempZip = "/tmp/ClipmanServer-$version.zip"
 
-& ssh $MacHost "mkdir -p `"$MacRepo/ClipmanServerWindows/dist`" `"$MacRepo/release/Server`""
+& ssh $MacHost "rm -rf '$remoteMacDist' '$remoteCombinedDist'; mkdir -p '$remoteMacDist' '$remoteCombinedDist'"
 if ($LASTEXITCODE -ne 0) {
     throw "Could not prepare Mac server bundle folders on $MacHost."
 }
@@ -94,12 +100,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Could not copy Windows server wrapper to $MacHost."
 }
 
-& ssh $MacHost "mv '$remoteTempWindowsExe' `"$MacRepo/ClipmanServerWindows/dist/ClipmanServer.exe`""
-if ($LASTEXITCODE -ne 0) {
-    throw "Could not stage Windows server wrapper inside the Mac repository on $MacHost."
-}
-
-& ssh $MacHost "cd `"$MacRepo`" && zsh ClipmanServerMac/Scripts/package-release.sh && zsh ClipmanServerMac/Scripts/package-combined-server.sh && cp `"$remoteZip`" '$remoteTempZip'"
+& ssh $MacHost "cd `"$MacRepo`" && CLIPMAN_SERVER_MAC_DIST_DIR='$remoteMacDist' zsh ClipmanServerMac/Scripts/package-release.sh && CLIPMAN_SERVER_WINDOWS_EXE='$remoteTempWindowsExe' CLIPMAN_SERVER_MAC_APP='$remoteMacDist/Clipman Server.app' CLIPMAN_SERVER_COMBINED_OUTPUT_DIR='$remoteCombinedDist' zsh ClipmanServerMac/Scripts/package-combined-server.sh && cp '$remoteCombinedDist/ClipmanServer-$version.zip' '$remoteTempZip'"
 if ($LASTEXITCODE -ne 0) {
     throw "Mac-side Clipman Server bundle build failed on $MacHost."
 }
@@ -109,7 +110,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Could not copy Mac-built server bundle from $MacHost."
 }
 
-& ssh $MacHost "rm -f '$remoteTempZip'"
+& ssh $MacHost "rm -rf '$remoteTempZip' '$remoteTempWindowsExe' '$remoteMacDist' '$remoteCombinedDist'"
 
 if (-not (Test-Path -LiteralPath $zipPath)) {
     throw "Server bundle ZIP was not created: $zipPath"
@@ -120,4 +121,5 @@ if (![string]::IsNullOrWhiteSpace($env:CLIPMAN_SERVER_BUILDS)) {
     Copy-Item -LiteralPath $zipPath -Destination (Join-Path $env:CLIPMAN_SERVER_BUILDS (Split-Path -Leaf $zipPath)) -Force
 }
 
+Remove-Item -LiteralPath ([IO.Path]::GetDirectoryName($windowsWrapperDist)) -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Built $zipPath"

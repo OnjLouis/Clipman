@@ -1,0 +1,35 @@
+name: ClipmanIOS
+options:
+  bundleIdPrefix: me.onj
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+targets:
+  ClipmanIOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: ClipmanIOS
+    resources:
+      - path: ClipmanIOS/Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios
+        PRODUCT_NAME: Clipman
+        MARKETING_VERSION: "2.0.4"
+        CURRENT_PROJECT_VERSION: "2.0.4"
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: ClipmanIOS/Support/Info.plist
+        SDKROOT: iphoneos
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_OBJC_BRIDGING_HEADER: ClipmanIOS/Support/ClipmanIOS-Bridging-Header.h
+        ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+        ENABLE_DEBUG_DYLIB: "NO"
+    dependencies:
+      - sdk: libz.tbd
+      - sdk: Security.framework

@@ -6,8 +6,13 @@ ClipmanMac/.build/
 ClipmanMac/.swiftpm/
 ClipmanMac/build/
 ClipmanMac/dist/
-ClipmanAndroid/
-ClipmanIOS/
+ClipmanAndroid/.gradle/
+ClipmanAndroid/.kotlin/
+ClipmanAndroid/app/build/
+ClipmanIOS/TestOutput/
+ClipmanIOS/DerivedData/
+ClipmanIOS/**/xcuserdata/
+ClipmanIOS/**/*.xcuserstate
 *.zip
 *.7z
 *.exe

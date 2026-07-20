@@ -16,33 +16,44 @@ final class SettingsStore {
         pointerURL = support.appendingPathComponent("settings-location.json")
     }
 
-    func load() -> ClipmanSettings {
-        do {
-            try FileManager.default.createDirectory(at: applicationSupportURL, withIntermediateDirectories: true)
-            resolveSettingsLocationConflicts()
-            let candidates = settingsCandidates()
-            let loaded = candidates
-                .compactMap { url -> (settings: ClipmanSettings, url: URL)? in
-                    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-                    guard let settings = try? loadSettings(from: url) else { return nil }
-                    return (settings, url)
+    func load() throws -> ClipmanSettings {
+        try FileManager.default.createDirectory(at: applicationSupportURL, withIntermediateDirectories: true)
+        resolveSettingsLocationConflicts()
+
+        let pointerFolder = try loadDataFolderPointer()
+        let loaded: (settings: ClipmanSettings, url: URL)?
+        if let pointerFolder {
+            let pointerSettingsURL = settingsURL(in: pointerFolder)
+            if FileManager.default.fileExists(atPath: pointerSettingsURL.path) {
+                do {
+                    loaded = (try loadSettings(from: pointerSettingsURL), pointerSettingsURL)
+                } catch {
+                    throw SettingsStoreError.unreadableSettings(pointerSettingsURL.path, error)
                 }
-                .sorted { score($0.settings) > score($1.settings) }
-                .first
-            loadedSettingsHadRememberDatabasePassword = loaded.map { settingsFileContainsProperty($0.url, "rememberDatabasePassword") } ?? true
-            var settings = loaded?.settings ?? ClipmanSettings.defaults(applicationSupport: applicationSupportURL)
-            if let loaded,
-               !settingsFileContainsProperty(loaded.url, "lastSelectedHistoryTab") {
-                settings.lastSelectedHistoryTab = settings.lastSelectedTab == 1 ? HistoryTabID.files : HistoryTabID.text
+            } else {
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: pointerFolder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    throw SettingsStoreError.dataFolderUnavailable(pointerFolder.path)
+                }
+
+                var migrated = try loadLocalSettings()?.settings ?? ClipmanSettings.defaults(applicationSupport: applicationSupportURL)
+                migrated.databasePath = pointerFolder.appendingPathComponent("clipman-history.clipdb").path
+                loaded = (migrated, pointerSettingsURL)
             }
-            if repairInvalidHotkeys(&settings) || normalize(&settings) {
-                try? save(settings)
-            }
-            try? save(settings)
-            return settings
-        } catch {
-            return ClipmanSettings.defaults(applicationSupport: applicationSupportURL)
+        } else {
+            loaded = try loadLocalSettings()
         }
+
+        loadedSettingsHadRememberDatabasePassword = loaded.map { settingsFileContainsProperty($0.url, "rememberDatabasePassword") } ?? true
+        var settings = loaded?.settings ?? ClipmanSettings.defaults(applicationSupport: applicationSupportURL)
+        if let loaded,
+           !settingsFileContainsProperty(loaded.url, "lastSelectedHistoryTab") {
+            settings.lastSelectedHistoryTab = settings.lastSelectedTab == 1 ? HistoryTabID.files : HistoryTabID.text
+        }
+        _ = repairInvalidHotkeys(&settings)
+        _ = normalize(&settings)
+        try save(settings)
+        return settings
     }
 
     func save(_ settings: ClipmanSettings) throws {
@@ -190,11 +201,8 @@ final class SettingsStore {
         folder.appendingPathComponent(machineSettingsFileName())
     }
 
-    private func settingsCandidates() -> [URL] {
+    private func localSettingsCandidates() -> [URL] {
         var urls: [URL] = []
-        if let dataFolder = loadDataFolderPointer() {
-            urls.append(settingsURL(in: dataFolder))
-        }
         urls.append(applicationSupportURL.appendingPathComponent(machineSettingsFileName()))
         urls.append(applicationSupportURL.appendingPathComponent("\(machine)-settings.json"))
         let seen = Set<String>()
@@ -205,26 +213,32 @@ final class SettingsStore {
         }.items
     }
 
-    private func score(_ settings: ClipmanSettings) -> Int {
-        let folder = dataFolder(for: settings)
-        let historyExists = FileManager.default.fileExists(atPath: folder.appendingPathComponent("clipman-history.clipdb").path)
-        let inApplicationSupport = folder.path.hasPrefix(applicationSupportURL.path)
-        let pointerFolder = loadDataFolderPointer()?.standardizedFileURL.path
-        var value = 0
-        if pointerFolder == folder.standardizedFileURL.path { value += 1000 }
-        if historyExists { value += 100 }
-        if !inApplicationSupport { value += 50 }
-        if settings.databasePath.contains("/Dropbox/") { value += 25 }
-        return value
+    private func loadLocalSettings() throws -> (settings: ClipmanSettings, url: URL)? {
+        var unreadable: (URL, Error)?
+        for url in localSettingsCandidates() where FileManager.default.fileExists(atPath: url.path) {
+            do {
+                return (try loadSettings(from: url), url)
+            } catch {
+                if unreadable == nil { unreadable = (url, error) }
+            }
+        }
+        if let unreadable {
+            throw SettingsStoreError.unreadableSettings(unreadable.0.path, unreadable.1)
+        }
+        return nil
     }
 
     private func machineSettingsFileName() -> String {
         "\(safeMachineName(machine))-settings.json"
     }
 
-    private func loadDataFolderPointer() -> URL? {
+    private func loadDataFolderPointer() throws -> URL? {
         resolveSettingsLocationConflicts()
-        guard let pointer = loadSettingsLocationPointer(pointerURL),
+        guard FileManager.default.fileExists(atPath: pointerURL.path) else { return nil }
+        guard let pointer = loadSettingsLocationPointer(pointerURL) else {
+            throw SettingsStoreError.unreadablePointer(pointerURL.path)
+        }
+        guard
               let path = pointer.folder(for: safeMachineName(machine)),
               !path.isEmpty
         else { return nil }
@@ -234,7 +248,15 @@ final class SettingsStore {
     private func saveDataFolderPointer(_ folder: URL) throws {
         try FileManager.default.createDirectory(at: applicationSupportURL, withIntermediateDirectories: true)
         resolveSettingsLocationConflicts()
-        var pointer = loadSettingsLocationPointer(pointerURL) ?? SettingsLocationPointer()
+        var pointer: SettingsLocationPointer
+        if FileManager.default.fileExists(atPath: pointerURL.path) {
+            guard let existing = loadSettingsLocationPointer(pointerURL) else {
+                throw SettingsStoreError.unreadablePointer(pointerURL.path)
+            }
+            pointer = existing
+        } else {
+            pointer = SettingsLocationPointer()
+        }
         pointer.setFolder(folder.path, for: safeMachineName(machine))
         let data = try JSONSerialization.data(withJSONObject: pointer.jsonObject, options: [.prettyPrinted, .withoutEscapingSlashes])
         try data.write(to: pointerURL, options: [.atomic])
@@ -252,12 +274,11 @@ final class SettingsStore {
         }
 
         if let merged = mergeSettingsLocationPointers(candidates) {
-            if let data = try? JSONSerialization.data(withJSONObject: merged.jsonObject, options: [.prettyPrinted, .withoutEscapingSlashes]) {
-                try? data.write(to: pointerURL, options: [.atomic])
+            if let data = try? JSONSerialization.data(withJSONObject: merged.jsonObject, options: [.prettyPrinted, .withoutEscapingSlashes]),
+               (try? data.write(to: pointerURL, options: [.atomic])) != nil {
+                deleteSettingsLocationConflicts()
             }
         }
-
-        deleteSettingsLocationConflicts()
     }
 
     private func addSettingsLocationCandidate(_ url: URL, to candidates: inout [(url: URL, folder: URL, modified: Date)]) {
@@ -283,20 +304,25 @@ final class SettingsStore {
         var merged = SettingsLocationPointer()
         var sawAny = false
         for candidate in candidates.sorted(by: { $0.modified < $1.modified }) {
-            guard FileManager.default.fileExists(atPath: candidate.folder.path) else { continue }
             if let pointer = loadSettingsLocationPointer(candidate.url) {
                 if let dataFolder = pointer.dataFolder,
-                   FileManager.default.fileExists(atPath: dataFolder) {
+                   isValidSettingsLocation(dataFolder) {
                     merged.dataFolder = dataFolder
                     sawAny = true
                 }
-                for (client, folder) in pointer.clients where FileManager.default.fileExists(atPath: folder) {
+                for (client, folder) in pointer.clients where isValidSettingsLocation(folder) {
                     merged.clients[client] = folder
                     sawAny = true
                 }
             }
         }
         return sawAny ? merged : nil
+    }
+
+    private func isValidSettingsLocation(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return URL(fileURLWithPath: trimmed).path.hasPrefix("/")
     }
 
     private func deleteSettingsLocationConflicts() {
@@ -359,6 +385,23 @@ final class SettingsStore {
             }
         let result = String(safe).trimmingCharacters(in: CharacterSet(charactersIn: "-_ "))
         return result.isEmpty ? "Mac" : result
+    }
+}
+
+private enum SettingsStoreError: LocalizedError {
+    case dataFolderUnavailable(String)
+    case unreadablePointer(String)
+    case unreadableSettings(String, Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .dataFolderUnavailable(let path):
+            return "Clipman cannot reach the configured data folder:\n\n\(path)\n\nReconnect the drive, cloud service, or network share, then start Clipman again. Clipman did not switch to the default data folder."
+        case .unreadablePointer(let path):
+            return "Clipman could not read its data-folder pointer:\n\n\(path)\n\nClipman did not switch to the default data folder."
+        case .unreadableSettings(let path, let underlying):
+            return "Clipman could not read the settings file in the configured data folder:\n\n\(path)\n\n\(underlying.localizedDescription)\n\nClipman did not switch to a different data folder."
+        }
     }
 }
 

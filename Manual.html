@@ -348,7 +348,7 @@
 
   <h2 id="database-and-sync">Database and Sync</h2>
   <p>On Windows, Clipman defaults to a portable <code>Settings</code> folder beside <code>clipman.exe</code>. On Mac, Clipman stores a small pointer under Application Support and keeps the active machine settings in the selected Clipman data folder. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code>, <code>Settings\Laptop-settings.json</code>, or <code>MacBook-settings.json</code>. This lets multiple computers share one data folder without fighting over hotkeys, monitoring state, startup choices, or window position. The shared text history database is <code>clipman-history.clipdb</code>.</p>
-  <p>If you choose a different data folder, Clipman stores this machine's active settings in that folder beside <code>clipman-history.clipdb</code> and the machine-specific file-history database. A small <code>settings-location.json</code> pointer remains in the app's local <code>Settings</code> folder so Clipman can find the selected data folder on the next launch. That pointer stores locations per computer name, so two machines using different local paths to reach the same cloud or network data folder do not overwrite each other's location. If a cloud service creates a conflict copy of the pointer, Clipman merges the known clients back into one pointer file.</p>
+  <p>If you choose a different data folder, Clipman stores this machine's active settings in that folder beside <code>clipman-history.clipdb</code> and the machine-specific file-history database. A small <code>settings-location.json</code> pointer remains in the app's local <code>Settings</code> folder so Clipman can find the selected data folder on the next launch. That pointer stores locations per computer name, so two machines using different local paths to reach the same cloud or network data folder do not overwrite each other's location. If a cloud service creates a conflict copy of the pointer, Clipman merges the known clients back into one pointer file. If the selected folder is unavailable when Clipman starts, Clipman reports that location and stops rather than silently switching to the default folder; reconnect the drive, cloud service, WebDAV mount, or network share and start Clipman again.</p>
   <p>If the default data folder is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different data folder, Clipman stores the shared history as <code>clipman-history.clipdb</code> inside that folder. Existing explicit <code>.clipdb</code> file paths remain readable for compatibility. If an explicit data location is missing at startup, Clipman asks whether to browse for the data folder in a new location, use the default database beside Clipman, or stop startup.</p>
 
   <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, Spotlight, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's data folder to the same synced or network-shared folder. Clipman uses the <code>clipman-history.clipdb</code> file inside that folder for shared text history.</p>
@@ -548,6 +548,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.0.4</h3>
+  <ul>
+    <li>Fixed custom data-folder changes so Windows and Mac keep the selected folder authoritative across restarts. If a WebDAV mount, cloud folder, network share, or settings file is unavailable at startup, Clipman now reports the problem instead of silently reverting to the default folder. Closes <a href="https://github.com/OnjLouis/Clipman/issues/30">issue #30</a>.</li>
+    <li>Improved Clipman Server write safety by serializing simultaneous uploads to the same database, rejecting stale concurrent revisions, and applying an adjustable database upload-size limit.</li>
+    <li>Improved iOS server refresh reliability by preventing overlapping background refreshes and bounding conflict retries when creating a server database.</li>
+  </ul>
+
   <h3>2.0.3</h3>
   <ul>
     <li>Improved cross-device clipboard handoff so text copied on iPhone or iPad through Apple Universal Clipboard is not re-added by the Mac as a new local clipboard entry after it has already synced through Clipman.</li>

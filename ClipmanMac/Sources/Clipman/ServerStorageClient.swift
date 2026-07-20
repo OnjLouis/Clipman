@@ -60,6 +60,7 @@ final class ServerStorageClient: @unchecked Sendable {
     private let baseURL: URL?
     private let token: String
     private let databaseID: String
+    private let userAgent = "ClipmanMac/" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
 
     init(serverURL: String, token: String, databasePassword: String) {
         let cleanedURL = ServerSettingsSanitizer.cleanTransportURL(serverURL)
@@ -95,7 +96,7 @@ final class ServerStorageClient: @unchecked Sendable {
         request.httpMethod = method
         request.timeoutInterval = 8
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("ClipmanMac/2.0.3", forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         if let expectedRevision, !expectedRevision.isEmpty {
             request.setValue(expectedRevision, forHTTPHeaderField: "If-Match")
         }
@@ -167,7 +168,7 @@ final class ServerStorageClient: @unchecked Sendable {
             "\(method) \(path) HTTP/1.1",
             "Host: \(host):\(port)",
             "Authorization: Bearer \(token)",
-            "User-Agent: ClipmanMac/2.0.3",
+            "User-Agent: \(userAgent)",
             "Connection: close"
         ]
         if let expectedRevision, !expectedRevision.isEmpty {

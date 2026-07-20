@@ -4,7 +4,7 @@ import Carbon
 
 @MainActor
 protocol PreferencesWindowControllerDelegate: AnyObject {
-    func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?)
+    func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) -> Bool
 }
 
 final class PreferencesWindow: NSWindow {
@@ -296,7 +296,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.toggleMonitoringHotkey = toggle
         settings.ignoredApplications = normalizedIgnoredApplications(ignoredApplicationsView.string)
         let password = passwordField.stringValue.isEmpty ? nil : passwordField.stringValue
-        preferencesDelegate?.preferencesWindow(self, didUpdate: settings, passwordToSave: password)
+        guard preferencesDelegate?.preferencesWindow(self, didUpdate: settings, passwordToSave: password) != false else {
+            return
+        }
         statusLabel.stringValue = "Preferences saved."
         window?.close()
     }

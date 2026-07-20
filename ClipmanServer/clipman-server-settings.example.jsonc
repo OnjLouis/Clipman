@@ -72,6 +72,12 @@
   "BackupRetentionHours": 24,
   "MaxBackups": 48,
 
+  // Largest database upload the server accepts, in bytes.
+  //
+  // The default is 64 MiB. This rejects unexpectedly large requests before
+  // they can consume unbounded memory or replace a normal Clipman database.
+  "MaxDatabaseBytes": 67108864,
+
   // Optional stale database cleanup.
   //
   // Leave DatabasePruneDays at 0 to never move old database buckets

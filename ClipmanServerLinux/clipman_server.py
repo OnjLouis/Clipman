@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.4"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"
@@ -97,6 +97,7 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     settings.setdefault("CreateBackupBeforeEveryUpload", True)
     settings.setdefault("DatabasePruneDays", 0)
     settings.setdefault("DatabasePruneIntervalHours", 24)
+    settings.setdefault("MaxDatabaseBytes", 64 * 1024 * 1024)
     save_settings(config_path, settings)
     return settings, created
 
@@ -339,7 +340,7 @@ def create_backup(settings: Dict[str, Any], db: Path, force: bool) -> Dict[str, 
     out_dir = backup_dir_for_database(db)
     make_private_dir(out_dir)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-    name = f"clipman-history-{stamp}.clipdb"
+    name = f"clipman-history-{stamp}-{time.time_ns() % 1_000_000_000:09d}.clipdb"
     target = out_dir / name
     if not force:
         newest = newest_backup(out_dir)
@@ -348,7 +349,7 @@ def create_backup(settings: Dict[str, Any], db: Path, force: bool) -> Dict[str, 
             return backup_info(newest)
     shutil.copy2(db, target)
     make_private_file(target)
-    prune_backups(settings)
+    prune_backup_directory(settings, out_dir)
     return backup_info(target)
 
 
@@ -366,18 +367,24 @@ def backup_info(path: Path) -> Dict[str, Any]:
     }
 
 
-def prune_backups(settings: Dict[str, Any]) -> None:
-    out_dir = Path(settings["DatabasePath"]).parent / "Databases"
-    if not out_dir.exists():
-        return
-    retention = int(settings["BackupRetentionHours"])
-    max_backups = int(settings["MaxBackups"])
-    cutoff = time.time() - retention * 3600
-    backups = sorted(out_dir.glob("*/ServerBackups/*.clipdb"), key=lambda p: p.stat().st_mtime, reverse=True)
+def prune_backup_directory(
+    settings: Dict[str, Any],
+    out_dir: Path,
+    *,
+    cutoff: float | None = None,
+    max_backups: int | None = None,
+) -> None:
+    if cutoff is None:
+        retention = int(settings["BackupRetentionHours"])
+        cutoff = time.time() - retention * 3600
+    if max_backups is None:
+        max_backups = int(settings["MaxBackups"])
+
+    backups = sorted(out_dir.glob("*.clipdb"), key=lambda p: p.stat().st_mtime, reverse=True)
     for path in backups:
         if path.stat().st_mtime < cutoff:
             path.unlink(missing_ok=True)
-    backups = sorted(out_dir.glob("*/ServerBackups/*.clipdb"), key=lambda p: p.stat().st_mtime, reverse=True)
+    backups = sorted(out_dir.glob("*.clipdb"), key=lambda p: p.stat().st_mtime, reverse=True)
     for path in backups[max_backups:]:
         path.unlink(missing_ok=True)
 
@@ -568,6 +575,8 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         super().__init__(server_address, request_handler_class)
         self.started_unix_ms = now_ms()
         self._stats_lock = Lock()
+        self._database_locks_lock = Lock()
+        self._database_locks: Dict[str, Any] = {}
         self._stats: Dict[str, Any] = {
             "Requests": 0,
             "DatabaseUploads": 0,
@@ -581,6 +590,14 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
             "StatusCodes": {},
             "Clients": {},
         }
+
+    def database_lock(self, database_id: str) -> Any:
+        with self._database_locks_lock:
+            lock = self._database_locks.get(database_id)
+            if lock is None:
+                lock = Lock()
+                self._database_locks[database_id] = lock
+            return lock
 
     def record_request(self, client_ip: str, method: str, path: str, status_code: int, bytes_received: int = 0, bytes_sent: int = 0) -> None:
         with self._stats_lock:
@@ -703,29 +720,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return bool(token) and self.headers.get("Authorization", "").strip() == "Bearer " + token
 
     def head_database(self, database_id: str) -> None:
-        db = database_path(self.settings, database_id)
-        if not db.exists():
-            self.send_response(404)
-            self.end_headers()
-            self.record(404)
-            return
-        touch_database(self.settings, database_id, "head")
-        rev = revision(db)
+        with self.server.database_lock(database_id):  # type: ignore[attr-defined]
+            db = database_path(self.settings, database_id)
+            if not db.exists():
+                self.send_response(404)
+                self.end_headers()
+                self.record(404)
+                return
+            touch_database(self.settings, database_id, "head")
+            rev = revision(db)
+            length = db.stat().st_size
         self.send_response(200)
         self.send_header("ETag", f'"{rev}"')
         self.send_header("X-Clipman-Revision", rev)
-        self.send_header("Content-Length", str(db.stat().st_size))
+        self.send_header("Content-Length", str(length))
         self.end_headers()
         self.record(200)
 
     def download_database(self, database_id: str) -> None:
-        db = database_path(self.settings, database_id)
-        if not db.exists():
-            self.send_text(404, "Database not found")
-            return
-        touch_database(self.settings, database_id, "download")
-        rev = revision(db)
-        data = db.read_bytes()
+        with self.server.database_lock(database_id):  # type: ignore[attr-defined]
+            db = database_path(self.settings, database_id)
+            if not db.exists():
+                self.send_text(404, "Database not found")
+                return
+            touch_database(self.settings, database_id, "download")
+            rev = revision(db)
+            data = db.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("ETag", f'"{rev}"')
@@ -736,44 +756,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.record(200, bytes_sent=len(data))
 
     def upload_database(self, database_id: str) -> None:
-        db = database_path(self.settings, database_id)
-        current = revision(db)
-        expected = self.headers.get("If-Match", "").strip().strip('"')
-        length = int(self.headers.get("Content-Length", "0"))
-        if expected and expected != current:
-            self.send_response(409)
-            self.send_header("X-Clipman-Revision", current)
-            self.end_headers()
-            self.wfile.write(b"Database revision changed")
-            self.record(409, bytes_received=0, bytes_sent=len(b"Database revision changed"))
+        raw_length = self.headers.get("Content-Length", "").strip()
+        try:
+            length = int(raw_length)
+        except ValueError:
+            self.send_text(400, "A valid Content-Length header is required")
+            return
+        max_database_bytes = max(1, int(self.settings.get("MaxDatabaseBytes", 64 * 1024 * 1024)))
+        if length < 0:
+            self.send_text(400, "Content-Length cannot be negative")
+            return
+        if length > max_database_bytes:
+            self.send_text(413, f"Database exceeds the configured {max_database_bytes} byte limit")
             return
 
         data = self.rfile.read(length)
-        if db.exists() and db.read_bytes() == data:
-            touch_database(self.settings, database_id, "head")
-            payload = json.dumps(status(self.settings, self.server), indent=2, sort_keys=True).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("X-Clipman-Revision", current)
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-            self.record(200, bytes_received=len(data), bytes_sent=len(payload))
+        if len(data) != length:
+            self.send_text(400, "Request body ended before Content-Length bytes were received")
             return
 
-        if self.settings.get("CreateBackupBeforeEveryUpload", True):
-            create_backup(self.settings, db, False)
-        make_private_dir(db.parent)
-        tmp = db.with_suffix(db.suffix + ".upload.tmp")
-        tmp.write_bytes(data)
-        make_private_file(tmp)
-        tmp.replace(db)
-        make_private_file(db)
-        touch_database(self.settings, database_id, "write")
+        expected = self.headers.get("If-Match", "").strip().strip('"')
+        with self.server.database_lock(database_id):  # type: ignore[attr-defined]
+            db = database_path(self.settings, database_id)
+            current = revision(db)
+            if expected and expected != current:
+                self.send_response(409)
+                self.send_header("X-Clipman-Revision", current)
+                self.end_headers()
+                self.wfile.write(b"Database revision changed")
+                self.record(409, bytes_received=len(data), bytes_sent=len(b"Database revision changed"))
+                return
+
+            if db.exists() and db.read_bytes() == data:
+                touch_database(self.settings, database_id, "head")
+                new_revision = current
+            else:
+                if self.settings.get("CreateBackupBeforeEveryUpload", True):
+                    create_backup(self.settings, db, False)
+                make_private_dir(db.parent)
+                tmp = db.with_suffix(db.suffix + ".upload.tmp")
+                tmp.write_bytes(data)
+                make_private_file(tmp)
+                tmp.replace(db)
+                make_private_file(db)
+                touch_database(self.settings, database_id, "write")
+                new_revision = revision(db)
+
         payload = json.dumps(status(self.settings, self.server), indent=2, sort_keys=True).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("X-Clipman-Revision", revision(db))
+        self.send_header("X-Clipman-Revision", new_revision)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)

@@ -127,7 +127,7 @@ namespace Clipman
         private static string VersionString()
         {
             var version = typeof(ServerStorageClient).Assembly.GetName().Version;
-            return version == null ? "2.0.3" : version.ToString();
+            return version == null ? "unknown" : version.ToString();
         }
     }
 

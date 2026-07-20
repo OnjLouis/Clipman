@@ -54,7 +54,18 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             return
         }
 
-        settings = settingsStore.load()
+        do {
+            settings = try settingsStore.load()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Clipman could not open its data folder"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .critical
+            alert.addButton(withTitle: "Close")
+            alert.runModal()
+            NSApp.terminate(nil)
+            return
+        }
         migrateServerTokenToKeychainIfNeeded()
         settings.serverToken = currentServerToken(for: settings)
         sounds.useDataFolder(settingsStore.dataFolder(for: settings))
@@ -1254,9 +1265,20 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         registerHotkeys()
     }
 
-    func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) {
+    func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) -> Bool {
         let previousSettings = self.settings!
         let previousDatabasePath = previousSettings.databasePath
+        do {
+            try settingsStore.save(settings)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Clipman could not save Preferences"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Close")
+            alert.runModal()
+            return false
+        }
         self.settings = settings
         saveServerTokenForSettings(settings, previousSettings: previousSettings)
         if let passwordToSave, !passwordToSave.isEmpty {
@@ -1273,7 +1295,6 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         if passwordToSave?.isEmpty == false {
             try? secretStore.changeDatabasePassword()
         }
-        try? settingsStore.save(settings)
         sounds.useDataFolder(settingsStore.dataFolder(for: settings))
         sounds.isEnabled = settings.soundsEnabled
         monitor.isEnabled = settings.monitoringEnabled
@@ -1306,6 +1327,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         )
         refreshHistoryWindow()
         rebuildMenu()
+        return true
     }
 
     private func refreshHistoryWindow() {

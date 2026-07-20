@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VERSION="$(zsh "$ROOT/ClipmanMac/Scripts/shared-version.sh" version)"
-DIST="$ROOT/release/Server"
+DIST="${CLIPMAN_SERVER_COMBINED_OUTPUT_DIR:-/tmp/ClipmanServer-combined}"
 STAGING="$(mktemp -d /tmp/clipman-server-combined.XXXXXX)"
 PACKAGE_ROOT="$STAGING/ClipmanServer"
 ZIP="$DIST/ClipmanServer-$VERSION.zip"
@@ -24,11 +24,8 @@ chmod +x "$PACKAGE_ROOT/Docker/docker-entrypoint.sh"
 cp "$ROOT/ClipmanServer/Manual.html" "$PACKAGE_ROOT/Manual.html"
 cp "$ROOT/ClipmanServer/clipman-server-settings.example.jsonc" "$PACKAGE_ROOT/clipman-server-settings.example.jsonc"
 cp "$ROOT/LICENSE.txt" "$PACKAGE_ROOT/LICENSE.txt"
-if [[ -f "$ROOT/ClipmanServerWindows/dist/ClipmanServer.exe" ]]; then
-  cp "$ROOT/ClipmanServerWindows/dist/ClipmanServer.exe" "$PACKAGE_ROOT/Windows/Clipman Server.exe"
-else
-  cp "$ROOT/ClipmanServerWindows/dist/Clipman Server.exe" "$PACKAGE_ROOT/Windows/Clipman Server.exe"
-fi
+WINDOWS_EXE="${CLIPMAN_SERVER_WINDOWS_EXE:-$ROOT/ClipmanServerWindows/dist/Clipman Server.exe}"
+cp "$WINDOWS_EXE" "$PACKAGE_ROOT/Windows/Clipman Server.exe"
 
 cat > "$PACKAGE_ROOT/Linux/run-clipman-server.sh" <<'SH'
 #!/usr/bin/env sh
@@ -38,7 +35,7 @@ exec python3 clipman_server.py "$@"
 SH
 chmod +x "$PACKAGE_ROOT/Linux/run-clipman-server.sh"
 
-MAC_APP="$ROOT/ClipmanServerMac/dist/Clipman Server.app"
+MAC_APP="${CLIPMAN_SERVER_MAC_APP:-$ROOT/ClipmanServerMac/dist/Clipman Server.app}"
 if [[ ! -d "$MAC_APP" ]]; then
   echo "Mac Clipman Server app is missing. Run ClipmanServerMac/Scripts/package-release.sh first." >&2
   exit 1
