@@ -19,15 +19,42 @@
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>ClipmanBuildStampUtcMs</key>
-    <string>1784644316693</string>
+    <string>1784668034785</string>
     <key>LSRequiresIPhoneOS</key>
     <true />
     <key>NSFaceIDUsageDescription</key>
     <string>Clipman uses Face ID to protect access to clipboard history stored on this device.</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false />
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Clipman connects to a Clipman Server on your local or private network to synchronize clipboard history.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <key>NSAllowsLocalNetworking</key>
         <true />
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>10.0.0.0/8</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+            <key>100.64.0.0/10</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+            <key>172.16.0.0/12</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+            <key>192.168.0.0/16</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+        </dict>
     </dict>
     <key>UILaunchScreen</key>
     <dict />

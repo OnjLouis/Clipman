@@ -8,7 +8,11 @@ APP="$DIST/Clipman.app"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
 BUILD_STAMP="$(zsh "$ROOT/Scripts/shared-version.sh" stamp)"
-ZIP="$DIST/ClipmanMac-$VERSION.zip"
+ZIP="$DIST/Clipman-macOS-$VERSION.zip"
+SIGNING_IDENTITY="${CLIPMAN_MAC_SIGNING_IDENTITY:-Developer ID Application: Andre Louis (83NN3HS237)}"
+EXPECTED_TEAM_ID="83NN3HS237"
+NOTARY_PROFILE="${CLIPMAN_MAC_NOTARY_PROFILE:-ClipmanNotary}"
+NOTARIZE="${CLIPMAN_MAC_NOTARIZE:-1}"
 
 rm -rf "$DIST"
 mkdir -p "$DIST"
@@ -62,11 +66,41 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP" >/tmp/clipmanmac-release-codesign.log 2>&1 || true
+if ! security find-identity -v -p codesigning | grep -Fq "\"$SIGNING_IDENTITY\""; then
+  echo "Required Mac release signing identity is unavailable: $SIGNING_IDENTITY" >&2
+  exit 1
+fi
+
+codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP"
+codesign --verify --deep --strict "$APP"
+
+SIGNATURE_DETAILS="$(codesign -dvv "$APP" 2>&1)"
+if [[ "$SIGNATURE_DETAILS" != *"TeamIdentifier=$EXPECTED_TEAM_ID"* ]]; then
+  echo "Mac release signature does not use expected team $EXPECTED_TEAM_ID." >&2
+  exit 1
+fi
+if [[ "$SIGNATURE_DETAILS" == *"Signature=adhoc"* ]]; then
+  echo "Mac release must not be ad-hoc signed." >&2
+  exit 1
+fi
 
 (
   cd "$DIST"
   COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent "Clipman.app" "$ZIP"
 )
+
+if [[ "$NOTARIZE" == "1" ]]; then
+  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$APP"
+  xcrun stapler validate "$APP"
+  rm -f "$ZIP"
+  (
+    cd "$DIST"
+    COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent "Clipman.app" "$ZIP"
+  )
+  spctl --assess --type execute --verbose=4 "$APP"
+else
+  echo "Warning: Mac test package was not notarized because CLIPMAN_MAC_NOTARIZE=$NOTARIZE." >&2
+fi
 
 echo "$ZIP"

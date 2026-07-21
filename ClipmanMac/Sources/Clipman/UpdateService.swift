@@ -65,7 +65,7 @@ final class UpdateService {
             .compactMap { release -> UpdateCandidate? in
                 let version = normalizedVersion(release.tag_name)
                 guard isVersion(version, newerThan: currentVersion),
-                      let asset = release.assets.first(where: { isMacAsset($0.name) }),
+                      let asset = preferredMacAsset(in: release.assets),
                       let releaseURL = URL(string: release.html_url),
                       let downloadURL = URL(string: asset.browser_download_url)
                 else { return nil }
@@ -150,6 +150,8 @@ final class UpdateService {
             throw NSError(domain: "ClipmanUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: "The update ZIP did not contain Clipman.app."])
         }
 
+        try verifyReleaseSignature(of: stagedApp)
+
         let targetApp = Bundle.main.bundleURL.path.hasPrefix("/Applications/")
             ? Bundle.main.bundleURL
             : URL(fileURLWithPath: "/Applications/Clipman.app")
@@ -161,8 +163,7 @@ final class UpdateService {
           sleep 0.2
         done
         rm -rf \(shellQuote(targetApp.path))
-        /bin/cp -R \(shellQuote(stagedApp.path)) \(shellQuote(targetApp.path))
-        /usr/bin/codesign --force --sign - \(shellQuote(targetApp.path)) >/tmp/clipmanmac-update-codesign.log 2>&1 || true
+        /usr/bin/ditto \(shellQuote(stagedApp.path)) \(shellQuote(targetApp.path))
         /usr/bin/open \(shellQuote(targetApp.path))
         rm -rf \(shellQuote(staging.path))
         """
@@ -173,6 +174,14 @@ final class UpdateService {
         process.arguments = [scriptURL.path]
         try process.run()
         NSApp.terminate(nil)
+    }
+
+    private func verifyReleaseSignature(of appURL: URL) throws {
+        let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"83NN3HS237\" and identifier \"com.andrelouis.clipman\""
+        try run(
+            "/usr/bin/codesign",
+            arguments: ["--verify", "--deep", "--strict", "--test-requirement", "=" + requirement, appURL.path]
+        )
     }
 
     private func findClipmanApp(in folder: URL) -> URL? {
@@ -203,7 +212,17 @@ final class UpdateService {
         alert.runModal()
     }
 
-    private func isMacAsset(_ name: String) -> Bool {
+    private func preferredMacAsset(in assets: [GitHubAsset]) -> GitHubAsset? {
+        assets.first(where: { isSignedMacAsset($0.name) })
+            ?? assets.first(where: { isLegacyMacAsset($0.name) })
+    }
+
+    private func isSignedMacAsset(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower.hasSuffix(".zip") && lower.hasPrefix("clipman-macos-")
+    }
+
+    private func isLegacyMacAsset(_ name: String) -> Bool {
         let lower = name.lowercased()
         return lower.hasSuffix(".zip") && lower.contains("clipmanmac")
     }

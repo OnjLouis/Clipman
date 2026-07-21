@@ -176,6 +176,12 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 ## Changelog
 
+### 2.0.6
+
+- Mac releases are now signed with a stable Apple Developer ID and notarized by Apple, so Keychain's **Always Allow** approval persists across updates and macOS can verify the downloaded app. Closes [issue #31](https://github.com/OnjLouis/Clipman/issues/31).
+- The Mac updater now verifies that an update is intact and signed by the expected Clipman developer before installing it.
+- Mac 2.0.6 is a one-time manual upgrade because the older updater cannot preserve the new Apple signature. Download the Mac ZIP, replace Clipman.app, then choose **Always Allow** at the final Keychain prompt. Automatic updates resume afterward.
+
 ### 2.0.5
 
 - Added Local and Server storage modes to Android and iOS. Local mode keeps history in private app storage; Server mode keeps an offline local cache and merges additions, edits, pins, and deletions when connectivity returns.
