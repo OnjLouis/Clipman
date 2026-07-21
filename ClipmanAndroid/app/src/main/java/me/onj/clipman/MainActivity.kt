@@ -10,6 +10,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Patterns
 import android.view.View
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -35,6 +36,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -54,12 +57,15 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.text.SimpleDateFormat
@@ -93,6 +99,14 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         requestUnlock()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            isUnlocked = false
+            unlockMessage = "Clipman is locked."
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -193,23 +207,41 @@ private enum class HistorySection(val label: String) {
     Links("Links")
 }
 
+private data class MobileSettingsSnapshot(
+    val storageMode: MobileStorageMode,
+    val serverUrl: String,
+    val token: String,
+    val password: String,
+    val deviceName: String,
+    val copyRemoteToClipboard: Boolean,
+    val addClipboardOnLaunch: Boolean,
+    val playSounds: Boolean,
+    val useHaptics: Boolean
+)
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun ClipmanApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
     val settings = remember { AndroidSettings(context) }
+    val historyRepository = remember { MobileHistoryRepository(context) }
+    val storageMutex = remember { Mutex() }
     val scope = rememberCoroutineScope()
     val textListState = rememberLazyListState()
     val linksListState = rememberLazyListState()
     val pagerState = rememberPagerState(pageCount = { HistorySection.entries.size })
     var serverUrl by remember { mutableStateOf(settings.serverUrl) }
+    var storageMode by remember { mutableStateOf(settings.storageMode) }
     var token by remember { mutableStateOf(settings.serverToken) }
     var password by remember { mutableStateOf(settings.historyPassword) }
     var deviceName by remember { mutableStateOf(settings.deviceName) }
     var showPassword by remember { mutableStateOf(false) }
-    var showConnectionSettings by remember { mutableStateOf(serverUrl.isBlank() || token.isBlank()) }
+    var showConnectionSettings by remember {
+        mutableStateOf(storageMode == MobileStorageMode.Server && (serverUrl.isBlank() || token.isBlank()))
+    }
     var copyRemoteToClipboard by remember { mutableStateOf(settings.copyRemoteToClipboard) }
+    var addClipboardOnLaunch by remember { mutableStateOf(settings.addClipboardOnLaunch) }
     var playSounds by remember { mutableStateOf(settings.playSounds) }
     var useHaptics by remember { mutableStateOf(settings.useHaptics) }
     var status by remember { mutableStateOf("Not loaded.") }
@@ -218,6 +250,7 @@ private fun ClipmanApp() {
     var sortMode by remember { mutableStateOf(HistorySort.Manual) }
     var groupFilter by remember { mutableStateOf("") }
     var entries by remember { mutableStateOf<List<ClipEntry>>(emptyList()) }
+    var database by remember { mutableStateOf(ClipDatabase()) }
     var viewingEntry by remember { mutableStateOf<ClipEntry?>(null) }
     var editingEntry by remember { mutableStateOf<ClipEntry?>(null) }
     var deleteCandidate by remember { mutableStateOf<ClipEntry?>(null) }
@@ -226,25 +259,56 @@ private fun ClipmanApp() {
     var currentRevision by remember { mutableStateOf("") }
     var isLoadingHistory by remember { mutableStateOf(false) }
     var announcedFirstPage by remember { mutableStateOf(false) }
+    var launchClipboardHandled by remember { mutableStateOf(false) }
+    var addClipboardAfterLoad by remember { mutableStateOf(false) }
+    var hasLoadedHistory by remember { mutableStateOf(false) }
+    var loadGeneration by remember { mutableStateOf(0L) }
+    var changeGeneration by remember { mutableStateOf(0L) }
+    var isSavingSettings by remember { mutableStateOf(false) }
 
-    fun saveSettings() {
-        settings.serverUrl = serverUrl
-        settings.serverToken = token
-        settings.historyPassword = password
-        settings.deviceName = deviceName
-        settings.copyRemoteToClipboard = copyRemoteToClipboard
-        settings.playSounds = playSounds
-        settings.useHaptics = useHaptics
+    fun discardSettingsChanges() {
+        serverUrl = settings.serverUrl
+        storageMode = settings.storageMode
+        token = settings.serverToken
+        password = settings.historyPassword
+        deviceName = settings.deviceName
+        copyRemoteToClipboard = settings.copyRemoteToClipboard
+        addClipboardOnLaunch = settings.addClipboardOnLaunch
+        playSounds = settings.playSounds
+        useHaptics = settings.useHaptics
+        showConnectionSettings = false
+    }
+
+    BackHandler(enabled = showConnectionSettings && !isSavingSettings) {
+        discardSettingsChanges()
+    }
+
+    fun saveSettings(snapshot: MobileSettingsSnapshot) {
+        settings.serverUrl = snapshot.serverUrl
+        settings.storageMode = snapshot.storageMode
+        settings.serverToken = snapshot.token
+        settings.historyPassword = snapshot.password
+        settings.deviceName = snapshot.deviceName
+        settings.copyRemoteToClipboard = snapshot.copyRemoteToClipboard
+        settings.addClipboardOnLaunch = snapshot.addClipboardOnLaunch
+        settings.playSounds = snapshot.playSounds
+        settings.useHaptics = snapshot.useHaptics
     }
 
     fun loadHistory(announceResult: Boolean = true, updateStatusWhenUnchanged: Boolean = true) {
-        if (serverUrl.isBlank() || token.isBlank()) {
+        if (storageMode == MobileStorageMode.Server && (serverUrl.isBlank() || token.isBlank())) {
             status = "Server address and token are required before loading history."
             showConnectionSettings = true
             return
         }
         if (isLoadingHistory) return
-        saveSettings()
+        val generation = loadGeneration + 1
+        loadGeneration = generation
+        val requestedMode = storageMode
+        val requestedServerUrl = serverUrl
+        val requestedToken = token
+        val requestedPassword = password
+        val databaseSnapshot = database
         isLoadingHistory = true
         if (announceResult) {
             status = "Loading history..."
@@ -253,80 +317,113 @@ private fun ClipmanApp() {
         scope.launch {
             val oldEntries = entries
             val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val client = ServerStorageClient(serverUrl, token, password)
-                    val download = client.download()
-                    download to ClipDatabaseFile.load(download.data, password)
+                storageMutex.withLock {
+                    runCatching {
+                        if (requestedMode == MobileStorageMode.Local) {
+                            MobileSyncResult(historyRepository.loadLocal(requestedPassword), "", false)
+                        } else {
+                            try {
+                                historyRepository.synchronize(requestedServerUrl, requestedToken, requestedPassword, databaseSnapshot)
+                            } catch (error: Throwable) {
+                                val cached = historyRepository.loadLocalOrNull(requestedPassword) ?: throw error
+                                MobileSyncResult(
+                                    database = cached,
+                                    revision = "",
+                                    uploaded = false,
+                                    pendingError = error.message ?: error::class.java.simpleName
+                                )
+                            }
+                        }
+                    }
                 }
             }
+            if (generation != loadGeneration) return@launch
             isLoadingHistory = false
-            result.onSuccess { (download, database) ->
-                if (download.revision != currentRevision || entries.isEmpty()) {
-                    currentRevision = download.revision
-                    entries = database.Entries
+            result.onSuccess { sync ->
+                val loadedDatabase = sync.database
+                if (storageMode == MobileStorageMode.Local || sync.revision != currentRevision || entries.isEmpty() || !SyncConflictResolver.hasSameContent(database, loadedDatabase)) {
+                    currentRevision = sync.revision
+                    database = loadedDatabase
+                    entries = loadedDatabase.Entries
+                    hasLoadedHistory = true
                     val remoteSource = handleRemoteAdditions(
                         context = context,
                         oldEntries = oldEntries,
-                        newEntries = database.Entries,
-                        enabled = !announceResult,
+                        newEntries = loadedDatabase.Entries,
+                        enabled = storageMode == MobileStorageMode.Server && !announceResult,
                         localMachine = deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
                         shouldCopyToClipboard = copyRemoteToClipboard,
                         playSounds = playSounds,
                         useHaptics = useHaptics
                     )
-                    status = if (remoteSource != null) {
+                    status = if (sync.pendingError != null) {
+                        "Using local history; server sync is pending: ${sync.pendingError}"
+                    } else if (remoteSource != null) {
                         "Clipboard updated by $remoteSource."
+                    } else if (storageMode == MobileStorageMode.Local) {
+                        "Local history loaded. ${loadedStatusText(entries)}"
                     } else {
                         loadedStatusText(entries)
                     }
                 } else if (updateStatusWhenUnchanged) {
                     status = "History is already up to date."
                 }
-                if (announceResult) showConnectionSettings = false
                 if (announceResult) announce(view, "History refreshed")
+                if (!launchClipboardHandled) {
+                    launchClipboardHandled = true
+                    addClipboardAfterLoad = addClipboardOnLaunch
+                }
             }.onFailure { error ->
-                entries = emptyList()
                 status = "Could not load history: ${error.message ?: error::class.java.simpleName}"
-                if (announceResult) showConnectionSettings = true
+                if (announceResult && storageMode == MobileStorageMode.Server && !hasLoadedHistory) showConnectionSettings = true
                 if (announceResult) announce(view, "Could not load history")
             }
         }
     }
 
     fun saveDatabaseChange(actionText: String, mutation: (ClipDatabase) -> ClipDatabase) {
-        saveSettings()
+        loadGeneration += 1
+        isLoadingHistory = false
+        val generation = changeGeneration + 1
+        changeGeneration = generation
+        val requestedMode = storageMode
+        val requestedServerUrl = serverUrl
+        val requestedToken = token
+        val requestedPassword = password
         status = "$actionText..."
+        val updatedLocal = mutation(database)
+        database = updatedLocal
+        entries = updatedLocal.Entries
+        hasLoadedHistory = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val client = ServerStorageClient(serverUrl, token, password)
-                    var download = client.download()
-                    var database = ClipDatabaseFile.load(download.data, password)
-                    var updated = mutation(database)
-                    var encoded = ClipDatabaseFile.save(updated, password)
-                    try {
-                        client.upload(encoded, download.revision)
-                    } catch (_: ServerConflictException) {
-                        download = client.download()
-                        database = ClipDatabaseFile.load(download.data, password)
-                        updated = mutation(database)
-                        encoded = ClipDatabaseFile.save(updated, password)
-                        client.upload(encoded, download.revision)
+                storageMutex.withLock {
+                    runCatching {
+                        historyRepository.saveLocal(updatedLocal, requestedPassword)
+                        if (requestedMode == MobileStorageMode.Local) {
+                            MobileSyncResult(updatedLocal, "", false)
+                        } else {
+                            historyRepository.synchronize(requestedServerUrl, requestedToken, requestedPassword, updatedLocal)
+                        }
                     }
-                    updated
                 }
             }
-            result.onSuccess { database ->
-                entries = database.Entries
-                currentRevision = ""
-                status = "$actionText complete."
-                showConnectionSettings = false
+            if (generation != changeGeneration) return@launch
+            result.onSuccess { sync ->
+                database = sync.database
+                entries = sync.database.Entries
+                currentRevision = sync.revision
+                status = if (requestedMode == MobileStorageMode.Local) "$actionText complete in local history." else "$actionText complete."
                 if (actionText == "Adding Android clipboard text") {
                     playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
                 }
                 announce(view, "$actionText complete")
             }.onFailure { error ->
-                status = "$actionText failed: ${error.message ?: error::class.java.simpleName}"
+                status = if (requestedMode == MobileStorageMode.Server) {
+                    "$actionText saved locally; server sync is pending: ${error.message ?: error::class.java.simpleName}"
+                } else {
+                    "$actionText failed: ${error.message ?: error::class.java.simpleName}"
+                }
             }
         }
     }
@@ -342,19 +439,27 @@ private fun ClipmanApp() {
         }
     }
 
-    if (serverUrl.isNotBlank() && token.isNotBlank() && entries.isEmpty() && status == "Not loaded.") {
+    LaunchedEffect(addClipboardAfterLoad) {
+        if (addClipboardAfterLoad) {
+            addClipboardAfterLoad = false
+            addCurrentClipboardText()
+        }
+    }
+
+    if (storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && entries.isEmpty() && status == "Not loaded.") {
         status = "Server details loaded. Enter the history password, then choose Load History."
     }
 
-    LaunchedEffect(serverUrl, token, password, showConnectionSettings) {
-        if (!attemptedInitialLoad && !showConnectionSettings && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank()) {
+    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings) {
+        val ready = storageMode == MobileStorageMode.Local || (serverUrl.isNotBlank() && token.isNotBlank())
+        if (!attemptedInitialLoad && !showConnectionSettings && ready) {
             attemptedInitialLoad = true
             loadHistory()
         }
     }
 
-    LaunchedEffect(serverUrl, token, password, showConnectionSettings) {
-        while (serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
+    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings) {
+        while (storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && !showConnectionSettings) {
             delay(5000)
             loadHistory(announceResult = false, updateStatusWhenUnchanged = false)
         }
@@ -473,6 +578,9 @@ private fun ClipmanApp() {
     ) {
         if (showConnectionSettings) {
             ConnectionSettingsScreen(
+                isSaving = isSavingSettings,
+                storageMode = storageMode,
+                onStorageModeChanged = { storageMode = it },
                 serverUrl = serverUrl,
                 onServerUrlChanged = { serverUrl = it },
                 token = token,
@@ -496,15 +604,68 @@ private fun ClipmanApp() {
                 onShowPasswordChanged = { showPassword = it },
                 copyRemoteToClipboard = copyRemoteToClipboard,
                 onCopyRemoteToClipboardChanged = { copyRemoteToClipboard = it },
+                addClipboardOnLaunch = addClipboardOnLaunch,
+                onAddClipboardOnLaunchChanged = { addClipboardOnLaunch = it },
                 playSounds = playSounds,
                 onPlaySoundsChanged = { playSounds = it },
                 useHaptics = useHaptics,
                 onUseHapticsChanged = { useHaptics = it },
-                onSaveAndClose = {
-                    saveSettings()
-                    showConnectionSettings = false
-                    if (serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank()) {
-                        loadHistory()
+                onCancel = { if (!isSavingSettings) discardSettingsChanges() },
+                onSave = saveSettings@{
+                    if (isSavingSettings) return@saveSettings
+                    val savedSettings = MobileSettingsSnapshot(
+                        storageMode = storageMode,
+                        serverUrl = serverUrl,
+                        token = token,
+                        password = password,
+                        deviceName = deviceName,
+                        copyRemoteToClipboard = copyRemoteToClipboard,
+                        addClipboardOnLaunch = addClipboardOnLaunch,
+                        playSounds = playSounds,
+                        useHaptics = useHaptics
+                    )
+                    isSavingSettings = true
+                    loadGeneration += 1
+                    changeGeneration += 1
+                    isLoadingHistory = false
+                    val oldPassword = settings.historyPassword
+                    val newPassword = savedSettings.password
+                    val databaseSnapshot = database
+                    val historyWasLoaded = hasLoadedHistory
+                    scope.launch {
+                        val cacheResult = withContext(Dispatchers.IO) {
+                            storageMutex.withLock {
+                                runCatching {
+                                    val toSave = if (historyWasLoaded) {
+                                        databaseSnapshot
+                                    } else {
+                                        historyRepository.loadLocalOrNull(oldPassword)
+                                    }
+                                    if (toSave != null) historyRepository.saveLocal(toSave, newPassword)
+                                }
+                            }
+                        }
+                        cacheResult.onSuccess {
+                            storageMode = savedSettings.storageMode
+                            serverUrl = savedSettings.serverUrl
+                            token = savedSettings.token
+                            password = savedSettings.password
+                            deviceName = savedSettings.deviceName
+                            copyRemoteToClipboard = savedSettings.copyRemoteToClipboard
+                            addClipboardOnLaunch = savedSettings.addClipboardOnLaunch
+                            playSounds = savedSettings.playSounds
+                            useHaptics = savedSettings.useHaptics
+                            saveSettings(savedSettings)
+                            isSavingSettings = false
+                            showConnectionSettings = false
+                            currentRevision = ""
+                            loadHistory()
+                        }
+                        cacheResult.onFailure { error ->
+                            isSavingSettings = false
+                            status = "Could not save settings: ${error.message ?: error::class.java.simpleName}"
+                            announce(view, status)
+                        }
                     }
                 }
             )
@@ -779,6 +940,9 @@ private fun HistoryToolbar(
 
 @Composable
 private fun ConnectionSettingsScreen(
+    isSaving: Boolean,
+    storageMode: MobileStorageMode,
+    onStorageModeChanged: (MobileStorageMode) -> Unit,
     serverUrl: String,
     onServerUrlChanged: (String) -> Unit,
     token: String,
@@ -792,11 +956,14 @@ private fun ConnectionSettingsScreen(
     onShowPasswordChanged: (Boolean) -> Unit,
     copyRemoteToClipboard: Boolean,
     onCopyRemoteToClipboardChanged: (Boolean) -> Unit,
+    addClipboardOnLaunch: Boolean,
+    onAddClipboardOnLaunchChanged: (Boolean) -> Unit,
     playSounds: Boolean,
     onPlaySoundsChanged: (Boolean) -> Unit,
     useHaptics: Boolean,
     onUseHapticsChanged: (Boolean) -> Unit,
-    onSaveAndClose: () -> Unit
+    onCancel: () -> Unit,
+    onSave: () -> Unit
 ) {
     var showServerConnection by remember {
         mutableStateOf(serverUrl.isBlank() || token.isBlank())
@@ -808,32 +975,80 @@ private fun ConnectionSettingsScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        SettingCheckboxRow(
-            checked = copyRemoteToClipboard,
-            onCheckedChange = onCopyRemoteToClipboardChanged,
-            label = "Copy remote additions to Android clipboard"
-        )
-        SettingCheckboxRow(
-            checked = playSounds,
-            onCheckedChange = onPlaySoundsChanged,
-            label = "Play sounds"
-        )
-        SettingCheckboxRow(
-            checked = useHaptics,
-            onCheckedChange = onUseHapticsChanged,
-            label = "Use haptic feedback"
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onCancel, enabled = !isSaving) { Text("Cancel") }
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { heading() }
+            )
+            TextButton(onClick = onSave, enabled = !isSaving) { Text(if (isSaving) "Saving" else "Save") }
+        }
         OutlinedTextField(
             value = deviceName,
             onValueChange = onDeviceNameChanged,
             label = { Text("Device name") },
             singleLine = true,
+            enabled = !isSaving,
             modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = "History storage",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            MobileStorageMode.entries.forEach { mode ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = storageMode == mode,
+                        onClick = { onStorageModeChanged(mode) },
+                        enabled = !isSaving
+                    )
+                    Text(mode.label)
+                }
+            }
+        }
+        Text(
+            text = if (storageMode == MobileStorageMode.Local) {
+                "History is stored privately on this phone. Your server details remain saved for later."
+            } else {
+                "History is cached on this phone and merged with Clipman Server. Offline changes retry automatically."
+            },
+            style = MaterialTheme.typography.bodySmall
+        )
+        SettingCheckboxRow(
+            checked = playSounds,
+            onCheckedChange = onPlaySoundsChanged,
+            label = "Play sounds",
+            enabled = !isSaving
+        )
+        SettingCheckboxRow(
+            checked = useHaptics,
+            onCheckedChange = onUseHapticsChanged,
+            label = "Use haptic feedback",
+            enabled = !isSaving
+        )
+        SettingCheckboxRow(
+            checked = copyRemoteToClipboard,
+            onCheckedChange = onCopyRemoteToClipboardChanged,
+            label = "Copy remote additions to Android clipboard",
+            enabled = !isSaving
+        )
+        SettingCheckboxRow(
+            checked = addClipboardOnLaunch,
+            onCheckedChange = onAddClipboardOnLaunchChanged,
+            label = "Add current clipboard to history on launch",
+            enabled = !isSaving
         )
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -853,7 +1068,7 @@ private fun ConnectionSettingsScreen(
                     },
                     style = MaterialTheme.typography.bodyMedium
                 )
-                TextButton(onClick = { showServerConnection = !showServerConnection }) {
+                TextButton(onClick = { showServerConnection = !showServerConnection }, enabled = !isSaving) {
                     Text(if (showServerConnection) "Hide server connection" else "Show server connection")
                 }
                 if (showServerConnection) {
@@ -862,6 +1077,7 @@ private fun ConnectionSettingsScreen(
                         onValueChange = onServerUrlChanged,
                         label = { Text("Server address") },
                         singleLine = true,
+                        enabled = !isSaving,
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
@@ -869,9 +1085,14 @@ private fun ConnectionSettingsScreen(
                         onValueChange = onTokenChanged,
                         label = { Text("Server token") },
                         singleLine = true,
+                        enabled = !isSaving && storageMode == MobileStorageMode.Server,
+                        visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    TextButton(onClick = onPasteToken) {
+                    TextButton(
+                        onClick = onPasteToken,
+                        enabled = !isSaving && storageMode == MobileStorageMode.Server
+                    ) {
                         Text("Paste token from clipboard")
                     }
                     OutlinedTextField(
@@ -879,6 +1100,7 @@ private fun ConnectionSettingsScreen(
                         onValueChange = onPasswordChanged,
                         label = { Text("History password") },
                         singleLine = true,
+                        enabled = !isSaving,
                         visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -886,6 +1108,7 @@ private fun ConnectionSettingsScreen(
                         Checkbox(
                             checked = showPassword,
                             onCheckedChange = onShowPasswordChanged,
+                            enabled = !isSaving,
                             modifier = Modifier
                         )
                         Text("Show password")
@@ -901,11 +1124,6 @@ private fun ConnectionSettingsScreen(
         Text("Version: ${BuildConfig.VERSION_NAME}")
         Text("Build: ${BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS}")
         Text("Built: ${formatBuildStamp(BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS)}")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onSaveAndClose) {
-                Text("Save and Close")
-            }
-        }
     }
 }
 
@@ -920,12 +1138,14 @@ private fun formatBuildStamp(value: String): String {
 private fun SettingCheckboxRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    label: String
+    label: String,
+    enabled: Boolean = true
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Checkbox(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            enabled = enabled
         )
         Text(label)
     }

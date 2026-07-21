@@ -9,6 +9,19 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("History storage") {
+                    Picker("Storage mode", selection: $draft.storageMode) {
+                        ForEach(MobileStorageMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(draft.storageMode == .local
+                        ? "History is stored privately on this iPhone. Your server details remain saved for later."
+                        : "History is cached on this iPhone and merged with Clipman Server. Offline changes retry automatically.")
+                        .font(.footnote)
+                }
+
                 Section("Behaviour") {
                     TextField("Device name", text: $draft.deviceName)
                         .textInputAutocapitalization(.words)
@@ -17,6 +30,7 @@ struct SettingsView: View {
                     Toggle("Use haptics", isOn: $draft.hapticsEnabled)
                     Toggle("Enable links history", isOn: $draft.linksEnabled)
                     Toggle("Copy latest remote item to iOS clipboard", isOn: $draft.autoCopyRemote)
+                    Toggle("Offer to add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
                     Stepper(value: $draft.refreshIntervalSeconds, in: 2...30, step: 1) {
                         Text("Refresh interval: \(Int(draft.refreshIntervalSeconds)) seconds")
                     }
@@ -35,6 +49,7 @@ struct SettingsView: View {
                         SecureField("Server token", text: $draft.serverToken)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .disabled(draft.storageMode == .local)
                         SecureField("History password", text: $draft.historyPassword)
                         Text("You can paste a full token line or a clipman:// server address; Clipman will clean it when saving.")
                             .font(.footnote)
@@ -65,6 +80,9 @@ struct SettingsView: View {
                 draft = app.settings
                 showServerConnection = !serverIsConfigured
             }
+        }
+        .accessibilityAction(.escape) {
+            dismiss()
         }
     }
 

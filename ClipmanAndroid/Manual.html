@@ -36,7 +36,7 @@
 <body>
   <h1>Clipman Android Test Build Manual</h1>
 
-  <p>Clipman Android is a foreground Clipman Server client for Android phones and tablets. It lets you browse, search, copy, add, edit, pin, delete, and open links from a shared Clipman Server text history while the app is open.</p>
+  <p>Clipman Android is a foreground clipboard-history client for Android phones and tablets. It can keep history privately on the phone or merge it with Clipman Server while the app is open. You can browse, search, copy, add, edit, pin, delete, and open links.</p>
 
   <p>This Android package is currently a test build. It is intended for Clipman Server users who want to help test the Android client before a wider Android release.</p>
 
@@ -55,9 +55,8 @@
   <h2 id="requirements">Requirements</h2>
   <ul>
     <li>Android 8.0 or newer.</li>
-    <li>A configured Clipman Server.</li>
-    <li>The Clipman Server address and token.</li>
-    <li>The same history password used by your Windows or Mac Clipman clients.</li>
+    <li>For Server mode, a configured Clipman Server address and token.</li>
+    <li>For an existing shared history, the same history password used by your other Clipman clients.</li>
     <li>Biometric unlock or Android device credential, such as fingerprint, face unlock, PIN, pattern, or password.</li>
   </ul>
 
@@ -75,18 +74,20 @@
   <p>The Android package ID is <code>me.onj.clipman</code>.</p>
 
   <h2 id="first-run">First Run</h2>
-  <p>On launch, Clipman asks Android to unlock with biometrics or your device credential before it shows history or settings.</p>
+  <p>On launch, and whenever you return after switching away, Clipman asks Android to unlock with biometrics or your device credential before it shows history or settings.</p>
 
   <p>The first time you configure it:</p>
   <ol>
     <li>Open Settings if it is not already shown.</li>
-    <li>Enter the Clipman Server address.</li>
-    <li>Enter the server token.</li>
-    <li>Enter the history password.</li>
-    <li>Choose <strong>Save and Close</strong>.</li>
+    <li>Choose <strong>Local</strong> to keep history on this phone, or <strong>Server</strong> to share history through Clipman Server.</li>
+    <li>For Server mode, enter the Clipman Server address and server token.</li>
+    <li>Enter the history password when the history is password protected.</li>
+    <li>Choose <strong>Save</strong> at the top of Settings.</li>
   </ol>
 
-  <p>Once configured, the server connection section is collapsed in Settings. You can open it again with <strong>Show server connection</strong>.</p>
+  <p>Local mode stores <code>clipman-history.clipdb</code> in Android's private app storage. Server mode keeps that local copy as an offline cache and merges it with the server. If the connection is unavailable, changes remain local and retry while Clipman is open. Switching back to Server mode merges both histories, including deletion records, instead of replacing either side.</p>
+
+  <p>Your server address, token, and history password remain saved when you switch to Local mode. The token control is disabled until Server mode is selected again. Once configured, the server connection section is collapsed in Settings; use <strong>Show server connection</strong> to open it.</p>
 
   <h2 id="main-screen">Main Screen</h2>
   <p>The main toolbar includes:</p>
@@ -115,12 +116,16 @@
   <h2 id="settings">Settings</h2>
   <p>Settings includes:</p>
   <ul>
+    <li><strong>History storage</strong>: switches between private Local history and Clipman Server. Switching modes keeps the other mode's settings and merges local changes when Server mode resumes.</li>
     <li><strong>Copy remote additions to Android clipboard</strong>: when another machine adds new text to the shared history, Clipman can place that new text on the Android clipboard while the app is open.</li>
+    <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
     <li><strong>Use haptic feedback</strong>: vibrates for supported feedback events.</li>
     <li><strong>Server connection</strong>: shows or hides server address, server token, history password, and show-password controls.</li>
     <li><strong>Build information</strong>: shows the app version, readable UTC build time, and exact build stamp so a tester can identify the installed build unambiguously.</li>
   </ul>
+
+  <p>Choose <strong>Cancel</strong> at the top, or use Android Back, to discard changes and return to history. Choose <strong>Save</strong> to apply changes and return to history. A history refresh that finishes while Settings is open does not close the Settings screen.</p>
 
   <p>If only some custom sounds are available, Clipman uses those and falls back to bundled defaults for the rest.</p>
 
@@ -135,8 +140,9 @@ https://host:port</code></pre>
 
   <h2 id="privacy">Privacy and Security Notes</h2>
   <ul>
-    <li>Clipman requires Android biometric or device unlock before showing history or settings.</li>
+    <li>Clipman requires Android biometric or device unlock before showing history or settings, including whenever you return after switching to another app.</li>
     <li>Server address, server token, and history password are stored using Android protected app storage.</li>
+    <li>Local history is stored in Android's private app data. It uses the configured history password when one is present.</li>
     <li>Clipman Android only syncs while the app is open.</li>
     <li>The Android clipboard itself is controlled by Android. Once an entry is copied to the clipboard, other apps may be able to paste it according to Android's normal clipboard rules.</li>
   </ul>

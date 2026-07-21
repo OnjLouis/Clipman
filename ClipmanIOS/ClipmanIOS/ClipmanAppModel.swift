@@ -23,14 +23,22 @@ final class ClipmanAppModel: ObservableObject {
     @Published var groupFilter = "All"
     @Published var status = "Ready"
     @Published var showingSettings = false
+    @Published var showingClipboardImport = false
     @Published var isRefreshing = false
     @Published private(set) var linkItems: [LinkExtractor.LinkItem] = []
 
     private let soundService = SoundService()
+    private let historyRepository = MobileHistoryRepository()
     private var revision = ""
+    private var unlockTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var uploadTask: Task<Void, Never>?
     private var refreshInProgress = false
+    private var hasPendingLocalChanges = false
+    private var storageGeneration = 0
+    private var isUnlocking = false
+    private var isSceneActive = true
+    private var foregroundGeneration = 0
     private var lastRemoteEntryID = ""
     private var pureLinkEntryIDs = Set<String>()
     private var machineName: String {
@@ -98,10 +106,27 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func unlock() {
-        Task {
-            if await AuthenticationService.unlock() {
+        guard !isUnlocked, !isUnlocking else { return }
+        isUnlocking = true
+        let generation = foregroundGeneration
+        unlockTask?.cancel()
+        unlockTask = Task { [weak self] in
+            guard let self else { return }
+            let authenticated = await AuthenticationService.unlock()
+            isUnlocking = false
+            guard !Task.isCancelled, generation == foregroundGeneration, isSceneActive else {
+                if isSceneActive {
+                    unlock()
+                }
+                return
+            }
+            if authenticated {
                 isUnlocked = true
-                await refresh(showStatus: true)
+                let loaded = await refresh(showStatus: true)
+                guard !Task.isCancelled, generation == foregroundGeneration, isUnlocked else { return }
+                if loaded, settings.addClipboardOnLaunch {
+                    showingClipboardImport = true
+                }
                 startPolling()
             } else {
                 status = "Authentication cancelled."
@@ -109,35 +134,105 @@ final class ClipmanAppModel: ObservableObject {
         }
     }
 
+    func sceneBecameActive() {
+        isSceneActive = true
+        if !isUnlocked {
+            unlock()
+        }
+    }
+
+    func sceneMovedToBackground() {
+        isSceneActive = false
+        foregroundGeneration += 1
+        unlockTask?.cancel()
+        unlockTask = nil
+        refreshTask?.cancel()
+        refreshTask = nil
+        showingSettings = false
+        showingClipboardImport = false
+        isUnlocked = false
+        status = "Clipman is locked."
+    }
+
     func saveSettings(_ newSettings: ClipmanSettings) {
+        storageGeneration += 1
+        refreshTask?.cancel()
+        uploadTask?.cancel()
         settings = newSettings
         if !settings.linksEnabled && selectedSection == .links {
             selectedSection = .text
         }
         SettingsStore.save(newSettings)
         revision = ""
-        startPolling()
-        Task { await refresh(showStatus: true) }
+        hasPendingLocalChanges = newSettings.storageMode == .server
+        let generation = storageGeneration
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await historyRepository.saveLocal(database, password: newSettings.historyPassword)
+            } catch {
+                status = "Could not save local history: \(error.localizedDescription)"
+                return
+            }
+            guard generation == storageGeneration else { return }
+            startPolling()
+            _ = await refresh(showStatus: true)
+        }
     }
 
     func startPolling() {
         refreshTask?.cancel()
-        guard settings.refreshIntervalSeconds >= 2 else { return }
+        guard settings.storageMode == .server, settings.refreshIntervalSeconds >= 2 else { return }
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(max(2, self?.settings.refreshIntervalSeconds ?? 3) * 1_000_000_000))
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(max(2, self?.settings.refreshIntervalSeconds ?? 3) * 1_000_000_000))
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
                 await self?.refresh(showStatus: false)
             }
         }
     }
 
-    func refresh(showStatus: Bool) async {
-        guard !refreshInProgress else { return }
-        let client = ServerStorageClient(settings: settings)
+    @discardableResult
+    func refresh(showStatus: Bool) async -> Bool {
+        guard !refreshInProgress else { return false }
+        let generation = storageGeneration
+        let settingsSnapshot = settings
+        if settingsSnapshot.storageMode == .local {
+            refreshInProgress = true
+            if showStatus { isRefreshing = true }
+            defer {
+                refreshInProgress = false
+                if showStatus { isRefreshing = false }
+            }
+            do {
+                if let local = try await historyRepository.loadLocal(password: settingsSnapshot.historyPassword) {
+                    guard generation == storageGeneration else { return false }
+                    if !SyncConflictResolver.hasSameContent(local, database) {
+                        database = local
+                    }
+                } else {
+                    try await historyRepository.saveLocal(database, password: settingsSnapshot.historyPassword)
+                    guard generation == storageGeneration else { return false }
+                }
+                revision = ""
+                hasPendingLocalChanges = false
+                if showStatus { status = "Local history loaded. \(loadedStatusText())" }
+                return true
+            } catch {
+                guard generation == storageGeneration else { return false }
+                status = "Could not load local history: \(error.localizedDescription)"
+                return false
+            }
+        }
+        let client = ServerStorageClient(settings: settingsSnapshot)
         guard client.isConfigured else {
             status = "Open Settings to configure Clipman Server."
             showingSettings = true
-            return
+            return false
         }
         refreshInProgress = true
         if showStatus { isRefreshing = true }
@@ -146,19 +241,21 @@ final class ClipmanAppModel: ObservableObject {
             if showStatus { isRefreshing = false }
         }
         do {
-            if !showStatus && !revision.isEmpty {
+            if !showStatus && !revision.isEmpty && !hasPendingLocalChanges {
                 let metadata = try await client.metadata()
                 if metadata.revision == revision {
-                    return
+                    return true
                 }
             }
-            let download = try await client.download()
-            let merged = try await DatabaseWorker.loadAndMerge(data: download.data, password: settings.historyPassword, current: database)
             let previousNewest = newestRemoteEntry(in: database)
+            let sync = try await historyRepository.synchronize(settings: settingsSnapshot, current: database)
+            guard generation == storageGeneration else { return false }
+            let merged = sync.database
             if merged != database {
                 database = merged
             }
-            revision = download.revision
+            revision = sync.revision
+            hasPendingLocalChanges = false
             if !showStatus, previousNewest != nil, let newest = newestRemoteEntry(in: merged), newest.Id != previousNewest?.Id, newest.Id != lastRemoteEntryID {
                 if settings.autoCopyRemote {
                     UIPasteboard.general.string = newest.Text
@@ -171,22 +268,44 @@ final class ClipmanAppModel: ObservableObject {
             if showStatus {
                 status = loadedStatusText()
             }
-        } catch ServerStorageError.notFound {
-            database = ClipDatabase()
-            await uploadDatabase(database, expectedRevision: "", successMessage: "Created server database.")
+            return true
         } catch {
+            guard generation == storageGeneration else { return false }
+            revision = ""
+            do {
+                if let cached = try await historyRepository.loadLocal(password: settingsSnapshot.historyPassword) {
+                    guard generation == storageGeneration else { return false }
+                    if !SyncConflictResolver.hasSameContent(cached, database) {
+                        database = cached
+                    }
+                    status = "Using local history; server sync is pending: \(error.localizedDescription)"
+                    return true
+                }
+            } catch {
+                guard generation == storageGeneration else { return false }
+                status = "Could not load local history: \(error.localizedDescription)"
+                return false
+            }
             status = error.localizedDescription
+            return false
         }
     }
 
-    func addCurrentClipboard() {
-        guard let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+    func addPastedClipboardText(_ pastedText: String?) {
+        showingClipboardImport = false
+        guard let text = pastedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             status = "Clipboard does not contain text."
             soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             return
         }
+        let alreadyExists = database.Entries.contains { $0.Text == text }
         database = SyncConflictResolver.addText(database: database, text: text, machineName: machineName)
-        queueUpload(successMessage: "Clipboard text added.")
+        queueUpload(successMessage: alreadyExists ? "Clipboard text already exists in history." : "Clipboard text added.")
+    }
+
+    func cancelClipboardImport() {
+        showingClipboardImport = false
+        status = "Clipboard paste cancelled."
     }
 
     func copy(_ entry: ClipEntry) {
@@ -221,47 +340,41 @@ final class ClipmanAppModel: ObservableObject {
     private func queueUpload(successMessage: String?) {
         uploadTask?.cancel()
         let snapshot = database
-        let currentRevision = revision
+        let generation = storageGeneration
+        let settingsSnapshot = settings
+        hasPendingLocalChanges = settings.storageMode == .server
         uploadTask = Task { [weak self] in
-            await self?.uploadDatabase(snapshot, expectedRevision: currentRevision, successMessage: successMessage)
+            await self?.persistAndSynchronize(snapshot, settings: settingsSnapshot, generation: generation, successMessage: successMessage)
         }
     }
 
-    private func uploadDatabase(_ snapshot: ClipDatabase, expectedRevision: String, successMessage: String?) async {
-        var expectedRevision = expectedRevision
-        var snapshot = snapshot
-        for attempt in 0..<3 {
-            let client = ServerStorageClient(settings: settings)
-            guard client.isConfigured else {
-                status = "Open Settings to configure Clipman Server."
+    private func persistAndSynchronize(_ snapshot: ClipDatabase, settings settingsSnapshot: ClipmanSettings, generation: Int, successMessage: String?) async {
+        do {
+            try await historyRepository.saveLocal(snapshot, password: settingsSnapshot.historyPassword)
+            try Task.checkCancellation()
+            guard generation == storageGeneration else { return }
+            if settingsSnapshot.storageMode == .local {
+                hasPendingLocalChanges = false
+                if let successMessage { status = "\(successMessage) Saved in local history." }
                 return
             }
-            do {
-                let data = try await DatabaseWorker.save(snapshot, password: settings.historyPassword)
-                revision = try await client.upload(data: data, expectedRevision: expectedRevision)
-                if let successMessage {
-                    status = successMessage
-                }
-                return
-            } catch ServerStorageError.conflict where attempt < 2 {
-                do {
-                    let download = try await client.download()
-                    let merged = try await DatabaseWorker.loadAndMerge(data: download.data, password: settings.historyPassword, current: snapshot)
-                    snapshot = merged
-                    if merged != database {
-                        database = merged
-                    }
-                    expectedRevision = download.revision
-                } catch {
-                    status = error.localizedDescription
-                    soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
-                    return
-                }
-            } catch {
-                status = error.localizedDescription
-                soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
-                return
+            let sync = try await historyRepository.synchronize(settings: settingsSnapshot, current: snapshot)
+            try Task.checkCancellation()
+            guard generation == storageGeneration else { return }
+            revision = sync.revision
+            hasPendingLocalChanges = false
+            if !SyncConflictResolver.hasSameContent(sync.database, database) {
+                database = sync.database
             }
+            if let successMessage { status = successMessage }
+        } catch is CancellationError {
+            return
+        } catch {
+            hasPendingLocalChanges = settingsSnapshot.storageMode == .server
+            status = settingsSnapshot.storageMode == .server
+                ? "Saved locally; server sync is pending: \(error.localizedDescription)"
+                : "Could not save local history: \(error.localizedDescription)"
+            soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
         }
     }
 
@@ -289,8 +402,7 @@ final class ClipmanAppModel: ObservableObject {
             for (index, url) in links.enumerated() {
                 items.append(LinkExtractor.LinkItem(id: "\(entry.Id)-link-\(index)", url: url, entry: entry))
             }
-            let trimmed = entry.Text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if links.count == 1, let url = links.first, trimmed == url.absoluteString {
+            if LinkExtractor.isPureLinkEntry(entry) {
                 pureIDs.insert(entry.Id)
             }
         }

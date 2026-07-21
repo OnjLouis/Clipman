@@ -10,6 +10,9 @@ enum LinkExtractor {
     }
 
     static func links(in text: String) -> [URL] {
+        if let url = pureHTTPURL(in: text) {
+            return [url]
+        }
         guard let detector else { return [] }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return detector
@@ -26,13 +29,24 @@ enum LinkExtractor {
     }
 
     static func isPureLinkEntry(_ entry: ClipEntry) -> Bool {
-        let trimmed = entry.Text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let links = links(in: trimmed)
-        guard links.count == 1, let link = links.first else { return false }
-        return trimmed == link.absoluteString
+        pureHTTPURL(in: entry.Text) != nil
     }
 
     static func isLinkEntry(_ entry: ClipEntry) -> Bool {
         links(in: entry.Text).isEmpty == false
+    }
+
+    private static func pureHTTPURL(in text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains("\n"),
+              !trimmed.contains("\r"),
+              let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false else {
+            return nil
+        }
+        return components.url
     }
 }

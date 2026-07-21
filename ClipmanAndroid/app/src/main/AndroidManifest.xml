@@ -6,7 +6,9 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/clipman_app_icon"
         android:label="Clipman"
+        android:roundIcon="@drawable/clipman_app_icon"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">

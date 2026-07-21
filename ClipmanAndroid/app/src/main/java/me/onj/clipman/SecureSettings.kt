@@ -18,6 +18,10 @@ class AndroidSettings(context: Context) {
         get() = getString("serverUrl")
         set(value) = putString("serverUrl", value)
 
+    var storageMode: MobileStorageMode
+        get() = MobileStorageMode.fromStoredValue(preferences.getString("storageMode", null))
+        set(value) = preferences.edit().putString("storageMode", value.storedValue).apply()
+
     var serverToken: String
         get() = getString("serverToken")
         set(value) = putString("serverToken", value)
@@ -42,6 +46,10 @@ class AndroidSettings(context: Context) {
     var copyRemoteToClipboard: Boolean
         get() = preferences.getBoolean("copyRemoteToClipboard", false)
         set(value) = preferences.edit().putBoolean("copyRemoteToClipboard", value).apply()
+
+    var addClipboardOnLaunch: Boolean
+        get() = preferences.getBoolean("addClipboardOnLaunch", false)
+        set(value) = preferences.edit().putBoolean("addClipboardOnLaunch", value).apply()
 
     var playSounds: Boolean
         get() = preferences.getBoolean("playSounds", true)
@@ -72,6 +80,16 @@ class AndroidSettings(context: Context) {
             val model = android.os.Build.MODEL?.trim().orEmpty()
             return if (model.isBlank()) "Android" else "Android $model"
         }
+    }
+}
+
+enum class MobileStorageMode(val storedValue: String, val label: String) {
+    Local("local", "Local"),
+    Server("server", "Server");
+
+    companion object {
+        fun fromStoredValue(value: String?): MobileStorageMode =
+            entries.firstOrNull { it.storedValue.equals(value, ignoreCase = true) } ?: Server
     }
 }
 

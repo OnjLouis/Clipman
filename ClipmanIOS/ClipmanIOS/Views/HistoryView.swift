@@ -8,15 +8,19 @@ struct HistoryView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 8) {
-                controls
-                entryList
-                statusBar
+            ScrollViewReader { proxy in
+                VStack(spacing: 8) {
+                    controls
+                    entryList
+                    statusBar(proxy: proxy)
+                }
             }
             .navigationTitle("Clipman")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("Paste") { app.addCurrentClipboard() }
+                    PasteButton(payloadType: String.self) { values in
+                        app.addPastedClipboardText(values.first)
+                    }
                         .accessibilityHint("Adds the current iOS clipboard text to Clipman.")
                     Button(app.selectedSection == .text ? "Switch to Links" : "Switch to Text") {
                         app.selectedSection = app.selectedSection == .text ? .links : .text
@@ -30,7 +34,7 @@ struct HistoryView: View {
                 await app.refresh(showStatus: true)
             }
             .accessibilityAction(.magicTap) {
-                app.addCurrentClipboard()
+                app.showingClipboardImport = true
             }
             .accessibilityScrollAction { edge in
                 switch edge {
@@ -81,76 +85,45 @@ struct HistoryView: View {
     }
 
     private var entryList: some View {
-        ScrollViewReader { proxy in
-            VStack(spacing: 0) {
-                HStack {
-                    Button("Top") {
-                        scrollToTop(proxy: proxy)
-                    }
-                    .disabled(currentListIsEmpty)
-
-                    Spacer()
-
-                    Button("Bottom") {
-                        scrollToBottom(proxy: proxy)
-                    }
-                    .disabled(currentListIsEmpty)
+        List {
+            if app.selectedSection == .links {
+                if app.visibleLinkItems.isEmpty {
+                    Text("No links.")
+                        .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 6)
-                .background(.bar)
-
-                List {
-                    if app.selectedSection == .links {
-                        if app.visibleLinkItems.isEmpty {
-                            Text("No links.")
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(app.visibleLinkItems) { item in
-                            LinkHistoryRow(
-                                item: item,
-                                copy: { app.copyText(item.url.absoluteString) },
-                                open: { UIApplication.shared.open(item.url) },
-                                view: { viewingEntry = item.entry },
-                                delete: { app.delete(item.entry) }
-                            )
-                            .id(item.id)
-                        }
-                    } else {
-                        if app.visibleEntries.isEmpty {
-                            Text("No entries.")
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(app.visibleEntries) { entry in
-                            HistoryEntryRow(
-                                entry: entry,
-                                copy: { app.copy(entry) },
-                                view: { viewingEntry = entry },
-                                edit: { editingEntry = entry },
-                                togglePinned: { app.togglePinned(entry) },
-                                delete: { app.delete(entry) }
-                            )
-                            .id(entry.Id)
-                        }
-                    }
+                ForEach(app.visibleLinkItems) { item in
+                    LinkHistoryRow(
+                        item: item,
+                        copy: { app.copyText(item.url.absoluteString) },
+                        open: { UIApplication.shared.open(item.url) },
+                        view: { viewingEntry = item.entry },
+                        delete: { app.delete(item.entry) }
+                    )
+                    .id(item.id)
                 }
-                .listStyle(.plain)
+            } else {
+                if app.visibleEntries.isEmpty {
+                    Text("No entries.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(app.visibleEntries) { entry in
+                    HistoryEntryRow(
+                        entry: entry,
+                        copy: { app.copy(entry) },
+                        view: { viewingEntry = entry },
+                        edit: { editingEntry = entry },
+                        togglePinned: { app.togglePinned(entry) },
+                        delete: { app.delete(entry) }
+                    )
+                    .id(entry.Id)
+                }
             }
         }
+        .listStyle(.plain)
     }
 
     private var currentListIsEmpty: Bool {
         app.selectedSection == .links ? app.visibleLinkItems.isEmpty : app.visibleEntries.isEmpty
-    }
-
-    private func scrollToTop(proxy: ScrollViewProxy) {
-        if app.selectedSection == .links, let first = app.visibleLinkItems.first {
-            proxy.scrollTo(first.id, anchor: .top)
-            UIAccessibility.post(notification: .layoutChanged, argument: first.accessibilityLabelText)
-        } else if let first = app.visibleEntries.first {
-            proxy.scrollTo(first.Id, anchor: .top)
-            UIAccessibility.post(notification: .layoutChanged, argument: first.accessibilityLabelText)
-        }
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
@@ -163,16 +136,19 @@ struct HistoryView: View {
         }
     }
 
-    private var availableSections: [ClipmanAppModel.Section] {
-        app.settings.linksEnabled ? ClipmanAppModel.Section.allCases : [.text]
-    }
-
-    private var statusBar: some View {
-        Text(app.status)
-            .font(.footnote)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal)
-            .padding(.bottom, 4)
+    private func statusBar(proxy: ScrollViewProxy) -> some View {
+        Button {
+            scrollToBottom(proxy: proxy)
+        } label: {
+            Text(app.status)
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.bottom, 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(currentListIsEmpty)
+        .accessibilityHint("Moves to the bottom of the current history list.")
     }
 }
 

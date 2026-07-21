@@ -403,6 +403,8 @@
 
   <p>Clients normally poll the server cheaply by checking the database revision. If the server, network, or VPN is temporarily unavailable, Clipman keeps its local cache, backs off repeated polling failures, and retries automatically. Diagnostics include the last server poll, last successful sync, last upload, current server revision, and failure count so sync problems can be diagnosed without guessing.</p>
 
+  <p>Android and iOS clients can choose <strong>Local</strong> or <strong>Server</strong> in Settings. Local mode keeps <code>clipman-history.clipdb</code> in the mobile operating system's private app storage and does not require a server. Server mode uses the same private file as an offline cache. Server details remain saved while Local mode is selected, and switching back to Server merges local additions, edits, pins, and deletions with the server history before uploading, so work done without a connection is not blindly replaced.</p>
+
   <p>Read the server package's <code>Manual.html</code> for setup, security, service-path, TLS, logging, backup, and API details.</p>
 
   <h2 id="send-to">Send To</h2>
@@ -548,6 +550,23 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.0.5</h3>
+  <ul>
+    <li>Added Local and Server storage modes to Android and iOS. Local mode keeps history in private app storage; Server mode keeps an offline local cache and merges additions, edits, pins, and deletions when connectivity returns.</li>
+    <li>Server address, token, and history password settings are retained while a mobile client uses Local mode, so switching back to Server does not require reconfiguration.</li>
+    <li>Changed iOS clipboard import to use Apple's explicit paste control. The optional launch action now opens an accessible Paste or Cancel screen, and VoiceOver scrub cancels without reading or adding clipboard text.</li>
+    <li>Added an opt-in Android and iOS setting to add the current mobile clipboard text after Clipman unlocks and loads the selected history.</li>
+    <li>Changed Android and iOS to lock whenever Clipman leaves the foreground and require biometric or device authentication each time the user returns.</li>
+    <li>Improved Android Settings with the same top Cancel and Save layout used on iOS.</li>
+    <li>Fixed Android Settings closing unexpectedly when the first history refresh finished.</li>
+    <li>Changed Android Back in Settings to discard unsaved changes and return to history.</li>
+    <li>Added VoiceOver scrub support for cancelling iOS Settings without saving.</li>
+    <li>Fixed standalone links whose normalized URL spelling caused them to appear in iOS Text history.</li>
+    <li>Changed the iOS status line to move to the bottom of the current history list when activated, while the standard iOS status-bar gesture remains available for returning to the top.</li>
+    <li>Improved iOS paste feedback so denied clipboard access and existing history text are not reported as newly added text.</li>
+    <li>Added a shared Clipman app icon to Android and iOS.</li>
+  </ul>
+
   <h3>2.0.4</h3>
   <ul>
     <li>Fixed custom data-folder changes so Windows and Mac keep the selected folder authoritative across restarts. If a WebDAV mount, cloud folder, network share, or settings file is unavailable at startup, Clipman now reports the problem instead of silently reverting to the default folder. Closes <a href="https://github.com/OnjLouis/Clipman/issues/30">issue #30</a>.</li>

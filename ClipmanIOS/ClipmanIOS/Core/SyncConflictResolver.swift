@@ -2,6 +2,10 @@ import CryptoKit
 import Foundation
 
 enum SyncConflictResolver {
+    static func hasSameContent(_ left: ClipDatabase, _ right: ClipDatabase) -> Bool {
+        left.Entries == right.Entries && left.DeletedEntries == right.DeletedEntries
+    }
+
     static func merge(target: ClipDatabase, source: ClipDatabase) -> ClipDatabase {
         var merged = target
         mergeDeletedEntries(into: &merged, source: source)

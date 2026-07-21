@@ -14,12 +14,14 @@
 		27F6E1A23D45B312371BFEDC /* ClipmanAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E70064E80A3EF247968D286 /* ClipmanAppModel.swift */; };
 		2C4499D2744D363D0FDAA807 /* copy.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2B73540DCE1C118E33B75CAF /* copy.wav */; };
 		31DF1873E5EA0F7A2A225723 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 283C9770D01F5E67699D4EAC /* SettingsView.swift */; };
+		3B2AEA8F73EDC017F8F34FAC /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */; };
 		40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */; };
 		49026C38259E970B438B4E54 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CD05FE0E19C7744ACFD87B4 /* Security.framework */; };
 		55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */; };
 		5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C5029F5D137A6D4490F765 /* HistoryView.swift */; };
 		5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98DD96F176CD3DE6A07D271 /* SoundService.swift */; };
 		60B3DA13369B6F9C5E9EEAAF /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */; };
+		63230AB36E74FDD29076CE5A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D4195FBB5149532BA117A9B8 /* Assets.xcassets */; };
 		7E92FC7E32A65B8890DAA492 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 3EE36547BC3684AF103A3821 /* libz.tbd */; };
 		80DF3940EAE12616EAA0047D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642C84289DC631AC184C2C31 /* Models.swift */; };
 		9C4809F93BC5717D1C1645DD /* SyncConflictResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */; };
@@ -29,6 +31,7 @@
 		B247FCD5A811CC35140C9A58 /* exclude.wav in Resources */ = {isa = PBXBuildFile; fileRef = B2CD34934E3F13399B8433EE /* exclude.wav */; };
 		B361AA587CED2A97ABD2F636 /* ClipmanSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */; };
 		B66FC9F132546C30E3E29127 /* EntryEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C075089BD6891E606C98F3 /* EntryEditView.swift */; };
+		C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */; };
 		C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02D9422349D165D345B5D71 /* KeychainStore.swift */; };
 		C676E48CA1A7CDAA51D4C9B5 /* EntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E9160FA444DB6E3A61314E /* EntryView.swift */; };
 		CA66F823CB2FBC5F09963CC6 /* ClipDatabaseFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */; };
@@ -58,6 +61,7 @@
 		7CD05FE0E19C7744ACFD87B4 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		89C5029F5D137A6D4490F765 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		93D166EC7141EE64B5371FD2 /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
+		98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileHistoryRepository.swift; sourceTree = "<group>"; };
 		9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanSettings.swift; sourceTree = "<group>"; };
 		9FF7A7A080F18D87A7A2A55F /* ClipmanIOS-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ClipmanIOS-Bridging-Header.h"; sourceTree = "<group>"; };
 		AD7265F77039DB93B9E0C74C /* on.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = on.wav; sourceTree = "<group>"; };
@@ -66,6 +70,8 @@
 		B93930D01A31ABF77524F78C /* skip.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = skip.wav; sourceTree = "<group>"; };
 		C02D9422349D165D345B5D71 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		C98DD96F176CD3DE6A07D271 /* SoundService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundService.swift; sourceTree = "<group>"; };
+		CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		D4195FBB5149532BA117A9B8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E794D8E5ABCF25641147F7F3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F5920DDD96B393F506A33F30 /* ClipmanIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanIOSApp.swift; sourceTree = "<group>"; };
 		FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkExtractor.swift; sourceTree = "<group>"; };
@@ -153,6 +159,8 @@
 		A6B32B127DAE11FDEBDF8ADE /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				D4195FBB5149532BA117A9B8 /* Assets.xcassets */,
+				CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */,
 				874C254B0CFBE6D0093E744B /* sounds */,
 			);
 			path = Resources;
@@ -172,6 +180,7 @@
 				73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */,
 				3757E95599655BFEB3101654 /* DatabaseWorker.swift */,
 				93D166EC7141EE64B5371FD2 /* Gzip.swift */,
+				98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */,
 				642C84289DC631AC184C2C31 /* Models.swift */,
 				034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */,
 				59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */,
@@ -253,6 +262,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				63230AB36E74FDD29076CE5A /* Assets.xcassets in Resources */,
+				3B2AEA8F73EDC017F8F34FAC /* PrivacyInfo.xcprivacy in Resources */,
 				2C4499D2744D363D0FDAA807 /* copy.wav in Resources */,
 				B247FCD5A811CC35140C9A58 /* exclude.wav in Resources */,
 				FA810C3FF3B2BAA9100DBEDC /* off.wav in Resources */,
@@ -281,6 +292,7 @@
 				5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */,
 				C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */,
 				40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */,
+				C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */,
 				80DF3940EAE12616EAA0047D /* Models.swift in Sources */,
 				A8912F558B14C788063B7A9B /* RootView.swift in Sources */,
 				55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */,
@@ -300,7 +312,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 2.0.4;
+				CURRENT_PROJECT_VERSION = 2.0.5;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -310,7 +322,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.4;
+				MARKETING_VERSION = 2.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -382,7 +394,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 2.0.4;
+				CURRENT_PROJECT_VERSION = 2.0.5;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -392,7 +404,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.4;
+				MARKETING_VERSION = 2.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;

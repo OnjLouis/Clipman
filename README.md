@@ -51,6 +51,7 @@ Windows and macOS downloads are attached to releases in this repository.
 - Optional startup capture, so Clipman can add the current clipboard item once when it starts if you choose.
 - Optional automatic update checks at startup, hourly, or daily, with silent install support when a release ZIP is available.
 - Optional Clipman Server support for hosting a shared `.clipdb` database with token authentication, password-scoped database buckets, revision checks, rolling backups, and explicit security rules for private-network versus HTTPS deployment. The server is a separate download; the normal Clipman app package is client-only.
+- Android and iOS can use private Local history without a server, or switch to Server mode while retaining an offline local cache. Returning to Server mode merges local and remote changes instead of replacing either history.
 
 ## Default Hotkeys
 
@@ -174,6 +175,22 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.0.5
+
+- Added Local and Server storage modes to Android and iOS. Local mode keeps history in private app storage; Server mode keeps an offline local cache and merges additions, edits, pins, and deletions when connectivity returns.
+- Server address, token, and history password settings are retained while a mobile client uses Local mode, so switching back to Server does not require reconfiguration.
+- Changed iOS clipboard import to use Apple's explicit paste control. The optional launch action now opens an accessible Paste or Cancel screen, and VoiceOver scrub cancels without reading or adding clipboard text.
+- Added an opt-in Android and iOS setting to add the current mobile clipboard text after Clipman unlocks and loads the selected history.
+- Changed Android and iOS to lock whenever Clipman leaves the foreground and require biometric or device authentication each time the user returns.
+- Improved Android Settings with the same top Cancel and Save layout used on iOS.
+- Fixed Android Settings closing unexpectedly when the first history refresh finished.
+- Changed Android Back in Settings to discard unsaved changes and return to history.
+- Added VoiceOver scrub support for cancelling iOS Settings without saving.
+- Fixed standalone links whose normalized URL spelling caused them to appear in iOS Text history.
+- Changed the iOS status line to move to the bottom of the current history list when activated, while the standard iOS status-bar gesture remains available for returning to the top.
+- Improved iOS paste feedback so denied clipboard access and existing history text are not reported as newly added text.
+- Added a shared Clipman app icon to Android and iOS.
 
 ### 2.0.4
 

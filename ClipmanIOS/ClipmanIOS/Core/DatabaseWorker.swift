@@ -1,10 +1,9 @@
 import Foundation
 
 enum DatabaseWorker {
-    static func loadAndMerge(data: Data, password: String, current: ClipDatabase) async throws -> ClipDatabase {
+    static func load(data: Data, password: String) async throws -> ClipDatabase {
         try await Task.detached(priority: .userInitiated) {
-            let remote = try ClipDatabaseFile.load(data, password: password)
-            return SyncConflictResolver.merge(target: current, source: remote)
+            try ClipDatabaseFile.load(data, password: password)
         }.value
     }
 

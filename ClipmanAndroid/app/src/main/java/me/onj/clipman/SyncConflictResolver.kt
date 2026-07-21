@@ -5,12 +5,24 @@ import java.util.UUID
 
 object SyncConflictResolver {
     fun merge(target: ClipDatabase, source: ClipDatabase): ClipDatabase {
-        val byId = target.Entries.associateBy { it.Id }.toMutableMap()
-        val byText = target.Entries.associateBy { it.Text }.toMutableMap()
-        val merged = target.Entries.toMutableList()
+        val deletedById = (target.DeletedEntries + source.DeletedEntries)
+            .filter { it.Id.isNotBlank() }
+            .groupBy { it.Id }
+            .mapValues { (_, markers) -> markers.maxBy { it.DeletedUnixMs } }
+            .values
+            .toList()
+        val deletedIds = deletedById.map { it.Id }.toSet()
+        val deletedHashes = deletedById.map { it.TextHash }.filter { it.isNotBlank() }.toSet()
+        val retainedTarget = target.Entries.filterNot {
+            deletedIds.contains(it.Id) || deletedHashes.contains(textHash(it.Text))
+        }
+        val byId = retainedTarget.associateBy { it.Id }.toMutableMap()
+        val byText = retainedTarget.associateBy { it.Text }.toMutableMap()
+        val merged = retainedTarget.toMutableList()
 
         for (incoming in source.Entries) {
             if (incoming.Text.isEmpty()) continue
+            if (deletedIds.contains(incoming.Id) || deletedHashes.contains(textHash(incoming.Text))) continue
             val existing = byId[incoming.Id].takeUnless { incoming.Id.isBlank() } ?: byText[incoming.Text]
             if (existing == null) {
                 val normalized = incoming.normalized()
@@ -26,8 +38,11 @@ object SyncConflictResolver {
             }
         }
 
-        return normalize(target.copy(Entries = merged))
+        return normalize(target.copy(Entries = merged, DeletedEntries = deletedById))
     }
+
+    fun hasSameContent(left: ClipDatabase, right: ClipDatabase): Boolean =
+        left.Entries == right.Entries && left.DeletedEntries == right.DeletedEntries
 
     fun addText(database: ClipDatabase, text: String, machineName: String): ClipDatabase {
         val trimmed = text.trim()

@@ -42,7 +42,7 @@ $taskName = if ($Configuration.Equals("Release", [StringComparison]::OrdinalIgno
     ":app:assembleDebug"
 }
 
-& $GradlePath -p $projectRoot $taskName --no-daemon --project-cache-dir $projectCache "-Pkotlin.project.persistent.dir=$kotlinCache"
+& $GradlePath -p $projectRoot ':app:testDebugUnitTest' $taskName --no-daemon --project-cache-dir $projectCache "-Pkotlin.project.persistent.dir=$kotlinCache"
 if ($LASTEXITCODE -ne 0) {
     throw "Android build failed with exit code $LASTEXITCODE."
 }
@@ -73,18 +73,24 @@ if ($null -ne $aapt) {
 }
 
 Write-Host "Packaged $targetApk"
-$generatedBuild = Join-Path $projectRoot 'app\build'
-for ($attempt = 1; $attempt -le 10 -and (Test-Path -LiteralPath $generatedBuild); $attempt++) {
-    try {
-        Remove-Item -LiteralPath $generatedBuild -Recurse -Force -ErrorAction Stop
-    }
-    catch {
-        if ($attempt -eq 10) {
-            throw "Could not clean generated Android build output after packaging: $generatedBuild"
+$generatedPaths = @(
+    (Join-Path $projectRoot 'app\build'),
+    (Join-Path $projectRoot '.gradle'),
+    (Join-Path $projectRoot '.kotlin')
+)
+foreach ($generatedPath in $generatedPaths) {
+    for ($attempt = 1; $attempt -le 10 -and (Test-Path -LiteralPath $generatedPath); $attempt++) {
+        try {
+            Remove-Item -LiteralPath $generatedPath -Recurse -Force -ErrorAction Stop
         }
-        Start-Sleep -Milliseconds 500
+        catch {
+            if ($attempt -eq 10) {
+                throw "Could not clean generated Android build output after packaging: $generatedPath"
+            }
+            Start-Sleep -Milliseconds 500
+        }
     }
-}
-if (Test-Path -LiteralPath $generatedBuild) {
-    throw "Generated Android build output remains after packaging: $generatedBuild"
+    if (Test-Path -LiteralPath $generatedPath) {
+        throw "Generated Android build output remains after packaging: $generatedPath"
+    }
 }

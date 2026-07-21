@@ -18,6 +18,9 @@ class ServerStorageClient(
     fun download(): ServerDatabaseDownload {
         val connection = openConnection("GET")
         val code = connection.responseCode
+        if (code == HttpURLConnection.HTTP_NOT_FOUND) {
+            throw ServerDatabaseNotFoundException("The Clipman Server database does not exist yet.")
+        }
         if (code < 200 || code > 299) {
             throw IllegalStateException("Clipman Server returned HTTP $code.")
         }
@@ -104,3 +107,5 @@ data class ServerDatabaseDownload(
     val revision: String,
     val data: ByteArray
 )
+
+class ServerDatabaseNotFoundException(message: String) : Exception(message)

@@ -9,7 +9,7 @@ enum AuthenticationService {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            return true
+            return false
         }
         do {
             return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock Clipman clipboard history.")
