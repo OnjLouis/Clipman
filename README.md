@@ -178,6 +178,7 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 ### 2.0.6
 
+- Android build 7 makes the status message a button that moves to the bottom of the current history list. The separate Top button remains available for quickly returning to the beginning.
 - Mac releases are now signed with a stable Apple Developer ID and notarized by Apple, so Keychain's **Always Allow** approval persists across updates and macOS can verify the downloaded app. Closes [issue #31](https://github.com/OnjLouis/Clipman/issues/31).
 - The Mac updater now verifies that an update is intact and signed by the expected Clipman developer before installing it.
 - Mac 2.0.6 is a one-time manual upgrade because the older updater cannot preserve the new Apple signature. Download the Mac ZIP, replace Clipman.app, then choose **Always Allow** at the final Keychain prompt. Automatic updates resume afterward.

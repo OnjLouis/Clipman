@@ -691,12 +691,7 @@ private fun ClipmanApp() {
             onOpenSettings = { showConnectionSettings = true },
             onSort = { sortMode = nextSortMode(sortMode) },
             onGroup = { showGroupPicker = true },
-            onTop = { scope.launch { selectedListState.animateScrollToItem(0) } },
-            onBottom = {
-                scope.launch {
-                    if (visibleEntries.isNotEmpty()) selectedListState.animateScrollToItem(visibleEntries.lastIndex)
-                }
-            }
+            onTop = { scope.launch { selectedListState.animateScrollToItem(0) } }
         )
         OutlinedTextField(
             value = search,
@@ -758,11 +753,24 @@ private fun ClipmanApp() {
                 }
             }
         }
-        Text(
-            text = status,
-            style = MaterialTheme.typography.bodySmall,
+        TextButton(
+            onClick = {
+                scope.launch {
+                    if (visibleEntries.isNotEmpty()) {
+                        selectedListState.animateScrollToItem(visibleEntries.lastIndex)
+                    }
+                }
+            },
+            enabled = visibleEntries.isNotEmpty(),
             modifier = Modifier.fillMaxWidth()
-        )
+        ) {
+            Text(
+                text = status,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 
@@ -909,8 +917,7 @@ private fun HistoryToolbar(
     onOpenSettings: () -> Unit,
     onSort: () -> Unit,
     onGroup: () -> Unit,
-    onTop: () -> Unit,
-    onBottom: () -> Unit
+    onTop: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -933,7 +940,6 @@ private fun HistoryToolbar(
         }
         TextButton(onClick = onOpenSettings) { Text("Settings") }
         TextButton(onClick = onTop, enabled = entriesShown > 0) { Text("Top") }
-        TextButton(onClick = onBottom, enabled = entriesShown > 0) { Text("Bottom") }
         TextButton(onClick = onSort) { Text("Sort: ${sortMode.label}") }
     }
 }
