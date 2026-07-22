@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clipman CLI Manual</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; line-height: 1.5; margin: 2rem; max-width: 58rem; color: #111; background: #fff; }
+    h1, h2 { line-height: 1.2; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #888; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #f0f0f0; }
+    code, pre { font-family: Consolas, "Courier New", monospace; }
+    pre { border: 1px solid #aaa; padding: 0.75rem; overflow: auto; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Clipman CLI</h1>
+    <p><strong>Development preview:</strong> this build is available for practical testing and feedback. Command names, configuration details, and behavior may change before the first stable CLI release.</p>
+    <p>Clipman CLI is an additional command-line client for Clipman text history. It does not replace the Windows, macOS, Android, or iOS apps. It is intended for terminals, SSH sessions, scripts, headless systems, and users who prefer ordinary text commands.</p>
+    <p>Clipman CLI connects to Clipman Server and reads and writes the same encrypted or passwordless text-history database as the other clients. File history, Secrets, local clipboard monitoring, and server administration remain in the relevant apps or server tools.</p>
+    <p>Project page: <a href="https://github.com/OnjLouis/Clipman">Clipman on GitHub</a></p>
+
+    <h2 id="contents">Contents</h2>
+    <ul>
+      <li><a href="#quick-start">Quick Start</a></li>
+      <li><a href="#commands">Commands</a></li>
+      <li><a href="#selection">Selecting Entries</a></li>
+      <li><a href="#interactive">Interactive Use</a></li>
+      <li><a href="#templates">Templates</a></li>
+      <li><a href="#streams">Streams and Scripts</a></li>
+      <li><a href="#configuration">Configuration</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#exit-codes">Exit Codes</a></li>
+      <li><a href="#files">Included Files</a></li>
+      <li><a href="#license">License</a></li>
+    </ul>
+
+    <h2 id="quick-start">Quick Start</h2>
+    <p>Choose the binary matching the current operating system and processor. It is standalone and does not require Go to be installed. You may rename that binary to <code>clipman-cli</code> or <code>clipman-cli.exe</code> and place it on the command search path.</p>
+    <p>Run initialization once for each configuration. The easiest method is to use the private connection-details file created by Clipman Server:</p>
+    <pre><code>clipman-cli --password "history password" init --connection-file clipman-server-connection.txt</code></pre>
+    <p>Initialization checks the server and, when the selected database already exists, verifies that the history password can decrypt it. If the selected database does not exist, Clipman cannot distinguish a new password from a mistyped password. It warns before any history is created.</p>
+    <p>Add and retrieve text through standard input and standard output:</p>
+    <pre><code>printf '%s' 'Text from a terminal' | clipman-cli put
+clipman-cli get
+clipman-cli get --name deploy-command &gt; command.txt</code></pre>
+
+    <h2 id="commands">Commands</h2>
+    <table>
+      <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>init</code></td><td>Configure and test a server profile. Supports connection files, token files, interactive secret entry, a machine name, and non-interactive setup.</td></tr>
+        <tr><td><code>status</code></td><td>Check the server and selected history. Add <code>--refresh</code> to download and decrypt the database.</td></tr>
+        <tr><td><code>list</code></td><td>List entries. Filter by group, search text, or kind; use <code>--json</code> or <code>--porcelain</code> for scripts.</td></tr>
+        <tr><td><code>get</code></td><td>Write one entry to standard output. Template variables resolve unless <code>--raw</code> is used.</td></tr>
+        <tr><td><code>put</code></td><td>Add UTF-8 text from standard input, <code>--file</code>, or <code>--text</code>. Standard input avoids exposing text in the process list.</td></tr>
+        <tr><td><code>rm</code></td><td>Delete exactly one entry and create the same synchronization tombstone used by Clipman desktop.</td></tr>
+        <tr><td><code>pick</code></td><td>Show a numbered accessible list on the controlling terminal and write the chosen entry only to standard output.</td></tr>
+        <tr><td><code>menu</code></td><td>Open the line-based history manager for viewing, outputting, deleting, and refreshing entries.</td></tr>
+        <tr><td><code>sync</code></td><td>Download and validate current server history. This stateless edition has no offline write queue.</td></tr>
+      </tbody>
+    </table>
+    <p>Run <code>clipman-cli --help</code> or <code>clipman-cli COMMAND --help</code> for the current syntax. Global options must precede the command. Command options follow it.</p>
+
+    <h2 id="selection">Selecting Entries</h2>
+    <p><code>get</code> and <code>rm</code> accept a visible zero-based index, exact ID, exact name, or text search. Indices belong to the selected view and can change after another client updates history. Scripts should prefer exact IDs or names.</p>
+    <pre><code>clipman-cli get 3
+clipman-cli get --id 0123456789abcdef0123456789abcdef
+clipman-cli get --search kubectl --first
+clipman-cli rm --name old-command --yes</code></pre>
+    <p>An ambiguous search is not treated as bulk deletion. Use a unique ID or a reviewed visible index.</p>
+
+    <h2 id="interactive">Interactive Use</h2>
+    <p>Run <code>clipman-cli menu</code>, or run <code>clipman-cli</code> without arguments in an interactive terminal. The line renderer avoids full-screen cursor movement and is suitable for screen readers.</p>
+    <ul>
+      <li>Type an entry number to view it.</li>
+      <li>Type <code>o</code>, a space, and an entry number to write that entry to standard output and exit.</li>
+      <li>Type <code>d</code>, a space, and an entry number to delete it after confirmation.</li>
+      <li>Type <code>r</code> to refresh or <code>q</code> to quit.</li>
+    </ul>
+    <p><code>pick</code> presents one numbered choice and then exits. Prompts use the controlling terminal, so piped clip text remains separate.</p>
+
+    <h2 id="templates">Templates</h2>
+    <p>Use <code>put --template</code> to create a template entry. <code>get</code>, <code>pick</code>, and menu output resolve the established Clipman date, time, time-zone, operating-system, and username variables. <code>get --raw</code> returns the stored text unchanged. Unknown variables remain unchanged.</p>
+    <pre><code>clipman-cli put --text '{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}' --template --name today
+clipman-cli get --kind templates --name today</code></pre>
+
+    <h2 id="streams">Streams and Scripts</h2>
+    <p>Successful <code>get</code> and <code>pick</code> commands write only clip text to standard output. Prompts and status messages do not enter the data stream. Text must be valid UTF-8 and may contain NUL bytes, whitespace, CRLF, LF, or no final newline.</p>
+    <p><code>--newline</code> adds one LF only when the selected text does not already end in LF. <code>--json</code> provides structured output where documented.</p>
+
+    <h2 id="configuration">Configuration</h2>
+    <p>The default configuration file is <code>~/.clipman/config.toml</code> on Linux and macOS, and <code>%LOCALAPPDATA%\Clipman CLI\config.toml</code> on Windows. <code>CLIPMAN_HOME</code> changes the data directory. <code>CLIPMAN_CONFIG</code> or <code>--config</code> selects a particular config file.</p>
+    <p>The history password is resolved from <code>--password</code>, <code>CLIPMAN_PASSWORD</code>, saved configuration when explicitly enabled, or a no-echo controlling-terminal prompt. This allows clip text to be read from standard input without consuming the password prompt.</p>
+
+    <h2 id="security">Security</h2>
+    <ul>
+      <li>Encrypted <code>CLIPDB2</code> data is authenticated before decryption or decompression.</li>
+      <li>Database, JSON, nesting, entry-count, and text-size limits are enforced.</li>
+      <li>Server tokens, passwords, full database IDs, and clip text are not written to diagnostic output.</li>
+      <li>On Windows, saved token and password values are protected for the current Windows user with DPAPI. On Linux and macOS, configuration is restricted to the owning user with directory mode 0700 and file mode 0600; explicitly saving a password there stores it in that owner-only file.</li>
+      <li><code>--password</code>, <code>--token</code>, and <code>--text</code> can be visible to other software inspecting the process list. Prefer prompts, environment variables used carefully, token files, connection files, standard input, or <code>--file</code>.</li>
+      <li><code>clipman://</code> is a convenient name for plain HTTP. Use it only on loopback, a trusted private network, or a VPN. Use HTTPS across an untrusted network.</li>
+      <li>Keep the Clipman Server token private. Delete or secure its connection-details file after configuring clients.</li>
+    </ul>
+
+    <h2 id="exit-codes">Exit Codes</h2>
+    <table>
+      <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>Success</td></tr>
+        <tr><td>1</td><td>Local input or output failure</td></tr>
+        <tr><td>2</td><td>Usage, selection, or confirmation error</td></tr>
+        <tr><td>3</td><td>Configuration, permission, or server-authentication error</td></tr>
+        <tr><td>4</td><td>Network, server, or synchronization failure</td></tr>
+        <tr><td>5</td><td>History password required, incorrect, or database authentication failed</td></tr>
+        <tr><td>6</td><td>Requested entry or database not found</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="files">Included Files</h2>
+    <table>
+      <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>clipman-cli-PLATFORM</code></td><td>Standalone command-line client for the named operating system and architecture.</td></tr>
+        <tr><td><code>Manual.html</code></td><td>This accessible manual.</td></tr>
+        <tr><td><code>clipman-cli.1</code></td><td>Unix manual page source.</td></tr>
+        <tr><td><code>SHA256SUMS</code></td><td>SHA-256 checksums for the supplied binaries.</td></tr>
+        <tr><td><code>LICENSE.txt</code></td><td>MIT licence terms.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="license">License</h2>
+    <p>Clipman CLI is supplied under the MIT License. See <code>LICENSE.txt</code>.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,135 @@
+.TH CLIPMAN-CLI 1 "July 22, 2026" "Clipman CLI 0.1.0-dev" "User Commands"
+.SH NAME
+clipman-cli \- access Clipman text history from a terminal
+.SH SYNOPSIS
+.B clipman-cli
+.RI [ global-options ]
+.I command
+.RI [ command-options ]
+.br
+.B clipman-cli
+.RI [ global-options ]
+.SH DESCRIPTION
+Clipman CLI is an additional command-line client for Clipman text history.
+It does not replace the Windows, macOS, Android, or iOS applications.
+This development preview is intended for practical testing and feedback;
+commands and configuration may change before the first stable CLI release.
+It connects to Clipman Server and reads and writes the same encrypted or
+passwordless text-history database as the other clients.
+.PP
+Running without a command opens the accessible line menu when a controlling
+terminal is available. Run
+.B clipman-cli --help
+or
+.B clipman-cli COMMAND --help
+for the complete current syntax.
+.SH COMMANDS
+.TP
+.B init
+Configure and test a server profile. A Clipman Server connection-details file
+can supply the server address and token without manually extracting JSON.
+.TP
+.B status
+Check the configured server and selected history. Use
+.B --refresh
+to download and decrypt the database.
+.TP
+.B list
+List entries, optionally filtered by group, search text, or kind.
+.TP
+.B get
+Write one selected entry to standard output. Template entries resolve unless
+.B --raw
+is used.
+.TP
+.B put
+Add UTF-8 text from standard input,
+.BR --file ,
+or
+.BR --text .
+Standard input is preferred for sensitive text because command arguments can
+be visible in the process list.
+.TP
+.B rm
+Delete exactly one entry and add a synchronization tombstone.
+.TP
+.B pick
+Display a numbered list on the controlling terminal and write the selected
+entry only to standard output.
+.TP
+.B menu
+Open the line-based history manager. Enter a number to view, "o NUMBER" to
+output, "d NUMBER" to delete after confirmation, "r" to refresh, or "q" to
+quit.
+.TP
+.B sync
+Download and validate the current server history. This stateless edition has
+no offline write queue.
+.SH CONFIGURATION
+The default configuration is
+.I ~/.clipman/config.toml
+on Linux and macOS, and
+.I %LOCALAPPDATA%\eClipman CLI\econfig.toml
+on Windows.
+.B CLIPMAN_HOME
+changes the data directory.
+.B CLIPMAN_CONFIG
+or
+.B --config
+selects another configuration file.
+.PP
+The history password is resolved from
+.BR --password ,
+.BR CLIPMAN_PASSWORD ,
+saved configuration when explicitly enabled, or a no-echo prompt on the
+controlling terminal.
+.SH SECURITY
+Encrypted CLIPDB2 data is authenticated before decryption or decompression.
+The client enforces database, JSON, nesting, entry-count, tombstone-count, and
+text-size limits. It does not print server tokens, passwords, full database
+identifiers, or clip text in diagnostics.
+.PP
+On Windows, saved tokens and passwords use DPAPI for the current user. On
+Linux and macOS, configuration is restricted to its owner with directory mode
+0700 and file mode 0600. An explicitly saved history password on those systems
+is stored in that owner-only file.
+.PP
+The clipman scheme is a convenient name for plain HTTP. Use it only on
+loopback, a trusted private network, or a VPN. Use HTTPS across an untrusted
+network.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Local input or output failure.
+.TP
+.B 2
+Usage, selection, or confirmation error.
+.TP
+.B 3
+Configuration, permission, or server-authentication error.
+.TP
+.B 4
+Network, server, or synchronization failure.
+.TP
+.B 5
+History password required or incorrect, or database authentication failed.
+.TP
+.B 6
+Requested entry or database not found.
+.SH FILES
+.TP
+.I Manual.html
+Accessible full manual supplied with the binaries.
+.TP
+.I SHA256SUMS
+SHA-256 checksums for all supplied platform binaries.
+.TP
+.I LICENSE.txt
+MIT License terms.
+.SH PROJECT
+https://github.com/OnjLouis/Clipman
+.SH LICENSE
+MIT License.

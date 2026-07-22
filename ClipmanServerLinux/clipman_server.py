@@ -613,7 +613,7 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
                     self._stats["DatabaseDownloads"] += 1
                 elif method == "HEAD":
                     self._stats["DatabasePolls"] += 1
-            if status_code == 409:
+            if status_code in (409, 412):
                 self._stats["Conflicts"] += 1
             self._stats["BytesReceived"] += max(0, bytes_received)
             self._stats["BytesSent"] += max(0, bytes_sent)
@@ -776,15 +776,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         expected = self.headers.get("If-Match", "").strip().strip('"')
+        create_only = self.headers.get("If-None-Match", "").strip()
+        if create_only and create_only != "*":
+            self.send_text(400, "If-None-Match must be * when creating a database")
+            return
+        if expected and create_only:
+            self.send_text(400, "If-Match and If-None-Match cannot be used together")
+            return
         with self.server.database_lock(database_id):  # type: ignore[attr-defined]
             db = database_path(self.settings, database_id)
             current = revision(db)
+            if create_only == "*" and db.exists():
+                payload = b"Database already exists"
+                self.send_response(412)
+                self.send_header("X-Clipman-Revision", current)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                self.record(412, bytes_received=len(data), bytes_sent=len(payload))
+                return
             if expected and expected != current:
+                payload = b"Database revision changed"
                 self.send_response(409)
                 self.send_header("X-Clipman-Revision", current)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
-                self.wfile.write(b"Database revision changed")
-                self.record(409, bytes_received=len(data), bytes_sent=len(b"Database revision changed"))
+                self.wfile.write(payload)
+                self.record(409, bytes_received=len(data), bytes_sent=len(payload))
                 return
 
             if db.exists() and db.read_bytes() == data:
