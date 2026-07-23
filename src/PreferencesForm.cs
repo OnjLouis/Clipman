@@ -18,6 +18,8 @@ namespace Clipman
         private readonly CheckBox soundsEnabled;
         private readonly CheckBox autoGroupByApp;
         private readonly CheckBox autoCopyLatestRemoteText;
+        private readonly CheckBox pasteAfterEnter;
+        private readonly CheckBox dynamicHistoryMode;
         private readonly CheckBox autoRemoveUrlTracking;
         private readonly CheckBox linksHistoryEnabled;
         private readonly CheckBox saveListPosition;
@@ -97,6 +99,10 @@ namespace Clipman
             autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
             autoCopyLatestRemoteText = NewCheckBox("Put new text received from another &machine on the clipboard", settings.AutoCopyLatestRemoteText);
             autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another machine onto this machine's clipboard. Reusing an older entry on another machine does not trigger this. This is off by default.";
+            pasteAfterEnter = NewCheckBox("After Enter, paste into the pre&vious application", settings.PasteAfterEnter);
+            pasteAfterEnter.AccessibleDescription = "When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. This is off by default.";
+            dynamicHistoryMode = NewCheckBox("Open history to the most recent clipboard t&ype", settings.DynamicHistoryMode);
+            dynamicHistoryMode.AccessibleDescription = "When checked, opening history selects Text, Links, or Files according to the most recent clipboard data Clipman accepted during this run. This is off by default.";
             autoRemoveUrlTracking = NewCheckBox("Automatically remove URL &tracking from copied text", settings.AutoRemoveUrlTracking);
             linksHistoryEnabled = NewCheckBox("Show &Links history tab", settings.LinksHistoryEnabled);
             linksHistoryEnabled.AccessibleDescription = "When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.";
@@ -112,6 +118,8 @@ namespace Clipman
             AddFullRow(generalLayout, soundsEnabled);
             AddFullRow(generalLayout, autoGroupByApp);
             AddFullRow(generalLayout, autoCopyLatestRemoteText);
+            AddFullRow(generalLayout, pasteAfterEnter);
+            AddFullRow(generalLayout, dynamicHistoryMode);
             AddFullRow(generalLayout, autoRemoveUrlTracking);
             AddFullRow(generalLayout, linksHistoryEnabled);
             AddFullRow(generalLayout, saveListPosition);
@@ -335,6 +343,8 @@ namespace Clipman
             soundsEnabled.CheckedChanged += (s, e) => ApplyNow();
             autoGroupByApp.CheckedChanged += (s, e) => ApplyNow();
             autoCopyLatestRemoteText.CheckedChanged += (s, e) => ApplyNow();
+            pasteAfterEnter.CheckedChanged += (s, e) => ApplyNow();
+            dynamicHistoryMode.CheckedChanged += (s, e) => ApplyNow();
             autoRemoveUrlTracking.CheckedChanged += (s, e) => ApplyNow();
             linksHistoryEnabled.CheckedChanged += (s, e) => ApplyNow();
             saveListPosition.CheckedChanged += (s, e) => ApplyNow();
@@ -376,6 +386,8 @@ namespace Clipman
             settings.SoundsEnabled = soundsEnabled.Checked;
             settings.AutoGroupByApp = autoGroupByApp.Checked;
             settings.AutoCopyLatestRemoteText = autoCopyLatestRemoteText.Checked;
+            settings.PasteAfterEnter = pasteAfterEnter.Checked;
+            settings.DynamicHistoryMode = dynamicHistoryMode.Checked;
             settings.AutoRemoveUrlTracking = autoRemoveUrlTracking.Checked;
             settings.LinksHistoryEnabled = linksHistoryEnabled.Checked;
             settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
@@ -674,6 +686,8 @@ namespace Clipman
                     ? new List<QuickCopyBinding>()
                     : current.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey, Mode = QuickPasteModes.Normalize(b.Mode) }).ToList(),
                 AutoCopyLatestRemoteText = current.AutoCopyLatestRemoteText,
+                PasteAfterEnter = current.PasteAfterEnter,
+                DynamicHistoryMode = current.DynamicHistoryMode,
                 RemoveDuplicates = current.RemoveDuplicates,
                 SoundsEnabled = current.SoundsEnabled,
                 SaveListPosition = current.SaveListPosition,

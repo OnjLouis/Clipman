@@ -28,6 +28,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var preferencesWindow: PreferencesWindowController?
     private var secretsWindow: SecretsWindowController?
     private weak var previousFrontmostApplication: NSRunningApplication?
+    private var pasteAfterHistoryHide = false
+    private var lastReceivedHistoryTab = HistoryTabID.text
     private var sessionDatabasePassword = ""
     private var sessionPasswordDatabasePath = ""
     private var cancelledPasswordPaths = Set<String>()
@@ -260,6 +262,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     @objc private func showHistory(_ sender: Any?) {
         rememberPreviousFrontmostApplication()
         refreshHistoryWindow()
+        if settings.dynamicHistoryMode {
+            historyWindow.showHistoryTab(lastReceivedHistoryTab)
+        }
         historyWindow.showWindow(nil)
         historyWindow.focusHistoryWindow(nil)
     }
@@ -491,6 +496,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Run at login: \(settings.runAtStartup ? "On" : "Off")",
             "Add clipboard item on startup: \(settings.captureClipboardOnStartup ? "On" : "Off")",
             "Auto-copy latest remote text: \(settings.autoCopyLatestRemoteText ? "On" : "Off")",
+            "Paste after Enter: \(settings.pasteAfterEnter ? "On" : "Off")",
+            "Dynamic history mode: \(settings.dynamicHistoryMode ? "On" : "Off")",
             "Update checks: \(settings.updateCheckFrequency)",
             "Ignored applications: \(settings.ignoredApplications.isEmpty ? "None" : settings.ignoredApplications.joined(separator: ", "))",
             "",
@@ -566,6 +573,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         store.addText(text, group: sourceApplication) { [weak self] saved in
             guard let self else { return }
             if saved {
+                self.lastReceivedHistoryTab = LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text
                 self.sounds.play(.copy)
             } else if self.storageUnavailableReason.isEmpty {
                 self.sounds.play(.skip)
@@ -581,6 +589,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         fileStore.add(files: files, formats: formats, containsText: containsText) { [weak self] saved in
             guard let self else { return }
             if saved {
+                self.lastReceivedHistoryTab = HistoryTabID.files
                 self.sounds.play(.copy)
             } else if self.storageUnavailableReason.isEmpty {
                 self.sounds.play(.skip)
@@ -794,6 +803,16 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry) {
+        pasteAfterHistoryHide = false
+        copyAndCloseHistory(entry, controller: controller)
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didChooseUsingEnter entry: ClipEntry) {
+        pasteAfterHistoryHide = settings.pasteAfterEnter
+        copyAndCloseHistory(entry, controller: controller)
+    }
+
+    private func copyAndCloseHistory(_ entry: ClipEntry, controller: HistoryWindowController) {
         monitor.writeInternalText(TemplateResolver.resolveEntryText(entry))
         sounds.play(.copy)
         store.markUsed(entry.Id)
@@ -1254,7 +1273,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindowDidHide(_ controller: HistoryWindowController) {
-        restorePreviousFrontmostApplication()
+        let pasteAfterActivation = pasteAfterHistoryHide
+        pasteAfterHistoryHide = false
+        restorePreviousFrontmostApplication(pasteAfterActivation: pasteAfterActivation)
     }
 
     func secretsWindow(_ controller: SecretsWindowController, quickPaste secret: SecretEntry) {
@@ -1684,13 +1705,38 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         previousFrontmostApplication = application
     }
 
-    private func restorePreviousFrontmostApplication() {
+    private func restorePreviousFrontmostApplication(pasteAfterActivation: Bool = false) {
         guard let application = previousFrontmostApplication,
               !application.isTerminated
-        else { return }
+        else {
+            previousFrontmostApplication = nil
+            return
+        }
         previousFrontmostApplication = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            application.activate(options: [.activateAllWindows])
+            guard pasteAfterActivation else {
+                application.activate(options: [.activateAllWindows])
+                return
+            }
+            self.activatePreviousApplicationAndPaste(application, attemptsRemaining: 4)
+        }
+    }
+
+    private func activatePreviousApplicationAndPaste(_ application: NSRunningApplication, attemptsRemaining: Int) {
+        guard !application.isTerminated else {
+            sounds.play(.skip)
+            return
+        }
+
+        application.activate(options: [.activateAllWindows])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier {
+                self.sendPasteKeystroke()
+            } else if attemptsRemaining > 0 {
+                self.activatePreviousApplicationAndPaste(application, attemptsRemaining: attemptsRemaining - 1)
+            } else {
+                self.sounds.play(.skip)
+            }
         }
     }
 

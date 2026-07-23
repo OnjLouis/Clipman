@@ -58,6 +58,8 @@ namespace Clipman
         private string lastAutoCopiedRemoteEntryId = string.Empty;
         private long lastAutoCopiedRemoteEntryStamp;
         private string databasePassword = string.Empty;
+        private IntPtr previousForegroundWindow = IntPtr.Zero;
+        private string lastReceivedHistoryTab = HistoryTabs.Text;
 
         public ClipmanApplicationContext()
         {
@@ -122,16 +124,25 @@ namespace Clipman
 
         public void ShowHistory()
         {
+            var historyWasVisible = historyForm != null && !historyForm.IsDisposed && historyForm.Visible;
+            if (!historyWasVisible)
+            {
+                RememberPreviousForegroundWindow();
+            }
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, PasteClipboardIntoPreviousApplication, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, BuildDiagnosticsText);
                 created = true;
             }
 
             if (historyForm.WindowState == FormWindowState.Minimized)
             {
                 historyForm.WindowState = FormWindowState.Normal;
+            }
+            if (settings.DynamicHistoryMode)
+            {
+                historyForm.SelectHistoryTabForOpen(lastReceivedHistoryTab);
             }
             var handle = historyForm.Handle;
             historyForm.Show();
@@ -336,6 +347,8 @@ namespace Clipman
                 ? new List<QuickCopyBinding>()
                 : updated.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey, Mode = QuickPasteModes.Normalize(b.Mode) }).ToList();
             settings.AutoCopyLatestRemoteText = updated.AutoCopyLatestRemoteText;
+            settings.PasteAfterEnter = updated.PasteAfterEnter;
+            settings.DynamicHistoryMode = updated.DynamicHistoryMode;
             settings.RemoveDuplicates = updated.RemoveDuplicates;
             settings.SoundsEnabled = updated.SoundsEnabled;
             settings.SaveListPosition = updated.SaveListPosition;
@@ -594,7 +607,11 @@ namespace Clipman
 
             lastClipboardPrivacySignal = "None";
 
-            RecordClipboardEvent(sourceProcessName);
+            var recordedFileEvent = RecordClipboardEvent(sourceProcessName);
+            if (recordedFileEvent)
+            {
+                lastReceivedHistoryTab = HistoryTabs.Files;
+            }
 
             if (!Clipboard.ContainsText(TextDataFormat.UnicodeText))
             {
@@ -656,10 +673,15 @@ namespace Clipman
                 return;
             }
 
+            if (!recordedFileEvent)
+            {
+                lastReceivedHistoryTab = LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text;
+            }
+
             sounds.Copy(settings.SoundsEnabled);
         }
 
-        private void RecordClipboardEvent(string sourceProcessName)
+        private bool RecordClipboardEvent(string sourceProcessName)
         {
             ClipboardEventSummary summary;
             try
@@ -668,15 +690,16 @@ namespace Clipman
             }
             catch
             {
-                return;
+                return false;
             }
 
-            if (summary == null) return;
+            if (summary == null) return false;
             fileEventStore.Add(summary);
             if (settings.AutoRemoveUnavailableFileHistoryEvents)
             {
                 fileEventStore.RemoveUnavailableEvents();
             }
+            return string.IsNullOrWhiteSpace(fileEventStore.LastStorageError);
         }
 
         private List<ClipboardEventSummary> GetRecentClipboardEvents()
@@ -1165,6 +1188,8 @@ namespace Clipman
                 "Quick Paste bindings: " + ((settings.QuickCopyHotkeys == null ? 0 : settings.QuickCopyHotkeys.Count) + " configured, " + quickCopyHotkeysRegistered + " registered") + "\r\n" +
                 "Secrets: " + (GetSecretEntriesSafe().Count + " configured, " + secretHotkeysRegistered + " hotkeys registered") + "\r\n" +
                 "Auto-copy latest remote text: " + (settings.AutoCopyLatestRemoteText ? "on" : "off") + "\r\n" +
+                "Paste after Enter: " + (settings.PasteAfterEnter ? "on" : "off") + "\r\n" +
+                "Dynamic history mode: " + (settings.DynamicHistoryMode ? "on" : "off") + "\r\n" +
                 "Build stamp: " + BuildInfo.BuildStampUtcMs + "\r\n" +
                 "Executable hash: " + SharedUpdateStateStore.CurrentExeHash() + "\r\n" +
                 "Shared update state path: " + SharedUpdateStateStore.StatePath(settingsStore.SettingsDirectory) + "\r\n" +
@@ -1398,6 +1423,64 @@ namespace Clipman
                 WaitForHotkeyModifiersReleased();
                 BeginInvokeIfReady(SendCtrlVPaste);
             });
+        }
+
+        private void RememberPreviousForegroundWindow()
+        {
+            var foreground = NativeMethods.GetForegroundWindow();
+            if (foreground == IntPtr.Zero) return;
+
+            uint processId;
+            NativeMethods.GetWindowThreadProcessId(foreground, out processId);
+            if (processId == (uint)Process.GetCurrentProcess().Id) return;
+            previousForegroundWindow = foreground;
+        }
+
+        private void PasteClipboardIntoPreviousApplication()
+        {
+            var target = previousForegroundWindow;
+            previousForegroundWindow = IntPtr.Zero;
+            if (target == IntPtr.Zero || !NativeMethods.IsWindow(target))
+            {
+                sounds.Skip(settings.SoundsEnabled);
+                return;
+            }
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                WaitForHotkeyModifiersReleased();
+                BeginInvokeIfReady(() => ActivatePreviousWindowAndPaste(target, 2));
+            });
+        }
+
+        private void ActivatePreviousWindowAndPaste(IntPtr target, int attemptsRemaining)
+        {
+            if (!NativeMethods.IsWindow(target))
+            {
+                sounds.Skip(settings.SoundsEnabled);
+                return;
+            }
+
+            NativeMethods.SetForegroundWindow(target);
+            var timer = new System.Windows.Forms.Timer { Interval = 100 };
+            timer.Tick += (sender, args) =>
+            {
+                timer.Stop();
+                timer.Dispose();
+                if (NativeMethods.GetForegroundWindow() == target)
+                {
+                    SendCtrlVPaste();
+                }
+                else if (attemptsRemaining > 0)
+                {
+                    ActivatePreviousWindowAndPaste(target, attemptsRemaining - 1);
+                }
+                else
+                {
+                    sounds.Skip(settings.SoundsEnabled);
+                }
+            };
+            timer.Start();
         }
 
         private void BeginPasteThenRestore(IDataObject previousClipboard)

@@ -62,6 +62,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let captureClipboardOnStartupCheckbox = NSButton(checkboxWithTitle: "Add current clipboard item to Clipman on start", target: nil, action: nil)
     private let rememberPasswordCheckbox = NSButton(checkboxWithTitle: "Remember history password in Keychain", target: nil, action: nil)
     private let autoCopyRemoteCheckbox = NSButton(checkboxWithTitle: "Copy latest remote text to this Mac clipboard", target: nil, action: nil)
+    private let pasteAfterEnterCheckbox = NSButton(checkboxWithTitle: "After Enter, paste into the previous application", target: nil, action: nil)
+    private let dynamicHistoryModeCheckbox = NSButton(checkboxWithTitle: "Open history to the most recent clipboard type", target: nil, action: nil)
     private let linksHistoryCheckbox = NSButton(checkboxWithTitle: "Show Links history tab", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
     private let updateFrequencyPopup = NSPopUpButton()
@@ -162,6 +164,18 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         autoCopyRemoteCheckbox.setAccessibilityHelp("When enabled, new text copied on another machine sharing this database is placed on this Mac clipboard. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, autoCopyRemoteCheckbox])
 
+        pasteAfterEnterCheckbox.target = nil
+        pasteAfterEnterCheckbox.action = nil
+        pasteAfterEnterCheckbox.setAccessibilityLabel("After Enter, paste into the previous application")
+        pasteAfterEnterCheckbox.setAccessibilityHelp("When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. This is off by default.")
+        grid.addRow(with: [NSGridCell.emptyContentView, pasteAfterEnterCheckbox])
+
+        dynamicHistoryModeCheckbox.target = nil
+        dynamicHistoryModeCheckbox.action = nil
+        dynamicHistoryModeCheckbox.setAccessibilityLabel("Open history to the most recent clipboard type")
+        dynamicHistoryModeCheckbox.setAccessibilityHelp("When checked, opening history selects Text, Links, or Files according to the most recent clipboard data Clipman accepted during this run. This is off by default.")
+        grid.addRow(with: [NSGridCell.emptyContentView, dynamicHistoryModeCheckbox])
+
         linksHistoryCheckbox.target = nil
         linksHistoryCheckbox.action = nil
         linksHistoryCheckbox.setAccessibilityLabel("Show Links history tab")
@@ -229,6 +243,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         captureClipboardOnStartupCheckbox.state = settings.captureClipboardOnStartup ? .on : .off
         rememberPasswordCheckbox.state = settings.rememberDatabasePassword ? .on : .off
         autoCopyRemoteCheckbox.state = settings.autoCopyLatestRemoteText ? .on : .off
+        pasteAfterEnterCheckbox.state = settings.pasteAfterEnter ? .on : .off
+        dynamicHistoryModeCheckbox.state = settings.dynamicHistoryMode ? .on : .off
         linksHistoryCheckbox.state = settings.linksHistoryEnabled ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
         updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
@@ -283,6 +299,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.captureClipboardOnStartup = captureClipboardOnStartupCheckbox.state == .on
         settings.rememberDatabasePassword = rememberPasswordCheckbox.state == .on
         settings.autoCopyLatestRemoteText = autoCopyRemoteCheckbox.state == .on
+        settings.pasteAfterEnter = pasteAfterEnterCheckbox.state == .on
+        settings.dynamicHistoryMode = dynamicHistoryModeCheckbox.state == .on
         settings.linksHistoryEnabled = linksHistoryCheckbox.state == .on
         settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled)
         settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on

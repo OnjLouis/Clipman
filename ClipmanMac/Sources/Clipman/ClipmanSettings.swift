@@ -24,6 +24,8 @@ struct ClipmanSettings: Codable, Equatable {
     var captureClipboardOnStartup: Bool
     var rememberDatabasePassword: Bool
     var autoCopyLatestRemoteText: Bool
+    var pasteAfterEnter: Bool
+    var dynamicHistoryMode: Bool
     var updateCheckFrequency: String
     var installUpdatesSilently: Bool
     var lastUpdateCheckUnixMs: Int64
@@ -38,7 +40,7 @@ struct ClipmanSettings: Codable, Equatable {
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, linksHistoryEnabled, groupFilter, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
-        case autoCopyLatestRemoteText, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
+        case autoCopyLatestRemoteText, pasteAfterEnter, dynamicHistoryMode, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
         case ignoredApplications
         case sensitiveDataMode = "SensitiveDataMode"
         case sensitiveDataPresetIds = "SensitiveDataPresetIds"
@@ -70,6 +72,8 @@ struct ClipmanSettings: Codable, Equatable {
         captureClipboardOnStartup: Bool,
         rememberDatabasePassword: Bool,
         autoCopyLatestRemoteText: Bool,
+        pasteAfterEnter: Bool,
+        dynamicHistoryMode: Bool,
         updateCheckFrequency: String,
         installUpdatesSilently: Bool,
         lastUpdateCheckUnixMs: Int64,
@@ -101,6 +105,8 @@ struct ClipmanSettings: Codable, Equatable {
         self.captureClipboardOnStartup = captureClipboardOnStartup
         self.rememberDatabasePassword = rememberDatabasePassword
         self.autoCopyLatestRemoteText = autoCopyLatestRemoteText
+        self.pasteAfterEnter = pasteAfterEnter
+        self.dynamicHistoryMode = dynamicHistoryMode
         self.updateCheckFrequency = updateCheckFrequency
         self.installUpdatesSilently = installUpdatesSilently
         self.lastUpdateCheckUnixMs = lastUpdateCheckUnixMs
@@ -136,6 +142,8 @@ struct ClipmanSettings: Codable, Equatable {
         captureClipboardOnStartup = try container.decodeIfPresent(Bool.self, forKey: .captureClipboardOnStartup) ?? false
         rememberDatabasePassword = try container.decodeIfPresent(Bool.self, forKey: .rememberDatabasePassword) ?? false
         autoCopyLatestRemoteText = try container.decodeIfPresent(Bool.self, forKey: .autoCopyLatestRemoteText) ?? false
+        pasteAfterEnter = try container.decodeIfPresent(Bool.self, forKey: .pasteAfterEnter) ?? false
+        dynamicHistoryMode = try container.decodeIfPresent(Bool.self, forKey: .dynamicHistoryMode) ?? false
         updateCheckFrequency = try container.decodeIfPresent(String.self, forKey: .updateCheckFrequency) ?? "Never"
         installUpdatesSilently = try container.decodeIfPresent(Bool.self, forKey: .installUpdatesSilently) ?? false
         lastUpdateCheckUnixMs = try container.decodeIfPresent(Int64.self, forKey: .lastUpdateCheckUnixMs) ?? 0
@@ -184,6 +192,8 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(captureClipboardOnStartup, forKey: .captureClipboardOnStartup)
         try container.encode(rememberDatabasePassword, forKey: .rememberDatabasePassword)
         try container.encode(autoCopyLatestRemoteText, forKey: .autoCopyLatestRemoteText)
+        try container.encode(pasteAfterEnter, forKey: .pasteAfterEnter)
+        try container.encode(dynamicHistoryMode, forKey: .dynamicHistoryMode)
         try container.encode(updateCheckFrequency, forKey: .updateCheckFrequency)
         try container.encode(installUpdatesSilently, forKey: .installUpdatesSilently)
         try container.encode(lastUpdateCheckUnixMs, forKey: .lastUpdateCheckUnixMs)
@@ -218,6 +228,8 @@ struct ClipmanSettings: Codable, Equatable {
             captureClipboardOnStartup: false,
             rememberDatabasePassword: false,
             autoCopyLatestRemoteText: false,
+            pasteAfterEnter: false,
+            dynamicHistoryMode: false,
             updateCheckFrequency: "Never",
             installUpdatesSilently: false,
             lastUpdateCheckUnixMs: 0,

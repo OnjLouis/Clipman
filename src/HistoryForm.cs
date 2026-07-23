@@ -19,6 +19,7 @@ namespace Clipman
         private readonly Action refreshHotkeys;
         private readonly Action<ClipEntry> copyEntry;
         private readonly Action<List<ClipEntry>> copyEntries;
+        private readonly Action pasteIntoPreviousApplication;
         private readonly Func<List<ClipboardEventSummary>> recentClipboardEvents;
         private readonly Func<List<string>, int> deleteRecentClipboardEvents;
         private readonly Func<int> clearRecentClipboardEvents;
@@ -67,7 +68,7 @@ namespace Clipman
         private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
@@ -75,6 +76,7 @@ namespace Clipman
             this.refreshHotkeys = refreshHotkeys;
             this.copyEntry = copyEntry;
             this.copyEntries = copyEntries;
+            this.pasteIntoPreviousApplication = pasteIntoPreviousApplication;
             this.recentClipboardEvents = recentClipboardEvents;
             this.deleteRecentClipboardEvents = deleteRecentClipboardEvents;
             this.clearRecentClipboardEvents = clearRecentClipboardEvents;
@@ -394,6 +396,11 @@ namespace Clipman
             RebuildHistoryTabs();
             SelectHistoryTab(HistoryTabs.Normalize(selectedTab, settings.LinksHistoryEnabled), false);
             Reload();
+        }
+
+        public void SelectHistoryTabForOpen(string tabId)
+        {
+            SelectHistoryTab(tabId, false);
         }
 
         private List<ClipEntry> TextEntriesForActiveTab(List<ClipEntry> source)
@@ -896,13 +903,15 @@ namespace Clipman
             else if (e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
+                e.SuppressKeyPress = true;
                 if (e.Shift)
                 {
                     TogglePinned();
                 }
                 else
                 {
-                    CopySelected(!e.Control);
+                    var closeAfterCopy = !e.Control;
+                    CopySelected(closeAfterCopy, closeAfterCopy && settings.PasteAfterEnter);
                 }
             }
             else if (e.KeyCode == Keys.Delete)
@@ -2143,6 +2152,11 @@ namespace Clipman
 
         private void CopySelected(bool closeAfterCopy)
         {
+            CopySelected(closeAfterCopy, false);
+        }
+
+        private void CopySelected(bool closeAfterCopy, bool pasteAfterClose)
+        {
             var selected = SelectedEntries();
             if (selected.Count == 0) return;
             SaveCurrentListPositionIfEnabled();
@@ -2158,6 +2172,10 @@ namespace Clipman
             if (closeAfterCopy)
             {
                 Hide();
+                if (pasteAfterClose)
+                {
+                    pasteIntoPreviousApplication();
+                }
             }
         }
 

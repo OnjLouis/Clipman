@@ -12,7 +12,18 @@ ZIP="$DIST/Clipman-macOS-$VERSION.zip"
 SIGNING_IDENTITY="${CLIPMAN_MAC_SIGNING_IDENTITY:-Developer ID Application: Andre Louis (83NN3HS237)}"
 EXPECTED_TEAM_ID="83NN3HS237"
 NOTARY_PROFILE="${CLIPMAN_MAC_NOTARY_PROFILE:-ClipmanNotary}"
+NOTARY_KEYCHAIN="${CLIPMAN_MAC_NOTARY_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 NOTARIZE="${CLIPMAN_MAC_NOTARIZE:-1}"
+
+if [[ "$NOTARIZE" == "1" ]]; then
+  if ! xcrun notarytool history \
+      --keychain-profile "$NOTARY_PROFILE" \
+      --keychain "$NOTARY_KEYCHAIN" >/dev/null 2>&1; then
+    echo "Mac notarization credential '$NOTARY_PROFILE' is unavailable in $NOTARY_KEYCHAIN." >&2
+    echo "Store or repair the credential before running the release package." >&2
+    exit 1
+  fi
+fi
 
 rm -rf "$DIST"
 mkdir -p "$DIST"
@@ -90,7 +101,10 @@ fi
 )
 
 if [[ "$NOTARIZE" == "1" ]]; then
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun notarytool submit "$ZIP" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --keychain "$NOTARY_KEYCHAIN" \
+    --wait
   xcrun stapler staple "$APP"
   xcrun stapler validate "$APP"
   rm -f "$ZIP"

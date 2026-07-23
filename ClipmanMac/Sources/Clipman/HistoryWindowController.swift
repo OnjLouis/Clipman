@@ -204,6 +204,7 @@ private final class TemplateInsertButton: NSButton {
 @MainActor
 protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didChoose entry: ClipEntry)
+    func historyWindow(_ controller: HistoryWindowController, didChooseUsingEnter entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didTogglePin entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didDelete entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didEdit entry: ClipEntry, name: String, text: String)
@@ -588,7 +589,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         )
         window.title = "Clipman History"
         super.init(window: window)
-        window.onEnter = { [weak self] in self?.chooseSelectedEntry() }
+        window.onEnter = { [weak self] in self?.chooseSelectedEntry(triggeredByEnter: true) }
         window.onShiftEnter = { [weak self] in self?.toggleSelectedPin() }
         window.onEscape = { [weak self] in (self?.window as? HistoryWindow)?.hide() }
         window.onFind = { [weak self] in self?.focusSearch() }
@@ -678,6 +679,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     func showFileHistory() {
         setMode(.files, notify: true)
+    }
+
+    func showHistoryTab(_ tabID: String) {
+        setMode(modeForTabID(tabID), notify: false)
     }
 
     func configureSort(textSortMode: String, textDescending: Bool, fileSortMode: String, fileDescending: Bool, selectedTab: Int, selectedHistoryTab: String, linksHistoryEnabled: Bool, groupFilter: String) {
@@ -1486,9 +1491,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
 
-    private func chooseSelectedEntry() {
+    private func chooseSelectedEntry(triggeredByEnter: Bool = false) {
         if let entry = selectedEntry() {
-            historyDelegate?.historyWindow(self, didChoose: entry)
+            if triggeredByEnter {
+                historyDelegate?.historyWindow(self, didChooseUsingEnter: entry)
+            } else {
+                historyDelegate?.historyWindow(self, didChoose: entry)
+            }
         } else if let event = selectedFileEvent() {
             historyDelegate?.historyWindow(self, didChooseFileEvent: event)
         }

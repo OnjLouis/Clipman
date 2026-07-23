@@ -1,7 +1,8 @@
 param(
     [string]$OutputPath = "$PSScriptRoot\portable\clipman.exe",
     [string]$LivePath = '',
-    [switch]$NoLiveDeploy
+    [switch]$NoLiveDeploy,
+    [switch]$DesktopOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -322,18 +323,20 @@ $buildStamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 ) -join [Environment]::NewLine | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
 
 $iOSInfoPath = Join-Path $PSScriptRoot 'ClipmanIOS\ClipmanIOS\Support\Info.plist'
-$iOSInfoText = [IO.File]::ReadAllText($iOSInfoPath)
-$iOSBuildPattern = '(<key>ClipmanBuildStampUtcMs</key>\s*<string>)\d+(</string>)'
-$iOSBuildMatches = [regex]::Matches($iOSInfoText, $iOSBuildPattern)
-if ($iOSBuildMatches.Count -ne 1) {
-    throw "Expected one iOS ClipmanBuildStampUtcMs value; found $($iOSBuildMatches.Count)."
+if (!$DesktopOnly) {
+    $iOSInfoText = [IO.File]::ReadAllText($iOSInfoPath)
+    $iOSBuildPattern = '(<key>ClipmanBuildStampUtcMs</key>\s*<string>)\d+(</string>)'
+    $iOSBuildMatches = [regex]::Matches($iOSInfoText, $iOSBuildPattern)
+    if ($iOSBuildMatches.Count -ne 1) {
+        throw "Expected one iOS ClipmanBuildStampUtcMs value; found $($iOSBuildMatches.Count)."
+    }
+    $iOSInfoText = [regex]::Replace(
+        $iOSInfoText,
+        $iOSBuildPattern,
+        { param($match) $match.Groups[1].Value + [string]$buildStamp + $match.Groups[2].Value }
+    )
+    [IO.File]::WriteAllText($iOSInfoPath, $iOSInfoText, [Text.UTF8Encoding]::new($false))
 }
-$iOSInfoText = [regex]::Replace(
-    $iOSInfoText,
-    $iOSBuildPattern,
-    { param($match) $match.Groups[1].Value + [string]$buildStamp + $match.Groups[2].Value }
-)
-[IO.File]::WriteAllText($iOSInfoPath, $iOSInfoText, [Text.UTF8Encoding]::new($false))
 try {
     $validatedIOSInfo = [Xml.XmlDocument]::new()
     $validatedIOSInfo.Load($iOSInfoPath)

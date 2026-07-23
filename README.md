@@ -23,7 +23,7 @@ An optional Clipman CLI development preview is available from prereleases for te
 - Optional Secrets area for short private snippets that are stored separately from clipboard history, require the history password, and can be pasted with their own global hotkeys.
 - Optional Links history tab for whole-entry HTTP and HTTPS links. Links remain in the normal shared text-history database; the tab is a filtered view that can be enabled in Preferences.
 - Optional template entries. Mark a text entry as a template in Entry Properties and Clipman resolves variables such as `{{year_full}}`, `{{month_num_padded}}`, `{{day_of_month_padded}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}` when that entry is copied or quick-pasted. Entry Properties includes sample templates and field insertion.
-- Press Enter on a history entry to copy it back to the clipboard and close history.
+- Press Enter on a history entry to copy it back to the clipboard and close history. An off-by-default preference can also paste it into the application that was active before Clipman opened.
 - Press Ctrl+C to copy without closing the history window.
 - Press Shift+Enter to pin or unpin an entry. Pinned entries are protected from delete and cleanup.
 - The first ten pinned entries are numbered in the history list to match their Ctrl+number copy shortcuts.
@@ -85,6 +85,8 @@ An optional Clipman CLI development preview is available from prereleases for te
 Hotkeys can be changed from Options > Preferences. In hotkey fields, press a valid shortcut to assign it, or press Delete or Backspace to clear it. Two modifiers are safest. For compatibility with existing clipboard-manager habits, Clipman also allows one modifier with function keys or with the grave/accent and backslash-style punctuation keys. Single-modifier letters, numbers, comma, space, Tab, Delete, Backspace, Escape, and reserved operating-system shortcuts are rejected. Windows hotkey fields accept the Windows key as a modifier for combinations Windows allows.
 
 Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared data folder and the history password controls.
+
+Two optional General preferences can streamline opening and choosing history. **After Enter, paste into the previous application** makes Enter on a Text or Links entry copy it, close history, return to the previously active application, and send the normal paste command; the selected entry remains on the clipboard. **Open history to the most recent clipboard type** dynamically opens Text, Links, or Files according to the latest clipboard event Clipman successfully accepted during the current run. If Links history is disabled, links open in Text history. Both preferences are off by default.
 
 Links history is optional and off by default. When enabled, it adds a separate view for entries where the whole clipboard text is one absolute `http` or `https` URL. Prose containing links, multiline text, `mailto:`, `file:`, and custom schemes remain in Text history. With Links history disabled, File history remains the second history area. With Links history enabled, Links becomes the second area and File history moves to the third.
 
@@ -177,6 +179,11 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.0.7
+
+- Added an opt-in preference that makes Enter on a Text or Links history entry copy it, close Clipman, return to the previously active application, and paste it there. The selected entry remains on the clipboard, and existing Enter behavior is unchanged when the preference is off.
+- Added an opt-in dynamic history mode that opens Text, Links, or Files according to the most recent clipboard event Clipman successfully accepted during the current run. Links fall back to Text when Links history is disabled.
 
 ### 2.0.6
 

@@ -91,7 +91,7 @@
   <h2 id="basic-use">Basic Use</h2>
   <ul>
     <li>Copy normally. Clipman stores text clips and separate file-history events while monitoring is on.</li>
-    <li>Open history, choose an item, and press <code>Enter</code> to put it back on the clipboard. Press <code>Esc</code> or close the window to hide history without quitting.</li>
+    <li>Open history, choose an item, and press <code>Enter</code> to put it back on the clipboard. An optional preference can also paste it into the application that was active before Clipman opened. Press <code>Esc</code> or close the window to hide history without quitting.</li>
     <li>Use search, groups, pinned entries, sort order, and Entry Properties as your history grows. The detailed commands are in the Keyboard Shortcuts table.</li>
     <li>Use template entries for reusable text that should resolve date, time, system, or username variables only when copied or pasted.</li>
     <li>Turn monitoring off temporarily when copying text that should not enter history, add sensitive apps to the ignored applications list, or enable sensitive-data exclusions for known text patterns.</li>
@@ -132,7 +132,7 @@
       <tr><td>Open diagnostics</td><td><code>Alt+F1</code></td><td><code>Option+F1</code></td></tr>
       <tr><td>Close or hide the history window</td><td><code>Esc</code></td><td><code>Escape</code></td></tr>
       <tr><td>Switch Preferences tabs</td><td><code>Ctrl+1</code> to <code>Ctrl+6</code></td><td>Tab control navigation</td></tr>
-      <tr><td>Copy selected text entry and close history</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
+      <tr><td>Copy selected text entry and close history; optionally paste into the previous application</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
       <tr><td>Copy selected text entry without closing history</td><td><code>Ctrl+C</code></td><td><code>Command+C</code></td></tr>
       <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
       <tr><td>Paste clipboard text into history</td><td><code>Ctrl+V</code></td><td><code>Command+V</code></td></tr>
@@ -164,6 +164,10 @@
 
   <h2 id="preferences">Preferences</h2>
   <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, optional Links history, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
+
+  <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text or Links history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
+
+  <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, Clipman opens Text, Links, or Files according to the most recent clipboard event it successfully accepted during the current run. Ignored, excluded, or failed captures do not change the destination. If Links history is disabled, a recently copied link opens in Text history instead.</p>
 
   <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
 
@@ -550,6 +554,12 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.0.7</h3>
+  <ul>
+    <li>Added an opt-in preference that makes <code>Enter</code> on a Text or Links history entry copy it, close Clipman, return to the previously active application, and paste it there. The selected entry remains on the clipboard, and existing Enter behavior is unchanged when the preference is off.</li>
+    <li>Added an opt-in dynamic history mode that opens Text, Links, or Files according to the most recent clipboard event Clipman successfully accepted during the current run. Links fall back to Text when Links history is disabled.</li>
+  </ul>
+
   <h3>2.0.6</h3>
   <ul>
     <li>Android build 7 makes the status message a button that moves to the bottom of the current history list. The separate Top button remains available for quickly returning to the beginning.</li>

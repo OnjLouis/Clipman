@@ -173,6 +173,8 @@ namespace Clipman
         public string ToggleActiveHotkey { get; set; }
         public List<QuickCopyBinding> QuickCopyHotkeys { get; set; }
         public bool AutoCopyLatestRemoteText { get; set; }
+        public bool PasteAfterEnter { get; set; }
+        public bool DynamicHistoryMode { get; set; }
         public bool RemoveDuplicates { get; set; }
         public bool SoundsEnabled { get; set; }
         public bool SaveListPosition { get; set; }
@@ -224,6 +226,8 @@ namespace Clipman
             ToggleActiveHotkey = "Ctrl+Alt+`";
             QuickCopyHotkeys = new List<QuickCopyBinding>();
             AutoCopyLatestRemoteText = false;
+            PasteAfterEnter = false;
+            DynamicHistoryMode = false;
             RemoveDuplicates = true;
             SoundsEnabled = true;
             SaveListPosition = true;
