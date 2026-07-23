@@ -86,7 +86,7 @@ Hotkeys can be changed from Options > Preferences. In hotkey fields, press a val
 
 Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared data folder and the history password controls.
 
-Two optional General preferences can streamline opening and choosing history. **After Enter, paste into the previous application** makes Enter on a Text or Links entry copy it, close history, return to the previously active application, and send the normal paste command; the selected entry remains on the clipboard. **Open history to the most recent clipboard type** dynamically opens Text, Links, or Files according to the latest clipboard event Clipman successfully accepted during the current run. If Links history is disabled, links open in Text history. Both preferences are off by default.
+Two optional General preferences can streamline opening and choosing history. **After Enter, paste into the previous application** makes Enter on a Text or Links entry copy it, close history, return to the previously active application, and send the normal paste command; the selected entry remains on the clipboard. On Mac, macOS asks for permission before Clipman can send that command; quit and reopen Clipman if the first paste is blocked after approval. Clipman only sends the command when an editable text control is focused. **Open history to the most recent clipboard type** dynamically opens Text, Links, or Files according to the latest clipboard event Clipman successfully accepted during the current run. If Links history is disabled, links open in Text history. Both preferences are off by default.
 
 Links history is optional and off by default. When enabled, it adds a separate view for entries where the whole clipboard text is one absolute `http` or `https` URL. Prose containing links, multiline text, `mailto:`, `file:`, and custom schemes remain in Text history. With Links history disabled, File history remains the second history area. With Links history enabled, Links becomes the second area and File history moves to the third.
 
@@ -184,6 +184,7 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 - Added an opt-in preference that makes Enter on a Text or Links history entry copy it, close Clipman, return to the previously active application, and paste it there. The selected entry remains on the clipboard, and existing Enter behavior is unchanged when the preference is off.
 - Added an opt-in dynamic history mode that opens Text, Links, or Files according to the most recent clipboard event Clipman successfully accepted during the current run. Links fall back to Text when Links history is disabled.
+- Fixed the Mac paste-after-Enter behavior so Clipman reliably returns focus to the previous application and only sends the paste command when an editable text control is focused.
 
 ### 2.0.6
 

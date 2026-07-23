@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon
 import ClipmanCore
 import UniformTypeIdentifiers
@@ -27,8 +28,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var historyWindow: HistoryWindowController!
     private var preferencesWindow: PreferencesWindowController?
     private var secretsWindow: SecretsWindowController?
-    private weak var previousFrontmostApplication: NSRunningApplication?
+    private var previousFrontmostProcessIdentifier: pid_t?
     private var pasteAfterHistoryHide = false
+    private var lastPasteTargetInspection = "Not checked"
     private var lastReceivedHistoryTab = HistoryTabID.text
     private var sessionDatabasePassword = ""
     private var sessionPasswordDatabasePath = ""
@@ -123,6 +125,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         buildMainMenu()
         scheduleUpdateChecks()
         scheduleServerRecoveryChecks()
+        if settings.pasteAfterEnter, !CGPreflightPostEventAccess() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                _ = CGRequestPostEventAccess()
+            }
+        }
     }
 
     private func enforceSingleRunningInstance() -> Bool {
@@ -368,6 +375,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         let mode = QuickPasteMode.normalize(settings.quickPasteModes[id])
         let text = TemplateResolver.resolveEntryText(entry)
+        if mode != .copyOnly, !ensurePasteAutomationAccess() {
+            return
+        }
         switch mode {
         case .pasteRestore:
             monitor.writeTemporaryInternalText(text, restoreAfter: 0.35) {
@@ -396,20 +406,113 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             NSSound.beep()
             return
         }
+        guard ensurePasteAutomationAccess() else { return }
         monitor.writeTemporaryInternalText(secret.Value, restoreAfter: 0.35) {
             self.sendPasteKeystroke()
         }
         sounds.play(.copy)
     }
 
-    private func sendPasteKeystroke() {
+    @discardableResult
+    private func sendPasteKeystroke(to processIdentifier: pid_t? = nil) -> Bool {
+        guard CGPreflightPostEventAccess() else {
+            lastPasteTargetInspection = "Blocked: Accessibility permission is unavailable"
+            sounds.play(.skip)
+            return false
+        }
+        guard let targetProcessIdentifier = processIdentifier ?? NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              targetProcessIdentifier != NSRunningApplication.current.processIdentifier
+        else {
+            lastPasteTargetInspection = "Blocked: no external destination application"
+            sounds.play(.skip)
+            return false
+        }
+        guard focusedElementAcceptsText(in: targetProcessIdentifier) else {
+            sounds.play(.skip)
+            return false
+        }
+
         let source = CGEventSource(stateID: .hidSystemState)
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
-        keyDown?.flags = .maskCommand
-        keyUp?.flags = .maskCommand
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
+        let commandDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
+        let pasteDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
+        let pasteUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+        let commandUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        commandDown?.flags = .maskCommand
+        pasteDown?.flags = .maskCommand
+        pasteUp?.flags = .maskCommand
+        commandUp?.flags = []
+
+        for event in [commandDown, pasteDown, pasteUp, commandUp].compactMap({ $0 }) {
+            event.postToPid(targetProcessIdentifier)
+        }
+        return true
+    }
+
+    private func focusedElementAcceptsText(in processIdentifier: pid_t) -> Bool {
+        let applicationElement = AXUIElementCreateApplication(processIdentifier)
+        var focusedValue: CFTypeRef?
+        let focusedResult = AXUIElementCopyAttributeValue(
+            applicationElement,
+            "AXFocusedUIElement" as CFString,
+            &focusedValue
+        )
+        guard focusedResult == .success,
+              let focusedValue,
+              CFGetTypeID(focusedValue) == AXUIElementGetTypeID()
+        else {
+            lastPasteTargetInspection = "Blocked: destination has no accessible focused control"
+            return false
+        }
+        let focusedElement = unsafeDowncast(focusedValue, to: AXUIElement.self)
+
+        var enabledValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedElement, "AXEnabled" as CFString, &enabledValue) == .success,
+           let enabled = enabledValue as? Bool,
+           !enabled {
+            lastPasteTargetInspection = "Blocked: focused control is disabled"
+            return false
+        }
+
+        var roleValue: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(focusedElement, "AXRole" as CFString, &roleValue)
+        let role = roleValue as? String ?? "Unknown"
+
+        var editableValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedElement, "AXEditable" as CFString, &editableValue) == .success,
+           let editable = editableValue as? Bool,
+           editable {
+            lastPasteTargetInspection = "Allowed: focused role \(role) reports editable text"
+            return true
+        }
+
+        let textRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
+        if textRoles.contains(role) {
+            lastPasteTargetInspection = "Allowed: focused role \(role) accepts text"
+            return true
+        }
+
+        for attribute in ["AXSelectedText", "AXSelectedTextRange"] {
+            var settable = DarwinBoolean(false)
+            if AXUIElementIsAttributeSettable(focusedElement, attribute as CFString, &settable) == .success,
+               settable.boolValue {
+                lastPasteTargetInspection = "Allowed: focused role \(role) exposes writable \(attribute)"
+                return true
+            }
+        }
+
+        lastPasteTargetInspection = "Blocked: focused role \(role) does not accept text"
+        return false
+    }
+
+    private func ensurePasteAutomationAccess() -> Bool {
+        if CGPreflightPostEventAccess() {
+            return true
+        }
+
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        _ = CGRequestPostEventAccess()
+        return CGPreflightPostEventAccess()
     }
 
     @objc private func openManual(_ sender: Any?) {
@@ -497,6 +600,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Add clipboard item on startup: \(settings.captureClipboardOnStartup ? "On" : "Off")",
             "Auto-copy latest remote text: \(settings.autoCopyLatestRemoteText ? "On" : "Off")",
             "Paste after Enter: \(settings.pasteAfterEnter ? "On" : "Off")",
+            "Paste automation access: \(CGPreflightPostEventAccess() ? "Allowed" : "Not allowed")",
+            "Last paste destination: \(lastPasteTargetInspection)",
             "Dynamic history mode: \(settings.dynamicHistoryMode ? "On" : "Off")",
             "Update checks: \(settings.updateCheckFrequency)",
             "Ignored applications: \(settings.ignoredApplications.isEmpty ? "None" : settings.ignoredApplications.joined(separator: ", "))",
@@ -808,6 +913,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChooseUsingEnter entry: ClipEntry) {
+        if settings.pasteAfterEnter, !ensurePasteAutomationAccess() {
+            pasteAfterHistoryHide = false
+            return
+        }
         pasteAfterHistoryHide = settings.pasteAfterEnter
         copyAndCloseHistory(entry, controller: controller)
     }
@@ -1327,6 +1436,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         resetRemoteClipboardBaseline()
         scheduleUpdateChecks()
         scheduleServerRecoveryChecks()
+        if settings.pasteAfterEnter, !CGPreflightPostEventAccess() {
+            DispatchQueue.main.async {
+                _ = CGRequestPostEventAccess()
+            }
+        }
         seedServerCacheFromConfiguredDatabase()
         let password = currentDatabasePassword(for: settings.databasePath)
         store.setDatabaseURL(textHistoryURL(for: settings), password: password)
@@ -1702,39 +1816,67 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         guard let application = NSWorkspace.shared.frontmostApplication,
               application.processIdentifier != NSRunningApplication.current.processIdentifier
         else { return }
-        previousFrontmostApplication = application
+        previousFrontmostProcessIdentifier = application.processIdentifier
     }
 
     private func restorePreviousFrontmostApplication(pasteAfterActivation: Bool = false) {
-        guard let application = previousFrontmostApplication,
+        guard let processIdentifier = previousFrontmostProcessIdentifier,
+              let application = NSRunningApplication(processIdentifier: processIdentifier),
               !application.isTerminated
         else {
-            previousFrontmostApplication = nil
+            previousFrontmostProcessIdentifier = nil
             return
         }
-        previousFrontmostApplication = nil
+        previousFrontmostProcessIdentifier = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            guard pasteAfterActivation else {
-                application.activate(options: [.activateAllWindows])
-                return
-            }
-            self.activatePreviousApplicationAndPaste(application, attemptsRemaining: 4)
+            self.activatePreviousApplication(
+                application,
+                pasteAfterActivation: pasteAfterActivation,
+                attemptsRemaining: 4
+            )
         }
     }
 
-    private func activatePreviousApplicationAndPaste(_ application: NSRunningApplication, attemptsRemaining: Int) {
+    private func activatePreviousApplication(
+        _ application: NSRunningApplication,
+        pasteAfterActivation: Bool,
+        attemptsRemaining: Int
+    ) {
         guard !application.isTerminated else {
-            sounds.play(.skip)
+            if pasteAfterActivation {
+                sounds.play(.skip)
+            }
             return
         }
 
-        application.activate(options: [.activateAllWindows])
+        application.unhide()
+        if #available(macOS 14.0, *) {
+            NSApp.yieldActivation(to: application)
+            _ = application.activate(from: .current, options: [.activateAllWindows])
+        } else {
+            NSApp.hide(nil)
+            NSApp.deactivate()
+            _ = application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier {
-                self.sendPasteKeystroke()
+            let targetIsFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier
+            if targetIsFrontmost && !NSApp.isActive {
+                if pasteAfterActivation {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier else {
+                            self.sounds.play(.skip)
+                            return
+                        }
+                        self.sendPasteKeystroke(to: application.processIdentifier)
+                    }
+                }
             } else if attemptsRemaining > 0 {
-                self.activatePreviousApplicationAndPaste(application, attemptsRemaining: attemptsRemaining - 1)
-            } else {
+                self.activatePreviousApplication(
+                    application,
+                    pasteAfterActivation: pasteAfterActivation,
+                    attemptsRemaining: attemptsRemaining - 1
+                )
+            } else if pasteAfterActivation {
                 self.sounds.play(.skip)
             }
         }

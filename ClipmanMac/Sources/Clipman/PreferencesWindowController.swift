@@ -167,7 +167,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         pasteAfterEnterCheckbox.target = nil
         pasteAfterEnterCheckbox.action = nil
         pasteAfterEnterCheckbox.setAccessibilityLabel("After Enter, paste into the previous application")
-        pasteAfterEnterCheckbox.setAccessibilityHelp("When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. This is off by default.")
+        pasteAfterEnterCheckbox.setAccessibilityHelp("When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. macOS will ask for permission to let Clipman send the paste command. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, pasteAfterEnterCheckbox])
 
         dynamicHistoryModeCheckbox.target = nil

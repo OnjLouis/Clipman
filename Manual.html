@@ -165,7 +165,7 @@
   <h2 id="preferences">Preferences</h2>
   <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, optional Links history, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
 
-  <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text or Links history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
+  <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text or Links history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. On Mac, macOS asks for permission before Clipman can send that command; allow Clipman to control the computer when prompted, then quit and reopen Clipman if the first paste is blocked. Clipman only sends the paste command when the destination has an editable text control in focus. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
 
   <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, Clipman opens Text, Links, or Files according to the most recent clipboard event it successfully accepted during the current run. Ignored, excluded, or failed captures do not change the destination. If Links history is disabled, a recently copied link opens in Text history instead.</p>
 
@@ -558,6 +558,7 @@
   <ul>
     <li>Added an opt-in preference that makes <code>Enter</code> on a Text or Links history entry copy it, close Clipman, return to the previously active application, and paste it there. The selected entry remains on the clipboard, and existing Enter behavior is unchanged when the preference is off.</li>
     <li>Added an opt-in dynamic history mode that opens Text, Links, or Files according to the most recent clipboard event Clipman successfully accepted during the current run. Links fall back to Text when Links history is disabled.</li>
+    <li>Fixed the Mac paste-after-Enter behavior so Clipman reliably returns focus to the previous application and only sends the paste command when an editable text control is focused.</li>
   </ul>
 
   <h3>2.0.6</h3>
