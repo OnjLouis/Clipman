@@ -182,6 +182,11 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 ## Changelog
 
+### 2.0.9
+
+- Added explicit VoiceOver labels and instructions to the iOS server address, server token, and history password fields.
+- The optional iOS launch clipboard offer now appears only when the pasteboard contains text, avoiding an empty Paste screen.
+
 ### 2.0.8
 
 - Fixed deliberately recreated or edited clipboard text disappearing when an older deletion marker existed for the same content. Stale copies of deleted entries remain suppressed, while a newer paste or edit is kept and synchronized normally.

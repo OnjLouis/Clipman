@@ -124,7 +124,7 @@ final class ClipmanAppModel: ObservableObject {
                 isUnlocked = true
                 let loaded = await refresh(showStatus: true)
                 guard !Task.isCancelled, generation == foregroundGeneration, isUnlocked else { return }
-                if loaded, settings.addClipboardOnLaunch {
+                if loaded, settings.addClipboardOnLaunch, UIPasteboard.general.hasStrings {
                     showingClipboardImport = true
                 }
                 startPolling()

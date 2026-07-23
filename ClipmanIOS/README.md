@@ -14,7 +14,7 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - Keep a private local cache in Server mode, save changes while offline, and merge them when the server becomes reachable again.
 - Browse text history and link history.
 - Add the current iOS clipboard text into Clipman while the app is open.
-- Optionally offer to add the current iOS clipboard text after each successful unlock and initial history refresh. The full-screen choice uses Apple's paste control, so Paste is explicit and Cancel or a VoiceOver scrub leaves history unchanged.
+- Optionally offer to add the current iOS clipboard text after each successful unlock and initial history refresh. Clipman only presents the choice when the pasteboard advertises text. The full-screen choice uses Apple's paste control, so Paste is explicit and Cancel or a VoiceOver scrub leaves history unchanged.
 - Copy an entry back to the iOS clipboard.
 - View, edit, pin, unpin, delete, search, and filter entries.
 - Use VoiceOver-friendly rows and actions so one swipe moves between entries.
@@ -43,5 +43,7 @@ If XcodeGen is not installed:
 Rows expose a compact VoiceOver label and custom actions for common operations. Double-tap copies the selected entry to the clipboard. Use the Actions rotor for View, Edit, Pin or Unpin, and Delete.
 
 In Settings, use the VoiceOver scrub gesture to cancel unsaved changes and return to history.
+
+The server address, server token, and history password fields have explicit VoiceOver labels and instructions. Secure field contents remain hidden.
 
 Activate Clipman's status line to move to the bottom of the current history list. The standard iOS status-bar gesture remains available for returning to the top.
