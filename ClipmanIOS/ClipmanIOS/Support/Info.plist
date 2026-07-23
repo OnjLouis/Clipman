@@ -19,7 +19,7 @@
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>ClipmanBuildStampUtcMs</key>
-    <string>1784668034785</string>
+    <string>1784810542809</string>
     <key>LSRequiresIPhoneOS</key>
     <true />
     <key>NSFaceIDUsageDescription</key>

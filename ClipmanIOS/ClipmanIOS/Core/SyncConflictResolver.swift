@@ -102,13 +102,22 @@ enum SyncConflictResolver {
     }
 
     private static func isDeleted(_ entry: ClipEntry, in database: ClipDatabase) -> Bool {
-        database.DeletedEntries.contains { $0.Id == entry.Id || (!$0.TextHash.isEmpty && $0.TextHash == textHash(entry.Text)) }
+        isDeleted(entry, deletedEntries: database.DeletedEntries)
+    }
+
+    private static func isDeleted(_ entry: ClipEntry, deletedEntries: [DeletedClipEntry]) -> Bool {
+        let entryChangedUnixMs = max(entry.CreatedUnixMs, entry.LastUsedUnixMs)
+        return deletedEntries.contains {
+            $0.Id == entry.Id
+                || (!$0.TextHash.isEmpty
+                    && $0.TextHash == textHash(entry.Text)
+                    && ($0.DeletedUnixMs <= 0 || entryChangedUnixMs <= $0.DeletedUnixMs))
+        }
     }
 
     private static func applyDeletedEntries(_ database: inout ClipDatabase) {
-        let ids = Set(database.DeletedEntries.map(\.Id).filter { !$0.isEmpty })
-        let hashes = Set(database.DeletedEntries.map(\.TextHash).filter { !$0.isEmpty })
-        database.Entries.removeAll { ids.contains($0.Id) || hashes.contains(textHash($0.Text)) }
+        let deletedEntries = database.DeletedEntries
+        database.Entries.removeAll { isDeleted($0, deletedEntries: deletedEntries) }
     }
 
     private static func normalize(_ database: inout ClipDatabase) {

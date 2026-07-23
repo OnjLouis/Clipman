@@ -23,7 +23,7 @@ An optional Clipman CLI development preview is available from prereleases for te
 - User-configurable hotkeys.
 - Optional per-entry Quick Paste global hotkeys that paste chosen text entries into the active app from anywhere without opening history.
 - Optional Secrets area for short private snippets that are stored separately from clipboard history, require the history password, and can be pasted with their own global hotkeys.
-- Optional Links history tab for whole-entry HTTP and HTTPS links. Links remain in the normal shared text-history database; the tab is a filtered view that can be enabled in Preferences.
+- Optional Links history tab for whole-entry HTTP, HTTPS, and `clipman://` server links. Links remain in the normal shared text-history database; the tab is a filtered view that can be enabled in Preferences.
 - Optional template entries. Mark a text entry as a template in Entry Properties and Clipman resolves variables such as `{{year_full}}`, `{{month_num_padded}}`, `{{day_of_month_padded}}`, `{{os_name}}`, `{{os_version}}`, and `{{username}}` when that entry is copied or quick-pasted. Entry Properties includes sample templates and field insertion.
 - Press Enter on a history entry to copy it back to the clipboard and close history. An off-by-default preference can also paste it into the application that was active before Clipman opened.
 - Press Ctrl+C to copy without closing the history window.
@@ -90,7 +90,7 @@ Preferences remembers the tab you used last. The File history tab controls file-
 
 Two optional General preferences can streamline opening and choosing history. **After Enter, paste into the previous application** makes Enter on a Text or Links entry copy it, close history, return to the previously active application, and send the normal paste command; the selected entry remains on the clipboard. On Mac, macOS asks for permission before Clipman can send that command; quit and reopen Clipman if the first paste is blocked after approval. Clipman only sends the command when an editable text control is focused. **Open history to the most recent clipboard type** dynamically opens Text, Links, or Files according to the latest clipboard event Clipman successfully accepted during the current run. If Links history is disabled, links open in Text history. Both preferences are off by default.
 
-Links history is optional and off by default. When enabled, it adds a separate view for entries where the whole clipboard text is one absolute `http` or `https` URL. Prose containing links, multiline text, `mailto:`, `file:`, and custom schemes remain in Text history. With Links history disabled, File history remains the second history area. With Links history enabled, Links becomes the second area and File history moves to the third.
+Links history is optional and off by default. When enabled, it adds a separate view for entries where the whole clipboard text is one absolute `http`, `https`, or `clipman` URL. Prose containing links, multiline text, `mailto:`, `file:`, and other custom schemes remain in Text history. With Links history disabled, File history remains the second history area. With Links history enabled, Links becomes the second area and File history moves to the third.
 
 The default data folder is `Settings` beside `clipman.exe`. If Clipman is moved while using that default data folder, settings and history follow the new folder. If you choose a different data folder, Clipman uses `clipman-history.clipdb` inside that folder and stores this machine's settings beside it. A small pointer remains in the app's `Settings` folder so Clipman can find the selected data folder on the next launch.
 
@@ -181,6 +181,11 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.0.8
+
+- Fixed deliberately recreated or edited clipboard text disappearing when an older deletion marker existed for the same content. Stale copies of deleted entries remain suppressed, while a newer paste or edit is kept and synchronized normally.
+- Custom `clipman://` server addresses now appear consistently in Links history on Windows, Mac, Android, and iOS.
 
 ### 2.0.7
 

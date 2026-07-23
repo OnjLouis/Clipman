@@ -43,7 +43,7 @@ enum LinkExtractor {
               !trimmed.contains("\r"),
               let components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
+              scheme == "http" || scheme == "https" || scheme == "clipman",
               components.host?.isEmpty == false else {
             return nil
         }

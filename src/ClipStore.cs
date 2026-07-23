@@ -1450,12 +1450,7 @@ namespace Clipman
         private static void ApplyDeletedEntries(ClipDatabase target)
         {
             if (target == null || target.Entries == null || target.DeletedEntries == null || target.DeletedEntries.Count == 0) return;
-            var deletedIds = new HashSet<string>(target.DeletedEntries.Select(d => d.Id).Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.Ordinal);
-            var deletedHashes = new HashSet<string>(target.DeletedEntries.Select(d => d.TextHash).Where(hash => !string.IsNullOrWhiteSpace(hash)), StringComparer.Ordinal);
-            if (deletedIds.Count == 0 && deletedHashes.Count == 0) return;
-            target.Entries.RemoveAll(e =>
-                e != null &&
-                (deletedIds.Contains(e.Id) || deletedHashes.Contains(ComputeTextHash(e.Text))));
+            target.Entries.RemoveAll(e => IsDeleted(target, e));
         }
 
         private static bool IsDeleted(ClipDatabase target, string id)
@@ -1472,7 +1467,11 @@ namespace Clipman
             if (IsDeleted(target, entry.Id)) return true;
             if (target == null || target.DeletedEntries == null || string.IsNullOrEmpty(entry.Text)) return false;
             var textHash = ComputeTextHash(entry.Text);
-            return target.DeletedEntries.Any(d => !string.IsNullOrWhiteSpace(d.TextHash) && string.Equals(d.TextHash, textHash, StringComparison.Ordinal));
+            var entryChangedUnixMs = Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs);
+            return target.DeletedEntries.Any(d =>
+                !string.IsNullOrWhiteSpace(d.TextHash) &&
+                string.Equals(d.TextHash, textHash, StringComparison.Ordinal) &&
+                (d.DeletedUnixMs <= 0 || entryChangedUnixMs <= d.DeletedUnixMs));
         }
 
         private static bool MergeDeletedEntries(ClipDatabase target, ClipDatabase source)

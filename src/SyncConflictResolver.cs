@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Clipman
 {
@@ -129,8 +131,13 @@ namespace Clipman
         public static void MergeInto(ClipDatabase target, ClipDatabase source)
         {
             if (target == null || source == null || source.Entries == null) return;
+            if (target.Entries == null) target.Entries = new List<ClipEntry>();
+            if (target.DeletedEntries == null) target.DeletedEntries = new List<DeletedClipEntry>();
+            MergeDeletedEntries(target, source);
+            ApplyDeletedEntries(target);
             foreach (var entry in source.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
             {
+                if (IsDeleted(target, entry)) continue;
                 var existing = target.Entries.FirstOrDefault(e =>
                     !string.IsNullOrWhiteSpace(entry.Id) &&
                     string.Equals(e.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
@@ -147,6 +154,7 @@ namespace Clipman
 
                 MergeEntry(existing, entry);
             }
+            ApplyDeletedEntries(target);
         }
 
         private static void MergeEntry(ClipEntry existing, ClipEntry incoming)
@@ -165,6 +173,7 @@ namespace Clipman
             if (!string.IsNullOrWhiteSpace(incoming.Group) && incomingWins) existing.Group = incoming.Group.Trim();
             if (!string.IsNullOrWhiteSpace(incoming.SourceMachine) && (incomingWins || incomingCreatedWins)) existing.SourceMachine = incoming.SourceMachine.Trim();
             existing.Pinned = existing.Pinned || incoming.Pinned;
+            existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate;
             if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder)) existing.ManualOrder = incoming.ManualOrder;
         }
 
@@ -173,6 +182,8 @@ namespace Clipman
             if (database.Entries == null) database.Entries = new List<ClipEntry>();
             database.Version = Math.Max(1, database.Version);
             database.UpdatedUnixMs = TimeUtil.NowUnixMs();
+            NormalizeDeletedEntries(database);
+            ApplyDeletedEntries(database);
 
             var next = 1L;
             foreach (var entry in database.Entries
@@ -201,7 +212,91 @@ namespace Clipman
                 CreatedUnixMs = entry.CreatedUnixMs,
                 LastUsedUnixMs = entry.LastUsedUnixMs,
                 Pinned = entry.Pinned,
+                IsTemplate = entry.IsTemplate,
                 ManualOrder = entry.ManualOrder
+            };
+        }
+
+        private static void MergeDeletedEntries(ClipDatabase target, ClipDatabase source)
+        {
+            NormalizeDeletedEntries(target);
+            if (source.DeletedEntries == null) return;
+            foreach (var marker in source.DeletedEntries.Where(d => d != null && !string.IsNullOrWhiteSpace(d.Id)))
+            {
+                var existing = target.DeletedEntries.FirstOrDefault(d =>
+                    string.Equals(d.Id, marker.Id, StringComparison.OrdinalIgnoreCase));
+                if (existing == null)
+                {
+                    target.DeletedEntries.Add(Clone(marker));
+                }
+                else if (marker.DeletedUnixMs > existing.DeletedUnixMs)
+                {
+                    existing.DeletedUnixMs = marker.DeletedUnixMs;
+                    existing.TextHash = marker.TextHash ?? string.Empty;
+                    existing.SourceMachine = marker.SourceMachine ?? string.Empty;
+                }
+                else if (string.IsNullOrWhiteSpace(existing.TextHash) && !string.IsNullOrWhiteSpace(marker.TextHash))
+                {
+                    existing.TextHash = marker.TextHash;
+                }
+            }
+            NormalizeDeletedEntries(target);
+        }
+
+        private static void NormalizeDeletedEntries(ClipDatabase database)
+        {
+            if (database.DeletedEntries == null)
+            {
+                database.DeletedEntries = new List<DeletedClipEntry>();
+                return;
+            }
+            var now = TimeUtil.NowUnixMs();
+            var cutoff = now - (long)TimeSpan.FromDays(90).TotalMilliseconds;
+            foreach (var marker in database.DeletedEntries.Where(d => d != null && d.DeletedUnixMs <= 0))
+            {
+                marker.DeletedUnixMs = now;
+            }
+            database.DeletedEntries = database.DeletedEntries
+                .Where(d => d != null && !string.IsNullOrWhiteSpace(d.Id) && d.DeletedUnixMs >= cutoff)
+                .GroupBy(d => d.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(d => d.DeletedUnixMs).First())
+                .ToList();
+        }
+
+        private static void ApplyDeletedEntries(ClipDatabase database)
+        {
+            if (database.Entries == null || database.DeletedEntries == null || database.DeletedEntries.Count == 0) return;
+            database.Entries.RemoveAll(entry => IsDeleted(database, entry));
+        }
+
+        private static bool IsDeleted(ClipDatabase database, ClipEntry entry)
+        {
+            if (entry == null || database.DeletedEntries == null) return false;
+            var entryChangedUnixMs = Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs);
+            var hash = ComputeTextHash(entry.Text);
+            return database.DeletedEntries.Any(marker =>
+                string.Equals(marker.Id, entry.Id, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(marker.TextHash) &&
+                 string.Equals(marker.TextHash, hash, StringComparison.OrdinalIgnoreCase) &&
+                 (marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs)));
+        }
+
+        private static string ComputeTextHash(string text)
+        {
+            using (var sha = SHA256.Create())
+            {
+                return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? string.Empty)).Select(b => b.ToString("x2")));
+            }
+        }
+
+        private static DeletedClipEntry Clone(DeletedClipEntry marker)
+        {
+            return new DeletedClipEntry
+            {
+                Id = marker.Id ?? string.Empty,
+                TextHash = marker.TextHash ?? string.Empty,
+                DeletedUnixMs = marker.DeletedUnixMs,
+                SourceMachine = marker.SourceMachine ?? string.Empty
             };
         }
 

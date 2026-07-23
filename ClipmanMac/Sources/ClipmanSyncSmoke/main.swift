@@ -65,6 +65,31 @@ do {
     expect(locallyUsedAfterPush.Entries.first?.CreatedUnixMs == 600, "newer push timestamp should win even when local last-used is newer")
     expect(locallyUsedAfterPush.Entries.first?.SourceMachine == "Windows", "newer push source should win even when local last-used is newer")
 
+    let deletedText = "https://example.com/recreated"
+    let deletedHash = SyncConflictResolver.textHash(deletedText)
+    let tombstoneTestNow = TimeUtil.nowUnixMs()
+    let deletedMarker = DeletedClipEntry(Id: "deleted-original", TextHash: deletedHash, DeletedUnixMs: tombstoneTestNow - 100, SourceMachine: "Windows")
+    var staleDuplicate = ClipDatabase(
+        Entries: [ClipEntry(Id: "stale-copy", Text: deletedText, CreatedUnixMs: tombstoneTestNow - 200, LastUsedUnixMs: tombstoneTestNow - 200, ManualOrder: 1)],
+        DeletedEntries: [deletedMarker]
+    )
+    SyncConflictResolver.normalize(&staleDuplicate)
+    expect(staleDuplicate.Entries.isEmpty, "same-text entry older than deletion should remain deleted")
+
+    var recreated = ClipDatabase(
+        Entries: [ClipEntry(Id: "new-copy", Text: deletedText, CreatedUnixMs: tombstoneTestNow, LastUsedUnixMs: tombstoneTestNow, ManualOrder: 1)],
+        DeletedEntries: [deletedMarker]
+    )
+    SyncConflictResolver.normalize(&recreated)
+    expect(recreated.Entries.contains(where: { $0.Id == "new-copy" }), "same-text entry recreated after deletion should survive")
+
+    var staleIdentity = ClipDatabase(
+        Entries: [ClipEntry(Id: "deleted-original", Text: deletedText, CreatedUnixMs: tombstoneTestNow, LastUsedUnixMs: tombstoneTestNow, ManualOrder: 1)],
+        DeletedEntries: [deletedMarker]
+    )
+    SyncConflictResolver.normalize(&staleIdentity)
+    expect(staleIdentity.Entries.isEmpty, "exact deleted entry identity should never be resurrected")
+
     print("Clipman sync smoke tests passed.")
 } catch {
     fputs("FAIL: \(error.localizedDescription)\n", stderr)

@@ -2,6 +2,8 @@
 
 Clipman for iOS is a foreground-only clipboard-history client. It can keep history privately on the iPhone or iPad, or read and write the same Clipman Server history used by Windows, Mac, and Android clients.
 
+[Join the Clipman public beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
+
 The iOS app is built with SwiftUI. It intentionally does not poll the clipboard in the background, because iOS does not allow the same always-on clipboard workflow as desktop operating systems.
 
 ## Current Scope

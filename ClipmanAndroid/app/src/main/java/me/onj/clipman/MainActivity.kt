@@ -1344,6 +1344,7 @@ private fun ClipEntry.isLinkEntry(): Boolean {
     if (text.isBlank() || text.any { it.isWhitespace() }) return false
     if (text.startsWith("http://", ignoreCase = true) ||
         text.startsWith("https://", ignoreCase = true) ||
+        text.startsWith("clipman://", ignoreCase = true) ||
         text.startsWith("www.", ignoreCase = true)) {
         return true
     }

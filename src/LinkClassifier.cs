@@ -13,7 +13,8 @@ namespace Clipman
             Uri uri;
             if (!Uri.TryCreate(trimmed, UriKind.Absolute, out uri)) return false;
             if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(uri.Scheme, "clipman", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }

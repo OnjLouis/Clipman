@@ -103,8 +103,14 @@ func Merge(target *model.Database, source model.Database, now int64) {
 
 func IsDeleted(database model.Database, entry model.Entry) bool {
 	hash := TextHash(entry.Text)
+	entryChangedUnixMs := entry.CreatedUnixMs
+	if entry.LastUsedUnixMs > entryChangedUnixMs {
+		entryChangedUnixMs = entry.LastUsedUnixMs
+	}
 	for _, marker := range database.Deleted {
-		if strings.EqualFold(marker.ID, entry.ID) || marker.TextHash != "" && strings.EqualFold(marker.TextHash, hash) {
+		if strings.EqualFold(marker.ID, entry.ID) ||
+			(marker.TextHash != "" && strings.EqualFold(marker.TextHash, hash) &&
+				(marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs)) {
 			return true
 		}
 	}

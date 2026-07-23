@@ -40,3 +40,42 @@ func TestNormalizeRepairsZeroTombstoneAndIDs(t *testing.T) {
 		t.Fatalf("tombstone=%+v", database.Deleted)
 	}
 }
+
+func TestSameTextEntryRecreatedAfterDeletionSurvives(t *testing.T) {
+	now := int64(2_000_000_000_000)
+	text := "https://example.com/recreated"
+	target := model.NewDatabase(now)
+	target.Deleted = []model.DeletedEntry{{ID: "deleted-original", TextHash: TextHash(text), DeletedUnixMs: now - 100}}
+	source := model.NewDatabase(now)
+	source.Entries = []model.Entry{{ID: "new-copy", Text: text, CreatedUnixMs: now, LastUsedUnixMs: now}}
+	Merge(&target, source, now)
+	if len(target.Entries) != 1 || target.Entries[0].ID != "new-copy" {
+		t.Fatalf("recreated entry was removed: %+v", target.Entries)
+	}
+}
+
+func TestSameTextEntryOlderThanDeletionStaysDeleted(t *testing.T) {
+	now := int64(2_000_000_000_000)
+	text := "https://example.com/stale"
+	target := model.NewDatabase(now)
+	target.Deleted = []model.DeletedEntry{{ID: "deleted-original", TextHash: TextHash(text), DeletedUnixMs: now - 100}}
+	source := model.NewDatabase(now)
+	source.Entries = []model.Entry{{ID: "stale-copy", Text: text, CreatedUnixMs: now - 200, LastUsedUnixMs: now - 200}}
+	Merge(&target, source, now)
+	if len(target.Entries) != 0 {
+		t.Fatalf("stale entry survived: %+v", target.Entries)
+	}
+}
+
+func TestExactDeletedIdentityCannotBeRecreated(t *testing.T) {
+	now := int64(2_000_000_000_000)
+	text := "https://example.com/deleted-id"
+	target := model.NewDatabase(now)
+	target.Deleted = []model.DeletedEntry{{ID: "same-id", TextHash: TextHash(text), DeletedUnixMs: now - 100}}
+	source := model.NewDatabase(now)
+	source.Entries = []model.Entry{{ID: "same-id", Text: text, CreatedUnixMs: now, LastUsedUnixMs: now}}
+	Merge(&target, source, now)
+	if len(target.Entries) != 0 {
+		t.Fatalf("deleted identity survived: %+v", target.Entries)
+	}
+}

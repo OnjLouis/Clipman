@@ -49,6 +49,8 @@
 
   <p>Project page: <a href="https://github.com/OnjLouis/Clipman">https://github.com/OnjLouis/Clipman</a></p>
 
+  <p>iPhone and iPad users can <a href="https://testflight.apple.com/join/HYReZKAk">join the Clipman public beta through TestFlight</a>.</p>
+
   <h2 id="contents">Contents</h2>
   <ul>
     <li><a href="#notes">Notes</a></li>
@@ -233,7 +235,7 @@
   <p>For quick named lookup, type a slash followed by the entry name prefix, such as <code>/Test</code>. Clipman jumps to the matching named entry when it is visible in the current group filter.</p>
 
   <h2 id="links-history">Links History</h2>
-  <p>Links history is optional and off by default. Enable it in Preferences with <strong>Show Links history tab</strong>. When enabled, Clipman adds a separate Links history view for entries where the whole clipboard text is a single absolute <code>http</code> or <code>https</code> URL. Prose that merely contains a link, multiline text, <code>mailto:</code>, <code>file:</code>, and custom schemes remain in Text history.</p>
+  <p>Links history is optional and off by default. Enable it in Preferences with <strong>Show Links history tab</strong>. When enabled, Clipman adds a separate Links history view for entries where the whole clipboard text is a single absolute <code>http</code>, <code>https</code>, or <code>clipman</code> URL. Prose that merely contains a link, multiline text, <code>mailto:</code>, <code>file:</code>, and other custom schemes remain in Text history.</p>
 
   <p>Links are not stored in a separate database and are not removed from shared text history. The Links tab is a filtered view of the same entries, so copy, cut, paste after selected, grouping, pinning, Quick Paste, templates, search, sorting, cleanup actions, and sharing across machines work like Text history wherever applicable. If the Links tab is disabled, links simply appear in Text history as before.</p>
 
@@ -554,6 +556,12 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.0.8</h3>
+  <ul>
+    <li>Fixed deliberately recreated or edited clipboard text disappearing when an older deletion marker existed for the same content. Stale copies of deleted entries remain suppressed, while a newer paste or edit is kept and synchronized normally.</li>
+    <li>Custom <code>clipman://</code> server addresses now appear consistently in Links history on Windows, Mac, Android, and iOS.</li>
+  </ul>
+
   <h3>2.0.7</h3>
   <ul>
     <li>Added an opt-in preference that makes <code>Enter</code> on a Text or Links history entry copy it, close Clipman, return to the previously active application, and paste it there. The selected entry remains on the clipboard, and existing Enter behavior is unchanged when the preference is off.</li>

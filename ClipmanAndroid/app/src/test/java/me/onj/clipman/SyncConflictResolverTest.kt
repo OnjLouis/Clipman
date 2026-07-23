@@ -46,6 +46,42 @@ class SyncConflictResolverTest {
         assertTrue(SyncConflictResolver.hasSameContent(original, newerTimestamp))
     }
 
+    @Test
+    fun sameTextEntryRecreatedAfterDeletionSurvives() {
+        val text = "https://example.com/recreated"
+        val marker = DeletedClipEntry("deleted-original", SyncConflictResolver.textHash(text), 100, "Desktop")
+        val local = database().copy(DeletedEntries = listOf(marker))
+        val server = database(entry("new-copy", text, 101))
+
+        val merged = SyncConflictResolver.merge(local, server)
+
+        assertTrue(merged.Entries.any { it.Id == "new-copy" })
+    }
+
+    @Test
+    fun sameTextEntryOlderThanDeletionStaysDeleted() {
+        val text = "https://example.com/stale"
+        val marker = DeletedClipEntry("deleted-original", SyncConflictResolver.textHash(text), 100, "Desktop")
+        val local = database().copy(DeletedEntries = listOf(marker))
+        val server = database(entry("stale-copy", text, 99))
+
+        val merged = SyncConflictResolver.merge(local, server)
+
+        assertFalse(merged.Entries.any { it.Id == "stale-copy" })
+    }
+
+    @Test
+    fun exactDeletedIdentityCannotBeRecreated() {
+        val text = "https://example.com/deleted-id"
+        val marker = DeletedClipEntry("same-id", SyncConflictResolver.textHash(text), 100, "Desktop")
+        val local = database().copy(DeletedEntries = listOf(marker))
+        val server = database(entry("same-id", text, 101))
+
+        val merged = SyncConflictResolver.merge(local, server)
+
+        assertFalse(merged.Entries.any { it.Id == "same-id" })
+    }
+
     private fun database(vararg entries: ClipEntry) = ClipDatabase(
         Version = 1,
         UpdatedUnixMs = 10,

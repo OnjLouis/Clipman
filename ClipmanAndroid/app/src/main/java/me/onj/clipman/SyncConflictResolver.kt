@@ -11,18 +11,14 @@ object SyncConflictResolver {
             .mapValues { (_, markers) -> markers.maxBy { it.DeletedUnixMs } }
             .values
             .toList()
-        val deletedIds = deletedById.map { it.Id }.toSet()
-        val deletedHashes = deletedById.map { it.TextHash }.filter { it.isNotBlank() }.toSet()
-        val retainedTarget = target.Entries.filterNot {
-            deletedIds.contains(it.Id) || deletedHashes.contains(textHash(it.Text))
-        }
+        val retainedTarget = target.Entries.filterNot { isDeleted(it, deletedById) }
         val byId = retainedTarget.associateBy { it.Id }.toMutableMap()
         val byText = retainedTarget.associateBy { it.Text }.toMutableMap()
         val merged = retainedTarget.toMutableList()
 
         for (incoming in source.Entries) {
             if (incoming.Text.isEmpty()) continue
-            if (deletedIds.contains(incoming.Id) || deletedHashes.contains(textHash(incoming.Text))) continue
+            if (isDeleted(incoming, deletedById)) continue
             val existing = byId[incoming.Id].takeUnless { incoming.Id.isBlank() } ?: byText[incoming.Text]
             if (existing == null) {
                 val normalized = incoming.normalized()
@@ -107,6 +103,17 @@ object SyncConflictResolver {
     fun textHash(text: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest((text.ifEmpty { "" }).toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun isDeleted(entry: ClipEntry, deletedEntries: List<DeletedClipEntry>): Boolean {
+        val hash = textHash(entry.Text)
+        val entryChangedUnixMs = maxOf(entry.CreatedUnixMs, entry.LastUsedUnixMs)
+        return deletedEntries.any {
+            it.Id == entry.Id ||
+                (it.TextHash.isNotBlank() &&
+                    it.TextHash == hash &&
+                    (it.DeletedUnixMs <= 0 || entryChangedUnixMs <= it.DeletedUnixMs))
+        }
     }
 
     private fun mergeEntry(existing: ClipEntry, incoming: ClipEntry): ClipEntry {

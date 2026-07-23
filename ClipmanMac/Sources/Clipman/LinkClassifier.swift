@@ -7,7 +7,7 @@ enum LinkClassifier {
         guard trimmed.rangeOfCharacter(from: .newlines) == nil else { return false }
         guard let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
+              scheme == "http" || scheme == "https" || scheme == "clipman",
               let host = url.host,
               !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
