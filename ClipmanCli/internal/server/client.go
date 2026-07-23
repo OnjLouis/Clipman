@@ -97,7 +97,12 @@ func ConnectionDetails(value string) (serverURL, token string) {
 	if strings.HasPrefix(value, "{") {
 		var raw map[string]any
 		if json.Unmarshal([]byte(value), &raw) == nil {
-			for _, key := range []string{"ServerAddress", "serverAddress", "ServerUrl", "serverUrl", "ServerURL", "serverURL", "ListenPrefix", "listenPrefix"} {
+			if marker, present := raw["clipman"]; present {
+				if marker != "server-connection" || jsonNumber(raw, "version") != "1" {
+					return "", ""
+				}
+			}
+			for _, key := range []string{"address", "ServerAddress", "serverAddress", "ServerUrl", "serverUrl", "ServerURL", "serverURL", "ListenPrefix", "listenPrefix"} {
 				if item, ok := raw[key].(string); ok && strings.TrimSpace(item) != "" {
 					serverURL = strings.TrimSpace(item)
 					break

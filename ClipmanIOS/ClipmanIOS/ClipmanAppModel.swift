@@ -25,6 +25,10 @@ final class ClipmanAppModel: ObservableObject {
     @Published var showingSettings = false
     @Published var showingClipboardImport = false
     @Published var isRefreshing = false
+    @Published private(set) var pendingServerConnection: ServerConnectionDetails?
+    @Published private(set) var serverConnectionImportError = ""
+    @Published private(set) var serverConnectionImportSequence = 0
+    @Published private(set) var isImportingServerConnection = false
     @Published private(set) var linkItems: [LinkExtractor.LinkItem] = []
 
     private let soundService = SoundService()
@@ -124,7 +128,11 @@ final class ClipmanAppModel: ObservableObject {
                 isUnlocked = true
                 let loaded = await refresh(showStatus: true)
                 guard !Task.isCancelled, generation == foregroundGeneration, isUnlocked else { return }
-                if loaded, settings.addClipboardOnLaunch, UIPasteboard.general.hasStrings {
+                if isImportingServerConnection {
+                    // The import completion opens Settings once the file has finished loading.
+                } else if pendingServerConnection != nil || !serverConnectionImportError.isEmpty {
+                    showingSettings = true
+                } else if loaded, settings.addClipboardOnLaunch, UIPasteboard.general.hasStrings {
                     showingClipboardImport = true
                 }
                 startPolling()
@@ -132,6 +140,50 @@ final class ClipmanAppModel: ObservableObject {
                 status = "Authentication cancelled."
             }
         }
+    }
+
+    func openServerConnectionFile(_ url: URL) {
+        isImportingServerConnection = true
+        showingClipboardImport = false
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await Task.detached(priority: .userInitiated) {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    guard fileSize <= 65_536 else { throw ConnectionConfigError.fileTooLarge }
+                    return Result<ServerConnectionDetails, ConnectionConfigError>.success(
+                        try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
+                    )
+                } catch let error as ConnectionConfigError {
+                    return .failure(error)
+                } catch {
+                    return .failure(.invalidFile)
+                }
+            }.value
+            switch result {
+            case .success(let details):
+                pendingServerConnection = details
+                serverConnectionImportError = ""
+            case .failure(let error):
+                pendingServerConnection = nil
+                serverConnectionImportError = error.localizedDescription
+            }
+            isImportingServerConnection = false
+            serverConnectionImportSequence += 1
+            if isUnlocked {
+                showingClipboardImport = false
+                showingSettings = true
+            }
+        }
+    }
+
+    func consumeServerConnectionImport() -> (ServerConnectionDetails?, String) {
+        let result = (pendingServerConnection, serverConnectionImportError)
+        pendingServerConnection = nil
+        serverConnectionImportError = ""
+        return result
     }
 
     func sceneBecameActive() {

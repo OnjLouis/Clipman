@@ -125,7 +125,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         addRow("Server host", serverUrlField)
         serverTokenField.setAccessibilityLabel("Clipman Server token")
         serverTokenField.setAccessibilityHelp("Server authentication token. The token is hidden on screen and saved in this Mac user's Keychain.")
-        addRow("Server token", serverTokenField)
+        let importServerButton = button(title: "Import Server File...", action: #selector(importServerConnection))
+        importServerButton.setAccessibilityHelp("Import a Clipman Server connection file, review its address, then save preferences.")
+        addRow("Server token", serverTokenField, importServerButton)
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("History password", passwordField)
@@ -268,6 +270,38 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
             databasePathField.stringValue = url.path
+        }
+    }
+
+    @objc private func importServerConnection() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "clpconf") ?? .json]
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard fileSize <= 65_536 else { throw ConnectionConfigError.fileTooLarge }
+            let details = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
+            let alert = NSAlert()
+            alert.messageText = "Import Clipman Server connection?"
+            alert.informativeText = "Server: \(details.address)\n\nThe token will remain hidden in preferences. Choose Save and Close to apply this connection."
+            alert.addButton(withTitle: "Import")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            storageModePopup.selectItem(withTitle: "Clipman Server")
+            serverUrlField.stringValue = details.address
+            serverTokenField.stringValue = details.token
+            statusLabel.stringValue = "Server connection imported. Choose Save and Close to apply it."
+            serverUrlField.window?.makeFirstResponder(serverUrlField)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not import server connection"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
         }
     }
 

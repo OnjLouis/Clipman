@@ -39,8 +39,8 @@
 
     <h2 id="quick-start">Quick Start</h2>
     <p>Choose the binary matching the current operating system and processor. It is standalone and does not require Go to be installed. You may rename that binary to <code>clipman-cli</code> or <code>clipman-cli.exe</code> and place it on the command search path.</p>
-    <p>Run initialization once for each configuration. The easiest method is to use the private connection-details file created by Clipman Server:</p>
-    <pre><code>clipman-cli --password "history password" init --connection-file clipman-server-connection.txt</code></pre>
+    <p>Run initialization once for each configuration. The easiest method is to use the private importable connection file created by Clipman Server:</p>
+    <pre><code>clipman-cli --password "history password" init --connection-file clipman-server-connection.clpconf</code></pre>
     <p>Initialization checks the server and, when the selected database already exists, verifies that the history password can decrypt it. If the selected database does not exist, Clipman cannot distinguish a new password from a mistyped password. It warns before any history is created.</p>
     <p>Add and retrieve text through standard input and standard output:</p>
     <pre><code>printf '%s' 'Text from a terminal' | clipman-cli put

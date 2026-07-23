@@ -31,6 +31,8 @@ Backups/
 *.clipdb
 clipman-history.json
 clipman-settings.json
+clipman-server-connection.txt
+clipman-server-connection.clpconf
 
 # Private coordination notes
 ClipmanShared.md

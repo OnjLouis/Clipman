@@ -297,6 +297,13 @@ func runInit(g globals, args []string) error {
 		if *tokenFile != "" || *tokenValue != "" {
 			return fail(2, "--connection-file cannot be combined with --token or --token-file")
 		}
+		connectionInfo, readErr := os.Stat(*connectionFile)
+		if readErr != nil {
+			return fail(3, "cannot inspect connection file: %v", readErr)
+		}
+		if connectionInfo.Size() > 65536 {
+			return fail(2, "connection file is too large")
+		}
 		connectionData, readErr := os.ReadFile(*connectionFile)
 		if readErr != nil {
 			return fail(3, "cannot read connection file: %v", readErr)

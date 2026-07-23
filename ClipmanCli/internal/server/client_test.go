@@ -32,6 +32,20 @@ func TestConnectionDetailsServerSettingsJSON(t *testing.T) {
 	}
 }
 
+func TestConnectionDetailsPortableConfig(t *testing.T) {
+	serverURL, token := ConnectionDetails(`{"clipman":"server-connection","version":1,"address":"clipman://server.example:54321","host":"server.example","port":54321,"token":"test-token"}`)
+	if serverURL != "clipman://server.example:54321" || token != "test-token" {
+		t.Fatalf("details = %q, %q", serverURL, token)
+	}
+}
+
+func TestConnectionDetailsRejectsUnsupportedPortableConfig(t *testing.T) {
+	serverURL, token := ConnectionDetails(`{"clipman":"server-connection","version":2,"address":"clipman://server.example:54321","token":"test-token"}`)
+	if serverURL != "" || token != "" {
+		t.Fatalf("unsupported details = %q, %q", serverURL, token)
+	}
+}
+
 func TestNormalizeURLRejectsEmbeddedCredentials(t *testing.T) {
 	if _, err := NormalizeURL("https://user:password@example.test"); err == nil {
 		t.Fatal("expected embedded-credential rejection")

@@ -18,8 +18,47 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Clipman Server Connection</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>me.onj.clipman.server-connection</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>me.onj.clipman.server-connection</string>
+            <key>UTTypeDescription</key>
+            <string>Clipman Server Connection</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>clpconf</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/x-clipman-server-connection</string>
+            </dict>
+        </dict>
+    </array>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true />
     <key>ClipmanBuildStampUtcMs</key>
-    <string>1784810542809</string>
+    <string>1784836208541</string>
     <key>LSRequiresIPhoneOS</key>
     <true />
     <key>NSFaceIDUsageDescription</key>

@@ -23,6 +23,9 @@ struct RootView: View {
         .onAppear {
             app.sceneBecameActive()
         }
+        .onOpenURL { url in
+            app.openServerConnectionFile(url)
+        }
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:

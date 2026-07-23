@@ -105,12 +105,13 @@
 
   <pre><code>sh Linux/install-clipman-server.sh</code></pre>
 
-  <p>The installer copies the server into a user-local application folder, creates a launcher, writes first-run settings, and creates a plain text connection details file:</p>
+  <p>The installer copies the server into a user-local application folder, creates a launcher, writes first-run settings, and creates importable and plain text connection files:</p>
 
   <pre><code>Program:            ~/.local/lib/clipman-server/clipman_server.py
 Launcher:           ~/.local/bin/clipman-server
 Settings:           ~/.config/clipman-server/clipman-server-settings.json
-Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code></pre>
+Importable connection: ~/.config/clipman-server/clipman-server-connection.clpconf
+Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</code></pre>
 
   <p>If user systemd is available, the installer also writes a user service file and prints the commands needed to enable it. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
 
@@ -146,7 +147,7 @@ Connection details: ~/.config/clipman-server/clipman-server-connection.txt</code
       <tr><td><code>CLIPMAN_DATA_DIR</code></td><td>Container data folder. Defaults to <code>/data</code>.</td></tr>
       <tr><td><code>CLIPMAN_HOST</code></td><td>Listen host inside the container. Defaults to <code>0.0.0.0</code>.</td></tr>
       <tr><td><code>CLIPMAN_PORT</code></td><td>Listen port inside the container. Defaults to <code>8080</code>.</td></tr>
-      <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Optional host written into the connection details file.</td></tr>
+      <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Optional host written into the generated connection files.</td></tr>
       <tr><td><code>CLIPMAN_IS_BEHIND_REVERSE_PROXY</code></td><td>Set to <code>true</code> when TLS is handled by a reverse proxy.</td></tr>
       <tr><td><code>CLIPMAN_CERT_FILE</code> and <code>CLIPMAN_KEY_FILE</code></td><td>Optional direct TLS certificate and key paths inside the container.</td></tr>
     </tbody>
@@ -188,7 +189,7 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
 
   <p>This is useful when you deliberately want console output. It is not the recommended everyday way to run the server. On Windows and macOS, the wrapper menu's <strong>Open settings folder</strong>, <strong>Open logs folder</strong>, and <strong>Copy connection details</strong> commands are usually easier than running the server by hand.</p>
 
-  <p>On first run, the server creates a settings file with a random high port, a random bearer token, a private data directory, a managed log file, and a plain text connection details file beside the settings file.</p>
+  <p>On first run, the server creates a settings file with a random high port, a random bearer token, a private data directory, a managed log file, and importable and readable connection files beside the settings file.</p>
 
   <p>Show the token later with:</p>
 
@@ -243,26 +244,28 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
 
   <p>Linux installs should update by replacing the installed <code>clipman_server.py</code> from a newer server package, then restarting the user service. Keep settings, databases, logs, and backups outside the extracted release folder so updating the server program does not touch stored history.</p>
 
-  <h2 id="connection-info">Connection Details File</h2>
-  <p>The connection details file exists so users do not have to open or edit the JSON settings file just to configure clients. It contains:</p>
+  <h2 id="connection-info">Connection Files</h2>
+  <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, and waits for <strong>Save</strong> before applying it. Clipman CLI accepts it with <code>init --connection-file</code>.</p>
+
+  <p>The server also writes <code>clipman-server-connection.txt</code> for readable manual setup and older clients. It contains:</p>
 
   <pre><code>Server address:
 Port:
 Token:</code></pre>
 
-  <p>Keep this file private. After every Clipman client has been configured, delete it or move the details to a password manager. If it is deleted, the server will not recreate it on every launch. On Windows and macOS, use the wrapper menu's <strong>Copy connection details</strong> command when you need the address, port, and token again.</p>
+  <p>Both files contain the private server token. After every Clipman client has been configured, delete them or move the details to a password manager. If both are deleted, the server will not recreate them on every launch. On Windows and macOS, use the wrapper menu's <strong>Copy connection details</strong> command when you need the address, port, and token again.</p>
 
   <p>Default connection-details locations are:</p>
 
   <table>
     <thead>
-      <tr><th>Platform</th><th>Connection details file</th></tr>
+      <tr><th>Platform</th><th>Importable connection file</th></tr>
     </thead>
     <tbody>
-      <tr><td>Windows wrapper</td><td><code>%LOCALAPPDATA%\Clipman Server\clipman-server-connection.txt</code></td></tr>
-      <tr><td>macOS wrapper</td><td><code>~/Library/Application Support/Clipman Server/clipman-server-connection.txt</code></td></tr>
-      <tr><td>Linux installer</td><td><code>~/.config/clipman-server/clipman-server-connection.txt</code></td></tr>
-      <tr><td>Direct package run</td><td><code>./Settings/clipman-server-connection.txt</code></td></tr>
+      <tr><td>Windows wrapper</td><td><code>%LOCALAPPDATA%\Clipman Server\clipman-server-connection.clpconf</code></td></tr>
+      <tr><td>macOS wrapper</td><td><code>~/Library/Application Support/Clipman Server/clipman-server-connection.clpconf</code></td></tr>
+      <tr><td>Linux installer</td><td><code>~/.config/clipman-server/clipman-server-connection.clpconf</code></td></tr>
+      <tr><td>Direct package run</td><td><code>./Settings/clipman-server-connection.clpconf</code></td></tr>
     </tbody>
   </table>
 
@@ -325,7 +328,7 @@ clipmanserver connection</code></pre>
 
   <ol>
     <li>Install and start Clipman Server.</li>
-    <li>Copy the server address and token from <code>clipman-server-connection.txt</code>.</li>
+    <li>Import <code>clipman-server-connection.clpconf</code> in Clipman Preferences, or copy the address and token from the readable text file.</li>
     <li>On the Clipman client that already has the desired history, open Preferences.</li>
     <li>Set Storage type to <strong>Clipman Server</strong>, enter the server address and token, and keep the same Clipman history password.</li>
     <li>Let that client connect first. It will upload or merge the existing history into the correct password-scoped server bucket.</li>
@@ -336,9 +339,8 @@ clipmanserver connection</code></pre>
   <p>In Clipman Preferences:</p>
 
   <ol>
-    <li>Set Storage type to <strong>Clipman Server</strong>.</li>
-    <li>Enter the server host.</li>
-    <li>Enter the server token.</li>
+    <li>Choose <strong>Import server file</strong> and select <code>clipman-server-connection.clpconf</code>, or enter the server host and token manually.</li>
+    <li>Review the imported server address, then save Preferences.</li>
     <li>Keep the Clipman data folder local to that machine. It is used for settings and cache.</li>
   </ol>
 
@@ -366,22 +368,24 @@ clipmanserver connection</code></pre>
   --cert-file /etc/letsencrypt/live/example.com/fullchain.pem \
   --key-file /etc/letsencrypt/live/example.com/privkey.pem</code></pre>
 
-  <p><code>--host</code> controls where the server listens. <code>--advertise-host</code> controls what host name is written to <code>clipman-server-connection.txt</code>. Use the certificate's DNS name as the advertised host when the server binds to a private IP address.</p>
+  <p><code>--host</code> controls where the server listens. <code>--advertise-host</code> controls what host name is written to the connection files. Use the certificate's DNS name as the advertised host when the server binds to a private IP address.</p>
 
   <p>You can also run the server on localhost and put it behind a reverse proxy such as nginx, Caddy, or Apache. In that case, the public client address should still be HTTPS.</p>
 
   <h2 id="paths">Files and Paths</h2>
-  <p>When run directly from the extracted server package, the settings file and connection details file stay beside that package:</p>
+  <p>When run directly from the extracted server package, the settings and connection files stay beside that package:</p>
 
   <pre><code>Settings file:      ./Settings/clipman-server-settings.json
-Connection details: ./Settings/clipman-server-connection.txt</code></pre>
+Importable connection: ./Settings/clipman-server-connection.clpconf
+Readable connection:   ./Settings/clipman-server-connection.txt</code></pre>
 
   <p>Default data and log locations depend on the operating system:</p>
 
   <h3>Linux</h3>
 
   <pre><code>Settings:           ~/.config/clipman-server/clipman-server-settings.json
-Connection details: ~/.config/clipman-server/clipman-server-connection.txt
+Importable connection: ~/.config/clipman-server/clipman-server-connection.clpconf
+Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt
 Databases:          ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/clipman-history.clipdb
 Backups:            ~/.local/share/clipman-server/Databases/&lt;database-id&gt;/ServerBackups/
 Logs:               ~/.local/state/clipman-server/logs/clipman-server.log</code></pre>
@@ -389,7 +393,8 @@ Logs:               ~/.local/state/clipman-server/logs/clipman-server.log</code>
   <h3>Windows</h3>
 
   <pre><code>Settings:           %LOCALAPPDATA%\Clipman Server\clipman-server-settings.json
-Connection details: %LOCALAPPDATA%\Clipman Server\clipman-server-connection.txt
+Importable connection: %LOCALAPPDATA%\Clipman Server\clipman-server-connection.clpconf
+Readable connection:   %LOCALAPPDATA%\Clipman Server\clipman-server-connection.txt
 Runtime script:     %LOCALAPPDATA%\Clipman Server\Runtime\clipman_server.py
 Databases:          %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\clipman-history.clipdb
 Backups:            %LOCALAPPDATA%\Clipman Server\Databases\&lt;database-id&gt;\ServerBackups\
@@ -398,7 +403,8 @@ Logs:               %LOCALAPPDATA%\Clipman Server\logs\clipman-server.log</code>
   <h3>macOS</h3>
 
   <pre><code>Settings:           ~/Library/Application Support/Clipman Server/clipman-server-settings.json
-Connection details: ~/Library/Application Support/Clipman Server/clipman-server-connection.txt
+Importable connection: ~/Library/Application Support/Clipman Server/clipman-server-connection.clpconf
+Readable connection:   ~/Library/Application Support/Clipman Server/clipman-server-connection.txt
 Runtime script:     Clipman Server.app/Contents/Resources/clipman_server.py
 Databases:          ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/clipman-history.clipdb
 Backups:            ~/Library/Application Support/Clipman Server/Databases/&lt;database-id&gt;/ServerBackups/

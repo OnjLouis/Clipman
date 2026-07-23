@@ -191,6 +191,9 @@ namespace Clipman
             clearPassword.Click += (s, e) => UseNoDatabasePassword();
             var addRunningApp = new Button { Text = "Add runn&ing app...", Width = 125 };
             addRunningApp.Click += (s, e) => AddRunningApplication();
+            var importServerConnection = new Button { Text = "Import server &file...", AutoSize = true };
+            importServerConnection.AccessibleDescription = "Import a Clipman Server connection file, review its address, and apply it to these preferences.";
+            importServerConnection.Click += (s, e) => ImportServerConnection();
 
             var dbPanel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
             dbPanel.Controls.Add(databasePath);
@@ -213,6 +216,7 @@ namespace Clipman
             AddFullRow(storageLayout, NewNote("Choose the folder that contains Clipman's settings, sounds, logs, file history, and local text-history cache. In server mode, Clipman syncs that text-history cache with a Clipman Server."));
             AddRow(storageLayout, "Server &host:", serverUrl);
             AddRow(storageLayout, "Server t&oken:", serverToken);
+            AddFullRow(storageLayout, importServerConnection);
             AddFullRow(storageLayout, NewNote("Enter a host and port such as home-server:49152. Clipman will infer the local server protocol. Server mode stores the raw clipman-history.clipdb on a Clipman Server. The server never knows the history password; encryption still happens on this computer."));
             AddRow(storageLayout, "History &password:", passwordPanel);
             AddRow(storageLayout, "&Confirm password:", passwordConfirmPanel);
@@ -542,6 +546,49 @@ namespace Clipman
 
             ApplyNow();
             base.OnFormClosing(e);
+        }
+
+        private void ImportServerConnection()
+        {
+            using (var dialog = new OpenFileDialog
+            {
+                Title = "Import Clipman Server connection",
+                Filter = "Clipman Server connection (*.clpconf)|*.clpconf|All files (*.*)|*.*",
+                CheckFileExists = true,
+                Multiselect = false
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                if (new FileInfo(dialog.FileName).Length > 65536)
+                {
+                    MessageBox.Show(this, "This connection file is too large.", "Clipman Server connection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                ServerConnectionDetails details;
+                string error;
+                if (!ServerSettingsSanitizer.TryParseConnectionConfig(File.ReadAllText(dialog.FileName), out details, out error))
+                {
+                    MessageBox.Show(this, error, "Clipman Server connection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var result = MessageBox.Show(
+                    this,
+                    "Import this Clipman Server connection?\r\n\r\n" + details.Address +
+                    "\r\n\r\nThe token will remain hidden in preferences.",
+                    "Clipman Server connection",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (result != DialogResult.Yes) return;
+
+                storageMode.SelectedItem = "Clipman Server";
+                serverUrl.Text = details.Address;
+                serverToken.Text = details.Token;
+                ApplyNow();
+                serverUrl.Focus();
+            }
         }
 
         private bool ConfirmSingleModifierHotkeys()

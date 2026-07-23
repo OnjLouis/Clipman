@@ -10,6 +10,7 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 
 - Unlock with Face ID, Touch ID, or the device passcode.
 - Choose private Local storage or Clipman Server storage.
+- Open the private `.clpconf` connection file from the Files app to send it to Clipman's review-and-save flow, use the importer in Clipman Settings, or enter the server address and token manually.
 - Retain the server address, token, and history password while Local mode is selected.
 - Keep a private local cache in Server mode, save changes while offline, and merge them when the server becomes reachable again.
 - Browse text history and link history.
@@ -44,6 +45,6 @@ Rows expose a compact VoiceOver label and custom actions for common operations. 
 
 In Settings, use the VoiceOver scrub gesture to cancel unsaved changes and return to history.
 
-The server address, server token, and history password fields have explicit VoiceOver labels and instructions. Secure field contents remain hidden.
+The server address, server token, and history password fields have explicit VoiceOver labels and instructions. Secure field contents remain hidden. The server-file importer reads the address and token, presents the address for review, and waits for Save before applying it.
 
 Activate Clipman's status line to move to the bottom of the current history list. The standard iOS status-bar gesture remains available for returning to the top.

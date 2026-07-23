@@ -1,4 +1,17 @@
 import Foundation
+import UniformTypeIdentifiers
+
+struct ServerConnectionDetails: Sendable {
+    let address: String
+    let token: String
+}
+
+extension UTType {
+    static let clipmanServerConnection = UTType(
+        exportedAs: "me.onj.clipman.server-connection",
+        conformingTo: .json
+    )
+}
 
 enum ServerSettingsSanitizer {
     static func cleanDisplayURL(_ value: String) -> String {
@@ -37,11 +50,46 @@ enum ServerSettingsSanitizer {
                 .replacingOccurrences(of: #"(?i)^.*[:=]\s*"?"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\" \r\n\t"))
         }
-        if let json = text.range(of: #""AuthToken"\s*:\s*"([^"]+)""#, options: .regularExpression) {
+        if let json = text.range(of: #""(?:AuthToken|token)"\s*:\s*"([^"]+)""#, options: [.regularExpression, .caseInsensitive]) {
             return String(text[json])
                 .replacingOccurrences(of: #"^.*:\s*""#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\" \r\n\t"))
         }
         return text.trimmingCharacters(in: CharacterSet(charactersIn: "\" \r\n\t"))
+    }
+
+    static func parseConnectionConfig(_ data: Data) throws -> ServerConnectionDetails {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["clipman"] as? String == "server-connection"
+        else { throw ConnectionConfigError.invalidFile }
+        let version = (object["version"] as? NSNumber)?.intValue
+            ?? Int(object["version"] as? String ?? "")
+        guard version == 1 else { throw ConnectionConfigError.unsupportedVersion }
+
+        var address = cleanDisplayURL(object["address"] as? String ?? "")
+        if address.isEmpty,
+           let host = object["host"] as? String,
+           let port = object["port"] as? NSNumber {
+            address = cleanDisplayURL("\(host):\(port.intValue)")
+        }
+        let token = cleanToken(object["token"] as? String ?? "")
+        guard !address.isEmpty, !token.isEmpty else { throw ConnectionConfigError.missingDetails }
+        return ServerConnectionDetails(address: address, token: token)
+    }
+}
+
+enum ConnectionConfigError: LocalizedError, Sendable {
+    case invalidFile
+    case unsupportedVersion
+    case missingDetails
+    case fileTooLarge
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidFile: return "This is not a Clipman Server connection file."
+        case .unsupportedVersion: return "This Clipman Server connection-file version is not supported."
+        case .missingDetails: return "The connection file does not contain both a server address and token."
+        case .fileTooLarge: return "This connection file is too large."
+        }
     }
 }

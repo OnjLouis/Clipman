@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.9"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"
@@ -209,6 +209,10 @@ def default_connection_info_path(config_path: Path) -> Path:
     return config_path.parent / "clipman-server-connection.txt"
 
 
+def default_connection_config_path(config_path: Path) -> Path:
+    return config_path.parent / "clipman-server-connection.clpconf"
+
+
 def client_server_address(settings: Dict[str, Any]) -> str:
     scheme = "https" if has_tls(settings) else "clipman"
     return f"{scheme}://{advertised_host(settings)}:{settings['Port']}"
@@ -235,10 +239,39 @@ def write_connection_info(config_path: Path, settings: Dict[str, Any]) -> Path:
     return target
 
 
+def write_connection_config(config_path: Path, settings: Dict[str, Any]) -> Path:
+    target = default_connection_config_path(config_path)
+    make_private_dir(target.parent)
+    document = {
+        "clipman": "server-connection",
+        "version": 1,
+        "address": client_server_address(settings),
+        "host": advertised_host(settings),
+        "port": int(settings["Port"]),
+        "token": str(settings["AuthToken"]),
+    }
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(document, f, indent=2, sort_keys=True)
+        f.write("\n")
+    make_private_file(tmp)
+    tmp.replace(target)
+    make_private_file(target)
+    return target
+
+
 def maybe_write_connection_info(config_path: Path, settings: Dict[str, Any], settings_created: bool, force: bool) -> Path | None:
     target = default_connection_info_path(config_path)
     if force or settings_created or target.exists():
         return write_connection_info(config_path, settings)
+    return None
+
+
+def maybe_write_connection_config(config_path: Path, settings: Dict[str, Any], settings_created: bool, force: bool) -> Path | None:
+    target = default_connection_config_path(config_path)
+    legacy = default_connection_info_path(config_path)
+    if force or settings_created or target.exists() or legacy.exists():
+        return write_connection_config(config_path, settings)
     return None
 
 
@@ -878,7 +911,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--key-file", help="TLS private key PEM file for direct HTTPS and save it.")
     parser.add_argument("--allow-insecure-remote", action="store_true", help="Allow non-local HTTP listeners without TLS. Use only behind a VPN, firewall, or reverse proxy.")
     parser.add_argument("--show-token", action="store_true", help="Print the bearer token and exit.")
-    parser.add_argument("--write-connection-info", action="store_true", help="Write a plain text server address, port, and token file beside the settings file.")
+    parser.add_argument("--write-connection-info", action="store_true", help="Write importable and plain text server connection files beside the settings file.")
     parser.add_argument("--list-databases", action="store_true", help="List database buckets known to this server and exit.")
     parser.add_argument("--list-databases-json", action="store_true", help="List database buckets as JSON and exit.")
     parser.add_argument("--delete-database", help="Move one database bucket to DeletedDatabases. Requires --confirm and refuses buckets touched in the last 24 hours unless --force-recent is also passed.")
@@ -910,13 +943,14 @@ def main() -> int:
         settings["AllowInsecureRemote"] = True
     save_settings(config_path, settings)
     connection_info = maybe_write_connection_info(config_path, settings, settings_created, args.write_connection_info)
+    connection_config = maybe_write_connection_config(config_path, settings, settings_created, args.write_connection_info)
     configure_logging(settings)
 
     if args.show_token:
         print(settings["AuthToken"])
         return 0
     if args.write_connection_info:
-        print(connection_info or default_connection_info_path(config_path))
+        print(connection_config or default_connection_config_path(config_path))
         return 0
     if args.list_databases or args.list_databases_json:
         print_database_list(settings, args.list_databases_json)
@@ -954,6 +988,8 @@ def main() -> int:
     print("Use --show-token to print the bearer token for client setup.")
     if connection_info:
         print(f"Connection details written to {connection_info}")
+    if connection_config:
+        print(f"Importable connection file written to {connection_config}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

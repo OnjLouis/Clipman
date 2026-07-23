@@ -1,10 +1,14 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var app: ClipmanAppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ClipmanSettings.empty
     @State private var showServerConnection = false
+    @State private var showConnectionImporter = false
+    @State private var pendingConnection: ServerConnectionDetails?
+    @State private var connectionImportError = ""
 
     var body: some View {
         NavigationStack {
@@ -42,6 +46,10 @@ struct SettingsView: View {
                     Button(showServerConnection ? "Hide server connection" : "Show server connection") {
                         showServerConnection.toggle()
                     }
+                    Button("Import server connection file") {
+                        showConnectionImporter = true
+                    }
+                    .accessibilityHint("Choose a Clipman Server connection file, review its address, then save settings.")
                     if showServerConnection {
                         TextField("Server address", text: $draft.serverURL)
                             .textInputAutocapitalization(.never)
@@ -85,6 +93,50 @@ struct SettingsView: View {
             .onAppear {
                 draft = app.settings
                 showServerConnection = !serverIsConfigured
+                applyPendingConnectionImport()
+            }
+            .onChange(of: app.serverConnectionImportSequence) { _ in
+                applyPendingConnectionImport()
+            }
+            .fileImporter(
+                isPresented: $showConnectionImporter,
+                allowedContentTypes: [.clipmanServerConnection, .json, .data],
+                allowsMultipleSelection: false
+            ) { result in
+                do {
+                    guard let url = try result.get().first else { return }
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    guard fileSize <= 65_536 else { throw ConnectionConfigError.fileTooLarge }
+                    pendingConnection = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
+                } catch {
+                    connectionImportError = error.localizedDescription
+                }
+            }
+            .alert("Import Clipman Server connection?", isPresented: Binding(
+                get: { pendingConnection != nil },
+                set: { if !$0 { pendingConnection = nil } }
+            )) {
+                Button("Import") {
+                    guard let details = pendingConnection else { return }
+                    draft.storageMode = .server
+                    draft.serverURL = details.address
+                    draft.serverToken = details.token
+                    showServerConnection = true
+                    pendingConnection = nil
+                }
+                Button("Cancel", role: .cancel) { pendingConnection = nil }
+            } message: {
+                Text("Server: \(pendingConnection?.address ?? "")\n\nThe token will remain hidden. Choose Save to apply this connection.")
+            }
+            .alert("Could not import server connection", isPresented: Binding(
+                get: { !connectionImportError.isEmpty },
+                set: { if !$0 { connectionImportError = "" } }
+            )) {
+                Button("OK") { connectionImportError = "" }
+            } message: {
+                Text(connectionImportError)
             }
         }
         .accessibilityAction(.escape) {
@@ -95,6 +147,15 @@ struct SettingsView: View {
     private var serverIsConfigured: Bool {
         !draft.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !draft.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func applyPendingConnectionImport() {
+        let (details, errorMessage) = app.consumeServerConnectionImport()
+        if let details {
+            pendingConnection = details
+        } else if !errorMessage.isEmpty {
+            connectionImportError = errorMessage
+        }
     }
 
     private var appVersion: String {

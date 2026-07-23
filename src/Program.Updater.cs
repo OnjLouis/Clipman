@@ -214,7 +214,7 @@ namespace Clipman
 
         private static void DownloadUpdateZip(string zipUrl, string destination)
         {
-            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+            NetworkSecurity.EnableModernTls();
             using (var client = new WebClient())
             {
                 client.Headers[HttpRequestHeader.UserAgent] = "Clipman updater";

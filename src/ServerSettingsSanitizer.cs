@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 
@@ -7,7 +8,7 @@ namespace Clipman
     internal static class ServerSettingsSanitizer
     {
         private static readonly Regex UrlRegex = new Regex(@"(?:https?|clipman)://[^\s""'<>]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Regex JsonAuthTokenRegex = new Regex(@"""AuthToken""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex JsonAuthTokenRegex = new Regex(@"""(?:AuthToken|token)""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex JsonPortRegex = new Regex(@"""Port""\s*:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex JsonHostRegex = new Regex(@"""Host""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -80,6 +81,62 @@ namespace Clipman
             return text.Trim().Trim('"', '\'', ',', ';');
         }
 
+        public static bool TryParseConnectionConfig(string value, out ServerConnectionDetails details, out string error)
+        {
+            details = null;
+            error = string.Empty;
+            try
+            {
+                var serializer = new JavaScriptSerializer();
+                var parsed = serializer.DeserializeObject(value ?? string.Empty) as Dictionary<string, object>;
+                if (parsed == null || !string.Equals(GetString(parsed, "clipman"), "server-connection", StringComparison.Ordinal))
+                {
+                    error = "This is not a Clipman Server connection file.";
+                    return false;
+                }
+
+                int version;
+                if (!int.TryParse(GetString(parsed, "version"), out version) || version != 1)
+                {
+                    error = "This Clipman Server connection-file version is not supported.";
+                    return false;
+                }
+
+                var address = CleanUrl(GetString(parsed, "address"));
+                if (address.Length == 0)
+                {
+                    var host = GetString(parsed, "host");
+                    var port = GetString(parsed, "port");
+                    if (host.Length > 0 && port.Length > 0)
+                    {
+                        address = CleanUrl(host + ":" + port);
+                    }
+                }
+                var token = CleanToken(GetString(parsed, "token"));
+                if (address.Length == 0 || token.Length == 0)
+                {
+                    error = "The connection file does not contain both a server address and token.";
+                    return false;
+                }
+
+                details = new ServerConnectionDetails(address, token);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = "Clipman could not read this connection file: " + ex.Message;
+                return false;
+            }
+        }
+
+        private static string GetString(Dictionary<string, object> values, string key)
+        {
+            object value;
+            return values.TryGetValue(key, out value) && value != null
+                ? Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture).Trim()
+                : string.Empty;
+        }
+
         private static string MatchGroup(Regex regex, string text)
         {
             var match = regex.Match(text);
@@ -105,5 +162,17 @@ namespace Clipman
         {
             public string AuthToken { get; set; }
         }
+    }
+
+    internal sealed class ServerConnectionDetails
+    {
+        public ServerConnectionDetails(string address, string token)
+        {
+            Address = address;
+            Token = token;
+        }
+
+        public string Address { get; private set; }
+        public string Token { get; private set; }
     }
 }

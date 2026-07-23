@@ -168,7 +168,7 @@ Server backups are raw `.clipdb` copies written under each database bucket, so e
 
 For private LAN, localhost, or VPN-only use, clients can use `clipman://host:port`. Do not expose plain `clipman://` or plain HTTP to the public internet. For VPS or internet-facing use, put the server behind HTTPS or start the server with `--cert-file` and `--key-file` so clients connect using an `https://` address.
 
-On Linux, the server package includes `Linux/install-clipman-server.sh`. The installer copies the server into a user-local application folder, creates a launcher, creates first-run settings, and writes `clipman-server-connection.txt` beside the settings file. That text file contains the server address, port, and token so users do not have to copy values from JSON. Delete it or move the details to a password manager once every client is configured. On Windows and macOS, the wrapper menus include **Copy connection details** and **Open settings folder** commands for the same information.
+On Linux, `Linux/install-clipman-server.sh` installs the server and its startup helper. On first setup, Clipman Server writes `clipman-server-connection.clpconf` beside its settings file. Windows, Mac, Android, iOS, and Clipman CLI can import this file to fill the server address and token without copying individual values. On Android and iOS, opening the file from the system file browser starts Clipman's review-and-save flow; the import command in Clipman Settings remains available as a fallback. The server also writes `clipman-server-connection.txt` for readable manual setup and older clients. Both files contain the private server token; delete them or move the details to a password manager once every client is configured. On Windows and macOS, the wrapper menus include **Copy connection details** and **Open settings folder** commands for the same information.
 
 The Linux installer also creates a `clipmanserver` helper command for everyday administration. Use `clipmanserver start`, `clipmanserver stop`, `clipmanserver restart`, `clipmanserver status`, `clipmanserver list`, `clipmanserver list-json`, `clipmanserver delete <database-id>`, `clipmanserver force-delete <database-id>`, `clipmanserver console`, `clipmanserver token`, and `clipmanserver connection` instead of remembering the full Python command. Normal delete refuses buckets touched in the last 24 hours; force-delete is the deliberate override after checking the full database ID.
 
@@ -184,6 +184,8 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 ### 2.0.9
 
+- Fixed Windows connections to HTTPS Clipman Servers, including reverse proxies using current Let's Encrypt certificates.
+- Added a portable Clipman Server connection file that can fill the server address and hidden token in Windows, Mac, Android, iOS, and Clipman CLI without copying individual values. Android and iOS also register the file type so opening it can take you directly to Clipman's review-and-save flow. This implements the portable setup part of [issue #34](https://github.com/OnjLouis/Clipman/issues/34).
 - Added explicit VoiceOver labels and instructions to the iOS server address, server token, and history password fields.
 - The optional iOS launch clipboard offer now appears only when the pasteboard contains text, avoiding an empty Paste screen.
 

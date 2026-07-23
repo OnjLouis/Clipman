@@ -11,7 +11,9 @@ import android.os.Vibrator
 import android.util.Patterns
 import android.view.View
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -61,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -77,6 +80,8 @@ class MainActivity : FragmentActivity() {
     private var isUnlocked by mutableStateOf(false)
     private var unlockMessage by mutableStateOf("Clipman is locked.")
     private var unlockPromptShowing = false
+    private var externalConnectionImport by mutableStateOf<ExternalServerConnectionImport?>(null)
+    private var nextExternalConnectionImportId = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,7 +90,12 @@ class MainActivity : FragmentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     if (isUnlocked) {
-                        ClipmanApp()
+                        ClipmanApp(
+                            externalConnectionImport = externalConnectionImport,
+                            onExternalConnectionImportConsumed = { id ->
+                                if (externalConnectionImport?.id == id) externalConnectionImport = null
+                            }
+                        )
                     } else {
                         LockedScreen(
                             message = unlockMessage
@@ -117,12 +127,37 @@ class MainActivity : FragmentActivity() {
 
     private fun handleConfigurationIntent(intent: Intent?) {
         if (intent == null) return
+        if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
+            importServerConnection(intent.data!!)
+            return
+        }
         val serverUrl = intent.getStringExtra("serverUrl") ?: intent.getStringExtra("clipmanServerUrl")
         val serverToken = intent.getStringExtra("serverToken") ?: intent.getStringExtra("clipmanServerToken")
         if (serverUrl.isNullOrBlank() && serverToken.isNullOrBlank()) return
         val settings = AndroidSettings(this)
         if (!serverUrl.isNullOrBlank()) settings.serverUrl = serverUrl
         if (!serverToken.isNullOrBlank()) settings.serverToken = serverToken
+    }
+
+    private fun importServerConnection(uri: Uri) {
+        val requestId = ++nextExternalConnectionImportId
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readLimitedText(65_536) }
+                        ?: error("The selected file could not be read.")
+                }.mapCatching(ServerConnectionConfig::parse)
+            }
+            externalConnectionImport = result.fold(
+                onSuccess = { ExternalServerConnectionImport(requestId, details = it) },
+                onFailure = {
+                    ExternalServerConnectionImport(
+                        requestId,
+                        errorMessage = it.message ?: it::class.java.simpleName
+                    )
+                }
+            )
+        }
     }
 
     private fun requestUnlock() {
@@ -219,9 +254,18 @@ private data class MobileSettingsSnapshot(
     val useHaptics: Boolean
 )
 
+private data class ExternalServerConnectionImport(
+    val id: Long,
+    val details: ServerConnectionDetails? = null,
+    val errorMessage: String = ""
+)
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun ClipmanApp() {
+private fun ClipmanApp(
+    externalConnectionImport: ExternalServerConnectionImport?,
+    onExternalConnectionImportConsumed: (Long) -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
     val settings = remember { AndroidSettings(context) }
@@ -265,6 +309,41 @@ private fun ClipmanApp() {
     var loadGeneration by remember { mutableStateOf(0L) }
     var changeGeneration by remember { mutableStateOf(0L) }
     var isSavingSettings by remember { mutableStateOf(false) }
+    val importServerConnection = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readLimitedText(65_536) }
+                    ?: error("The selected file could not be read.")
+            }.mapCatching(ServerConnectionConfig::parse)
+                .onSuccess { details ->
+                    storageMode = MobileStorageMode.Server
+                    serverUrl = details.address
+                    token = details.token
+                    status = "Server connection imported. Review it, then choose Save."
+                    announce(view, status)
+                }
+                .onFailure { error ->
+                    status = "Could not import server connection: ${error.message ?: error::class.java.simpleName}"
+                    announce(view, status)
+                }
+        }
+    }
+
+    LaunchedEffect(externalConnectionImport?.id) {
+        val request = externalConnectionImport ?: return@LaunchedEffect
+        val details = request.details
+        if (details != null) {
+            storageMode = MobileStorageMode.Server
+            serverUrl = details.address
+            token = details.token
+            showConnectionSettings = true
+            status = "Server connection imported. Review it, then choose Save."
+        } else {
+            status = "Could not import server connection: ${request.errorMessage}"
+        }
+        announce(view, status)
+        onExternalConnectionImportConsumed(request.id)
+    }
 
     fun discardSettingsChanges() {
         serverUrl = settings.serverUrl
@@ -595,6 +674,9 @@ private fun ClipmanApp() {
                         status = "Clipboard does not contain a server token."
                         announce(view, status)
                     }
+                },
+                onImportServerFile = {
+                    importServerConnection.launch(arrayOf("*/*"))
                 },
                 password = password,
                 onPasswordChanged = { password = it },
@@ -954,6 +1036,7 @@ private fun ConnectionSettingsScreen(
     token: String,
     onTokenChanged: (String) -> Unit,
     onPasteToken: () -> Unit,
+    onImportServerFile: () -> Unit,
     password: String,
     onPasswordChanged: (String) -> Unit,
     deviceName: String,
@@ -1076,6 +1159,9 @@ private fun ConnectionSettingsScreen(
                 )
                 TextButton(onClick = { showServerConnection = !showServerConnection }, enabled = !isSaving) {
                     Text(if (showServerConnection) "Hide server connection" else "Show server connection")
+                }
+                TextButton(onClick = onImportServerFile, enabled = !isSaving) {
+                    Text("Import server connection file")
                 }
                 if (showServerConnection) {
                     OutlinedTextField(
@@ -1494,7 +1580,19 @@ private fun cleanServerToken(value: String): String {
     val text = value.trim()
     val labeled = Regex("""(?i)\b(?:Token|AuthToken)\s*[:=]\s*"?([A-Za-z0-9_\-]+)""").find(text)
     if (labeled != null) return labeled.groupValues[1].trim()
-    val json = Regex(""""AuthToken"\s*:\s*"([^"]+)"""").find(text)
+    val json = Regex(""""(?:AuthToken|token)"\s*:\s*"([^"]+)"""", RegexOption.IGNORE_CASE).find(text)
     if (json != null) return json.groupValues[1].trim()
     return text.trim('"')
+}
+
+private fun java.io.Reader.readLimitedText(maxChars: Int): String {
+    val output = StringBuilder()
+    val buffer = CharArray(4096)
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        if (output.length + count > maxChars) error("This connection file is too large.")
+        output.append(buffer, 0, count)
+    }
+    return output.toString()
 }

@@ -82,7 +82,7 @@
   <ol>
     <li>Open Settings if it is not already shown.</li>
     <li>Choose <strong>Local</strong> to keep history on this phone, or <strong>Server</strong> to share history through Clipman Server.</li>
-    <li>For Server mode, enter the Clipman Server address and server token.</li>
+    <li>For Server mode, open the private <code>.clpconf</code> file from Android's file browser, or choose <strong>Import server connection file</strong> in Clipman Settings. You can also enter the server address and token manually.</li>
     <li>Enter the history password when the history is password protected.</li>
     <li>Choose <strong>Save</strong> at the top of Settings.</li>
   </ol>
@@ -124,11 +124,13 @@
     <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
     <li><strong>Use haptic feedback</strong>: vibrates for supported feedback events.</li>
-    <li><strong>Server connection</strong>: shows or hides server address, server token, history password, and show-password controls.</li>
+    <li><strong>Server connection</strong>: imports a private <code>.clpconf</code> server file, or shows server address, server token, history password, and show-password controls for manual setup.</li>
     <li><strong>Build information</strong>: shows the app version, readable UTC build time, and exact build stamp so a tester can identify the installed build unambiguously.</li>
   </ul>
 
   <p>Choose <strong>Cancel</strong> at the top, or use Android Back, to discard changes and return to history. Choose <strong>Save</strong> to apply changes and return to history. A history refresh that finishes while Settings is open does not close the Settings screen.</p>
+
+  <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. The <code>.clpconf</code> file contains the private server token; delete it or move it to a password manager after configuring your devices.</p>
 
   <p>If only some custom sounds are available, Clipman uses those and falls back to bundled defaults for the rest.</p>
 

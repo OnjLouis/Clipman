@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import http.client
+import json
+import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +13,40 @@ from pathlib import Path
 from threading import Barrier, Thread
 
 import clipman_server
+
+
+class ConnectionConfigTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.config_path = self.root / "settings.json"
+        self.settings, _ = clipman_server.load_settings(self.config_path)
+        self.settings.update({
+            "AdvertiseHost": "server.example",
+            "Port": 54321,
+            "AuthToken": "test-token",
+        })
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_connection_config_is_valid_and_complete(self) -> None:
+        target = clipman_server.write_connection_config(self.config_path, self.settings)
+        document = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual("server-connection", document["clipman"])
+        self.assertEqual(1, document["version"])
+        self.assertEqual("clipman://server.example:54321", document["address"])
+        self.assertEqual("server.example", document["host"])
+        self.assertEqual(54321, document["port"])
+        self.assertEqual("test-token", document["token"])
+        if os.name != "nt":
+            self.assertEqual(0, target.stat().st_mode & 0o077)
+
+    def test_legacy_connection_file_triggers_new_config(self) -> None:
+        clipman_server.write_connection_info(self.config_path, self.settings)
+        target = clipman_server.maybe_write_connection_config(self.config_path, self.settings, False, False)
+        self.assertEqual(clipman_server.default_connection_config_path(self.config_path), target)
+        self.assertTrue(target.is_file())
 
 
 class ConditionalCreateTests(unittest.TestCase):

@@ -88,6 +88,7 @@ namespace Clipman
                 throw new InvalidOperationException("Clipman server host and token are required.");
             }
 
+            NetworkSecurity.EnableModernTls();
             var request = (HttpWebRequest)WebRequest.Create(new Uri(new Uri(baseUrl), relativePath));
             request.Method = method;
             request.Timeout = 8000;

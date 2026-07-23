@@ -326,7 +326,7 @@ namespace Clipman
 
         private static WebClient CreateGitHubClient()
         {
-            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+            NetworkSecurity.EnableModernTls();
             var client = new WebClient();
             client.Headers.Add("User-Agent", UserAgent);
             return client;

@@ -401,7 +401,7 @@
 
   <p>For private LAN, localhost, or VPN-only use, clients can use <code>clipman://host:port</code>. Clipman displays that form to avoid making the server look like a normal web page, then uses the local server transport internally. Do not expose plain <code>clipman://</code> or plain HTTP to the public internet. For VPS or internet-facing use, put the server behind HTTPS or start the server with <code>--cert-file</code> and <code>--key-file</code> so clients connect using an <code>https://</code> address.</p>
 
-  <p>On Linux, the server package includes <code>Linux/install-clipman-server.sh</code>. The installer copies the server into a user-local application folder, creates a launcher, creates first-run settings, and writes <code>clipman-server-connection.txt</code> beside the settings file. That text file contains the server address, port, and token so users do not have to copy values from JSON. Delete it or move the details to a password manager once every client is configured.</p>
+  <p>On Linux, <code>Linux/install-clipman-server.sh</code> installs the server and its startup helper. On first setup, Clipman Server creates <code>clipman-server-connection.clpconf</code> beside its settings file. In Clipman Preferences, choose <strong>Import server file</strong> on Windows or <strong>Import Server File</strong> on Mac, review the server address, then save. On Android or iOS, tap the <code>.clpconf</code> file in the system file browser to open it in Clipman, or use <strong>Import server connection file</strong> in Clipman Settings. Clipman requires the normal device unlock, displays the address for review, keeps the token hidden, and does not apply the connection until you choose <strong>Save</strong>. The server also writes a readable <code>clipman-server-connection.txt</code> file for manual setup and older clients. Both files contain the private server token; delete them or move the details to a password manager once every client is configured.</p>
 
   <p>To start a server from an existing history, connect first from the Clipman client that already has the desired history and history password. Do not manually copy a <code>.clipdb</code> into the server's database folders; clients derive the correct server bucket from the server token and the history password, and the server deliberately does not know the history password.</p>
 
@@ -558,6 +558,8 @@
   <h2 id="changelog">Changelog</h2>
   <h3>2.0.9</h3>
   <ul>
+    <li>Fixed Windows connections to HTTPS Clipman Servers, including reverse proxies using current Let's Encrypt certificates.</li>
+    <li>Added a portable Clipman Server connection file that can fill the server address and hidden token in Windows, Mac, Android, iOS, and Clipman CLI without copying individual values. Android and iOS also register the file type so opening it can take you directly to Clipman's review-and-save flow. This implements the portable setup part of <a href="https://github.com/OnjLouis/Clipman/issues/34">issue #34</a>.</li>
     <li>Added explicit VoiceOver labels and instructions to the iOS server address, server token, and history password fields.</li>
     <li>The optional iOS launch clipboard offer now appears only when the pasteboard contains text, avoiding an empty Paste screen.</li>
   </ul>

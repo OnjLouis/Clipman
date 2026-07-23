@@ -22,7 +22,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios
         PRODUCT_NAME: Clipman
         MARKETING_VERSION: "2.0.9"
-        CURRENT_PROJECT_VERSION: "20901"
+        CURRENT_PROJECT_VERSION: "20902"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanIOS/Support/Info.plist
         SDKROOT: iphoneos

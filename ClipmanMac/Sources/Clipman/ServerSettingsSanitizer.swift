@@ -1,5 +1,10 @@
 import Foundation
 
+struct ServerConnectionDetails {
+    let address: String
+    let token: String
+}
+
 enum ServerSettingsSanitizer {
     static func cleanURL(_ value: String) -> String {
         var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,6 +48,33 @@ enum ServerSettingsSanitizer {
         return text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"',;")))
     }
 
+    static func parseConnectionConfig(_ data: Data) throws -> ServerConnectionDetails {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["clipman"] as? String == "server-connection"
+        else {
+            throw ConnectionConfigError.invalidFile
+        }
+        let version: Int?
+        if let number = object["version"] as? NSNumber {
+            version = number.intValue
+        } else if let text = object["version"] as? String {
+            version = Int(text)
+        } else {
+            version = nil
+        }
+        guard version == 1 else { throw ConnectionConfigError.unsupportedVersion }
+
+        var address = cleanURL(object["address"] as? String ?? "")
+        if address.isEmpty,
+           let host = object["host"] as? String,
+           let port = object["port"] as? NSNumber {
+            address = cleanURL("\(host):\(port.intValue)")
+        }
+        let token = cleanToken(object["token"] as? String ?? "")
+        guard !address.isEmpty, !token.isEmpty else { throw ConnectionConfigError.missingDetails }
+        return ServerConnectionDetails(address: address, token: token)
+    }
+
     private static func extractJSONValue(from text: String, keys: [String]) -> String? {
         guard let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -53,5 +85,21 @@ enum ServerSettingsSanitizer {
             }
         }
         return nil
+    }
+}
+
+enum ConnectionConfigError: LocalizedError {
+    case invalidFile
+    case unsupportedVersion
+    case missingDetails
+    case fileTooLarge
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidFile: return "This is not a Clipman Server connection file."
+        case .unsupportedVersion: return "This Clipman Server connection-file version is not supported."
+        case .missingDetails: return "The connection file does not contain both a server address and token."
+        case .fileTooLarge: return "This connection file is too large."
+        }
     }
 }
