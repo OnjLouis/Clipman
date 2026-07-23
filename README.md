@@ -8,6 +8,8 @@ Project page: <https://github.com/OnjLouis/Clipman>
 
 Windows and macOS downloads are attached to releases in this repository.
 
+iPhone and iPad users can [join the Clipman public beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
+
 An optional Clipman CLI development preview is available from prereleases for terminal, SSH, scripting, and headless use. It is an additional Clipman Server client, not a replacement for the native Windows, macOS, Android, or iOS apps.
 
 ## Features
