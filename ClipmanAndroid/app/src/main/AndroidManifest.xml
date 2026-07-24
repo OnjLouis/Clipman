@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
@@ -8,6 +9,7 @@
         android:allowBackup="false"
         android:icon="@drawable/clipman_app_icon"
         android:label="Clipman"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@drawable/clipman_app_icon"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
@@ -34,5 +36,14 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
     </application>
 </manifest>

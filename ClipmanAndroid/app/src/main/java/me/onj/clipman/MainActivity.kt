@@ -70,6 +70,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -108,12 +109,18 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        requestUnlock()
+        if (AndroidSettings(this).requireAuthentication) {
+            requestUnlock()
+        } else {
+            unlockPromptShowing = false
+            isUnlocked = true
+            unlockMessage = "Clipman is unlocked."
+        }
     }
 
     override fun onStop() {
         super.onStop()
-        if (!isChangingConfigurations) {
+        if (!isChangingConfigurations && AndroidSettings(this).requireAuthentication) {
             isUnlocked = false
             unlockMessage = "Clipman is locked."
         }
@@ -162,6 +169,11 @@ class MainActivity : FragmentActivity() {
 
     private fun requestUnlock() {
         if (isUnlocked || unlockPromptShowing) return
+        if (!AndroidSettings(this).requireAuthentication) {
+            isUnlocked = true
+            unlockMessage = "Clipman is unlocked."
+            return
+        }
         val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
             BiometricManager.Authenticators.DEVICE_CREDENTIAL
         val manager = BiometricManager.from(this)
@@ -250,6 +262,8 @@ private data class MobileSettingsSnapshot(
     val deviceName: String,
     val copyRemoteToClipboard: Boolean,
     val addClipboardOnLaunch: Boolean,
+    val requireAuthentication: Boolean,
+    val checkForUpdatesAutomatically: Boolean,
     val playSounds: Boolean,
     val useHaptics: Boolean
 )
@@ -286,6 +300,8 @@ private fun ClipmanApp(
     }
     var copyRemoteToClipboard by remember { mutableStateOf(settings.copyRemoteToClipboard) }
     var addClipboardOnLaunch by remember { mutableStateOf(settings.addClipboardOnLaunch) }
+    var requireAuthentication by remember { mutableStateOf(settings.requireAuthentication) }
+    var checkForUpdatesAutomatically by remember { mutableStateOf(settings.checkForUpdatesAutomatically) }
     var playSounds by remember { mutableStateOf(settings.playSounds) }
     var useHaptics by remember { mutableStateOf(settings.useHaptics) }
     var status by remember { mutableStateOf("Not loaded.") }
@@ -309,6 +325,21 @@ private fun ClipmanApp(
     var loadGeneration by remember { mutableStateOf(0L) }
     var changeGeneration by remember { mutableStateOf(0L) }
     var isSavingSettings by remember { mutableStateOf(false) }
+    var isCheckingForUpdate by remember { mutableStateOf(false) }
+    var isDownloadingUpdate by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf("") }
+    var updateCandidate by remember { mutableStateOf<AndroidUpdateCandidate?>(null) }
+    var pendingUpdateApk by remember { mutableStateOf<File?>(null) }
+    val unknownSourcesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val apk = pendingUpdateApk
+        if (apk != null && AndroidUpdateService.canInstallPackages(context)) {
+            pendingUpdateApk = null
+            runCatching { AndroidUpdateService.openInstaller(context, apk) }
+                .onFailure { updateStatus = "Could not open the Android installer: ${it.message ?: it::class.java.simpleName}" }
+        } else if (apk != null) {
+            updateStatus = "Allow Clipman to install unknown apps, then choose Check Now again."
+        }
+    }
     val importServerConnection = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -353,6 +384,8 @@ private fun ClipmanApp(
         deviceName = settings.deviceName
         copyRemoteToClipboard = settings.copyRemoteToClipboard
         addClipboardOnLaunch = settings.addClipboardOnLaunch
+        requireAuthentication = settings.requireAuthentication
+        checkForUpdatesAutomatically = settings.checkForUpdatesAutomatically
         playSounds = settings.playSounds
         useHaptics = settings.useHaptics
         showConnectionSettings = false
@@ -370,6 +403,8 @@ private fun ClipmanApp(
         settings.deviceName = snapshot.deviceName
         settings.copyRemoteToClipboard = snapshot.copyRemoteToClipboard
         settings.addClipboardOnLaunch = snapshot.addClipboardOnLaunch
+        settings.requireAuthentication = snapshot.requireAuthentication
+        settings.checkForUpdatesAutomatically = snapshot.checkForUpdatesAutomatically
         settings.playSounds = snapshot.playSounds
         settings.useHaptics = snapshot.useHaptics
     }
@@ -518,6 +553,67 @@ private fun ClipmanApp(
         }
     }
 
+    fun installDownloadedUpdate(apk: File) {
+        if (AndroidUpdateService.canInstallPackages(context)) {
+            runCatching { AndroidUpdateService.openInstaller(context, apk) }
+                .onFailure { updateStatus = "Could not open the Android installer: ${it.message ?: it::class.java.simpleName}" }
+        } else {
+            pendingUpdateApk = apk
+            updateStatus = "Allow Clipman to install updates, then return to continue."
+            unknownSourcesLauncher.launch(AndroidUpdateService.unknownSourcesSettingsIntent(context))
+        }
+    }
+
+    fun checkForUpdates(userInitiated: Boolean) {
+        if (isCheckingForUpdate || isDownloadingUpdate) return
+        isCheckingForUpdate = true
+        if (userInitiated) updateStatus = "Checking for updates..."
+        scope.launch {
+            runCatching { AndroidUpdateService.check(BuildConfig.VERSION_NAME) }
+                .onSuccess { candidate ->
+                    settings.lastUpdateCheckUnixMs = System.currentTimeMillis()
+                    if (candidate == null) {
+                        if (userInitiated) updateStatus = "Clipman is up to date."
+                    } else {
+                        updateCandidate = candidate
+                        updateStatus = "Clipman ${candidate.version} is available."
+                    }
+                }
+                .onFailure { error ->
+                    if (userInitiated) {
+                        updateStatus = "Could not check for updates: ${error.message ?: error::class.java.simpleName}"
+                    }
+                }
+            isCheckingForUpdate = false
+        }
+    }
+
+    fun downloadUpdate(candidate: AndroidUpdateCandidate) {
+        if (isDownloadingUpdate) return
+        updateCandidate = null
+        isDownloadingUpdate = true
+        updateStatus = "Downloading Clipman ${candidate.version}..."
+        scope.launch {
+            runCatching { AndroidUpdateService.downloadAndVerify(context, candidate) }
+                .onSuccess { apk ->
+                    updateStatus = "Clipman ${candidate.version} is ready to install."
+                    installDownloadedUpdate(apk)
+                }
+                .onFailure { error ->
+                    updateStatus = "Could not prepare the update: ${error.message ?: error::class.java.simpleName}"
+                }
+            isDownloadingUpdate = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val day = 24L * 60L * 60L * 1000L
+        if (checkForUpdatesAutomatically && System.currentTimeMillis() - settings.lastUpdateCheckUnixMs >= day) {
+            delay(3_000)
+            checkForUpdates(userInitiated = false)
+        }
+    }
+
     LaunchedEffect(addClipboardAfterLoad) {
         if (addClipboardAfterLoad) {
             addClipboardAfterLoad = false
@@ -530,7 +626,7 @@ private fun ClipmanApp(
     }
 
     LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings) {
-        val ready = storageMode == MobileStorageMode.Local || (serverUrl.isNotBlank() && token.isNotBlank())
+        val ready = storageMode == MobileStorageMode.Local || (serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank())
         if (!attemptedInitialLoad && !showConnectionSettings && ready) {
             attemptedInitialLoad = true
             loadHistory()
@@ -538,7 +634,7 @@ private fun ClipmanApp(
     }
 
     LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings) {
-        while (storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && !showConnectionSettings) {
+        while (storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
             delay(5000)
             loadHistory(announceResult = false, updateStatusWhenUnchanged = false)
         }
@@ -637,6 +733,19 @@ private fun ClipmanApp(
             }
         )
     }
+    updateCandidate?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { updateCandidate = null },
+            title = { Text("Clipman update available") },
+            text = { Text("Clipman ${candidate.version} is available. Android will ask you to approve the installation.") },
+            confirmButton = {
+                TextButton(onClick = { downloadUpdate(candidate) }) { Text("Download") }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateCandidate = null }) { Text("Not now") }
+            }
+        )
+    }
     if (showGroupPicker) {
         GroupPickerDialog(
             groups = groups,
@@ -688,6 +797,13 @@ private fun ClipmanApp(
                 onCopyRemoteToClipboardChanged = { copyRemoteToClipboard = it },
                 addClipboardOnLaunch = addClipboardOnLaunch,
                 onAddClipboardOnLaunchChanged = { addClipboardOnLaunch = it },
+                requireAuthentication = requireAuthentication,
+                onRequireAuthenticationChanged = { requireAuthentication = it },
+                checkForUpdatesAutomatically = checkForUpdatesAutomatically,
+                onCheckForUpdatesAutomaticallyChanged = { checkForUpdatesAutomatically = it },
+                isCheckingForUpdate = isCheckingForUpdate || isDownloadingUpdate,
+                updateStatus = updateStatus,
+                onCheckForUpdates = { checkForUpdates(userInitiated = true) },
                 playSounds = playSounds,
                 onPlaySoundsChanged = { playSounds = it },
                 useHaptics = useHaptics,
@@ -695,6 +811,11 @@ private fun ClipmanApp(
                 onCancel = { if (!isSavingSettings) discardSettingsChanges() },
                 onSave = saveSettings@{
                     if (isSavingSettings) return@saveSettings
+                    if (storageMode == MobileStorageMode.Server && password.isBlank()) {
+                        status = "Clipman Server requires a unique history password. Enter one before saving this connection."
+                        announce(view, status)
+                        return@saveSettings
+                    }
                     val savedSettings = MobileSettingsSnapshot(
                         storageMode = storageMode,
                         serverUrl = serverUrl,
@@ -703,6 +824,8 @@ private fun ClipmanApp(
                         deviceName = deviceName,
                         copyRemoteToClipboard = copyRemoteToClipboard,
                         addClipboardOnLaunch = addClipboardOnLaunch,
+                        requireAuthentication = requireAuthentication,
+                        checkForUpdatesAutomatically = checkForUpdatesAutomatically,
                         playSounds = playSounds,
                         useHaptics = useHaptics
                     )
@@ -735,6 +858,8 @@ private fun ClipmanApp(
                             deviceName = savedSettings.deviceName
                             copyRemoteToClipboard = savedSettings.copyRemoteToClipboard
                             addClipboardOnLaunch = savedSettings.addClipboardOnLaunch
+                            requireAuthentication = savedSettings.requireAuthentication
+                            checkForUpdatesAutomatically = savedSettings.checkForUpdatesAutomatically
                             playSounds = savedSettings.playSounds
                             useHaptics = savedSettings.useHaptics
                             saveSettings(savedSettings)
@@ -1047,6 +1172,13 @@ private fun ConnectionSettingsScreen(
     onCopyRemoteToClipboardChanged: (Boolean) -> Unit,
     addClipboardOnLaunch: Boolean,
     onAddClipboardOnLaunchChanged: (Boolean) -> Unit,
+    requireAuthentication: Boolean,
+    onRequireAuthenticationChanged: (Boolean) -> Unit,
+    checkForUpdatesAutomatically: Boolean,
+    onCheckForUpdatesAutomaticallyChanged: (Boolean) -> Unit,
+    isCheckingForUpdate: Boolean,
+    updateStatus: String,
+    onCheckForUpdates: () -> Unit,
     playSounds: Boolean,
     onPlaySoundsChanged: (Boolean) -> Unit,
     useHaptics: Boolean,
@@ -1139,6 +1271,29 @@ private fun ConnectionSettingsScreen(
             label = "Add current clipboard to history on launch",
             enabled = !isSaving
         )
+        SettingCheckboxRow(
+            checked = requireAuthentication,
+            onCheckedChange = onRequireAuthenticationChanged,
+            label = "Require biometric or device authentication",
+            enabled = !isSaving
+        )
+        Text(
+            text = "Updates",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        SettingCheckboxRow(
+            checked = checkForUpdatesAutomatically,
+            onCheckedChange = onCheckForUpdatesAutomaticallyChanged,
+            label = "Check for updates automatically",
+            enabled = !isSaving
+        )
+        TextButton(onClick = onCheckForUpdates, enabled = !isSaving && !isCheckingForUpdate) {
+            Text(if (isCheckingForUpdate) "Checking" else "Check Now")
+        }
+        if (updateStatus.isNotBlank()) {
+            Text(updateStatus, style = MaterialTheme.typography.bodySmall)
+        }
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(12.dp),

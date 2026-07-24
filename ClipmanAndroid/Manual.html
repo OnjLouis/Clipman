@@ -50,6 +50,7 @@
     <li><a href="#main-screen">Main Screen</a></li>
     <li><a href="#view-entry">View Entry</a></li>
     <li><a href="#settings">Settings</a></li>
+    <li><a href="#updates">Updates</a></li>
     <li><a href="#server-addresses">Server Addresses</a></li>
     <li><a href="#privacy">Privacy and Security Notes</a></li>
   </ul>
@@ -59,7 +60,7 @@
     <li>Android 8.0 or newer.</li>
     <li>For Server mode, a configured Clipman Server address and token.</li>
     <li>For an existing shared history, the same history password used by your other Clipman clients.</li>
-    <li>Biometric unlock or Android device credential, such as fingerprint, face unlock, PIN, pattern, or password.</li>
+    <li>Biometric unlock or an Android device credential only when you enable Clipman's optional authentication setting.</li>
   </ul>
 
   <p>Clipman Android does not monitor the Android clipboard in the background. Android restricts background clipboard access, and Clipman follows that platform rule. The app syncs while it is open.</p>
@@ -76,14 +77,14 @@
   <p>The Android package ID is <code>me.onj.clipman</code>.</p>
 
   <h2 id="first-run">First Run</h2>
-  <p>On launch, and whenever you return after switching away, Clipman asks Android to unlock with biometrics or your device credential before it shows history or settings.</p>
+  <p>Clipman can optionally ask Android to unlock with biometrics or your device credential before showing history after you return to the app. This is off by default and can be enabled in Settings.</p>
 
   <p>The first time you configure it:</p>
   <ol>
     <li>Open Settings if it is not already shown.</li>
     <li>Choose <strong>Local</strong> to keep history on this phone, or <strong>Server</strong> to share history through Clipman Server.</li>
     <li>For Server mode, open the private <code>.clpconf</code> file from Android's file browser, or choose <strong>Import server connection file</strong> in Clipman Settings. You can also enter the server address and token manually.</li>
-    <li>Enter the history password when the history is password protected.</li>
+    <li>Enter a nonblank, preferably unique history password. Clipman Server does not allow passwordless history.</li>
     <li>Choose <strong>Save</strong> at the top of Settings.</li>
   </ol>
 
@@ -124,6 +125,9 @@
     <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
     <li><strong>Use haptic feedback</strong>: vibrates for supported feedback events.</li>
+    <li><strong>Require biometric or device authentication</strong>: when enabled, locks Clipman whenever it leaves the foreground and requires Android authentication when you return. This is off by default.</li>
+    <li><strong>Check for updates automatically</strong>: checks the Clipman GitHub release at most once per day while the app is open. Disable it to use only manual checks.</li>
+    <li><strong>Check Now</strong>: checks immediately and reports whether this Android build is current.</li>
     <li><strong>Server connection</strong>: imports a private <code>.clpconf</code> server file, or shows server address, server token, history password, and show-password controls for manual setup.</li>
     <li><strong>Build information</strong>: shows the app version, readable UTC build time, and exact build stamp so a tester can identify the installed build unambiguously.</li>
   </ul>
@@ -133,6 +137,11 @@
   <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. The <code>.clpconf</code> file contains the private server token; delete it or move it to a password manager after configuring your devices.</p>
 
   <p>If only some custom sounds are available, Clipman uses those and falls back to bundled defaults for the rest.</p>
+
+  <h2 id="updates">Updates</h2>
+  <p>When an update is available, Clipman can download the versioned Android APK from the official GitHub release. Before opening the installer, it checks the package name and version, checks the SHA-256 digest when GitHub supplies one, and confirms that the APK is signed by the same application key as the installed Clipman.</p>
+
+  <p>Android requires the user to approve application installation. The first in-app update may also ask you to allow Clipman as an installation source. This permission allows Clipman to open Android's installer for its verified update; it does not permit Clipman to install silently. You can remove that permission later through Android's application settings.</p>
 
   <h2 id="server-addresses">Server Addresses</h2>
   <p>Server addresses may be entered as:</p>
@@ -145,7 +154,8 @@ https://host:port</code></pre>
 
   <h2 id="privacy">Privacy and Security Notes</h2>
   <ul>
-    <li>Clipman requires Android biometric or device unlock before showing history or settings, including whenever you return after switching to another app.</li>
+    <li>Clipman can require Android biometric or device unlock before showing history after you return from another app. This protection is opt-in under Settings.</li>
+    <li>For private-CA HTTPS servers, Android must have the public authority installed as a CA certificate. Clipman allows user-installed authorities for its server connection.</li>
     <li>Server address, server token, and history password are stored using Android protected app storage.</li>
     <li>Local history is stored in Android's private app data. It uses the configured history password when one is present.</li>
     <li>Clipman Android only syncs while the app is open.</li>

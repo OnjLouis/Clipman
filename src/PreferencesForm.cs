@@ -577,7 +577,7 @@ namespace Clipman
                 var result = MessageBox.Show(
                     this,
                     "Import this Clipman Server connection?\r\n\r\n" + details.Address +
-                    "\r\n\r\nThe token will remain hidden in preferences.",
+                    "\r\n\r\nThe token will remain hidden in preferences. Clipman Server requires a unique history password. Synchronization will not start until the connection is applied with a password.",
                     "Clipman Server connection",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
@@ -586,8 +586,14 @@ namespace Clipman
                 storageMode.SelectedItem = "Clipman Server";
                 serverUrl.Text = details.Address;
                 serverToken.Text = details.Token;
-                ApplyNow();
-                serverUrl.Focus();
+                if (HasEffectiveDatabasePassword())
+                {
+                    serverUrl.Focus();
+                }
+                else
+                {
+                    databasePassword.Focus();
+                }
             }
         }
 
@@ -634,7 +640,33 @@ namespace Clipman
                 return false;
             }
 
+            if (IsServerStorageSelected() && !HasEffectiveDatabasePassword())
+            {
+                if (showMessage)
+                {
+                    MessageBox.Show(
+                        this,
+                        "Clipman Server requires a history password. Enter and confirm a unique password before connecting. This prevents an unencrypted history and avoids accidentally sharing a database with another user who chose no password.",
+                        "Clipman Server history password",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    databasePassword.Focus();
+                }
+                return false;
+            }
+
             return true;
+        }
+
+        private bool IsServerStorageSelected()
+        {
+            return string.Equals(StoredStorageMode(Convert.ToString(storageMode.SelectedItem)), "Server", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool HasEffectiveDatabasePassword()
+        {
+            return databasePassword.Text.Length > 0 ||
+                (!passwordClearRequested && settings.DatabaseEncryptionEnabled);
         }
 
         private void BrowseDatabase()
@@ -696,6 +728,13 @@ namespace Clipman
 
         private void UseNoDatabasePassword()
         {
+            if (IsServerStorageSelected())
+            {
+                MessageBox.Show(this, "Clipman Server requires a history password. Switch to local or shared-folder storage before removing the password.", "Clipman Server history password", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                databasePassword.Focus();
+                return;
+            }
+
             if (settings.DatabaseEncryptionEnabled || !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 var result = MessageBox.Show(this, "Remove the saved history password and rewrite the Clipman database without password encryption?", "Clipman history password", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);

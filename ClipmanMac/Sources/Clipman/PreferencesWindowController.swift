@@ -52,6 +52,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private var settings: ClipmanSettings
     private var historyIsEncrypted: Bool
     private var rememberedPasswordExists: Bool
+    private var databasePasswordAvailable: Bool
     private let databasePathField = NSTextField()
     private let storageModePopup = NSPopUpButton()
     private let serverUrlField = NSTextField()
@@ -75,10 +76,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let ignoredApplicationsView = NSTextView()
     private let statusLabel = NSTextField(labelWithString: "")
 
-    init(settings: ClipmanSettings, historyIsEncrypted: Bool, rememberedPasswordExists: Bool) {
+    init(settings: ClipmanSettings, historyIsEncrypted: Bool, rememberedPasswordExists: Bool, databasePasswordAvailable: Bool) {
         self.settings = settings
         self.historyIsEncrypted = historyIsEncrypted
         self.rememberedPasswordExists = rememberedPasswordExists
+        self.databasePasswordAvailable = databasePasswordAvailable
         let window = PreferencesWindow(
             contentRect: NSRect(x: 140, y: 120, width: 760, height: 760),
             styleMask: [.titled, .closable, .resizable],
@@ -95,10 +97,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(settings: ClipmanSettings, historyIsEncrypted: Bool, rememberedPasswordExists: Bool) {
+    func update(settings: ClipmanSettings, historyIsEncrypted: Bool, rememberedPasswordExists: Bool, databasePasswordAvailable: Bool) {
         self.settings = settings
         self.historyIsEncrypted = historyIsEncrypted
         self.rememberedPasswordExists = rememberedPasswordExists
+        self.databasePasswordAvailable = databasePasswordAvailable
         loadFields()
     }
 
@@ -288,15 +291,15 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             let details = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
             let alert = NSAlert()
             alert.messageText = "Import Clipman Server connection?"
-            alert.informativeText = "Server: \(details.address)\n\nThe token will remain hidden in preferences. Choose Save and Close to apply this connection."
+            alert.informativeText = "Server: \(details.address)\n\nThe token will remain hidden in preferences. Clipman Server requires a unique history password. Choose Save and Close to apply this connection."
             alert.addButton(withTitle: "Import")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             storageModePopup.selectItem(withTitle: "Clipman Server")
             serverUrlField.stringValue = details.address
             serverTokenField.stringValue = details.token
-            statusLabel.stringValue = "Server connection imported. Choose Save and Close to apply it."
-            serverUrlField.window?.makeFirstResponder(serverUrlField)
+            statusLabel.stringValue = "Server connection imported. Enter a history password if needed, then choose Save and Close to apply it."
+            serverUrlField.window?.makeFirstResponder(databasePasswordAvailable ? serverUrlField : passwordField)
         } catch {
             let alert = NSAlert()
             alert.messageText = "Could not import server connection"
@@ -321,8 +324,15 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         guard confirmSingleModifierHotkeys(show: show, toggle: toggle) else {
             return
         }
+        let selectedStorageMode = storedStorageMode(storageModePopup.titleOfSelectedItem ?? "")
+        let enteredPassword = passwordField.stringValue
+        guard selectedStorageMode != "Server" || !enteredPassword.isEmpty || databasePasswordAvailable else {
+            statusLabel.stringValue = "Clipman Server requires a unique history password before the connection can be saved."
+            passwordField.window?.makeFirstResponder(passwordField)
+            return
+        }
         settings.databasePath = normalizedDatabasePath(databasePathField.stringValue)
-        settings.storageMode = storedStorageMode(storageModePopup.titleOfSelectedItem ?? "")
+        settings.storageMode = selectedStorageMode
         settings.serverUrl = ServerSettingsSanitizer.cleanURL(serverUrlField.stringValue)
         settings.serverToken = ServerSettingsSanitizer.cleanToken(serverTokenField.stringValue)
         serverUrlField.stringValue = settings.serverUrl
@@ -347,7 +357,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.showHistoryHotkey = show
         settings.toggleMonitoringHotkey = toggle
         settings.ignoredApplications = normalizedIgnoredApplications(ignoredApplicationsView.string)
-        let password = passwordField.stringValue.isEmpty ? nil : passwordField.stringValue
+        let password = enteredPassword.isEmpty ? nil : enteredPassword
         guard preferencesDelegate?.preferencesWindow(self, didUpdate: settings, passwordToSave: password) != false else {
             return
         }

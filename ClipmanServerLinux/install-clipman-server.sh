@@ -15,7 +15,7 @@ APP_DIR="${CLIPMAN_SERVER_APP_DIR:-$HOME/.local/lib/clipman-server}"
 BIN_DIR="${CLIPMAN_SERVER_BIN_DIR:-$HOME/.local/bin}"
 CONFIG_DIR="${CLIPMAN_SERVER_CONFIG_DIR:-$HOME/.config/clipman-server}"
 CONFIG_FILE="$CONFIG_DIR/clipman-server-settings.json"
-SERVICE_DIR="$HOME/.config/systemd/user"
+SERVICE_DIR="${CLIPMAN_SERVER_SERVICE_DIR:-$HOME/.config/systemd/user}"
 SERVICE_FILE="$SERVICE_DIR/clipman-server.service"
 
 mkdir -p "$APP_DIR" "$BIN_DIR" "$CONFIG_DIR"
@@ -23,6 +23,8 @@ chmod 700 "$CONFIG_DIR" 2>/dev/null || true
 
 cp "$SOURCE_ROOT/clipman_server.py" "$APP_DIR/clipman_server.py"
 chmod 700 "$APP_DIR/clipman_server.py" 2>/dev/null || true
+cp "$SOURCE_ROOT/clipman_server_updater.py" "$APP_DIR/clipman_server_updater.py"
+chmod 700 "$APP_DIR/clipman_server_updater.py" 2>/dev/null || true
 
 if [ -f "$SOURCE_ROOT/Manual.html" ]; then
   cp "$SOURCE_ROOT/Manual.html" "$APP_DIR/Manual.html"
@@ -43,6 +45,8 @@ set -eu
 SERVICE="clipman-server.service"
 LAUNCHER="$BIN_DIR/clipman-server"
 CONFIG_FILE="$CONFIG_FILE"
+APP_DIR="$APP_DIR"
+SERVICE_FILE="$SERVICE_FILE"
 
 usage() {
   cat <<USAGE
@@ -61,7 +65,21 @@ Commands:
   console     Run Clipman Server in the current terminal
   token       Print the server token
   connection  Write and print the connection details file path
+  cert        Create or renew a private-CA HTTPS certificate
+  share-ca    Temporarily share the public certificate authority
+  version     Show the installed server version
+  check-update Check whether a newer server package is available
+  update      Safely install a newer server package
+  enable-auto-updates Enable daily checked updates
+  disable-auto-updates Disable automatic server updates
+  update-status Show the automatic update timer status
   help        Show this help
+
+Certificate examples:
+  clipmanserver cert
+  clipmanserver cert --cert-host server.example
+  clipmanserver cert --cert-ip 192.168.1.50
+  clipmanserver share-ca
 USAGE
 }
 
@@ -148,6 +166,47 @@ PY
   connection)
     "\$LAUNCHER" --write-connection-info
     ;;
+  cert)
+    shift 2>/dev/null || true
+    "\$LAUNCHER" --create-tls-certificate "\$@"
+    echo
+    echo "Restarting Clipman Server to use HTTPS."
+    "\$0" restart
+    ;;
+  share-ca)
+    shift 2>/dev/null || true
+    "\$LAUNCHER" --share-ca "\$@"
+    ;;
+  version)
+    "\$LAUNCHER" --version
+    ;;
+  check-update)
+    exec python3 "\$APP_DIR/clipman_server_updater.py" --check \
+      --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
+      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
+    ;;
+  update)
+    shift 2>/dev/null || true
+    exec python3 "\$APP_DIR/clipman_server_updater.py" --install "\$@" \
+      --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
+      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
+    ;;
+  enable-auto-updates)
+    if ! has_user_service; then
+      echo "Automatic updates require the installed systemd user service." >&2
+      exit 2
+    fi
+    systemctl --user daemon-reload
+    systemctl --user enable --now clipman-server-update.timer
+    echo "Automatic Clipman Server updates enabled."
+    ;;
+  disable-auto-updates)
+    systemctl --user disable --now clipman-server-update.timer 2>/dev/null || true
+    echo "Automatic Clipman Server updates disabled."
+    ;;
+  update-status)
+    systemctl --user status clipman-server-update.timer --no-pager
+    ;;
   help|-h|--help)
     usage
     ;;
@@ -167,6 +226,9 @@ echo "Launcher: $BIN_DIR/clipman-server"
 echo "Helper: $BIN_DIR/clipmanserver"
 echo "Settings: $CONFIG_FILE"
 echo "Connection details: $CONFIG_DIR/clipman-server-connection.txt"
+echo
+echo "For private-CA HTTPS, run:"
+echo "  clipmanserver cert"
 echo
 echo "Run now with:"
 echo "  clipmanserver start"
@@ -188,6 +250,29 @@ NoNewPrivileges=true
 
 [Install]
 WantedBy=default.target
+EOF
+  cat > "$SERVICE_DIR/clipman-server-update.service" <<EOF
+[Unit]
+Description=Update Clipman Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$BIN_DIR/clipmanserver update --yes
+EOF
+  cat > "$SERVICE_DIR/clipman-server-update.timer" <<EOF
+[Unit]
+Description=Check daily for Clipman Server updates
+
+[Timer]
+OnBootSec=15m
+OnUnitActiveSec=1d
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
 EOF
   echo
   echo "A user systemd service was written to:"

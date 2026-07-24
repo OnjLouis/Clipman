@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/config"
+)
 
 func TestGlobalParsingStopsAtCommand(t *testing.T) {
 	g, remaining, err := parseGlobals([]string{"--server", "clipman://host:60000", "put", "--text", "--json"})
@@ -39,5 +44,15 @@ func TestHelpAndUnknownCommandDoNotNeedConfiguration(t *testing.T) {
 	}
 	if code := run([]string{"not-a-command"}); code != 2 {
 		t.Fatalf("unknown command exit code = %d", code)
+	}
+}
+
+func TestResolvePasswordRequiresNonblankValue(t *testing.T) {
+	if _, err := resolvePassword(globals{password: optionalString{set: true}}, config.Default(), false); err == nil || !strings.Contains(err.Error(), "nonblank history password") {
+		t.Fatalf("blank history password error = %v", err)
+	}
+	password, err := resolvePassword(globals{password: optionalString{set: true, value: "test-password"}}, config.Default(), false)
+	if err != nil || password != "test-password" {
+		t.Fatalf("nonblank history password = %q, %v", password, err)
 	}
 }

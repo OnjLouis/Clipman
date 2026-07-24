@@ -15,18 +15,21 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import socketserver
 import ssl
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any, Dict, List, Tuple
 from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.0.9"
+APP_VERSION = "2.1.0"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"
@@ -90,6 +93,7 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     settings.setdefault("LogPath", str(default_log_path()))
     settings.setdefault("CertFile", "")
     settings.setdefault("KeyFile", "")
+    settings.setdefault("CaFile", "")
     settings.setdefault("AllowInsecureRemote", False)
     settings.setdefault("BackupIntervalMinutes", 60)
     settings.setdefault("BackupRetentionHours", 24)
@@ -133,6 +137,27 @@ def default_log_path() -> Path:
 
 def has_tls(settings: Dict[str, Any]) -> bool:
     return bool(str(settings.get("CertFile", "")).strip() and str(settings.get("KeyFile", "")).strip())
+
+
+def create_tls_context(settings: Dict[str, Any]) -> ssl.SSLContext | None:
+    certificate = str(settings.get("CertFile", "")).strip()
+    key = str(settings.get("KeyFile", "")).strip()
+    if bool(certificate) != bool(key):
+        raise SystemExit("Clipman Server HTTPS requires both CertFile and KeyFile. No listener was started.")
+    if not certificate:
+        return None
+    certificate_path = Path(certificate).expanduser()
+    key_path = Path(key).expanduser()
+    if not certificate_path.is_file():
+        raise SystemExit(f"Clipman Server HTTPS certificate was not found: {certificate_path}")
+    if not key_path.is_file():
+        raise SystemExit(f"Clipman Server HTTPS private key was not found: {key_path}")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    try:
+        context.load_cert_chain(str(certificate_path), str(key_path))
+    except (OSError, ssl.SSLError) as error:
+        raise SystemExit(f"Clipman Server could not load its HTTPS certificate and key: {error}")
+    return context
 
 
 def listen_scheme(settings: Dict[str, Any]) -> str:
@@ -203,6 +228,307 @@ def save_settings(config_path: Path, settings: Dict[str, Any]) -> None:
     make_private_file(tmp)
     tmp.replace(config_path)
     make_private_file(config_path)
+
+
+def find_openssl() -> str:
+    candidates = [shutil.which("openssl")]
+    if os.name == "nt":
+        program_files = [os.environ.get("ProgramFiles", ""), os.environ.get("ProgramFiles(x86)", "")]
+        for root in program_files:
+            if root:
+                candidates.extend([
+                    str(Path(root) / "Git" / "mingw64" / "bin" / "openssl.exe"),
+                    str(Path(root) / "Git" / "usr" / "bin" / "openssl.exe"),
+                ])
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    raise RuntimeError(
+        "OpenSSL was not found. Install OpenSSL (Git for Windows includes it), then try again."
+    )
+
+
+def run_openssl(openssl: str, arguments: List[str]) -> str:
+    completed = subprocess.run(
+        [openssl] + arguments,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"OpenSSL failed: {detail or 'unknown error'}")
+    return completed.stdout.strip()
+
+
+def warn_if_tls_certificate_expiring(settings: Dict[str, Any], days: int = 30) -> None:
+    certificate = str(settings.get("CertFile", "")).strip()
+    if not certificate:
+        return
+    try:
+        openssl = find_openssl()
+        completed = subprocess.run(
+            [openssl, "x509", "-in", certificate, "-noout", "-checkend", str(days * 24 * 60 * 60)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if completed.returncode == 1:
+            logging.warning(
+                "The Clipman Server HTTPS certificate expires within %s days. Renew it before clients lose access.",
+                days,
+            )
+        elif completed.returncode != 0:
+            detail = (completed.stderr or "").strip()
+            logging.warning("Could not check the Clipman Server HTTPS certificate expiry: %s", detail or "unknown error")
+    except Exception as error:
+        logging.warning("Could not check the Clipman Server HTTPS certificate expiry: %s", error)
+
+
+def tls_certificate_expiry(settings: Dict[str, Any]) -> str:
+    certificate = str(settings.get("CertFile", "")).strip()
+    if not certificate:
+        return ""
+    try:
+        return run_openssl(find_openssl(), ["x509", "-in", certificate, "-noout", "-enddate"]).partition("=")[2]
+    except Exception:
+        return ""
+
+
+def normalized_certificate_names(settings: Dict[str, Any], extra_hosts: List[str], extra_ips: List[str]) -> Tuple[List[str], List[str]]:
+    dns_names: List[str] = []
+    ip_addresses: List[str] = []
+
+    def add(value: str, force_ip: bool = False) -> None:
+        clean = (value or "").strip().rstrip(".")
+        if not clean or clean in {"0.0.0.0", "::"}:
+            return
+        try:
+            address = str(ipaddress.ip_address(clean))
+            if address not in ip_addresses:
+                ip_addresses.append(address)
+            return
+        except ValueError:
+            if force_ip:
+                raise ValueError(f"Invalid certificate IP address: {clean}")
+        if len(clean) > 253 or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", clean):
+            raise ValueError(f"Invalid certificate DNS name: {clean}")
+        lowered = clean.lower()
+        if lowered not in dns_names:
+            dns_names.append(lowered)
+
+    add(str(settings.get("Host", "")))
+    add(str(settings.get("AdvertiseHost", "")))
+    add(socket.gethostname())
+    add("localhost")
+    add("127.0.0.1", True)
+    add("::1", True)
+    for host in extra_hosts:
+        add(host)
+    for address in extra_ips:
+        add(address, True)
+    if not dns_names and not ip_addresses:
+        raise ValueError("No usable DNS name or IP address was available for the server certificate.")
+    return dns_names, ip_addresses
+
+
+def create_tls_certificate(
+    config_path: Path,
+    settings: Dict[str, Any],
+    extra_hosts: List[str],
+    extra_ips: List[str],
+    new_ca: bool,
+) -> Dict[str, str]:
+    openssl = find_openssl()
+    dns_names, ip_addresses = normalized_certificate_names(settings, extra_hosts, extra_ips)
+    tls_dir = config_path.parent / "tls"
+    make_private_dir(tls_dir)
+    ca_key = tls_dir / "clipman-server-ca.key"
+    ca_cert = tls_dir / "clipman-server-ca.crt"
+    server_key = tls_dir / "clipman-server.key"
+    server_cert = tls_dir / "clipman-server.crt"
+    fullchain = tls_dir / "clipman-server-fullchain.crt"
+
+    with tempfile.TemporaryDirectory(prefix="clipman-cert-", dir=str(tls_dir)) as staging_text:
+        staging = Path(staging_text)
+        staged_ca_key = staging / ca_key.name
+        staged_ca_cert = staging / ca_cert.name
+        staged_server_key = staging / server_key.name
+        staged_server_cert = staging / server_cert.name
+        staged_fullchain = staging / fullchain.name
+
+        if ca_key.exists() and ca_cert.exists() and not new_ca:
+            shutil.copy2(ca_key, staged_ca_key)
+            shutil.copy2(ca_cert, staged_ca_cert)
+        else:
+            ca_config = staging / "ca.cnf"
+            ca_config.write_text(
+                "[req]\n"
+                "prompt = no\n"
+                "distinguished_name = subject\n"
+                "x509_extensions = ca_extensions\n"
+                "[subject]\n"
+                "CN = Clipman Server Private CA\n"
+                "[ca_extensions]\n"
+                "basicConstraints = critical,CA:TRUE,pathlen:0\n"
+                "keyUsage = critical,keyCertSign,cRLSign\n"
+                "subjectKeyIdentifier = hash\n",
+                encoding="ascii",
+            )
+            run_openssl(openssl, [
+                "req", "-x509", "-newkey", "rsa:4096", "-nodes", "-sha256", "-days", "3650",
+                "-config", str(ca_config), "-keyout", str(staged_ca_key), "-out", str(staged_ca_cert),
+            ])
+
+        san_values = [f"DNS:{name}" for name in dns_names] + [f"IP:{address}" for address in ip_addresses]
+        leaf_config = staging / "server.cnf"
+        leaf_config.write_text(
+            "[server_extensions]\n"
+            "basicConstraints = critical,CA:FALSE\n"
+            "keyUsage = critical,digitalSignature,keyEncipherment\n"
+            "extendedKeyUsage = serverAuth\n"
+            f"subjectAltName = {','.join(san_values)}\n"
+            "subjectKeyIdentifier = hash\n"
+            "authorityKeyIdentifier = keyid,issuer\n",
+            encoding="ascii",
+        )
+        request = staging / "server.csr"
+        run_openssl(openssl, [
+            "req", "-new", "-newkey", "rsa:2048", "-nodes", "-sha256",
+            "-subj", "/CN=Clipman Server", "-keyout", str(staged_server_key), "-out", str(request),
+        ])
+        run_openssl(openssl, [
+            "x509", "-req", "-in", str(request), "-CA", str(staged_ca_cert), "-CAkey", str(staged_ca_key),
+            "-CAcreateserial", "-days", "397", "-sha256", "-extfile", str(leaf_config),
+            "-extensions", "server_extensions", "-out", str(staged_server_cert),
+        ])
+        run_openssl(openssl, ["verify", "-CAfile", str(staged_ca_cert), str(staged_server_cert)])
+        details = run_openssl(openssl, ["x509", "-in", str(staged_server_cert), "-noout", "-text"])
+        if "TLS Web Server Authentication" not in details or "CA:FALSE" not in details:
+            raise RuntimeError("The generated server certificate failed its usage checks.")
+        staged_fullchain.write_bytes(staged_server_cert.read_bytes() + staged_ca_cert.read_bytes())
+
+        for path in [staged_ca_key, staged_server_key]:
+            make_private_file(path)
+        for source, target in [
+            (staged_ca_key, ca_key),
+            (staged_ca_cert, ca_cert),
+            (staged_server_key, server_key),
+            (staged_server_cert, server_cert),
+            (staged_fullchain, fullchain),
+        ]:
+            os.replace(str(source), str(target))
+        make_private_file(ca_key)
+        make_private_file(server_key)
+
+    settings["CaFile"] = str(ca_cert.resolve())
+    settings["CertFile"] = str(fullchain.resolve())
+    settings["KeyFile"] = str(server_key.resolve())
+    save_settings(config_path, settings)
+    write_connection_info(config_path, settings)
+    write_connection_config(config_path, settings)
+    fingerprint = run_openssl(
+        openssl,
+        ["x509", "-in", str(ca_cert), "-noout", "-fingerprint", "-sha256"],
+    ).partition("=")[2]
+    expiry = run_openssl(openssl, ["x509", "-in", str(server_cert), "-noout", "-enddate"]).partition("=")[2]
+    return {
+        "authority": str(ca_cert),
+        "certificate": str(server_cert),
+        "fingerprint": fingerprint,
+        "expires": expiry,
+    }
+
+
+class CertificateShareHandler(http.server.BaseHTTPRequestHandler):
+    def do_HEAD(self) -> None:
+        self._send_certificate(False)
+
+    def do_GET(self) -> None:
+        self._send_certificate(True)
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        logging.info("Certificate share %s - %s", self.client_address[0], fmt % args)
+
+    def _send_certificate(self, include_body: bool) -> None:
+        if self.path != self.server.download_path:  # type: ignore[attr-defined]
+            self.send_error(404)
+            return
+        data = self.server.certificate_data  # type: ignore[attr-defined]
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-x509-ca-cert")
+        self.send_header("Content-Disposition", 'attachment; filename="clipman-server-ca.crt"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if include_body:
+            self.wfile.write(data)
+            self.server.downloaded.set()  # type: ignore[attr-defined]
+            logging.info("Certificate authority downloaded by %s; sharing will stop.", self.client_address[0])
+
+
+def share_certificate_authority(settings: Dict[str, Any], bind_override: str, minutes: int) -> int:
+    configured = str(settings.get("CaFile", "")).strip()
+    if not configured:
+        cert_value = str(settings.get("CertFile", "")).strip()
+        if cert_value:
+            configured = str(Path(cert_value).expanduser().parent / "clipman-server-ca.crt")
+    ca_path = Path(configured).expanduser()
+    if not ca_path.is_file():
+        raise RuntimeError("The certificate authority was not found. Create the HTTPS certificate first.")
+    certificate_data = ca_path.read_bytes()
+    if b"BEGIN CERTIFICATE" not in certificate_data or b"PRIVATE KEY" in certificate_data:
+        raise RuntimeError("The configured authority file is not a public PEM certificate.")
+
+    bind_host = (bind_override or str(settings.get("Host", ""))).strip() or "127.0.0.1"
+    advertised = (str(settings.get("AdvertiseHost", "")).strip() or bind_host).strip()
+    if advertised in {"0.0.0.0", "::"}:
+        raise RuntimeError("Set AdvertiseHost, or pass --share-host with an address the client can reach.")
+    server = None
+    last_error: Exception | None = None
+    for _ in range(20):
+        try:
+            server = http.server.HTTPServer((bind_host, random_high_port()), CertificateShareHandler)
+            break
+        except OSError as error:
+            last_error = error
+    if server is None:
+        raise RuntimeError(f"Could not open a temporary certificate sharing port: {last_error}")
+
+    server.download_path = "/clipman-ca-" + secrets.token_urlsafe(18) + ".crt"  # type: ignore[attr-defined]
+    server.certificate_data = certificate_data  # type: ignore[attr-defined]
+    server.downloaded = Event()  # type: ignore[attr-defined]
+    host_for_url = f"[{advertised}]" if ":" in advertised and not advertised.startswith("[") else advertised
+    url = f"http://{host_for_url}:{server.server_port}{server.download_path}"  # type: ignore[attr-defined]
+    openssl = find_openssl()
+    fingerprint = run_openssl(
+        openssl,
+        ["x509", "-in", str(ca_path), "-noout", "-fingerprint", "-sha256"],
+    ).partition("=")[2]
+    print(f"Certificate URL: {url}", flush=True)
+    print(f"SHA-256 fingerprint: {fingerprint}", flush=True)
+    print(f"Sharing stops after the first download or {minutes} minute{'s' if minutes != 1 else ''}.", flush=True)
+    logging.info("Certificate authority sharing started on %s for at most %s minutes.", url, minutes)
+    deadline = time.monotonic() + minutes * 60
+    try:
+        while not server.downloaded.is_set():  # type: ignore[attr-defined]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            server.timeout = min(1.0, remaining)
+            server.handle_request()
+    finally:
+        server.server_close()
+    reason = "download completed" if server.downloaded.is_set() else "time limit reached"  # type: ignore[attr-defined]
+    logging.info("Certificate authority sharing stopped: %s.", reason)
+    print(f"Certificate sharing stopped: {reason}.", flush=True)
+    return 0
 
 
 def default_connection_info_path(config_path: Path) -> Path:
@@ -286,6 +612,7 @@ def status(settings: Dict[str, Any], server: Any | None = None) -> Dict[str, Any
         "DatabaseModifiedUnixMs": 0,
         "ListenPrefix": listen_prefix(settings),
         "TlsEnabled": has_tls(settings),
+        "TlsCertificateExpires": str(settings.get("_TlsCertificateExpires", "")),
         "BackupRetentionHours": int(settings["BackupRetentionHours"]),
         "MaxBackups": int(settings["MaxBackups"]),
         "Runtime": runtime,
@@ -697,6 +1024,7 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "ClipmanServerLinux/" + APP_VERSION
+    protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
         self.route()
@@ -901,6 +1229,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Clipman history server.")
+    parser.add_argument("--version", action="store_true", help="Print the Clipman Server version and exit.")
     parser.add_argument("--config", default=str(Path.cwd() / "Settings" / DEFAULT_CONFIG), help="Path to server settings JSON.")
     parser.add_argument("--host", help="Override listen host for this run and save it.")
     parser.add_argument("--advertise-host", help="Override the host written to connection details for this run and save it.")
@@ -909,6 +1238,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log", help="Override log path and save it.")
     parser.add_argument("--cert-file", help="TLS certificate PEM file for direct HTTPS and save it.")
     parser.add_argument("--key-file", help="TLS private key PEM file for direct HTTPS and save it.")
+    parser.add_argument("--create-tls-certificate", action="store_true", help="Create or renew a private-CA HTTPS certificate, update settings, and exit.")
+    parser.add_argument("--cert-host", action="append", default=[], help="Add a DNS name to a generated HTTPS certificate. May be repeated.")
+    parser.add_argument("--cert-ip", action="append", default=[], help="Add an IP address to a generated HTTPS certificate. May be repeated.")
+    parser.add_argument("--new-ca", action="store_true", help="Replace the private certificate authority when generating HTTPS. Existing clients must trust the new authority.")
+    parser.add_argument("--share-ca", action="store_true", help="Temporarily share only the public certificate authority over HTTP and exit after one download or the time limit.")
+    parser.add_argument("--share-minutes", type=int, default=10, help="Minutes to share the public authority with --share-ca (1 to 60; default 10).")
+    parser.add_argument("--share-host", help="Override the listen host used by --share-ca.")
     parser.add_argument("--allow-insecure-remote", action="store_true", help="Allow non-local HTTP listeners without TLS. Use only behind a VPN, firewall, or reverse proxy.")
     parser.add_argument("--show-token", action="store_true", help="Print the bearer token and exit.")
     parser.add_argument("--write-connection-info", action="store_true", help="Write importable and plain text server connection files beside the settings file.")
@@ -923,6 +1259,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.version:
+        print(APP_VERSION)
+        return 0
     config_path = Path(args.config).expanduser().resolve()
     settings, settings_created = load_settings(config_path)
     if args.host:
@@ -946,6 +1285,26 @@ def main() -> int:
     connection_config = maybe_write_connection_config(config_path, settings, settings_created, args.write_connection_info)
     configure_logging(settings)
 
+    if args.create_tls_certificate:
+        try:
+            result = create_tls_certificate(config_path, settings, args.cert_host, args.cert_ip, args.new_ca)
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"Could not create the HTTPS certificate: {error}", file=sys.stderr)
+            return 1
+        print(f"Certificate authority: {result['authority']}")
+        print(f"Server certificate: {result['certificate']}")
+        print(f"Server certificate expires: {result['expires']}")
+        print(f"Authority SHA-256 fingerprint: {result['fingerprint']}")
+        print("Install and trust the authority on each client, then restart Clipman Server.")
+        return 0
+    if args.share_ca:
+        if args.share_minutes < 1 or args.share_minutes > 60:
+            raise SystemExit("--share-minutes must be between 1 and 60.")
+        try:
+            return share_certificate_authority(settings, args.share_host or "", args.share_minutes)
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"Could not share the certificate authority: {error}", file=sys.stderr)
+            return 1
     if args.show_token:
         print(settings["AuthToken"])
         return 0
@@ -960,15 +1319,16 @@ def main() -> int:
     if args.prune_databases_days is not None:
         return prune_database_buckets(settings, args.prune_databases_days, args.confirm)
 
+    tls_context = create_tls_context(settings)
     validate_network_security(settings)
+    warn_if_tls_certificate_expiring(settings)
+    settings["_TlsCertificateExpires"] = tls_certificate_expiry(settings)
     host = str(settings["Host"])
     port = int(settings["Port"])
     server = ThreadingServer((host, port), Handler)
     server.settings = settings  # type: ignore[attr-defined]
-    if has_tls(settings):
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(str(settings["CertFile"]), str(settings["KeyFile"]))
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+    if tls_context is not None:
+        server.socket = tls_context.wrap_socket(server.socket, server_side=True)
     stop_reason = "shutdown"
 
     def request_shutdown(signum: int, _frame: Any) -> None:

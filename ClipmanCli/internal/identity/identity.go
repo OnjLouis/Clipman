@@ -8,19 +8,14 @@ import (
 )
 
 const purpose = "Clipman.ServerDatabaseId.v1"
-const noPassword = "<clipman-no-history-password>"
 
 func DatabaseID(token, password string) string {
 	token = strings.TrimSpace(token)
-	if token == "" {
+	if token == "" || password == "" {
 		return ""
-	}
-	component := password
-	if component == "" {
-		component = noPassword
 	}
 	key := sha256.Sum256([]byte(token))
 	mac := hmac.New(sha256.New, key[:])
-	_, _ = mac.Write([]byte(purpose + "\n" + component))
+	_, _ = mac.Write([]byte(purpose + "\n" + password))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

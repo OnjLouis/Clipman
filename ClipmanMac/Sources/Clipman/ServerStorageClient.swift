@@ -68,7 +68,7 @@ final class ServerStorageClient: @unchecked Sendable {
         self.baseURL = URL(string: cleanedURL)
         self.token = cleanedToken
         self.databaseID = ServerDatabaseIdentity.fromTokenAndPassword(token: cleanedToken, password: databasePassword)
-        self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty
+        self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty && !databasePassword.isEmpty
     }
 
     func metadata() throws -> ServerDatabaseMetadata {

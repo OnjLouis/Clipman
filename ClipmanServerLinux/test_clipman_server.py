@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import http.client
+import http.server
 import json
 import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier, Thread
+from threading import Barrier, Event, Thread
 
 import clipman_server
 
@@ -47,6 +48,127 @@ class ConnectionConfigTests(unittest.TestCase):
         target = clipman_server.maybe_write_connection_config(self.config_path, self.settings, False, False)
         self.assertEqual(clipman_server.default_connection_config_path(self.config_path), target)
         self.assertTrue(target.is_file())
+
+
+class CertificateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.config_path = self.root / "settings.json"
+        self.settings, _ = clipman_server.load_settings(self.config_path)
+        self.settings.update({
+            "Host": "127.0.0.1",
+            "AdvertiseHost": "localhost",
+            "DatabasePath": str(self.root / "clipman-history.clipdb"),
+            "LogPath": str(self.root / "logs" / "clipman-server.log"),
+        })
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_certificate_names_are_typed_and_reject_config_injection(self) -> None:
+        names, addresses = clipman_server.normalized_certificate_names(
+            self.settings,
+            ["server.example"],
+            ["192.0.2.7"],
+        )
+        self.assertIn("localhost", names)
+        self.assertIn("server.example", names)
+        self.assertIn("127.0.0.1", addresses)
+        self.assertIn("192.0.2.7", addresses)
+        with self.assertRaises(ValueError):
+            clipman_server.normalized_certificate_names(self.settings, ["bad.example\nkeyUsage=CA:TRUE"], [])
+
+    def test_partial_or_missing_tls_configuration_cannot_downgrade_to_http(self) -> None:
+        self.settings["CertFile"] = str(self.root / "missing.crt")
+        self.settings["KeyFile"] = ""
+        with self.assertRaisesRegex(SystemExit, "both CertFile and KeyFile"):
+            clipman_server.create_tls_context(self.settings)
+        self.settings["KeyFile"] = str(self.root / "missing.key")
+        with self.assertRaisesRegex(SystemExit, "certificate was not found"):
+            clipman_server.create_tls_context(self.settings)
+
+    def test_generated_certificate_has_apple_and_android_server_extensions(self) -> None:
+        try:
+            clipman_server.find_openssl()
+        except RuntimeError:
+            self.skipTest("OpenSSL is not installed")
+        result = clipman_server.create_tls_certificate(
+            self.config_path,
+            self.settings,
+            ["server.example"],
+            ["192.0.2.7"],
+            False,
+        )
+        authority = Path(result["authority"])
+        certificate = Path(result["certificate"])
+        self.assertTrue(authority.is_file())
+        self.assertTrue(certificate.is_file())
+        self.assertEqual(str(authority.resolve()), self.settings["CaFile"])
+        self.assertTrue(str(self.settings["CertFile"]).endswith("clipman-server-fullchain.crt"))
+        openssl = clipman_server.find_openssl()
+        details = clipman_server.run_openssl(openssl, ["x509", "-in", str(certificate), "-noout", "-text"])
+        self.assertIn("CA:FALSE", details)
+        self.assertIn("TLS Web Server Authentication", details)
+        self.assertIn("DNS:server.example", details)
+        self.assertIn("IP Address:192.0.2.7", details)
+        self.assertIsInstance(clipman_server.create_tls_context(self.settings), clipman_server.ssl.SSLContext)
+        self.settings["_TlsCertificateExpires"] = clipman_server.tls_certificate_expiry(self.settings)
+        self.assertTrue(clipman_server.status(self.settings)["TlsCertificateExpires"])
+        first_authority = authority.read_bytes()
+        clipman_server.create_tls_certificate(self.config_path, self.settings, [], [], False)
+        self.assertEqual(first_authority, authority.read_bytes())
+
+    def test_expiry_warning_is_non_blocking_and_uses_active_certificate(self) -> None:
+        try:
+            clipman_server.find_openssl()
+        except RuntimeError:
+            self.skipTest("OpenSSL is not installed")
+        clipman_server.create_tls_certificate(self.config_path, self.settings, [], [], False)
+        with self.assertLogs(level="WARNING") as captured:
+            clipman_server.warn_if_tls_certificate_expiring(self.settings, days=500)
+        self.assertIn("expires within 500 days", "\n".join(captured.output))
+
+    def test_certificate_share_handler_serves_only_the_public_authority(self) -> None:
+        server = http.server.HTTPServer(("127.0.0.1", 0), clipman_server.CertificateShareHandler)
+        server.download_path = "/private-test.crt"
+        server.certificate_data = b"-----BEGIN CERTIFICATE-----\nPUBLIC\n-----END CERTIFICATE-----\n"
+        server.downloaded = Event()
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("HEAD", server.download_path)
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(200, response.status)
+            self.assertEqual("no-store", response.getheader("Cache-Control"))
+            self.assertFalse(server.downloaded.is_set())
+            connection.close()
+
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("GET", "/clipman-server-ca.key")
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(404, response.status)
+            self.assertFalse(server.downloaded.is_set())
+            connection.close()
+
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("GET", server.download_path)
+            response = connection.getresponse()
+            data = response.read()
+            self.assertEqual(200, response.status)
+            self.assertEqual("application/x-x509-ca-cert", response.getheader("Content-Type"))
+            self.assertIn("clipman-server-ca.crt", response.getheader("Content-Disposition"))
+            self.assertEqual("no-store", response.getheader("Cache-Control"))
+            self.assertEqual(server.certificate_data, data)
+            self.assertTrue(server.downloaded.is_set())
+            connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
 
 class ConditionalCreateTests(unittest.TestCase):
@@ -108,6 +230,30 @@ class ConditionalCreateTests(unittest.TestCase):
         database = clipman_server.database_path(self.settings, "0123456789abcdef0123456789abcdef")
         self.assertIn(database.read_bytes(), (b"first", b"second"))
         self.assertEqual(1, self.server.runtime_summary()["Conflicts"])
+
+    def test_expect_continue_upload_completes(self) -> None:
+        database_id = "abcdef0123456789abcdef0123456789"
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        connection.request(
+            "PUT",
+            f"/api/v1/database/{database_id}",
+            body=b"expect-continue",
+            headers={
+                "Authorization": "Bearer test-token",
+                "Content-Type": "application/octet-stream",
+                "Expect": "100-continue",
+                "If-None-Match": "*",
+            },
+        )
+        response = connection.getresponse()
+        data = response.read()
+        connection.close()
+
+        self.assertEqual(200, response.status)
+        self.assertTrue(response.getheader("X-Clipman-Revision", ""))
+        self.assertIn(b'"Version": "2.1.0"', data)
+        database = clipman_server.database_path(self.settings, database_id)
+        self.assertEqual(b"expect-continue", database.read_bytes())
 
 
 if __name__ == "__main__":

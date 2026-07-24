@@ -11,9 +11,10 @@ class ServerStorageClient(
     private val baseUrl = normalizeBaseUrl(serverUrl)
     private val token = cleanToken(token)
     private val databaseId = ServerDatabaseIdentity.fromTokenAndPassword(token, databasePassword)
+    private val hasDatabasePassword = databasePassword.isNotEmpty()
 
     val isConfigured: Boolean
-        get() = baseUrl.isNotBlank() && token.trim().isNotBlank() && databaseId.isNotBlank()
+        get() = baseUrl.isNotBlank() && token.trim().isNotBlank() && hasDatabasePassword && databaseId.isNotBlank()
 
     fun download(): ServerDatabaseDownload {
         val connection = openConnection("GET")

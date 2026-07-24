@@ -54,6 +54,7 @@
     <li><a href="#existing-history">Starting With Existing History</a></li>
     <li><a href="#client-settings">Client Settings</a></li>
     <li><a href="#private-network">Private LAN or VPN</a></li>
+    <li><a href="#private-ca">Private-CA HTTPS</a></li>
     <li><a href="#public">VPS or Public Internet</a></li>
     <li><a href="#paths">Files and Paths</a></li>
     <li><a href="#multiple-databases">Multiple Databases</a></li>
@@ -242,10 +243,23 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
     </tbody>
   </table>
 
-  <p>Linux installs should update by replacing the installed <code>clipman_server.py</code> from a newer server package, then restarting the user service. Keep settings, databases, logs, and backups outside the extracted release folder so updating the server program does not touch stored history.</p>
+  <p>Installed Linux servers provide:</p>
+
+  <pre><code>clipmanserver check-update
+clipmanserver update</code></pre>
+
+  <p>The Linux updater downloads the exact versioned server ZIP over HTTPS, requires and verifies its GitHub SHA-256 digest, rejects unsafe archive paths, checks the package manifest, and stages the replacement. It backs up only installed program, launcher, helper, and service files; it never includes settings, databases, logs, backups, certificates, or tokens. After installation it restarts the server and checks the health endpoint. If the updated service does not become healthy, the previous program files are restored and restarted automatically.</p>
+
+  <p>Automatic daily Linux updates are optional:</p>
+
+  <pre><code>clipmanserver enable-auto-updates
+clipmanserver update-status
+clipmanserver disable-auto-updates</code></pre>
+
+  <p>The systemd timer waits at least 15 minutes after boot, runs at most once per day with a randomized delay, and remembers a missed run. Container installations should continue updating by pulling a newer container image rather than modifying a running container.</p>
 
   <h2 id="connection-info">Connection Files</h2>
-  <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, and waits for <strong>Save</strong> before applying it. Clipman CLI accepts it with <code>init --connection-file</code>.</p>
+  <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, requires a nonblank history password, and waits for <strong>Save</strong> before applying it. Clipman CLI accepts it with <code>init --connection-file</code>.</p>
 
   <p>The server also writes <code>clipman-server-connection.txt</code> for readable manual setup and older clients. It contains:</p>
 
@@ -317,9 +331,15 @@ clipmanserver delete &lt;database-id&gt;
 clipmanserver force-delete &lt;database-id&gt;
 clipmanserver console
 clipmanserver token
-clipmanserver connection</code></pre>
+clipmanserver connection
+clipmanserver version
+clipmanserver check-update
+clipmanserver update
+clipmanserver enable-auto-updates
+clipmanserver disable-auto-updates
+clipmanserver update-status</code></pre>
 
-  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>prune</code> moves buckets inactive for the configured number of days, or for the number you type after the command. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully.</p>
+  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>prune</code> moves buckets inactive for the configured number of days, or for the number you type after the command. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully. The update commands use the safe update and rollback process described above.</p>
 
   <h2 id="existing-history">Starting With Existing History</h2>
   <p>Do not manually copy an existing <code>.clipdb</code> into the server's database folders. Server database buckets are derived by Clipman clients from the server token and the Clipman history password. The server deliberately does not know that history password, so it cannot safely decide which bucket an imported file belongs in.</p>
@@ -356,6 +376,34 @@ clipmanserver connection</code></pre>
   <pre><code>clipman://server-name-or-tailscale-ip:port</code></pre>
 
   <p>Only use this when the port is reachable only from trusted private networks or VPN clients.</p>
+
+  <h2 id="private-ca">Private-CA HTTPS</h2>
+  <p>Clipman Server can create its own private certificate authority and a server certificate for people who want HTTPS without buying a certificate or publishing a private server through public DNS. OpenSSL is required. The generated private keys stay in the server settings folder and must never be copied to client devices.</p>
+
+  <p>On Windows, choose <strong>Create or renew HTTPS certificate</strong> from the Clipman Server notification-area menu. On macOS, use the same command in the menu-bar menu. On an installed Linux server, run:</p>
+
+  <pre><code>clipmanserver cert --cert-host server-name --cert-ip 100.64.0.10</code></pre>
+
+  <p>Repeat <code>--cert-host</code> and <code>--cert-ip</code> for every DNS name or address clients use. The server reuses its existing private authority during normal renewal, creates a new server certificate valid for 397 days, updates its HTTPS settings, and rewrites the connection files with an <code>https://</code> address. Creating a new authority is an explicit recovery operation because every client must trust the replacement authority again.</p>
+
+  <p>To transfer only the public authority, use <strong>Share certificate authority</strong> in the Windows or macOS server menu, or run:</p>
+
+  <pre><code>clipmanserver share-ca</code></pre>
+
+  <p>This temporarily serves the public <code>clipman-server-ca.crt</code> at a random high port and unguessable path. It stops after the first successful download or ten minutes. Use it only over a trusted LAN or VPN. Compare the SHA-256 fingerprint shown by the server before trusting the certificate. The sharing command never serves either private key.</p>
+
+  <h3>Trust the Authority on Clients</h3>
+  <ul>
+    <li><strong>Windows:</strong> open the downloaded <code>.crt</code>, choose <strong>Install Certificate</strong>, and place it in <strong>Trusted Root Certification Authorities</strong> for the current user. Restart Clipman afterward.</li>
+    <li><strong>macOS:</strong> add the authority to Keychain Access, open the certificate, set <strong>Secure Sockets Layer</strong> to <strong>Always Trust</strong>, then restart Clipman.</li>
+    <li><strong>Android:</strong> install it as a CA certificate through Android security settings. Menu names vary by Android version. Clipman permits user-installed authorities for its server connection; this opt-in affects trust decisions made by Clipman, so remove an authority you no longer control.</li>
+    <li><strong>iPhone or iPad:</strong> download the certificate, install the downloaded profile in Settings, then open <strong>Settings &gt; General &gt; About &gt; Certificate Trust Settings</strong> and enable full trust for the Clipman Server authority. Installing the profile without enabling full trust is not sufficient.</li>
+  </ul>
+
+  <p>Once the authority is trusted, import the regenerated <code>.clpconf</code> file or change the client address to the HTTPS name or IP included in the certificate. A different address will fail hostname validation even when the authority is trusted. Clipman Server writes a warning to its log when the active certificate has fewer than 30 days remaining, and its health response includes the certificate expiry date. If either the certificate or key is missing, unreadable, or mismatched, the server refuses to open a listener and reports the exact configuration problem instead of falling back to HTTP.</p>
+
+  <h3>Docker</h3>
+  <p>Set <code>CLIPMAN_SELF_SIGNED_CERT=true</code> to create and reuse a private authority in the mounted <code>/data</code> volume. Optional comma-separated <code>CLIPMAN_CERT_HOSTS</code> and <code>CLIPMAN_CERT_IPS</code> values add names and addresses to the server certificate. Keep the volume persistent: deleting it also deletes the private authority needed for renewal.</p>
 
   <h2 id="public">VPS or Public Internet</h2>
   <p>For a VPS or any internet-facing deployment, use HTTPS.</p>

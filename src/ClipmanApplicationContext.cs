@@ -120,6 +120,30 @@ namespace Clipman
             StartSharedUpdateWatchers();
             ScheduleSharedUpdateCheck(5000);
             ScheduleUpdateChecks();
+            WarnAboutPasswordlessServerConfiguration();
+        }
+
+        private void WarnAboutPasswordlessServerConfiguration()
+        {
+            if (!IsServerStorageEnabled() ||
+                string.IsNullOrWhiteSpace(settings.ServerUrl) ||
+                string.IsNullOrWhiteSpace(settings.ServerToken) ||
+                !string.IsNullOrEmpty(CurrentDatabasePassword()) ||
+                invoker == null ||
+                !invoker.IsHandleCreated)
+            {
+                return;
+            }
+
+            invoker.BeginInvoke(new Action(() =>
+            {
+                MessageBox.Show(
+                    "Clipman Server now requires a history password. Server synchronization has not started, and your local cached history has not been changed.\r\n\r\nOpen Storage and Password preferences and enter a unique password shared only with your own Clipman clients.",
+                    "Clipman Server history password",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                ShowPreferencesFromTray();
+            }));
         }
 
         public void ShowHistory()

@@ -13,7 +13,10 @@ ENV CLIPMAN_PORT=8080
 WORKDIR /app
 COPY clipman_server.py /app/clipman_server.py
 COPY Docker/docker-entrypoint.sh /usr/local/bin/clipman-server-entrypoint
-RUN chmod +x /usr/local/bin/clipman-server-entrypoint
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod +x /usr/local/bin/clipman-server-entrypoint
 
 VOLUME ["/data"]
 EXPOSE 8080

@@ -100,8 +100,6 @@ func (c Config) ResolvedToken() (string, error) {
 }
 func (c Config) ResolvedPassword() (string, bool, error) {
 	switch strings.ToLower(strings.TrimSpace(c.PasswordMode)) {
-	case "passwordless":
-		return "", true, nil
 	case "config":
 		if c.PasswordProtected != "" {
 			value, err := platform.Unprotect(c.PasswordProtected)
@@ -136,9 +134,11 @@ func Validate(value Config) error {
 		return errors.New("default_kind must be history, templates, or all")
 	}
 	switch strings.ToLower(strings.TrimSpace(value.PasswordMode)) {
-	case "prompt", "config", "passwordless":
+	case "prompt", "config":
+	case "passwordless":
+		return errors.New("passwordless Clipman Server profiles are no longer supported; run clipman-cli init with a nonblank history password")
 	default:
-		return errors.New("password_mode must be prompt, config, or passwordless")
+		return errors.New("password_mode must be prompt or config")
 	}
 	limits := []struct {
 		name       string

@@ -11,8 +11,8 @@ final class ClipmanAppModel: ObservableObject {
         var id: String { rawValue }
     }
 
-    @Published var isUnlocked = false
-    @Published var settings = SettingsStore.load()
+    @Published var isUnlocked: Bool
+    @Published var settings: ClipmanSettings
     @Published var database = ClipDatabase() {
         didSet {
             rebuildLinkCache()
@@ -48,6 +48,14 @@ final class ClipmanAppModel: ObservableObject {
     private var machineName: String {
         let name = settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? UIDeviceMachine.name : name
+    }
+
+    init() {
+        let loaded = SettingsStore.load()
+        settings = loaded
+        // Startup always flows through unlock(), which also loads history and starts polling.
+        // When authentication is disabled, unlock() completes without showing a prompt.
+        isUnlocked = false
     }
 
     var groups: [String] {
@@ -116,7 +124,12 @@ final class ClipmanAppModel: ObservableObject {
         unlockTask?.cancel()
         unlockTask = Task { [weak self] in
             guard let self else { return }
-            let authenticated = await AuthenticationService.unlock()
+            let authenticated: Bool
+            if settings.requireAuthentication {
+                authenticated = await AuthenticationService.unlock()
+            } else {
+                authenticated = true
+            }
             isUnlocking = false
             guard !Task.isCancelled, generation == foregroundGeneration, isSceneActive else {
                 if isSceneActive {
@@ -211,6 +224,9 @@ final class ClipmanAppModel: ObservableObject {
         refreshTask?.cancel()
         uploadTask?.cancel()
         settings = newSettings
+        if !newSettings.requireAuthentication {
+            isUnlocked = true
+        }
         if !settings.linksEnabled && selectedSection == .links {
             selectedSection = .text
         }
@@ -282,7 +298,13 @@ final class ClipmanAppModel: ObservableObject {
         }
         let client = ServerStorageClient(settings: settingsSnapshot)
         guard client.isConfigured else {
-            status = "Open Settings to configure Clipman Server."
+            if !settingsSnapshot.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !settingsSnapshot.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               settingsSnapshot.historyPassword.isEmpty {
+                status = "Clipman Server requires a unique history password. Your local cached history is unchanged."
+            } else {
+                status = "Open Settings to configure Clipman Server."
+            }
             showingSettings = true
             return false
         }

@@ -2,9 +2,30 @@ import AppKit
 import Darwin
 import Foundation
 
+private final class CertificateShareOutputState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    private var showedDetails = false
+
+    func append(_ newData: Data) -> (text: String, lines: [String], shouldShow: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        data.append(newData)
+        let text = String(data: data, encoding: .utf8) ?? ""
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        let shouldShow = !showedDetails && lines.count >= 3 && lines[0].hasPrefix("Certificate URL: ")
+        if shouldShow { showedDetails = true }
+        return (text, lines, shouldShow)
+    }
+}
+
 final class ServerController: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var serverProcess: Process?
+    private var certificateShareProcess: Process?
+    private var intendedStop = false
+    private var unexpectedRestartCount = 0
+    private var serverStartedAt: Date?
     private var quitting = false
 
     private var appBundle: Bundle { Bundle.main }
@@ -45,6 +66,8 @@ final class ServerController: NSObject, NSApplicationDelegate {
         status.isEnabled = false
         menu.addItem(status)
         menu.addItem(NSMenuItem(title: "Copy Connection Details", action: #selector(copyConnectionDetails), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Create or Renew HTTPS Certificate", action: #selector(createHTTPSCertificate), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Share Certificate Authority", action: #selector(shareCertificateAuthority), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Settings Folder", action: #selector(openSettingsFolder), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Logs Folder", action: #selector(openLogsFolder), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: ""))
@@ -70,6 +93,8 @@ final class ServerController: NSObject, NSApplicationDelegate {
     }
 
     private func startServer() {
+        if serverProcess?.isRunning == true { return }
+        intendedStop = false
         do {
             try FileManager.default.createDirectory(at: supportURL, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: logsURL, withIntermediateDirectories: true)
@@ -107,12 +132,24 @@ final class ServerController: NSObject, NSApplicationDelegate {
             self?.appendLog(text)
         }
 
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self, weak process] _ in
             DispatchQueue.main.async {
-                guard let self else { return }
-                if !self.quitting {
-                    self.refreshMenu()
-                    self.showNotification("Clipman Server stopped. Use Start Server from the menu.")
+                guard let self, let process, self.serverProcess === process else { return }
+                self.serverProcess = nil
+                self.refreshMenu()
+                guard !self.quitting, !self.intendedStop else { return }
+                if let startedAt = self.serverStartedAt, Date().timeIntervalSince(startedAt) >= 60 {
+                    self.unexpectedRestartCount = 0
+                }
+                self.unexpectedRestartCount += 1
+                guard self.unexpectedRestartCount <= 3 else {
+                    self.showAlert("Clipman Server stopped repeatedly. Open the logs folder for details.")
+                    return
+                }
+                self.showNotification("Clipman Server stopped unexpectedly. Restarting in 5 seconds.")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                    guard let self, !self.quitting, self.serverProcess == nil else { return }
+                    self.startServer()
                 }
             }
         }
@@ -120,6 +157,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
         do {
             try process.run()
             serverProcess = process
+            serverStartedAt = Date()
             refreshMenu()
             showNotification("Clipman Server started in the background.")
         } catch {
@@ -130,6 +168,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
     }
 
     private func stopServer() {
+        intendedStop = true
         guard let process = serverProcess else { return }
         if process.isRunning {
             process.terminate()
@@ -144,8 +183,121 @@ final class ServerController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func restartServer() {
+        unexpectedRestartCount = 0
+        let previousProcess = serverProcess
         stopServer()
-        startServer()
+        guard let previousProcess, previousProcess.isRunning else {
+            startServer()
+            return
+        }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            previousProcess.waitUntilExit()
+            DispatchQueue.main.async {
+                guard let self, !self.quitting, self.serverProcess == nil else { return }
+                self.startServer()
+            }
+        }
+    }
+
+    @objc private func createHTTPSCertificate() {
+        showNotification("Creating the HTTPS certificate.")
+        runPythonUtility(["--create-tls-certificate"], timeout: 120) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let output):
+                self.restartServer()
+                self.showAlert(output + "\n\nInstall and trust the public certificate authority on each client. Use Share Certificate Authority from this menu to transfer it safely.")
+            case .failure(let error):
+                self.appendLog(error.localizedDescription + "\n")
+                self.showAlert(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func shareCertificateAuthority() {
+        if certificateShareProcess?.isRunning == true {
+            showNotification("The certificate authority is already being shared.")
+            return
+        }
+        guard let python = findPython() else {
+            showAlert("Python 3 was not found.")
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: python)
+        process.arguments = [scriptURL.path, "--config", settingsURL.path, "--share-ca"]
+        process.currentDirectoryURL = resourceURL
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        certificateShareProcess = process
+        let outputState = CertificateShareOutputState()
+        pipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            let result = outputState.append(data)
+            if result.shouldShow {
+                let url = String(result.lines[0].dropFirst("Certificate URL: ".count))
+                DispatchQueue.main.async {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(url, forType: .string)
+                    self?.showAlert(result.lines.prefix(3).joined(separator: "\n") + "\n\nThe URL has been copied to the clipboard.")
+                }
+            }
+            if process?.isRunning == false {
+                self?.appendLog(result.text)
+            }
+        }
+        process.terminationHandler = { [weak self, weak process] _ in
+            DispatchQueue.main.async {
+                if let process, self?.certificateShareProcess === process {
+                    self?.certificateShareProcess = nil
+                }
+            }
+        }
+        do {
+            try process.run()
+        } catch {
+            certificateShareProcess = nil
+            showAlert("Could not share the certificate authority: \(error.localizedDescription)")
+        }
+    }
+
+    private func runPythonUtility(_ arguments: [String], timeout: TimeInterval, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let python = findPython() else {
+            completion(.failure(NSError(domain: "ClipmanServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Python 3 was not found."])))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [scriptURL, settingsURL, resourceURL] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: python)
+            process.arguments = [scriptURL.path, "--config", settingsURL.path] + arguments
+            process.currentDirectoryURL = resourceURL
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
+            do {
+                try process.run()
+                let deadline = Date().addingTimeInterval(timeout)
+                while process.isRunning && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                if process.isRunning {
+                    process.terminate()
+                    throw NSError(domain: "ClipmanServer", code: 2, userInfo: [NSLocalizedDescriptionKey: "The operation did not finish before the time limit."])
+                }
+                let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let error = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let combined = [output, error].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "\n")
+                guard process.terminationStatus == 0 else {
+                    throw NSError(domain: "ClipmanServer", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: combined.isEmpty ? "The operation failed." : combined])
+                }
+                DispatchQueue.main.async { completion(.success(combined.isEmpty ? "The operation completed." : combined)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
     }
 
     @objc private func copyConnectionDetails() {
@@ -191,6 +343,9 @@ final class ServerController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() {
+        if certificateShareProcess?.isRunning == true {
+            certificateShareProcess?.terminate()
+        }
         NSApp.terminate(nil)
     }
 

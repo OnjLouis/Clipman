@@ -253,21 +253,28 @@ func loadContext(g globals) (*appContext, error) {
 }
 
 func resolvePassword(g globals, cfg config.Config, allowPrompt bool) (string, error) {
+	var password string
 	if g.password.set {
-		return g.password.value, nil
-	}
-	if value, ok := os.LookupEnv("CLIPMAN_PASSWORD"); ok {
-		return value, nil
-	}
-	if value, ok, err := cfg.ResolvedPassword(); err != nil {
+		password = g.password.value
+	} else if value, ok := os.LookupEnv("CLIPMAN_PASSWORD"); ok {
+		password = value
+	} else if value, ok, err := cfg.ResolvedPassword(); err != nil {
 		return "", fail(3, "cannot unlock history password: %v", err)
 	} else if ok {
-		return value, nil
-	}
-	if !allowPrompt {
+		password = value
+	} else if !allowPrompt {
 		return "", fail(5, "history password is required; set CLIPMAN_PASSWORD or use --password")
+	} else {
+		var err error
+		password, err = promptPassword("History password: ")
+		if err != nil {
+			return "", err
+		}
 	}
-	return promptPassword("History password (leave blank for no password): ")
+	if password == "" {
+		return "", fail(5, "Clipman Server requires a nonblank history password")
+	}
+	return password, nil
 }
 
 func runInit(g globals, args []string) error {
@@ -281,7 +288,6 @@ func runInit(g globals, args []string) error {
 	machine := fs.String("machine", "", "source machine name")
 	nonInteractive := fs.Bool("non-interactive", false, "do not prompt")
 	force := fs.Bool("force", false, "replace existing configuration")
-	allowPasswordless := fs.Bool("allow-passwordless", false, "confirm an empty history password")
 	if err := fs.Parse(args); err != nil {
 		return fail(2, "%v", err)
 	}
@@ -355,24 +361,16 @@ func runInit(g globals, args []string) error {
 		password = g.password.value
 	} else if value, ok := os.LookupEnv("CLIPMAN_PASSWORD"); ok {
 		password = value
-	} else if *allowPasswordless {
-		password = ""
 	} else if *nonInteractive {
-		return fail(2, "provide --password or --allow-passwordless in non-interactive mode")
+		return fail(2, "provide a nonblank --password in non-interactive mode")
 	} else {
-		password, err = promptPassword("History password (leave blank for no password): ")
+		password, err = promptPassword("History password: ")
 		if err != nil {
 			return err
 		}
-		if password == "" {
-			answer, askErr := promptLine("Use passwordless history? Type yes to confirm: ")
-			if askErr != nil {
-				return askErr
-			}
-			if !strings.EqualFold(strings.TrimSpace(answer), "yes") {
-				return fail(2, "initialization cancelled")
-			}
-		}
+	}
+	if password == "" {
+		return fail(5, "Clipman Server requires a nonblank history password")
 	}
 	normalized, err := server.NormalizeURL(serverURL)
 	if err != nil {
@@ -415,22 +413,18 @@ func runInit(g globals, args []string) error {
 		return fail(3, "cannot protect server token: %v", err)
 	}
 	cfg.TokenProtected = protectedToken
-	if password == "" {
-		cfg.PasswordMode = "passwordless"
-	} else {
-		switch strings.ToLower(*savePassword) {
-		case "none":
-			cfg.PasswordMode = "prompt"
-		case "config":
-			cfg.PasswordMode = "config"
-			protected, protectErr := config.ProtectForConfig(password)
-			if protectErr != nil {
-				return fail(3, "cannot protect history password: %v", protectErr)
-			}
-			cfg.PasswordProtected = protected
-		default:
-			return fail(2, "--save-password must be none or config")
+	switch strings.ToLower(*savePassword) {
+	case "none":
+		cfg.PasswordMode = "prompt"
+	case "config":
+		cfg.PasswordMode = "config"
+		protected, protectErr := config.ProtectForConfig(password)
+		if protectErr != nil {
+			return fail(3, "cannot protect history password: %v", protectErr)
 		}
+		cfg.PasswordProtected = protected
+	default:
+		return fail(2, "--save-password must be none or config")
 	}
 	if err = config.Save(path, cfg); err != nil {
 		return fail(3, "cannot save configuration: %v", err)
@@ -1106,7 +1100,7 @@ func printUsage(out io.Writer) {
 
 func printCommandUsage(out io.Writer, command string) bool {
 	usage := map[string]string{
-		"init":   "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--allow-passwordless] [--force]",
+		"init":   "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force]",
 		"status": "Usage: clipman-cli [global options] status [--refresh] [--json]",
 		"list":   "Usage: clipman-cli [global options] list [-n COUNT | --all] [--group NAME] [--search TEXT] [--kind history|templates|all] [--pinned-first] [--porcelain] [--json]",
 		"get":    "Usage: clipman-cli [global options] get [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--first] [--touch] [--newline] [--raw] [--json]",

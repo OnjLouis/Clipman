@@ -3,13 +3,11 @@ import CCommonCrypto
 
 public enum ServerDatabaseIdentity {
     private static let purpose = "Clipman.ServerDatabaseId.v1"
-    private static let noPasswordMarker = "<clipman-no-history-password>"
-
     public static func fromTokenAndPassword(token: String, password: String) -> String {
         let cleanedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        let passwordPart = password.isEmpty ? noPasswordMarker : password
+        guard !cleanedToken.isEmpty, !password.isEmpty else { return "" }
         let key = sha256(Array(cleanedToken.utf8))
-        let message = Array((purpose + "\n" + passwordPart).utf8)
+        let message = Array((purpose + "\n" + password).utf8)
         return base64URL(hmacSHA256(key: key, data: message))
     }
 

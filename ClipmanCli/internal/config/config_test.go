@@ -25,7 +25,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	want.Token = "token-value"
 	want.Machine = "Terminal"
 	want.PinnedFirst = true
-	want.PasswordMode = "passwordless"
+	want.PasswordMode = "prompt"
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +64,14 @@ func TestLoadRejectsUnknownKeyAndSection(t *testing.T) {
 				t.Fatal("expected unknown configuration data to be rejected")
 			}
 		})
+	}
+}
+
+func TestValidateRejectsPasswordlessServerProfile(t *testing.T) {
+	value := Default()
+	value.PasswordMode = "passwordless"
+	if err := Validate(value); err == nil || !strings.Contains(err.Error(), "no longer supported") {
+		t.Fatalf("passwordless profile error = %v", err)
 	}
 }
 

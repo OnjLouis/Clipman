@@ -1,7 +1,9 @@
 param(
     [string]$Configuration = "Debug",
     [string]$OutputDirectory = "",
-    [string]$GradlePath = ""
+    [string]$GradlePath = "",
+    [ValidateRange(30, 900)]
+    [int]$GradleNetworkTimeoutSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,7 +44,12 @@ $taskName = if ($Configuration.Equals("Release", [StringComparison]::OrdinalIgno
     ":app:assembleDebug"
 }
 
-& $GradlePath -p $projectRoot ':app:testDebugUnitTest' $taskName --no-daemon --project-cache-dir $projectCache "-Pkotlin.project.persistent.dir=$kotlinCache"
+$networkTimeoutMilliseconds = $GradleNetworkTimeoutSeconds * 1000
+Write-Host "Gradle dependency connection and read timeout: $GradleNetworkTimeoutSeconds seconds."
+& $GradlePath -p $projectRoot ':app:testDebugUnitTest' $taskName --no-daemon --stacktrace `
+    "-Dorg.gradle.internal.http.connectionTimeout=$networkTimeoutMilliseconds" `
+    "-Dorg.gradle.internal.http.socketTimeout=$networkTimeoutMilliseconds" `
+    --project-cache-dir $projectCache "-Pkotlin.project.persistent.dir=$kotlinCache"
 if ($LASTEXITCODE -ne 0) {
     throw "Android build failed with exit code $LASTEXITCODE."
 }

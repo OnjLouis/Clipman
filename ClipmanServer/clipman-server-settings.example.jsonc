@@ -48,11 +48,16 @@
   // macOS default:   ~/Library/Logs/Clipman Server/logs/clipman-server.log
   "LogPath": "/home/clipman/.local/state/clipman-server/logs/clipman-server.log",
 
-  // Direct HTTPS certificate and key.
+  // Direct HTTPS certificate authority, certificate chain, and key.
   //
   // Leave both blank for loopback, private LAN, or VPN use.
   // For VPS/public use, configure TLS directly here or put Clipman Server behind
   // a TLS reverse proxy. If these are set, clients should use https://.
+  //
+  // The built-in private-CA generator fills all three paths automatically.
+  // CaFile is the public authority installed on client devices. Never distribute
+  // the server key or the private CA key.
+  "CaFile": "",
   "CertFile": "",
   "KeyFile": "",
 

@@ -51,6 +51,18 @@ class AndroidSettings(context: Context) {
         get() = preferences.getBoolean("addClipboardOnLaunch", false)
         set(value) = preferences.edit().putBoolean("addClipboardOnLaunch", value).apply()
 
+    var requireAuthentication: Boolean
+        get() = preferences.getBoolean("requireAuthentication", false)
+        set(value) = preferences.edit().putBoolean("requireAuthentication", value).apply()
+
+    var checkForUpdatesAutomatically: Boolean
+        get() = preferences.getBoolean("checkForUpdatesAutomatically", true)
+        set(value) = preferences.edit().putBoolean("checkForUpdatesAutomatically", value).apply()
+
+    var lastUpdateCheckUnixMs: Long
+        get() = preferences.getLong("lastUpdateCheckUnixMs", 0L)
+        set(value) = preferences.edit().putLong("lastUpdateCheckUnixMs", value).apply()
+
     var playSounds: Boolean
         get() = preferences.getBoolean("playSounds", true)
         set(value) = preferences.edit().putBoolean("playSounds", value).apply()

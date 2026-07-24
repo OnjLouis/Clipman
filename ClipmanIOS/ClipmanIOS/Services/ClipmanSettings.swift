@@ -18,6 +18,7 @@ struct ClipmanSettings: Equatable, Sendable {
     var hapticsEnabled: Bool
     var autoCopyRemote: Bool
     var addClipboardOnLaunch: Bool
+    var requireAuthentication: Bool
     var linksEnabled: Bool
     var refreshIntervalSeconds: Double
 
@@ -33,6 +34,7 @@ struct ClipmanSettings: Equatable, Sendable {
             hapticsEnabled: true,
             autoCopyRemote: false,
             addClipboardOnLaunch: false,
+            requireAuthentication: false,
             linksEnabled: true,
             refreshIntervalSeconds: 5
         )
@@ -47,6 +49,7 @@ enum SettingsStore {
         static let hapticsEnabled = "hapticsEnabled"
         static let autoCopyRemote = "autoCopyRemote"
         static let addClipboardOnLaunch = "addClipboardOnLaunch"
+        static let requireAuthentication = "requireAuthentication"
         static let linksEnabled = "linksEnabled"
         static let refreshIntervalSeconds = "refreshIntervalSeconds"
         static let serverToken = "serverToken"
@@ -63,6 +66,7 @@ enum SettingsStore {
         settings.hapticsEnabled = UserDefaults.standard.object(forKey: Keys.hapticsEnabled) as? Bool ?? true
         settings.autoCopyRemote = UserDefaults.standard.object(forKey: Keys.autoCopyRemote) as? Bool ?? false
         settings.addClipboardOnLaunch = UserDefaults.standard.object(forKey: Keys.addClipboardOnLaunch) as? Bool ?? false
+        settings.requireAuthentication = UserDefaults.standard.object(forKey: Keys.requireAuthentication) as? Bool ?? false
         settings.linksEnabled = UserDefaults.standard.object(forKey: Keys.linksEnabled) as? Bool ?? true
         let interval = UserDefaults.standard.double(forKey: Keys.refreshIntervalSeconds)
         settings.refreshIntervalSeconds = interval > 0 ? interval : 5
@@ -82,6 +86,7 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.hapticsEnabled, forKey: Keys.hapticsEnabled)
         UserDefaults.standard.set(settings.autoCopyRemote, forKey: Keys.autoCopyRemote)
         UserDefaults.standard.set(settings.addClipboardOnLaunch, forKey: Keys.addClipboardOnLaunch)
+        UserDefaults.standard.set(settings.requireAuthentication, forKey: Keys.requireAuthentication)
         UserDefaults.standard.set(settings.linksEnabled, forKey: Keys.linksEnabled)
         UserDefaults.standard.set(max(2, settings.refreshIntervalSeconds), forKey: Keys.refreshIntervalSeconds)
         UserDefaults.standard.set(settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Keys.deviceName)

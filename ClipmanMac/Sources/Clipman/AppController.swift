@@ -130,6 +130,23 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 _ = CGRequestPostEventAccess()
             }
         }
+        warnAboutPasswordlessServerConfiguration(initialPassword: initialPassword)
+    }
+
+    private func warnAboutPasswordlessServerConfiguration(initialPassword: String) {
+        guard isServerStorageEnabled(settings),
+              !settings.serverUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !settings.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              initialPassword.isEmpty else { return }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.showInformationalAlert(
+                title: "Clipman Server History Password",
+                message: "Clipman Server now requires a history password. Server synchronization has not started, and your local cached history has not been changed. Open Storage and Password preferences and enter a unique password shared only with your own Clipman clients."
+            )
+            self.showPreferences(nil)
+        }
     }
 
     private func enforceSingleRunningInstance() -> Bool {
@@ -628,18 +645,21 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     @objc private func showPreferences(_ sender: Any?) {
+        let databasePasswordAvailable = !currentDatabasePassword(for: settings.databasePath).isEmpty
         if preferencesWindow == nil {
             preferencesWindow = PreferencesWindowController(
                 settings: settings,
                 historyIsEncrypted: encryptedHistoryExists(for: settings),
-                rememberedPasswordExists: keychain.hasPassword(for: settings.databasePath)
+                rememberedPasswordExists: keychain.hasPassword(for: settings.databasePath),
+                databasePasswordAvailable: databasePasswordAvailable
             )
             preferencesWindow?.preferencesDelegate = self
         } else {
             preferencesWindow?.update(
                 settings: settings,
                 historyIsEncrypted: encryptedHistoryExists(for: settings),
-                rememberedPasswordExists: keychain.hasPassword(for: settings.databasePath)
+                rememberedPasswordExists: keychain.hasPassword(for: settings.databasePath),
+                databasePasswordAvailable: databasePasswordAvailable
             )
         }
         preferencesWindow?.showWindow(nil)

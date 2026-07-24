@@ -7,18 +7,11 @@ namespace Clipman
     internal static class ServerDatabaseIdentity
     {
         private const string Purpose = "Clipman.ServerDatabaseId.v1";
-        private const string NoPasswordMarker = "<clipman-no-history-password>";
-
         public static string FromTokenAndPassword(string serverToken, string historyPassword)
         {
             var token = (serverToken ?? string.Empty).Trim();
-            if (token.Length == 0) return string.Empty;
-
             var password = historyPassword ?? string.Empty;
-            if (password.Length == 0)
-            {
-                password = NoPasswordMarker;
-            }
+            if (token.Length == 0 || password.Length == 0) return string.Empty;
 
             var key = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(token));
             using (var hmac = new HMACSHA256(key))

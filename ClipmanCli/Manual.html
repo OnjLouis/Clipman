@@ -19,7 +19,7 @@
     <h1>Clipman CLI</h1>
     <p><strong>Development preview:</strong> this build is available for practical testing and feedback. Command names, configuration details, and behavior may change before the first stable CLI release.</p>
     <p>Clipman CLI is an additional command-line client for Clipman text history. It does not replace the Windows, macOS, Android, or iOS apps. It is intended for terminals, SSH sessions, scripts, headless systems, and users who prefer ordinary text commands.</p>
-    <p>Clipman CLI connects to Clipman Server and reads and writes the same encrypted or passwordless text-history database as the other clients. File history, Secrets, local clipboard monitoring, and server administration remain in the relevant apps or server tools.</p>
+    <p>Clipman CLI connects to Clipman Server and reads and writes the same encrypted text-history database as the other clients. Clipman Server requires a nonblank, preferably unique history password. File history, Secrets, local clipboard monitoring, and server administration remain in the relevant apps or server tools.</p>
     <p>Project page: <a href="https://github.com/OnjLouis/Clipman">Clipman on GitHub</a></p>
 
     <h2 id="contents">Contents</h2>
@@ -93,7 +93,7 @@ clipman-cli get --kind templates --name today</code></pre>
 
     <h2 id="configuration">Configuration</h2>
     <p>The default configuration file is <code>~/.clipman/config.toml</code> on Linux and macOS, and <code>%LOCALAPPDATA%\Clipman CLI\config.toml</code> on Windows. <code>CLIPMAN_HOME</code> changes the data directory. <code>CLIPMAN_CONFIG</code> or <code>--config</code> selects a particular config file.</p>
-    <p>The history password is resolved from <code>--password</code>, <code>CLIPMAN_PASSWORD</code>, saved configuration when explicitly enabled, or a no-echo controlling-terminal prompt. This allows clip text to be read from standard input without consuming the password prompt.</p>
+    <p>The nonblank history password is resolved from <code>--password</code>, <code>CLIPMAN_PASSWORD</code>, saved configuration when explicitly enabled, or a no-echo controlling-terminal prompt. This allows clip text to be read from standard input without consuming the password prompt.</p>
 
     <h2 id="security">Security</h2>
     <ul>

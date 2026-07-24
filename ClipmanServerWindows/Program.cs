@@ -54,7 +54,13 @@ namespace ClipmanServerWrapper
         private readonly string logDirectory;
         private readonly string wrapperLogPath;
         private readonly NotifyIcon tray;
+        private readonly SynchronizationContext uiContext;
         private Process serverProcess;
+        private Process certificateShareProcess;
+        private System.Windows.Forms.Timer restartTimer;
+        private int unexpectedRestartCount;
+        private DateTime serverStartedUtc;
+        private bool stoppingServer;
         private bool quitting;
 
         public ServerTrayContext(string appDirectory)
@@ -71,6 +77,7 @@ namespace ClipmanServerWrapper
             Directory.CreateDirectory(settingsDirectory);
             Directory.CreateDirectory(logDirectory);
             ExtractBundledServerScript();
+            uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
             tray = new NotifyIcon
             {
@@ -91,6 +98,8 @@ namespace ClipmanServerWrapper
                 menu.Items.Clear();
                 menu.Items.Add("Clipman Server: " + StatusText()).Enabled = false;
                 menu.Items.Add("Copy connection details", null, delegate { CopyConnectionDetails(); });
+                menu.Items.Add("Create or renew HTTPS certificate", null, delegate { CreateHttpsCertificate(); });
+                menu.Items.Add("Share certificate authority", null, delegate { ShareCertificateAuthority(); });
                 menu.Items.Add("Open settings folder", null, delegate { OpenFolder(settingsDirectory); });
                 menu.Items.Add("Open logs folder", null, delegate { OpenFolder(logDirectory); });
                 menu.Items.Add("Check for updates", null, delegate { ServerUpdateService.CheckForUpdates(null, false, ExitThread); });
@@ -123,6 +132,11 @@ namespace ClipmanServerWrapper
 
         private void StartServer()
         {
+            if (serverProcess != null && StatusText() == "running")
+            {
+                return;
+            }
+            stoppingServer = false;
             if (!File.Exists(scriptPath))
             {
                 tray.Text = "Clipman Server: missing script";
@@ -151,29 +165,29 @@ namespace ClipmanServerWrapper
                 StandardErrorEncoding = Encoding.UTF8
             };
 
-            serverProcess = new Process { StartInfo = start, EnableRaisingEvents = true };
-            serverProcess.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) { LogLine(e.Data); };
-            serverProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { LogLine(e.Data); };
-            serverProcess.Exited += delegate
+            var process = new Process { StartInfo = start, EnableRaisingEvents = true };
+            process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) { LogLine(e.Data); };
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { LogLine(e.Data); };
+            process.Exited += delegate
             {
-                if (!quitting)
-                {
-                    tray.Text = "Clipman Server: stopped";
-                    tray.ShowBalloonTip(5000, "Clipman Server", "The server stopped. Use Restart server from the tray menu.", ToolTipIcon.Warning);
-                }
+                HandleUnexpectedServerExit(process);
             };
+            serverProcess = process;
 
             try
             {
-                serverProcess.Start();
-                serverProcess.BeginOutputReadLine();
-                serverProcess.BeginErrorReadLine();
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                serverStartedUtc = DateTime.UtcNow;
                 tray.Text = "Clipman Server: running";
                 tray.ShowBalloonTip(2500, "Clipman Server", "Server started in the background.", ToolTipIcon.Info);
             }
             catch (Exception ex)
             {
                 LogLine(ex.ToString());
+                try { process.Dispose(); } catch { }
+                if (serverProcess == process) serverProcess = null;
                 tray.Text = "Clipman Server: error";
                 tray.ShowBalloonTip(5000, "Clipman Server", ex.Message, ToolTipIcon.Error);
             }
@@ -181,12 +195,14 @@ namespace ClipmanServerWrapper
 
         private void RestartServer()
         {
+            unexpectedRestartCount = 0;
             StopServer();
             StartServer();
         }
 
         private void StopServer()
         {
+            stoppingServer = true;
             if (serverProcess == null)
             {
                 return;
@@ -208,6 +224,169 @@ namespace ClipmanServerWrapper
                 serverProcess.Dispose();
                 serverProcess = null;
             }
+        }
+
+        private void HandleUnexpectedServerExit(Process process)
+        {
+            uiContext.Post(delegate
+            {
+                if (quitting || stoppingServer || serverProcess != process)
+                {
+                    return;
+                }
+                try { process.Dispose(); } catch { }
+                serverProcess = null;
+                tray.Text = "Clipman Server: stopped";
+                if (serverStartedUtc != default(DateTime) && DateTime.UtcNow - serverStartedUtc >= TimeSpan.FromMinutes(1))
+                {
+                    unexpectedRestartCount = 0;
+                }
+                unexpectedRestartCount++;
+                if (unexpectedRestartCount > 3)
+                {
+                    tray.ShowBalloonTip(5000, "Clipman Server", "The server stopped repeatedly. Open the logs folder for details.", ToolTipIcon.Error);
+                    return;
+                }
+                tray.ShowBalloonTip(3000, "Clipman Server", "The server stopped unexpectedly. Restarting in 5 seconds.", ToolTipIcon.Warning);
+                if (restartTimer != null)
+                {
+                    restartTimer.Stop();
+                    restartTimer.Dispose();
+                }
+                restartTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+                restartTimer.Tick += delegate
+                {
+                    restartTimer.Stop();
+                    restartTimer.Dispose();
+                    restartTimer = null;
+                    StartServer();
+                };
+                restartTimer.Start();
+            }, null);
+        }
+
+        private void CreateHttpsCertificate()
+        {
+            tray.ShowBalloonTip(2500, "Clipman Server", "Creating the HTTPS certificate.", ToolTipIcon.Info);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = RunPythonUtility("--create-tls-certificate", 120000);
+                uiContext.Post(delegate
+                {
+                    if (!result.Succeeded)
+                    {
+                        LogLine(result.Output);
+                        MessageBox.Show(result.Output, "Clipman Server HTTPS", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    RestartServer();
+                    MessageBox.Show(
+                        result.Output + Environment.NewLine + Environment.NewLine +
+                        "Install and trust the public certificate authority on each client. Use Share certificate authority from the tray menu to transfer it safely.",
+                        "Clipman Server HTTPS",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }, null);
+            });
+        }
+
+        private void ShareCertificateAuthority()
+        {
+            if (certificateShareProcess != null)
+            {
+                try
+                {
+                    if (!certificateShareProcess.HasExited)
+                    {
+                        tray.ShowBalloonTip(3000, "Clipman Server", "The certificate authority is already being shared.", ToolTipIcon.Info);
+                        return;
+                    }
+                }
+                catch { }
+            }
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var python = FindPythonLauncher();
+                if (python == null)
+                {
+                    uiContext.Post(delegate { MessageBox.Show("Python 3 was not found.", "Clipman Server", MessageBoxButtons.OK, MessageBoxIcon.Error); }, null);
+                    return;
+                }
+                var start = CreatePythonStartInfo(python, "--share-ca");
+                var process = new Process { StartInfo = start };
+                certificateShareProcess = process;
+                try
+                {
+                    process.Start();
+                    var urlLine = process.StandardOutput.ReadLine() ?? "";
+                    var fingerprintLine = process.StandardOutput.ReadLine() ?? "";
+                    var limitLine = process.StandardOutput.ReadLine() ?? "";
+                    if (!urlLine.StartsWith("Certificate URL: ", StringComparison.Ordinal))
+                    {
+                        var error = process.StandardError.ReadToEnd();
+                        throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "The certificate sharing service did not start." : error.Trim());
+                    }
+                    var url = urlLine.Substring("Certificate URL: ".Length);
+                    uiContext.Post(delegate
+                    {
+                        Clipboard.SetText(url);
+                        MessageBox.Show(
+                            urlLine + Environment.NewLine + fingerprintLine + Environment.NewLine + limitLine + Environment.NewLine + Environment.NewLine +
+                            "The URL has been copied to the clipboard.",
+                            "Share Certificate Authority",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                    }, null);
+                    process.WaitForExit();
+                    var remainder = process.StandardOutput.ReadToEnd();
+                    if (!string.IsNullOrWhiteSpace(remainder)) LogLine(remainder.Trim());
+                }
+                catch (Exception ex)
+                {
+                    LogLine(ex.ToString());
+                    uiContext.Post(delegate { MessageBox.Show(ex.Message, "Share Certificate Authority", MessageBoxButtons.OK, MessageBoxIcon.Error); }, null);
+                }
+                finally
+                {
+                    try { process.Dispose(); } catch { }
+                    if (certificateShareProcess == process) certificateShareProcess = null;
+                }
+            });
+        }
+
+        private CommandResult RunPythonUtility(string arguments, int timeoutMilliseconds)
+        {
+            var python = FindPythonLauncher();
+            if (python == null) return new CommandResult(false, "Python 3 was not found.");
+            using (var process = new Process { StartInfo = CreatePythonStartInfo(python, arguments) })
+            {
+                process.Start();
+                var output = process.StandardOutput.ReadToEnd();
+                var error = process.StandardError.ReadToEnd();
+                if (!process.WaitForExit(timeoutMilliseconds))
+                {
+                    try { process.Kill(); } catch { }
+                    return new CommandResult(false, "The operation did not finish before the time limit.");
+                }
+                var combined = string.Join(Environment.NewLine, new[] { output.Trim(), error.Trim() }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                return new CommandResult(process.ExitCode == 0, string.IsNullOrWhiteSpace(combined) ? "The operation completed." : combined);
+            }
+        }
+
+        private ProcessStartInfo CreatePythonStartInfo(PythonLauncher python, string arguments)
+        {
+            return new ProcessStartInfo
+            {
+                FileName = python.FileName,
+                Arguments = python.ArgumentsPrefix + Quote(scriptPath) + " --config " + Quote(settingsPath) + " " + arguments,
+                WorkingDirectory = appDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
         }
 
         private void CopyConnectionDetails()
@@ -277,7 +456,6 @@ namespace ClipmanServerWrapper
         {
             var candidates = new[]
             {
-                new PythonLauncher("py.exe", "-3 "),
                 new PythonLauncher("pythonw.exe", ""),
                 new PythonLauncher("python.exe", "")
             };
@@ -308,6 +486,29 @@ namespace ClipmanServerWrapper
                 {
                 }
             }
+
+            try
+            {
+                var locate = new ProcessStartInfo
+                {
+                    FileName = "py.exe",
+                    Arguments = "-3 -c \"import sys;print(sys.executable)\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var process = Process.Start(locate))
+                {
+                    var executable = process.StandardOutput.ReadToEnd().Trim();
+                    process.WaitForExit(5000);
+                    if (process.ExitCode == 0 && File.Exists(executable))
+                    {
+                        return new PythonLauncher(executable, "");
+                    }
+                }
+            }
+            catch { }
 
             return null;
         }
@@ -397,6 +598,15 @@ namespace ClipmanServerWrapper
         protected override void ExitThreadCore()
         {
             quitting = true;
+            if (restartTimer != null)
+            {
+                restartTimer.Stop();
+                restartTimer.Dispose();
+            }
+            if (certificateShareProcess != null)
+            {
+                try { if (!certificateShareProcess.HasExited) certificateShareProcess.Kill(); } catch { }
+            }
             tray.Visible = false;
             tray.Dispose();
             StopServer();
@@ -413,6 +623,18 @@ namespace ClipmanServerWrapper
         {
             FileName = fileName;
             ArgumentsPrefix = argumentsPrefix;
+        }
+    }
+
+    internal sealed class CommandResult
+    {
+        public bool Succeeded { get; private set; }
+        public string Output { get; private set; }
+
+        public CommandResult(bool succeeded, string output)
+        {
+            Succeeded = succeeded;
+            Output = output;
         }
     }
 

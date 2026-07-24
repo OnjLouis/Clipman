@@ -10,17 +10,19 @@ namespace Clipman
         private readonly string baseUrl;
         private readonly string token;
         private readonly string databaseId;
+        private readonly bool hasDatabasePassword;
 
         public ServerStorageClient(string serverUrl, string token, string databasePassword)
         {
             baseUrl = NormalizeBaseUrl(serverUrl);
             this.token = ServerSettingsSanitizer.CleanToken(token);
+            hasDatabasePassword = !string.IsNullOrEmpty(databasePassword);
             databaseId = ServerDatabaseIdentity.FromTokenAndPassword(this.token, databasePassword);
         }
 
         public bool IsConfigured
         {
-            get { return baseUrl.Length > 0 && token.Trim().Length > 0 && databaseId.Length > 0; }
+            get { return baseUrl.Length > 0 && token.Trim().Length > 0 && hasDatabasePassword && databaseId.Length > 0; }
         }
 
         public ServerDatabaseMetadata GetMetadata()
@@ -85,7 +87,7 @@ namespace Clipman
         {
             if (!IsConfigured)
             {
-                throw new InvalidOperationException("Clipman server host and token are required.");
+                throw new InvalidOperationException("Clipman server host, token, and history password are required.");
             }
 
             NetworkSecurity.EnableModernTls();

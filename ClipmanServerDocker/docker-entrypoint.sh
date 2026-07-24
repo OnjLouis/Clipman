@@ -13,6 +13,33 @@ KEY_FILE="${CLIPMAN_KEY_FILE:-}"
 
 mkdir -p "$DATA_DIR" "$(dirname "$LOG_PATH")"
 
+if [ "${CLIPMAN_SELF_SIGNED_CERT:-}" = "true" ] && [ -z "$CERT_FILE" ] && [ -z "$KEY_FILE" ]; then
+  GENERATED_CERT="$DATA_DIR/tls/clipman-server-fullchain.crt"
+  GENERATED_KEY="$DATA_DIR/tls/clipman-server.key"
+  if [ ! -f "$GENERATED_CERT" ] || [ ! -f "$GENERATED_KEY" ]; then
+    set -- /app/clipman_server.py \
+      --config "$CONFIG_PATH" \
+      --host "$HOST" \
+      --port "$PORT" \
+      --database "$DATABASE_PATH" \
+      --log "$LOG_PATH" \
+      --create-tls-certificate
+    if [ -n "$ADVERTISE_HOST" ]; then
+      set -- "$@" --advertise-host "$ADVERTISE_HOST"
+    fi
+    for name in ${CLIPMAN_CERT_HOSTS:-}; do
+      set -- "$@" --cert-host "$name"
+    done
+    for address in ${CLIPMAN_CERT_IPS:-}; do
+      set -- "$@" --cert-ip "$address"
+    done
+    python3 "$@"
+  fi
+  CERT_FILE="$GENERATED_CERT"
+  KEY_FILE="$GENERATED_KEY"
+  echo "Private-CA HTTPS is enabled. Install and trust $DATA_DIR/tls/clipman-server-ca.crt on each client."
+fi
+
 set -- /app/clipman_server.py \
   --config "$CONFIG_PATH" \
   --host "$HOST" \

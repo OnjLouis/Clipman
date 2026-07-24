@@ -54,7 +54,7 @@ final class ServerStorageClient {
         } else {
             self.displayEndpoint = "invalid server address"
         }
-        self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty
+        self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty && !settings.historyPassword.isEmpty
     }
 
     func metadata() async throws -> ServerDatabaseMetadata {

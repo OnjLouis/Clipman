@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var showConnectionImporter = false
     @State private var pendingConnection: ServerConnectionDetails?
     @State private var connectionImportError = ""
+    @State private var settingsValidationError = ""
 
     var body: some View {
         NavigationStack {
@@ -35,6 +36,8 @@ struct SettingsView: View {
                     Toggle("Enable links history", isOn: $draft.linksEnabled)
                     Toggle("Copy latest remote item to iOS clipboard", isOn: $draft.autoCopyRemote)
                     Toggle("Offer to add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
+                    Toggle("Require biometric or device authentication", isOn: $draft.requireAuthentication)
+                        .accessibilityHint("When enabled, Clipman asks for Face ID, Touch ID, or the device passcode whenever the app returns to the foreground.")
                     Stepper(value: $draft.refreshIntervalSeconds, in: 2...30, step: 1) {
                         Text("Refresh interval: \(Int(draft.refreshIntervalSeconds)) seconds")
                     }
@@ -85,6 +88,11 @@ struct SettingsView: View {
                     Button("Save") {
                         draft.serverURL = ServerSettingsSanitizer.cleanDisplayURL(draft.serverURL)
                         draft.serverToken = ServerSettingsSanitizer.cleanToken(draft.serverToken)
+                        guard draft.storageMode != .server || !draft.historyPassword.isEmpty else {
+                            settingsValidationError = "Clipman Server requires a unique history password. Enter one before saving this connection."
+                            showServerConnection = true
+                            return
+                        }
                         app.saveSettings(draft)
                         dismiss()
                     }
@@ -137,6 +145,14 @@ struct SettingsView: View {
                 Button("OK") { connectionImportError = "" }
             } message: {
                 Text(connectionImportError)
+            }
+            .alert("History password required", isPresented: Binding(
+                get: { !settingsValidationError.isEmpty },
+                set: { if !$0 { settingsValidationError = "" } }
+            )) {
+                Button("OK") { settingsValidationError = "" }
+            } message: {
+                Text(settingsValidationError)
             }
         }
         .accessibilityAction(.escape) {
