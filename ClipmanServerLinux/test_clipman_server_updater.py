@@ -12,7 +12,7 @@ import clipman_server_updater as updater
 class ClipmanServerUpdaterTests(unittest.TestCase):
     def test_versions_and_release_asset_are_selected_numerically(self):
         release = {
-            "tag_name": "v2.10.0",
+            "tag_name": "server-v2.10.0",
             "assets": [
                 {
                     "name": "ClipmanServer-2.10.0.zip",
@@ -20,10 +20,25 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
                 }
             ],
         }
-        version, asset = updater.find_update(release, "2.9.9")
+        version, asset = updater.find_update([release], "2.9.9")
         self.assertEqual("2.10.0", version)
         self.assertEqual("ClipmanServer-2.10.0.zip", asset["name"])
-        self.assertIsNone(updater.find_update(release, "2.10.0"))
+        self.assertIsNone(updater.find_update([release], "2.10.0"))
+
+    def test_client_releases_and_prereleases_are_ignored(self):
+        releases = [
+            {
+                "tag_name": "v9.0.0",
+                "assets": [{"name": "ClipmanServer-9.0.0.zip", "browser_download_url": "https://example.test/client.zip"}],
+            },
+            {
+                "tag_name": "server-v2.2.0",
+                "prerelease": True,
+                "assets": [{"name": "ClipmanServer-2.2.0.zip", "browser_download_url": "https://example.test/preview.zip"}],
+            },
+        ]
+
+        self.assertIsNone(updater.find_update(releases, "2.1.0"))
 
     def test_unsafe_zip_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

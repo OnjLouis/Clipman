@@ -138,6 +138,18 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
 
   <p>If you are using Caddy, nginx, Traefik, or another TLS reverse proxy, leave Clipman Server as plain HTTP inside the private Docker network and expose only the reverse proxy to the public internet. Set <code>CLIPMAN_IS_BEHIND_REVERSE_PROXY=true</code> so the server permits that private container listener. Clipman clients should use the public HTTPS address from the reverse proxy.</p>
 
+  <p>For a server whose published port is reachable only through a trusted LAN or VPN, explicitly allow that private plain-HTTP transport:</p>
+
+  <pre><code>docker run --detach \
+  --name clipman-server \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -e CLIPMAN_ALLOW_INSECURE_REMOTE=true \
+  -v /opt/clipman-server:/data \
+  ghcr.io/onjlouis/clipman-server:latest</code></pre>
+
+  <p>Do not use <code>CLIPMAN_ALLOW_INSECURE_REMOTE=true</code> for a port exposed directly to the public internet. Without TLS, reverse-proxy mode, or this deliberate trusted-network override, the container explains the required choices and stops instead of opening an insecure listener.</p>
+
   <p>Useful container environment variables:</p>
 
   <table>
@@ -150,6 +162,7 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
       <tr><td><code>CLIPMAN_PORT</code></td><td>Listen port inside the container. Defaults to <code>8080</code>.</td></tr>
       <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Optional host written into the generated connection files.</td></tr>
       <tr><td><code>CLIPMAN_IS_BEHIND_REVERSE_PROXY</code></td><td>Set to <code>true</code> when TLS is handled by a reverse proxy.</td></tr>
+      <tr><td><code>CLIPMAN_ALLOW_INSECURE_REMOTE</code></td><td>Set to <code>true</code> only when the published port is restricted to a trusted LAN or VPN.</td></tr>
       <tr><td><code>CLIPMAN_CERT_FILE</code> and <code>CLIPMAN_KEY_FILE</code></td><td>Optional direct TLS certificate and key paths inside the container.</td></tr>
     </tbody>
   </table>
@@ -190,7 +203,7 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
 
   <p>This is useful when you deliberately want console output. It is not the recommended everyday way to run the server. On Windows and macOS, the wrapper menu's <strong>Open settings folder</strong>, <strong>Open logs folder</strong>, and <strong>Copy connection details</strong> commands are usually easier than running the server by hand.</p>
 
-  <p>On first run, the server creates a settings file with a random high port, a random bearer token, a private data directory, a managed log file, and importable and readable connection files beside the settings file.</p>
+  <p>On first run, the server creates a settings file with a random persistent listening port, a random bearer token, a private data directory, a managed log file, and importable and readable connection files beside the settings file. New ports are chosen outside the range Windows normally reserves for temporary connections, so a Windows restart is less likely to make the saved port unavailable.</p>
 
   <p>Show the token later with:</p>
 
@@ -229,6 +242,8 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
 
   <p>On Windows, use the Clipman Server notification-area menu and choose <strong>Check for updates</strong>. On macOS, use the Clipman Server menu-bar item and choose <strong>Check for Updates</strong>. If a newer server ZIP is available, the wrapper downloads the ZIP, closes the wrapper, replaces the platform-specific server app, and starts the updated wrapper again.</p>
 
+  <p>Server 2.1.1 separates server releases from Clipman client releases. Install 2.1.1 once from the server download on the releases page; later server-only updates can then be found by the server updater without making Clipman clients think that a client update is available. It also fixes the container entrypoint so Docker writes first-run connection files and then keeps the server process running, resolving <a href="https://github.com/OnjLouis/Clipman/issues/38">issue #38</a>.</p>
+
   <p>The Windows and macOS wrappers also support these command-line switches for scripts and diagnostics:</p>
 
   <table>
@@ -257,6 +272,15 @@ clipmanserver update-status
 clipmanserver disable-auto-updates</code></pre>
 
   <p>The systemd timer waits at least 15 minutes after boot, runs at most once per day with a randomized delay, and remembers a missed run. Container installations should continue updating by pulling a newer container image rather than modifying a running container.</p>
+
+  <h3>Unavailable Listening Port</h3>
+  <p>If another program or the operating system reserves the saved listening port, Clipman Server reports <strong>port unavailable</strong> and stops instead of repeatedly restarting. Settings, tokens, certificates, databases, and backups remain unchanged. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/37">issue #37</a>.</p>
+
+  <p>On Windows or macOS, open the server's notification-area or menu-bar menu and choose <strong>Change Listening Port</strong>. The server suggests an available persistent port, saves it, refreshes both connection files, and restarts. On an installed Linux server, run:</p>
+
+  <pre><code>clipmanserver port</code></pre>
+
+  <p>You can also specify a checked port directly, for example <code>clipmanserver port 25766</code>. After changing the port, update the server address on every Clipman client or import the refreshed <code>clipman-server-connection.clpconf</code> file. Changing the port does not change the token or choose a different database bucket.</p>
 
   <h2 id="connection-info">Connection Files</h2>
   <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, requires a nonblank history password, and waits for <strong>Save</strong> before applying it. Clipman CLI accepts it with <code>init --connection-file</code>.</p>

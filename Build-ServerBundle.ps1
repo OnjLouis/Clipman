@@ -12,14 +12,12 @@ if ($OutputDirectory.TrimEnd('\').StartsWith($repoFullPath + '\', [StringCompari
 }
 
 function Get-ClipmanVersion {
-    $assemblyInfo = Join-Path $PSScriptRoot 'src\AssemblyInfo.cs'
-    $text = Get-Content -LiteralPath $assemblyInfo -Raw
-    $match = [regex]::Match($text, 'AssemblyInformationalVersion\("(?<version>[^"]+)"\)')
-    if (-not $match.Success) {
-        throw "Could not find AssemblyInformationalVersion in $assemblyInfo"
+    $versionFile = Join-Path $PSScriptRoot 'ClipmanServer\version.txt'
+    $version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+    if ($version -notmatch '^\d+\.\d+\.\d+$') {
+        throw "Clipman Server version is invalid in $versionFile"
     }
-
-    return $match.Groups['version'].Value
+    return $version
 }
 
 function Build-WindowsServerWrapper([string]$outputPath) {

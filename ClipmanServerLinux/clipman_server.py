@@ -29,11 +29,14 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"
 METADATA_TOUCH_INTERVAL_MS = 5 * 60 * 1000
+SERVER_PORT_MIN = 20000
+SERVER_PORT_MAX = 49151
+BIND_ERROR_EXIT_CODE = 20
 
 
 def now_ms() -> int:
@@ -42,6 +45,21 @@ def now_ms() -> int:
 
 def random_high_port() -> int:
     return 49152 + secrets.randbelow(65535 - 49152)
+
+
+def find_available_server_port(attempts: int = 256) -> int:
+    """Choose a persistent listener port outside Windows' dynamic range."""
+    for _ in range(attempts):
+        port = SERVER_PORT_MIN + secrets.randbelow(SERVER_PORT_MAX - SERVER_PORT_MIN + 1)
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", port))
+            return port
+        except OSError:
+            pass
+        finally:
+            probe.close()
+    raise RuntimeError("Could not find an available Clipman Server port.")
 
 
 def random_token() -> str:
@@ -87,7 +105,8 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     data_dir = default_data_dir()
     settings.setdefault("Host", "127.0.0.1")
     settings.setdefault("AdvertiseHost", "")
-    settings.setdefault("Port", random_high_port())
+    if "Port" not in settings:
+        settings["Port"] = find_available_server_port()
     settings.setdefault("DatabasePath", str(data_dir / "clipman-history.clipdb"))
     settings.setdefault("AuthToken", random_token())
     settings.setdefault("LogPath", str(default_log_path()))
@@ -1234,6 +1253,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", help="Override listen host for this run and save it.")
     parser.add_argument("--advertise-host", help="Override the host written to connection details for this run and save it.")
     parser.add_argument("--port", type=int, help="Override listen port for this run and save it.")
+    parser.add_argument("--suggest-port", action="store_true", help="Print an available persistent server port and exit.")
     parser.add_argument("--database", help="Override database path and save it.")
     parser.add_argument("--log", help="Override log path and save it.")
     parser.add_argument("--cert-file", help="TLS certificate PEM file for direct HTTPS and save it.")
@@ -1262,13 +1282,19 @@ def main() -> int:
     if args.version:
         print(APP_VERSION)
         return 0
+    if args.suggest_port:
+        print(find_available_server_port())
+        return 0
+    if args.port is not None and not 1 <= args.port <= 65535:
+        print("The listening port must be between 1 and 65535.", file=sys.stderr)
+        return 2
     config_path = Path(args.config).expanduser().resolve()
     settings, settings_created = load_settings(config_path)
     if args.host:
         settings["Host"] = args.host
     if args.advertise_host:
         settings["AdvertiseHost"] = args.advertise_host
-    if args.port:
+    if args.port is not None:
         settings["Port"] = args.port
     if args.database:
         settings["DatabasePath"] = str(Path(args.database).expanduser().resolve())
@@ -1325,7 +1351,17 @@ def main() -> int:
     settings["_TlsCertificateExpires"] = tls_certificate_expiry(settings)
     host = str(settings["Host"])
     port = int(settings["Port"])
-    server = ThreadingServer((host, port), Handler)
+    try:
+        server = ThreadingServer((host, port), Handler)
+    except OSError as error:
+        message = (
+            f"Clipman Server could not open {host}:{port}: {error}. "
+            "The port may already be in use or reserved by the operating system. "
+            "Choose another listening port, then update the address used by Clipman clients."
+        )
+        logging.error(message)
+        print(message, file=sys.stderr)
+        return BIND_ERROR_EXIT_CODE
     server.settings = settings  # type: ignore[attr-defined]
     if tls_context is not None:
         server.socket = tls_context.wrap_socket(server.socket, server_side=True)

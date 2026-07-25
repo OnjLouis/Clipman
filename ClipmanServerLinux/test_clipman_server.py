@@ -6,14 +6,62 @@ from __future__ import annotations
 import http.client
 import http.server
 import json
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Event, Thread
+from unittest import mock
 
 import clipman_server
+
+
+class ServerStartupTests(unittest.TestCase):
+    def test_docker_entrypoint_writes_connection_files_then_runs_server(self) -> None:
+        entrypoint = (Path(__file__).resolve().parent.parent / "ClipmanServerDocker" / "docker-entrypoint.sh").read_text(encoding="utf-8")
+        write_command = 'python3 "$@" --write-connection-info >/dev/null'
+        run_command = 'exec python3 "$@"'
+
+        self.assertIn(write_command, entrypoint)
+        self.assertIn(run_command, entrypoint)
+        self.assertLess(entrypoint.index(write_command), entrypoint.index(run_command))
+        self.assertIn("CLIPMAN_ALLOW_INSECURE_REMOTE=true only on a trusted LAN or VPN", entrypoint)
+
+    def test_new_settings_use_persistent_port_range(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            settings, created = clipman_server.load_settings(Path(folder) / "settings.json")
+
+        self.assertTrue(created)
+        self.assertGreaterEqual(settings["Port"], clipman_server.SERVER_PORT_MIN)
+        self.assertLessEqual(settings["Port"], clipman_server.SERVER_PORT_MAX)
+
+    def test_suggest_port_prints_available_persistent_port(self) -> None:
+        output = io.StringIO()
+        with mock.patch("sys.argv", ["clipman_server.py", "--suggest-port"]), redirect_stdout(output):
+            result = clipman_server.main()
+
+        port = int(output.getvalue().strip())
+        self.assertEqual(0, result)
+        self.assertGreaterEqual(port, clipman_server.SERVER_PORT_MIN)
+        self.assertLessEqual(port, clipman_server.SERVER_PORT_MAX)
+
+    def test_bind_failure_is_concise_and_has_dedicated_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "settings.json"
+            error_output = io.StringIO()
+            args = ["clipman_server.py", "--config", str(config)]
+            with mock.patch("sys.argv", args), \
+                 mock.patch.object(clipman_server, "ThreadingServer", side_effect=OSError(10013, "Permission denied")), \
+                 redirect_stderr(error_output):
+                result = clipman_server.main()
+
+        self.assertEqual(clipman_server.BIND_ERROR_EXIT_CODE, result)
+        self.assertIn("could not open", error_output.getvalue())
+        self.assertIn("Choose another listening port", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
 
 
 class ConnectionConfigTests(unittest.TestCase):
@@ -251,7 +299,7 @@ class ConditionalCreateTests(unittest.TestCase):
 
         self.assertEqual(200, response.status)
         self.assertTrue(response.getheader("X-Clipman-Revision", ""))
-        self.assertIn(b'"Version": "2.1.0"', data)
+        self.assertIn(b'"Version": "2.1.1"', data)
         database = clipman_server.database_path(self.settings, database_id)
         self.assertEqual(b"expect-continue", database.read_bytes())
 

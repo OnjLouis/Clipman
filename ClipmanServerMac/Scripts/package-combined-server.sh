@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-VERSION="$(zsh "$ROOT/ClipmanMac/Scripts/shared-version.sh" version)"
+VERSION="$(tr -d '[:space:]' < "$ROOT/ClipmanServer/version.txt")"
+if [[ ! "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
+  echo "Invalid Clipman Server version: $VERSION" >&2
+  exit 1
+fi
 DIST="${CLIPMAN_SERVER_COMBINED_OUTPUT_DIR:-/tmp/ClipmanServer-combined}"
 STAGING="$(mktemp -d /tmp/clipman-server-combined.XXXXXX)"
 PACKAGE_ROOT="$STAGING/ClipmanServer"

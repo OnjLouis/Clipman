@@ -20,6 +20,7 @@ private final class CertificateShareOutputState: @unchecked Sendable {
 }
 
 final class ServerController: NSObject, NSApplicationDelegate {
+    private let bindErrorExitCode: Int32 = 20
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var serverProcess: Process?
     private var certificateShareProcess: Process?
@@ -27,6 +28,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
     private var unexpectedRestartCount = 0
     private var serverStartedAt: Date?
     private var quitting = false
+    private var statusOverride: String?
 
     private var appBundle: Bundle { Bundle.main }
     private var resourceURL: URL { appBundle.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath) }
@@ -66,6 +68,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
         status.isEnabled = false
         menu.addItem(status)
         menu.addItem(NSMenuItem(title: "Copy Connection Details", action: #selector(copyConnectionDetails), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Change Listening Port...", action: #selector(changeListeningPort), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Create or Renew HTTPS Certificate", action: #selector(createHTTPSCertificate), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Share Certificate Authority", action: #selector(shareCertificateAuthority), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Settings Folder", action: #selector(openSettingsFolder), keyEquivalent: ""))
@@ -88,6 +91,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
     }
 
     private func statusText() -> String {
+        if let statusOverride { return statusOverride }
         guard let process = serverProcess else { return "stopped" }
         return process.isRunning ? "running" : "stopped"
     }
@@ -95,6 +99,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
     private func startServer() {
         if serverProcess?.isRunning == true { return }
         intendedStop = false
+        statusOverride = nil
         do {
             try FileManager.default.createDirectory(at: supportURL, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: logsURL, withIntermediateDirectories: true)
@@ -136,6 +141,12 @@ final class ServerController: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self, let process, self.serverProcess === process else { return }
                 self.serverProcess = nil
+                if process.terminationStatus == self.bindErrorExitCode {
+                    self.statusOverride = "port unavailable"
+                    self.refreshMenu()
+                    self.showAlert("The listening port is unavailable. Choose Change Listening Port from this menu; existing settings and databases are unchanged.")
+                    return
+                }
                 self.refreshMenu()
                 guard !self.quitting, !self.intendedStop else { return }
                 if let startedAt = self.serverStartedAt, Date().timeIntervalSince(startedAt) >= 60 {
@@ -210,6 +221,51 @@ final class ServerController: NSObject, NSApplicationDelegate {
             case .failure(let error):
                 self.appendLog(error.localizedDescription + "\n")
                 self.showAlert(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func changeListeningPort() {
+        runPythonUtility(["--suggest-port"], timeout: 10) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.showAlert(error.localizedDescription)
+            case .success(let output):
+                guard let suggestedPort = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                    self.showAlert("Clipman Server could not suggest an available port.")
+                    return
+                }
+
+                let alert = NSAlert()
+                alert.messageText = "Change Listening Port"
+                alert.informativeText = "Choose an available port. Clipman will preserve server settings and databases."
+                alert.addButton(withTitle: "Save and Restart")
+                alert.addButton(withTitle: "Cancel")
+                let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+                field.stringValue = String(suggestedPort)
+                field.placeholderString = "Listening port"
+                field.setAccessibilityLabel("Listening port")
+                alert.accessoryView = field
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                guard let port = Int(field.stringValue), (1024...49151).contains(port) else {
+                    self.showAlert("Enter a listening port between 1024 and 49151.")
+                    return
+                }
+
+                self.stopServer()
+                self.runPythonUtility(["--port", String(port), "--write-connection-info"], timeout: 30) { [weak self] writeResult in
+                    guard let self else { return }
+                    switch writeResult {
+                    case .failure(let error):
+                        self.showAlert(error.localizedDescription)
+                        self.startServer()
+                    case .success:
+                        self.unexpectedRestartCount = 0
+                        self.startServer()
+                        self.showAlert("Clipman Server now uses port \(port).\n\nUpdate the server address on each Clipman client, or import the refreshed connection file from the server settings folder.")
+                    }
+                }
             }
         }
     }
@@ -551,13 +607,17 @@ enum ServerUpdateService {
         let data = try Data(contentsOf: releasesURL)
         guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
         return rows.compactMap { row -> (version: String, downloadURL: URL)? in
+            guard (row["draft"] as? Bool) != true, (row["prerelease"] as? Bool) != true else { return nil }
             let tag = ((row["tag_name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+            let prefix = "server-v"
+            guard tag.lowercased().hasPrefix(prefix) else { return nil }
+            let version = String(tag.dropFirst(prefix.count))
+            let expectedName = "ClipmanServer-\(version).zip"
             guard !version.isEmpty,
                   let assets = row["assets"] as? [[String: Any]],
                   let asset = assets.first(where: {
                       let name = ($0["name"] as? String) ?? ""
-                      return name.hasPrefix("ClipmanServer-") && name.hasSuffix(".zip")
+                      return name.caseInsensitiveCompare(expectedName) == .orderedSame
                   }),
                   let urlText = asset["browser_download_url"] as? String,
                   let url = URL(string: urlText) else { return nil }

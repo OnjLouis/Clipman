@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -16,10 +17,11 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
-RELEASE_API = "https://api.github.com/repos/OnjLouis/Clipman/releases/latest"
+RELEASE_API = "https://api.github.com/repos/OnjLouis/Clipman/releases?per_page=100"
+SERVER_TAG_PATTERN = re.compile(r"^server-v(?P<version>\d+\.\d+(?:\.\d+){0,2})$", re.IGNORECASE)
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 600 * 1024 * 1024
 MAX_ZIP_ENTRIES = 2_000
@@ -33,7 +35,7 @@ def version_tuple(value: str) -> Tuple[int, ...]:
     return tuple(int(part) for part in parts)
 
 
-def read_release(api_url: str = RELEASE_API) -> Dict[str, Any]:
+def read_releases(api_url: str = RELEASE_API) -> List[Dict[str, Any]]:
     request = urllib.request.Request(
         api_url,
         headers={"Accept": "application/vnd.github+json", "User-Agent": "Clipman-Server-Linux-Updater"},
@@ -44,14 +46,23 @@ def read_release(api_url: str = RELEASE_API) -> Dict[str, Any]:
         payload = response.read(2 * 1024 * 1024 + 1)
     if len(payload) > 2 * 1024 * 1024:
         raise RuntimeError("The update service response was unexpectedly large.")
-    release = json.loads(payload.decode("utf-8"))
-    if release.get("draft") or release.get("prerelease"):
-        raise RuntimeError("The latest release is not a stable public release.")
-    return release
+    releases = json.loads(payload.decode("utf-8"))
+    if not isinstance(releases, list):
+        raise RuntimeError("The update service returned an unexpected response.")
+    return releases
 
 
-def find_update(release: Dict[str, Any], current_version: str) -> Optional[Tuple[str, Dict[str, Any]]]:
-    version = str(release.get("tag_name", "")).strip().lstrip("vV")
+def find_update(releases: Iterable[Dict[str, Any]], current_version: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+    candidates: List[Tuple[str, Dict[str, Any]]] = []
+    for release in releases:
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        match = SERVER_TAG_PATTERN.fullmatch(str(release.get("tag_name", "")).strip())
+        if match:
+            candidates.append((match.group("version"), release))
+    if not candidates:
+        return None
+    version, release = max(candidates, key=lambda item: version_tuple(item[0]))
     if version_tuple(version) <= version_tuple(current_version):
         return None
     expected = f"ClipmanServer-{version}.zip".lower()
@@ -250,8 +261,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        release = read_release(args.release_api_url)
-        update = find_update(release, args.current_version)
+        releases = read_releases(args.release_api_url)
+        update = find_update(releases, args.current_version)
         if update is None:
             print(f"Clipman Server is up to date. Current version: {args.current_version}.")
             return 0

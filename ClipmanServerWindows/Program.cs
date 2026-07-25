@@ -47,6 +47,7 @@ namespace ClipmanServerWrapper
     internal sealed class ServerTrayContext : ApplicationContext
     {
         private const string StartupValueName = "Clipman Server";
+        private const int BindErrorExitCode = 20;
         private readonly string appDirectory;
         private readonly string scriptPath;
         private readonly string settingsDirectory;
@@ -62,6 +63,7 @@ namespace ClipmanServerWrapper
         private DateTime serverStartedUtc;
         private bool stoppingServer;
         private bool quitting;
+        private string statusOverride;
 
         public ServerTrayContext(string appDirectory)
         {
@@ -98,6 +100,7 @@ namespace ClipmanServerWrapper
                 menu.Items.Clear();
                 menu.Items.Add("Clipman Server: " + StatusText()).Enabled = false;
                 menu.Items.Add("Copy connection details", null, delegate { CopyConnectionDetails(); });
+                menu.Items.Add("Change listening port...", null, delegate { ChangeListeningPort(); });
                 menu.Items.Add("Create or renew HTTPS certificate", null, delegate { CreateHttpsCertificate(); });
                 menu.Items.Add("Share certificate authority", null, delegate { ShareCertificateAuthority(); });
                 menu.Items.Add("Open settings folder", null, delegate { OpenFolder(settingsDirectory); });
@@ -116,6 +119,10 @@ namespace ClipmanServerWrapper
 
         private string StatusText()
         {
+            if (!string.IsNullOrWhiteSpace(statusOverride))
+            {
+                return statusOverride;
+            }
             if (serverProcess == null)
             {
                 return "stopped";
@@ -137,6 +144,7 @@ namespace ClipmanServerWrapper
                 return;
             }
             stoppingServer = false;
+            statusOverride = null;
             if (!File.Exists(scriptPath))
             {
                 tray.Text = "Clipman Server: missing script";
@@ -228,6 +236,9 @@ namespace ClipmanServerWrapper
 
         private void HandleUnexpectedServerExit(Process process)
         {
+            int exitCode;
+            try { exitCode = process.ExitCode; }
+            catch { exitCode = -1; }
             uiContext.Post(delegate
             {
                 if (quitting || stoppingServer || serverProcess != process)
@@ -236,6 +247,17 @@ namespace ClipmanServerWrapper
                 }
                 try { process.Dispose(); } catch { }
                 serverProcess = null;
+                if (exitCode == BindErrorExitCode)
+                {
+                    statusOverride = "port unavailable";
+                    tray.Text = "Clipman Server: port unavailable";
+                    tray.ShowBalloonTip(
+                        8000,
+                        "Clipman Server",
+                        "The listening port is unavailable. Choose Change listening port from this menu; existing settings and databases are unchanged.",
+                        ToolTipIcon.Error);
+                    return;
+                }
                 tray.Text = "Clipman Server: stopped";
                 if (serverStartedUtc != default(DateTime) && DateTime.UtcNow - serverStartedUtc >= TimeSpan.FromMinutes(1))
                 {
@@ -263,6 +285,43 @@ namespace ClipmanServerWrapper
                 };
                 restartTimer.Start();
             }, null);
+        }
+
+        private void ChangeListeningPort()
+        {
+            var suggestion = RunPythonUtility("--suggest-port", 10000);
+            int suggestedPort;
+            if (!suggestion.Succeeded || !int.TryParse(suggestion.Output.Trim(), out suggestedPort))
+            {
+                MessageBox.Show(suggestion.Output, "Change Listening Port", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using (var dialog = new ListeningPortDialog(suggestedPort))
+            {
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                StopServer();
+                var result = RunPythonUtility("--port " + dialog.SelectedPort + " --write-connection-info", 30000);
+                if (!result.Succeeded)
+                {
+                    MessageBox.Show(result.Output, "Change Listening Port", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    StartServer();
+                    return;
+                }
+
+                unexpectedRestartCount = 0;
+                StartServer();
+                MessageBox.Show(
+                    "Clipman Server now uses port " + dialog.SelectedPort + "." + Environment.NewLine + Environment.NewLine +
+                    "Update the server address on each Clipman client, or import the refreshed connection file from the server settings folder.",
+                    "Change Listening Port",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
         }
 
         private void CreateHttpsCertificate()
@@ -638,6 +697,60 @@ namespace ClipmanServerWrapper
         }
     }
 
+    internal sealed class ListeningPortDialog : Form
+    {
+        private readonly NumericUpDown portField;
+
+        public int SelectedPort { get { return Decimal.ToInt32(portField.Value); } }
+
+        public ListeningPortDialog(int suggestedPort)
+        {
+            Text = "Change Listening Port";
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            ClientSize = new Size(390, 150);
+
+            var explanation = new Label
+            {
+                AutoSize = false,
+                Location = new Point(12, 12),
+                Size = new Size(366, 45),
+                Text = "Choose an available port. Clipman will preserve server settings and databases."
+            };
+            var label = new Label { AutoSize = true, Location = new Point(12, 68), Text = "&Listening port:" };
+            portField = new NumericUpDown
+            {
+                Location = new Point(120, 65),
+                Size = new Size(120, 24),
+                Minimum = 1024,
+                Maximum = 49151,
+                Value = Math.Max(1024, Math.Min(49151, suggestedPort))
+            };
+            label.UseMnemonic = true;
+            var save = new Button
+            {
+                Text = "&Save and Restart",
+                DialogResult = DialogResult.OK,
+                Location = new Point(160, 108),
+                Size = new Size(110, 30)
+            };
+            var cancel = new Button
+            {
+                Text = "&Cancel",
+                DialogResult = DialogResult.Cancel,
+                Location = new Point(278, 108),
+                Size = new Size(100, 30)
+            };
+            AcceptButton = save;
+            CancelButton = cancel;
+            Controls.AddRange(new Control[] { explanation, label, portField, save, cancel });
+            Shown += delegate { portField.Focus(); portField.Select(0, portField.Text.Length); };
+        }
+    }
+
     internal sealed class ServerSettings
     {
         public string Host { get; set; }
@@ -709,7 +822,12 @@ namespace ClipmanServerWrapper
             try
             {
                 var release = LatestRelease();
-                var remoteText = (release.TagName ?? string.Empty).Trim().TrimStart('v', 'V');
+                if (release == null)
+                {
+                    if (!installSilently) MessageBox.Show(owner, "Could not find a stable Clipman Server release.", "Clipman Server updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                var remoteText = VersionText(release.TagName);
                 Version current;
                 Version remote;
                 if (!Version.TryParse(CurrentVersion(), out current) || !Version.TryParse(remoteText, out remote))
@@ -724,7 +842,7 @@ namespace ClipmanServerWrapper
                     return;
                 }
 
-                var asset = FindServerAsset(release);
+                var asset = FindServerAsset(release, remoteText);
                 if (asset == null || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl))
                 {
                     if (!installSilently) MessageBox.Show(owner, "Clipman Server " + remote + " is available, but no ClipmanServer ZIP asset was found.", "Clipman Server updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -849,7 +967,7 @@ namespace ClipmanServerWrapper
                 var rows = new JavaScriptSerializer().DeserializeObject(json) as object[];
                 return (rows ?? new object[0])
                     .Select(ParseRelease)
-                    .Where(r => r != null && VersionText(r.TagName).Length > 0)
+                    .Where(r => r != null && !r.Draft && !r.Prerelease && VersionText(r.TagName).Length > 0)
                     .OrderByDescending(r => ParsedVersion(r.TagName))
                     .FirstOrDefault();
             }
@@ -862,6 +980,8 @@ namespace ClipmanServerWrapper
             var release = new GitHubRelease
             {
                 TagName = GetString(map, "tag_name"),
+                Draft = GetBoolean(map, "draft"),
+                Prerelease = GetBoolean(map, "prerelease"),
                 Assets = new System.Collections.Generic.List<GitHubAsset>()
             };
             object assetsObject;
@@ -882,16 +1002,15 @@ namespace ClipmanServerWrapper
             return release;
         }
 
-        private static GitHubAsset FindServerAsset(GitHubRelease release)
+        private static GitHubAsset FindServerAsset(GitHubRelease release, string version)
         {
+            var expectedName = "ClipmanServer-" + version + ".zip";
             return release == null || release.Assets == null
                 ? null
                 : release.Assets.FirstOrDefault(a =>
                     a != null &&
                     !string.IsNullOrWhiteSpace(a.BrowserDownloadUrl) &&
-                    !string.IsNullOrWhiteSpace(a.Name) &&
-                    a.Name.StartsWith("ClipmanServer-", StringComparison.OrdinalIgnoreCase) &&
-                    a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+                    string.Equals(a.Name, expectedName, StringComparison.OrdinalIgnoreCase));
         }
 
         private static WebClient GitHubClient()
@@ -921,7 +1040,15 @@ namespace ClipmanServerWrapper
 
         private static string VersionText(string tagName)
         {
-            return (tagName ?? string.Empty).Trim().TrimStart('v', 'V');
+            var value = (tagName ?? string.Empty).Trim();
+            const string prefix = "server-v";
+            if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+            var version = value.Substring(prefix.Length);
+            Version parsed;
+            return Version.TryParse(version, out parsed) ? version : string.Empty;
         }
 
         private static Version ParsedVersion(string tagName)
@@ -934,6 +1061,12 @@ namespace ClipmanServerWrapper
         {
             object value;
             return map != null && map.TryGetValue(key, out value) && value != null ? Convert.ToString(value) : string.Empty;
+        }
+
+        private static bool GetBoolean(System.Collections.Generic.Dictionary<string, object> map, string key)
+        {
+            object value;
+            return map != null && map.TryGetValue(key, out value) && value != null && Convert.ToBoolean(value);
         }
 
         private static bool HasArg(string[] args, string name)
@@ -1007,6 +1140,8 @@ namespace ClipmanServerWrapper
         private sealed class GitHubRelease
         {
             public string TagName { get; set; }
+            public bool Draft { get; set; }
+            public bool Prerelease { get; set; }
             public System.Collections.Generic.List<GitHubAsset> Assets { get; set; }
         }
 

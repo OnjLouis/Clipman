@@ -8,8 +8,12 @@ APP="$DIST/Clipman Server.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
-VERSION="$(zsh "$ROOT/ClipmanMac/Scripts/shared-version.sh" version)"
-BUILD_VERSION="$(zsh "$ROOT/ClipmanMac/Scripts/shared-version.sh" build)"
+VERSION="$(tr -d '[:space:]' < "$ROOT/ClipmanServer/version.txt")"
+BUILD_VERSION="$VERSION.0"
+if [[ ! "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
+  echo "Invalid Clipman Server version: $VERSION" >&2
+  exit 1
+fi
 
 rm -rf "$DIST"
 mkdir -p "$MACOS" "$RESOURCES"

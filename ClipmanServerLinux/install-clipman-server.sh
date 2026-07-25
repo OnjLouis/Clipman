@@ -65,6 +65,7 @@ Commands:
   console     Run Clipman Server in the current terminal
   token       Print the server token
   connection  Write and print the connection details file path
+  port        Change the listening port and restart the server
   cert        Create or renew a private-CA HTTPS certificate
   share-ca    Temporarily share the public certificate authority
   version     Show the installed server version
@@ -165,6 +166,24 @@ PY
     ;;
   connection)
     "\$LAUNCHER" --write-connection-info
+    ;;
+  port)
+    PORT="\${2:-}"
+    if [ -z "\$PORT" ]; then
+      PORT="\$("\$LAUNCHER" --suggest-port)"
+      printf "Use suggested listening port %s? [y/N] " "\$PORT"
+      read -r ANSWER
+      case "\$ANSWER" in y|Y|yes|YES) ;; *) exit 0 ;; esac
+    fi
+    case "\$PORT" in *[!0-9]*|'') echo "Port must be a number between 1024 and 49151." >&2; exit 2 ;; esac
+    if [ "\$PORT" -lt 1024 ] || [ "\$PORT" -gt 49151 ]; then
+      echo "Port must be between 1024 and 49151." >&2
+      exit 2
+    fi
+    "\$0" stop
+    "\$LAUNCHER" --port "\$PORT" --write-connection-info
+    "\$0" start
+    echo "Clipman Server now uses port \$PORT. Update each Clipman client's server address or import the refreshed connection file."
     ;;
   cert)
     shift 2>/dev/null || true
