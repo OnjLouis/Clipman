@@ -42,6 +42,8 @@ GITHUB-RELEASE-RULES.md
 SmokeTest.ps1
 Test-ReleasePrivacy.ps1
 CommunitySearch.ps1
+CommunitySearch.md
+ClipmanIOS/TestFlightNotes.txt
 
 # Editor and OS noise
 .DS_Store

@@ -1147,7 +1147,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             addMenuItem("Entry Properties", action: #selector(menuEditSelected), to: menu, shortcut: "F2")
             addMenuItem("View Selected Text", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
             addMenuItem("Set As Quick Paste Target...", action: #selector(menuSetQuickCopyTarget), to: menu)
-            addMenuItem("Push To Other Machines", action: #selector(menuPushToOtherMachines), to: menu, shortcut: "Command+P")
+            addMenuItem("Push To Other Devices", action: #selector(menuPushToOtherMachines), to: menu, shortcut: "Command+P")
             addQuickPasteTargetItems(to: menu)
         } else {
             addMenuItem("View File Event Details", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
@@ -1298,7 +1298,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private func sortOptions() -> [(value: String, title: String)] {
         mode == .files
             ? [("Time", "Time captured"), ("Files", "File count"), ("Name", "Name"), ("Operation", "Operation"), ("Source", "Source application"), ("Manual", "Manual order")]
-            : [("LastUsed", "Last used"), ("Added", "Added"), ("Text", "Text"), ("Group", "Group"), ("Machine", "Machine"), ("Manual", "Manual order")]
+            : [("LastUsed", "Last used"), ("Added", "Added"), ("Text", "Text"), ("Group", "Group"), ("Machine", "Device"), ("Manual", "Manual order")]
     }
 
     private func currentSortMode() -> String {
@@ -1572,7 +1572,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 lines.append("Source: \(event.Source)")
             }
             if !event.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append("Machine: \(event.SourceMachine)")
+                lines.append("Device: \(event.SourceMachine)")
             }
             if event.CapturedUnixMs > 0 {
                 let date = Date(timeIntervalSince1970: TimeInterval(event.CapturedUnixMs) / 1000.0)
@@ -1602,7 +1602,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         var details: [(String, String)] = []
         addDetail(&details, "Name", entry.Name)
         addDetail(&details, "Group", entry.Group)
-        addDetail(&details, "Machine", entry.SourceMachine)
+        addDetail(&details, "Device", entry.SourceMachine)
         details.append(("Pinned", entry.Pinned ? "Yes" : "No"))
         details.append(("Template", entry.IsTemplate ? "Yes" : "No"))
         if entry.CreatedUnixMs > 0 {
@@ -2295,7 +2295,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             parts.append("Group: \(entry.Group)")
         }
         if !entry.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            parts.append("Machine: \(entry.SourceMachine)")
+            parts.append("Device: \(entry.SourceMachine)")
         }
         if entry.LastUsedUnixMs > 0 {
             let date = Date(timeIntervalSince1970: TimeInterval(entry.LastUsedUnixMs) / 1000.0)
@@ -2370,7 +2370,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             parts.append("Source: \(event.Source)")
         }
         if !event.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            parts.append("Machine: \(event.SourceMachine)")
+            parts.append("Device: \(event.SourceMachine)")
         }
         if event.CapturedUnixMs > 0 {
             let date = Date(timeIntervalSince1970: TimeInterval(event.CapturedUnixMs) / 1000.0)

@@ -58,7 +58,7 @@ struct EntryView: View {
             lines.append("Group: \(entry.Group)")
         }
         if !entry.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append("Machine: \(entry.SourceMachine)")
+            lines.append("Device: \(entry.SourceMachine)")
         }
         lines.append("Pinned: \(entry.Pinned ? "Yes" : "No")")
         lines.append("Template: \(entry.IsTemplate ? "Yes" : "No")")

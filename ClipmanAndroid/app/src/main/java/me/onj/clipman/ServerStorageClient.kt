@@ -34,6 +34,16 @@ class ServerStorageClient(
         }
     }
 
+    fun metadata(): String {
+        val connection = openConnection("HEAD")
+        val code = connection.responseCode
+        if (code == HttpURLConnection.HTTP_NOT_FOUND) return ""
+        if (code < 200 || code > 299) {
+            throw IllegalStateException("Clipman Server returned HTTP $code.")
+        }
+        return cleanRevision(connection.getHeaderField("X-Clipman-Revision") ?: connection.getHeaderField("ETag"))
+    }
+
     fun upload(data: ByteArray, expectedRevision: String): ServerDatabaseDownload {
         val connection = openConnection("PUT")
         if (expectedRevision.isNotBlank()) {

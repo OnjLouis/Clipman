@@ -34,10 +34,13 @@
 		C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */; };
 		C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02D9422349D165D345B5D71 /* KeychainStore.swift */; };
 		C676E48CA1A7CDAA51D4C9B5 /* EntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E9160FA444DB6E3A61314E /* EntryView.swift */; };
+		C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */; };
 		CA66F823CB2FBC5F09963CC6 /* ClipDatabaseFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */; };
 		E46249F68F6D5D3235439BA3 /* on.wav in Resources */ = {isa = PBXBuildFile; fileRef = AD7265F77039DB93B9E0C74C /* on.wav */; };
+		F567DBBD3AA27F09740F2C66 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 32D231A3045AB33B818FACE0 /* StoreKit.framework */; };
 		F9C33C3C942E9C0397FB4AFF /* ServerStorageClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */; };
 		FA810C3FF3B2BAA9100DBEDC /* off.wav in Resources */ = {isa = PBXBuildFile; fileRef = 60F380468EAD667D829F4D30 /* off.wav */; };
+		FD5B299F7F13570E50D93B8D /* TipJarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFA70C5093FAAF9882B23D9 /* TipJarStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,11 +48,14 @@
 		032F062DF28E39F5953D7824 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDatabaseIdentity.swift; sourceTree = "<group>"; };
 		15C075089BD6891E606C98F3 /* EntryEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEditView.swift; sourceTree = "<group>"; };
+		1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectionDocument.swift; sourceTree = "<group>"; };
 		1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStorageClient.swift; sourceTree = "<group>"; };
 		283C9770D01F5E67699D4EAC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2B73540DCE1C118E33B75CAF /* copy.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = copy.wav; sourceTree = "<group>"; };
+		32D231A3045AB33B818FACE0 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationService.swift; sourceTree = "<group>"; };
 		3757E95599655BFEB3101654 /* DatabaseWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseWorker.swift; sourceTree = "<group>"; };
+		3AFA70C5093FAAF9882B23D9 /* TipJarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarStore.swift; sourceTree = "<group>"; };
 		3EE36547BC3684AF103A3821 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 		59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncConflictResolver.swift; sourceTree = "<group>"; };
 		5E70064E80A3EF247968D286 /* ClipmanAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanAppModel.swift; sourceTree = "<group>"; };
@@ -84,6 +90,7 @@
 			files = (
 				7E92FC7E32A65B8890DAA492 /* libz.tbd in Frameworks */,
 				49026C38259E970B438B4E54 /* Security.framework in Frameworks */,
+				F567DBBD3AA27F09740F2C66 /* StoreKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -152,6 +159,7 @@
 			children = (
 				3EE36547BC3684AF103A3821 /* libz.tbd */,
 				7CD05FE0E19C7744ACFD87B4 /* Security.framework */,
+				32D231A3045AB33B818FACE0 /* StoreKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -195,9 +203,11 @@
 				9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */,
 				C02D9422349D165D345B5D71 /* KeychainStore.swift */,
 				FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */,
+				1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */,
 				721C35A41DED299959E74C8A /* ServerSettingsSanitizer.swift */,
 				1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */,
 				C98DD96F176CD3DE6A07D271 /* SoundService.swift */,
+				3AFA70C5093FAAF9882B23D9 /* TipJarStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -296,12 +306,14 @@
 				C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */,
 				80DF3940EAE12616EAA0047D /* Models.swift in Sources */,
 				A8912F558B14C788063B7A9B /* RootView.swift in Sources */,
+				C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */,
 				55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */,
 				0F57F06D81A59E00DE56EDD6 /* ServerSettingsSanitizer.swift in Sources */,
 				F9C33C3C942E9C0397FB4AFF /* ServerStorageClient.swift in Sources */,
 				31DF1873E5EA0F7A2A225723 /* SettingsView.swift in Sources */,
 				5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */,
 				9C4809F93BC5717D1C1645DD /* SyncConflictResolver.swift in Sources */,
+				FD5B299F7F13570E50D93B8D /* TipJarStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -313,7 +325,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 21000;
+				CURRENT_PROJECT_VERSION = 22000;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -323,7 +335,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -396,7 +408,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 21000;
+				CURRENT_PROJECT_VERSION = 22000;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -406,7 +418,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;

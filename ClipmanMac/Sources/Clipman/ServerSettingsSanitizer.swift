@@ -75,6 +75,25 @@ enum ServerSettingsSanitizer {
         return ServerConnectionDetails(address: address, token: token)
     }
 
+    static func connectionConfigData(address addressValue: String, token tokenValue: String) throws -> Data {
+        let address = cleanURL(addressValue)
+        let token = cleanToken(tokenValue)
+        guard !address.isEmpty, !token.isEmpty else { throw ConnectionConfigError.missingDetails }
+        guard let transport = URL(string: cleanTransportURL(address)), let host = transport.host else {
+            throw ConnectionConfigError.invalidAddress
+        }
+        let port = transport.port ?? (transport.scheme?.lowercased() == "https" ? 443 : 80)
+        let object: [String: Any] = [
+            "clipman": "server-connection",
+            "version": 1,
+            "address": address,
+            "host": host,
+            "port": port,
+            "token": token
+        ]
+        return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
+
     private static func extractJSONValue(from text: String, keys: [String]) -> String? {
         guard let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -93,6 +112,7 @@ enum ConnectionConfigError: LocalizedError {
     case unsupportedVersion
     case missingDetails
     case fileTooLarge
+    case invalidAddress
 
     var errorDescription: String? {
         switch self {
@@ -100,6 +120,7 @@ enum ConnectionConfigError: LocalizedError {
         case .unsupportedVersion: return "This Clipman Server connection-file version is not supported."
         case .missingDetails: return "The connection file does not contain both a server address and token."
         case .fileTooLarge: return "This connection file is too large."
+        case .invalidAddress: return "The Clipman Server address is not valid."
         }
     }
 }

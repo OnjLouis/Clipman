@@ -589,7 +589,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Version: \(version)",
             "Build: \(build)",
             "Build stamp: \(buildStamp)",
-            "Machine: \(settings.machineName)",
+            "Device: \(settings.machineName)",
             "Monitoring: \(settings.monitoringEnabled ? "On" : "Off")",
             "Data folder: \(dataFolder)",
             "Storage mode: \(settings.storageMode)",

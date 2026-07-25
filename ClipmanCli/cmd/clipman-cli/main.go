@@ -897,7 +897,7 @@ func printEntryLines(out io.Writer, entries []model.Entry) {
 			flags += " template"
 		}
 		label := preview(entry)
-		fmt.Fprintf(out, "%d. %s;%s group: %s; machine: %s; last used: %s\n", index, label, flags, emptyDash(entry.Group), emptyDash(entry.SourceMachine), time.UnixMilli(entry.LastUsedUnixMs).Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(out, "%d. %s;%s group: %s; device: %s; last used: %s\n", index, label, flags, emptyDash(entry.Group), emptyDash(entry.SourceMachine), time.UnixMilli(entry.LastUsedUnixMs).Format("2006-01-02 15:04:05"))
 	}
 }
 

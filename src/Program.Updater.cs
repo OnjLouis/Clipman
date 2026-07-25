@@ -181,6 +181,43 @@ namespace Clipman
             CleanupEmptyBackupFolders(targetDir);
         }
 
+        private static void CleanupStaleUpdaterLaunchers(string appDirectory)
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var roots = new[]
+            {
+                string.IsNullOrWhiteSpace(localAppData) ? string.Empty : Path.Combine(localAppData, "Temp"),
+                Path.GetTempPath(),
+                Path.Combine(appDirectory, "Settings", "Update Temp")
+            }
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => Path.GetFullPath(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            var cutoff = DateTime.UtcNow.AddMinutes(-5);
+            foreach (var root in roots)
+            {
+                try
+                {
+                    if (!Directory.Exists(root)) continue;
+                    foreach (var folder in Directory.GetDirectories(root, "ClipmanUpdater-*", SearchOption.TopDirectoryOnly))
+                    {
+                        try
+                        {
+                            if (Directory.GetLastWriteTimeUtc(folder) > cutoff) continue;
+                            Directory.Delete(folder, true);
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
         private static void CleanupObsoleteFactorySoundBackups(string targetDir)
         {
             try

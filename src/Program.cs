@@ -142,6 +142,7 @@ namespace Clipman
         private static void CleanupStartupArtifacts()
         {
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            CleanupStaleUpdaterLaunchers(appDirectory);
             CleanupObsoleteRootUpdateFolders(appDirectory);
             CleanupObsoleteFactorySoundBackups(appDirectory);
             CleanupEmptyBackupFolders(appDirectory);
@@ -297,7 +298,7 @@ namespace Clipman
                     writer.WriteLine("Build stamp: " + BuildInfo.BuildStampUtcMs);
                     writer.WriteLine("OS: " + Environment.OSVersion);
                     writer.WriteLine(".NET: " + Environment.Version);
-                    writer.WriteLine("Machine: " + Environment.MachineName);
+                    writer.WriteLine("Device: " + Environment.MachineName);
                     if (exception != null)
                     {
                         writer.WriteLine(exception);

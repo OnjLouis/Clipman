@@ -44,6 +44,9 @@ final class ClipmanAppModel: ObservableObject {
     private var isSceneActive = true
     private var foregroundGeneration = 0
     private var lastRemoteEntryID = ""
+    private var pollingFailureCount = 0
+    private let pollingIntervalNanoseconds: UInt64 = 5_000_000_000
+    private var skipNextSettingsClosedRefresh = false
     private var pureLinkEntryIDs = Set<String>()
     private var machineName: String {
         let name = settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -219,7 +222,19 @@ final class ClipmanAppModel: ObservableObject {
         status = "Clipman is locked."
     }
 
+    func settingsClosed() {
+        if skipNextSettingsClosedRefresh {
+            skipNextSettingsClosedRefresh = false
+            return
+        }
+        guard isSceneActive, isUnlocked, settings.storageMode == .server else { return }
+        Task { [weak self] in
+            await self?.refresh(showStatus: false)
+        }
+    }
+
     func saveSettings(_ newSettings: ClipmanSettings) {
+        skipNextSettingsClosedRefresh = true
         storageGeneration += 1
         refreshTask?.cancel()
         uploadTask?.cancel()
@@ -250,16 +265,22 @@ final class ClipmanAppModel: ObservableObject {
 
     func startPolling() {
         refreshTask?.cancel()
-        guard settings.storageMode == .server, settings.refreshIntervalSeconds >= 2 else { return }
+        guard settings.storageMode == .server else { return }
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
+                guard let self else { break }
+                let delayNanoseconds = min(
+                    60_000_000_000,
+                    pollingIntervalNanoseconds * UInt64(1 << min(pollingFailureCount, 4))
+                )
                 do {
-                    try await Task.sleep(nanoseconds: UInt64(max(2, self?.settings.refreshIntervalSeconds ?? 3) * 1_000_000_000))
+                    try await Task.sleep(nanoseconds: delayNanoseconds)
                 } catch {
                     break
                 }
                 guard !Task.isCancelled else { break }
-                await self?.refresh(showStatus: false)
+                guard isSceneActive, isUnlocked, !showingSettings else { continue }
+                await refresh(showStatus: false)
             }
         }
     }
@@ -288,6 +309,7 @@ final class ClipmanAppModel: ObservableObject {
                 }
                 revision = ""
                 hasPendingLocalChanges = false
+                pollingFailureCount = 0
                 if showStatus { status = "Local history loaded. \(loadedStatusText())" }
                 return true
             } catch {
@@ -315,9 +337,18 @@ final class ClipmanAppModel: ObservableObject {
             if showStatus { isRefreshing = false }
         }
         do {
+            if showStatus, revision.isEmpty,
+               let cached = try await historyRepository.loadLocal(password: settingsSnapshot.historyPassword) {
+                guard generation == storageGeneration else { return false }
+                if !SyncConflictResolver.hasSameContent(cached, database) {
+                    database = cached
+                }
+                status = "Cached history loaded; refreshing Clipman Server."
+            }
             if !showStatus && !revision.isEmpty && !hasPendingLocalChanges {
                 let metadata = try await client.metadata()
                 if metadata.revision == revision {
+                    pollingFailureCount = 0
                     return true
                 }
             }
@@ -330,13 +361,14 @@ final class ClipmanAppModel: ObservableObject {
             }
             revision = sync.revision
             hasPendingLocalChanges = false
+            pollingFailureCount = 0
             if !showStatus, previousNewest != nil, let newest = newestRemoteEntry(in: merged), newest.Id != previousNewest?.Id, newest.Id != lastRemoteEntryID {
                 if settings.autoCopyRemote {
                     UIPasteboard.general.string = newest.Text
                 }
                 lastRemoteEntryID = newest.Id
                 let source = newest.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
-                status = source.isEmpty ? "Clipboard updated by another machine." : "Clipboard updated by \(source)."
+                status = source.isEmpty ? "Clipboard updated by another device." : "Clipboard updated by \(source)."
                 soundService.play("remote", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             }
             if showStatus {
@@ -345,7 +377,7 @@ final class ClipmanAppModel: ObservableObject {
             return true
         } catch {
             guard generation == storageGeneration else { return false }
-            revision = ""
+            pollingFailureCount = min(pollingFailureCount + 1, 4)
             do {
                 if let cached = try await historyRepository.loadLocal(password: settingsSnapshot.historyPassword) {
                     guard generation == storageGeneration else { return false }

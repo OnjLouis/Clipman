@@ -347,7 +347,7 @@ final class SettingsStore {
         case "ADDED": return "Added"
         case "TEXT": return "Text"
         case "GROUP": return "Group"
-        case "MACHINE": return "Machine"
+        case "MACHINE": return "Device"
         case "MANUAL": return "Manual"
         default: return "LastUsed"
         }

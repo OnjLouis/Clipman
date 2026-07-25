@@ -7,9 +7,14 @@ struct SettingsView: View {
     @State private var draft = ClipmanSettings.empty
     @State private var showServerConnection = false
     @State private var showConnectionImporter = false
+    @State private var showConnectionExportWarning = false
+    @State private var showConnectionExporter = false
+    @State private var connectionDocument: ServerConnectionDocument?
     @State private var pendingConnection: ServerConnectionDetails?
     @State private var connectionImportError = ""
+    @State private var connectionExportError = ""
     @State private var settingsValidationError = ""
+    @StateObject private var tipJar = TipJarStore()
 
     var body: some View {
         NavigationStack {
@@ -27,7 +32,7 @@ struct SettingsView: View {
                         .font(.footnote)
                 }
 
-                Section("Behaviour") {
+                Section("Device") {
                     TextField("Device name", text: $draft.deviceName)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
@@ -38,9 +43,6 @@ struct SettingsView: View {
                     Toggle("Offer to add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
                     Toggle("Require biometric or device authentication", isOn: $draft.requireAuthentication)
                         .accessibilityHint("When enabled, Clipman asks for Face ID, Touch ID, or the device passcode whenever the app returns to the foreground.")
-                    Stepper(value: $draft.refreshIntervalSeconds, in: 2...30, step: 1) {
-                        Text("Refresh interval: \(Int(draft.refreshIntervalSeconds)) seconds")
-                    }
                 }
 
                 Section("Server connection") {
@@ -53,6 +55,18 @@ struct SettingsView: View {
                         showConnectionImporter = true
                     }
                     .accessibilityHint("Choose a Clipman Server connection file, review its address, then save settings.")
+                    Button("Export server connection file") {
+                        do {
+                            connectionDocument = ServerConnectionDocument(data: try ServerSettingsSanitizer.connectionConfigData(
+                                address: draft.serverURL,
+                                token: draft.serverToken
+                            ))
+                            showConnectionExportWarning = true
+                        } catch {
+                            connectionExportError = error.localizedDescription
+                        }
+                    }
+                    .accessibilityHint("Save the current server address and private access token to a Clipman Server connection file.")
                     if showServerConnection {
                         TextField("Server address", text: $draft.serverURL)
                             .textInputAutocapitalization(.never)
@@ -71,6 +85,10 @@ struct SettingsView: View {
                         Text("You can paste a full token line or a clipman:// server address; Clipman will clean it when saving.")
                             .font(.footnote)
                     }
+                }
+
+                if tipJar.isLoading || !tipJar.products.isEmpty {
+                    TipJarSettingsSection(tipJar: tipJar)
                 }
 
                 Section("Build information") {
@@ -103,6 +121,9 @@ struct SettingsView: View {
                 showServerConnection = !serverIsConfigured
                 applyPendingConnectionImport()
             }
+            .task {
+                await tipJar.loadProducts()
+            }
             .onChange(of: app.serverConnectionImportSequence) { _ in
                 applyPendingConnectionImport()
             }
@@ -121,6 +142,24 @@ struct SettingsView: View {
                 } catch {
                     connectionImportError = error.localizedDescription
                 }
+            }
+            .fileExporter(
+                isPresented: $showConnectionExporter,
+                document: connectionDocument,
+                contentType: .clipmanServerConnection,
+                defaultFilename: "Clipman Server.clpconf"
+            ) { result in
+                if case .failure(let error) = result,
+                   (error as NSError).code != NSUserCancelledError {
+                    connectionExportError = error.localizedDescription
+                }
+                connectionDocument = nil
+            }
+            .alert("Export private server connection?", isPresented: $showConnectionExportWarning) {
+                Button("Export") { showConnectionExporter = true }
+                Button("Cancel", role: .cancel) { connectionDocument = nil }
+            } message: {
+                Text("This file contains the private server token. Store and share it securely, and never place it beside an exported clipboard history.")
             }
             .alert("Import Clipman Server connection?", isPresented: Binding(
                 get: { pendingConnection != nil },
@@ -145,6 +184,14 @@ struct SettingsView: View {
                 Button("OK") { connectionImportError = "" }
             } message: {
                 Text(connectionImportError)
+            }
+            .alert("Could not export server connection", isPresented: Binding(
+                get: { !connectionExportError.isEmpty },
+                set: { if !$0 { connectionExportError = "" } }
+            )) {
+                Button("OK") { connectionExportError = "" }
+            } message: {
+                Text(connectionExportError)
             }
             .alert("History password required", isPresented: Binding(
                 get: { !settingsValidationError.isEmpty },
@@ -189,5 +236,31 @@ struct SettingsView: View {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss 'UTC'"
         return formatter.string(from: Date(timeIntervalSince1970: milliseconds / 1000))
+    }
+}
+
+private struct TipJarSettingsSection: View {
+    @ObservedObject var tipJar: TipJarStore
+
+    var body: some View {
+        Section("Support Clipman") {
+            Text("Tips are optional in-app purchases and do not unlock features or content.")
+                .font(.footnote)
+            if tipJar.products.isEmpty {
+                ProgressView("Loading Tip Options")
+            } else {
+                ForEach(tipJar.products, id: \.id) { product in
+                    Button(tipJar.buttonTitle(for: product)) {
+                        Task { await tipJar.purchase(product) }
+                    }
+                    .disabled(tipJar.isPurchasing)
+                    .accessibilityHint("Make an optional one-time tip through Apple. This unlocks nothing.")
+                }
+            }
+            if !tipJar.message.isEmpty {
+                Text(tipJar.message)
+                    .font(.footnote)
+            }
+        }
     }
 }

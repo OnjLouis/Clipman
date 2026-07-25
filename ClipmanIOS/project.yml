@@ -21,8 +21,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios
         PRODUCT_NAME: Clipman
-        MARKETING_VERSION: "2.1.0"
-        CURRENT_PROJECT_VERSION: "21000"
+        MARKETING_VERSION: "2.2.0"
+        CURRENT_PROJECT_VERSION: "22000"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanIOS/Support/Info.plist
         SDKROOT: iphoneos
@@ -34,3 +34,4 @@ targets:
     dependencies:
       - sdk: libz.tbd
       - sdk: Security.framework
+      - sdk: StoreKit.framework

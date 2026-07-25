@@ -97,8 +97,8 @@ namespace Clipman
             active = NewCheckBox("Clipboard monitoring &active", settings.Active);
             soundsEnabled = NewCheckBox("Play &sounds", settings.SoundsEnabled);
             autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
-            autoCopyLatestRemoteText = NewCheckBox("Put new text received from another &machine on the clipboard", settings.AutoCopyLatestRemoteText);
-            autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another machine onto this machine's clipboard. Reusing an older entry on another machine does not trigger this. This is off by default.";
+            autoCopyLatestRemoteText = NewCheckBox("Put new text received from another devi&ce on the clipboard", settings.AutoCopyLatestRemoteText);
+            autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another device onto this device's clipboard. Reusing an older entry on another device does not trigger this. This is off by default.";
             pasteAfterEnter = NewCheckBox("After Enter, paste into the pre&vious application", settings.PasteAfterEnter);
             pasteAfterEnter.AccessibleDescription = "When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. This is off by default.";
             dynamicHistoryMode = NewCheckBox("Open history to the most recent clipboard t&ype", settings.DynamicHistoryMode);
@@ -194,6 +194,9 @@ namespace Clipman
             var importServerConnection = new Button { Text = "Import server &file...", AutoSize = true };
             importServerConnection.AccessibleDescription = "Import a Clipman Server connection file, review its address, and apply it to these preferences.";
             importServerConnection.Click += (s, e) => ImportServerConnection();
+            var exportServerConnection = new Button { Text = "E&xport server file...", AutoSize = true };
+            exportServerConnection.AccessibleDescription = "Export the current Clipman Server address and private token to a connection file.";
+            exportServerConnection.Click += (s, e) => ExportServerConnection();
 
             var dbPanel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
             dbPanel.Controls.Add(databasePath);
@@ -216,7 +219,10 @@ namespace Clipman
             AddFullRow(storageLayout, NewNote("Choose the folder that contains Clipman's settings, sounds, logs, file history, and local text-history cache. In server mode, Clipman syncs that text-history cache with a Clipman Server."));
             AddRow(storageLayout, "Server &host:", serverUrl);
             AddRow(storageLayout, "Server t&oken:", serverToken);
-            AddFullRow(storageLayout, importServerConnection);
+            var serverFilePanel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+            serverFilePanel.Controls.Add(importServerConnection);
+            serverFilePanel.Controls.Add(exportServerConnection);
+            AddFullRow(storageLayout, serverFilePanel);
             AddFullRow(storageLayout, NewNote("Enter a host and port such as home-server:49152. Clipman will infer the local server protocol. Server mode stores the raw clipman-history.clipdb on a Clipman Server. The server never knows the history password; encryption still happens on this computer."));
             AddRow(storageLayout, "History &password:", passwordPanel);
             AddRow(storageLayout, "&Confirm password:", passwordConfirmPanel);
@@ -594,6 +600,40 @@ namespace Clipman
                 {
                     databasePassword.Focus();
                 }
+            }
+        }
+
+        private void ExportServerConnection()
+        {
+            string json;
+            string error;
+            if (!ServerSettingsSanitizer.TryCreateConnectionConfig(serverUrl.Text, serverToken.Text, out json, out error))
+            {
+                MessageBox.Show(this, error, "Clipman Server connection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var confirm = MessageBox.Show(
+                this,
+                "This file contains the private Clipman Server token. Anyone with the file can connect to that server. Save it only somewhere you trust, then delete it or move it to a password manager after configuring your devices.\r\n\r\nExport the connection file?",
+                "Export Clipman Server connection",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes) return;
+
+            using (var dialog = new SaveFileDialog
+            {
+                Title = "Export Clipman Server connection",
+                Filter = "Clipman Server connection (*.clpconf)|*.clpconf",
+                FileName = "clipman-server-connection.clpconf",
+                AddExtension = true,
+                DefaultExt = "clpconf",
+                OverwritePrompt = true
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                File.WriteAllText(dialog.FileName, json, new System.Text.UTF8Encoding(false));
+                MessageBox.Show(this, "The Clipman Server connection file was exported.", "Clipman Server connection", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 

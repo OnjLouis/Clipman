@@ -156,7 +156,7 @@ namespace Clipman
             };
             list.Columns.Add(string.Empty, 730);
             list.Columns.Add("Group", 130);
-            list.Columns.Add("Machine", 120);
+            list.Columns.Add("Device", 120);
             list.Columns.Add("Last used", 170);
             list.Columns.Add("Added", 170);
             list.KeyDown += ListKeyDown;
@@ -507,7 +507,7 @@ namespace Clipman
             sortAddedMenuItem = new ToolStripMenuItem("&Added", null, (s, e) => SetSortMode("Added"));
             sortTextMenuItem = new ToolStripMenuItem("&Text", null, (s, e) => SetSortMode("Text"));
             sortGroupMenuItem = new ToolStripMenuItem("&Group", null, (s, e) => SetSortMode("Group"));
-            sortMachineMenuItem = new ToolStripMenuItem("Mac&hine", null, (s, e) => SetSortMode("Machine"));
+            sortMachineMenuItem = new ToolStripMenuItem("&Device", null, (s, e) => SetSortMode("Machine"));
             sortManualMenuItem = new ToolStripMenuItem("&Manual order", null, (s, e) => SetSortMode("Manual"));
             sortDirectionMenuItem = new ToolStripMenuItem("", null, (s, e) => ToggleSortDirection());
             view.DropDownItems.Add("Text history\tAlt+T", null, (s, e) => SelectMainTab());
@@ -754,7 +754,7 @@ namespace Clipman
             edit.DropDownItems.Add(groupEntryMenuItem);
             edit.DropDownItems.Add("Entry &properties...\tF2", null, (s, e) => ShowEntryProperties());
             edit.DropDownItems.Add("Set as &quick-paste target...", null, (s, e) => ShowEntryProperties(true));
-            edit.DropDownItems.Add("Push to other &machines\tCtrl+P", null, (s, e) => PushSelectedToOtherMachines());
+            edit.DropDownItems.Add("P&ush to other devices\tCtrl+P", null, (s, e) => PushSelectedToOtherMachines());
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
             edit.DropDownItems.Add("Pin or unp&in\tShift+Enter", null, (s, e) => TogglePinned());
             edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelected());
@@ -790,7 +790,7 @@ namespace Clipman
             menu.Items.Add("&Group entry...\tCtrl+G", null, (sender, args) => GroupSelectedEntries());
             menu.Items.Add("Entry &properties...\tF2", null, (sender, args) => ShowEntryProperties());
             menu.Items.Add("Set as &quick-paste target...", null, (sender, args) => ShowEntryProperties(true));
-            menu.Items.Add("Push to other &machines\tCtrl+P", null, (sender, args) => PushSelectedToOtherMachines());
+            menu.Items.Add("P&ush to other devices\tCtrl+P", null, (sender, args) => PushSelectedToOtherMachines());
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
             menu.Items.Add(PinMenuText(), null, (sender, args) => TogglePinned());
             var pinnedShortcutPosition = SelectedPinnedEntryShortcutPosition();
@@ -2242,8 +2242,8 @@ namespace Clipman
             Reload(firstSelectedId, -1);
             FocusHistoryList();
             statusText.Text = pushed == 1
-                ? "Pushed selected entry to other machines and copied it to this clipboard."
-                : "Pushed " + pushed + " selected entries to other machines and copied them to this clipboard.";
+                ? "Pushed selected entry to other devices and copied it to this clipboard."
+                : "Pushed " + pushed + " selected entries to other devices and copied them to this clipboard.";
         }
 
         private void CopyPinnedByPosition(int position)
@@ -2699,7 +2699,7 @@ namespace Clipman
             var details = new List<KeyValuePair<string, string>>();
             AddDetail(details, "Name", entry.Name);
             AddDetail(details, "Group", entry.Group);
-            AddDetail(details, "Machine", entry.SourceMachine);
+            AddDetail(details, "Device", entry.SourceMachine);
             details.Add(new KeyValuePair<string, string>("Pinned", entry.Pinned ? "Yes" : "No"));
             details.Add(new KeyValuePair<string, string>("Template", entry.IsTemplate ? "Yes" : "No"));
             if (entry.CreatedUnixMs > 0)
@@ -2906,7 +2906,7 @@ namespace Clipman
             }
             if (sortMachineMenuItem != null)
             {
-                sortMachineMenuItem.Text = fileTabActive ? "&Source application" : "Mac&hine";
+                sortMachineMenuItem.Text = fileTabActive ? "&Source application" : "&Device";
                 sortMachineMenuItem.Checked = fileTabActive ? IsFileSortMode("Source") : IsSortMode("Machine");
             }
             if (sortManualMenuItem != null) sortManualMenuItem.Checked = fileTabActive ? IsFileSortMode("Manual") : IsSortMode("Manual");

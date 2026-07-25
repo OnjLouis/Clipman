@@ -79,6 +79,7 @@ import java.util.TimeZone
 
 class MainActivity : FragmentActivity() {
     private var isUnlocked by mutableStateOf(false)
+    private var appIsForeground by mutableStateOf(false)
     private var unlockMessage by mutableStateOf("Clipman is locked.")
     private var unlockPromptShowing = false
     private var externalConnectionImport by mutableStateOf<ExternalServerConnectionImport?>(null)
@@ -92,6 +93,7 @@ class MainActivity : FragmentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     if (isUnlocked) {
                         ClipmanApp(
+                            appIsForeground = appIsForeground,
                             externalConnectionImport = externalConnectionImport,
                             onExternalConnectionImportConsumed = { id ->
                                 if (externalConnectionImport?.id == id) externalConnectionImport = null
@@ -109,6 +111,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        appIsForeground = true
         if (AndroidSettings(this).requireAuthentication) {
             requestUnlock()
         } else {
@@ -119,6 +122,7 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onStop() {
+        appIsForeground = false
         super.onStop()
         if (!isChangingConfigurations && AndroidSettings(this).requireAuthentication) {
             isUnlocked = false
@@ -277,6 +281,7 @@ private data class ExternalServerConnectionImport(
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun ClipmanApp(
+    appIsForeground: Boolean,
     externalConnectionImport: ExternalServerConnectionImport?,
     onExternalConnectionImportConsumed: (Long) -> Unit
 ) {
@@ -322,6 +327,8 @@ private fun ClipmanApp(
     var launchClipboardHandled by remember { mutableStateOf(false) }
     var addClipboardAfterLoad by remember { mutableStateOf(false) }
     var hasLoadedHistory by remember { mutableStateOf(false) }
+    var hasPendingLocalChanges by remember { mutableStateOf(false) }
+    var pollingFailureCount by remember { mutableStateOf(0) }
     var loadGeneration by remember { mutableStateOf(0L) }
     var changeGeneration by remember { mutableStateOf(0L) }
     var isSavingSettings by remember { mutableStateOf(false) }
@@ -330,6 +337,8 @@ private fun ClipmanApp(
     var updateStatus by remember { mutableStateOf("") }
     var updateCandidate by remember { mutableStateOf<AndroidUpdateCandidate?>(null) }
     var pendingUpdateApk by remember { mutableStateOf<File?>(null) }
+    var pendingConnectionExport by remember { mutableStateOf<String?>(null) }
+    var showConnectionExportWarning by remember { mutableStateOf(false) }
     val unknownSourcesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val apk = pendingUpdateApk
         if (apk != null && AndroidUpdateService.canInstallPackages(context)) {
@@ -357,6 +366,24 @@ private fun ClipmanApp(
                     status = "Could not import server connection: ${error.message ?: error::class.java.simpleName}"
                     announce(view, status)
                 }
+        }
+    }
+    val exportServerConnection = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val content = pendingConnectionExport
+        pendingConnectionExport = null
+        if (uri != null && content != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { it.write(content) }
+                    ?: error("The selected file could not be written.")
+            }.onSuccess {
+                status = "Server connection file exported."
+                announce(view, status)
+            }.onFailure { error ->
+                status = "Could not export server connection: ${error.message ?: error::class.java.simpleName}"
+                announce(view, status)
+            }
         }
     }
 
@@ -409,7 +436,11 @@ private fun ClipmanApp(
         settings.useHaptics = snapshot.useHaptics
     }
 
-    fun loadHistory(announceResult: Boolean = true, updateStatusWhenUnchanged: Boolean = true) {
+    fun loadHistory(
+        announceResult: Boolean = true,
+        updateStatusWhenUnchanged: Boolean = true,
+        checkRevisionFirst: Boolean = false
+    ) {
         if (storageMode == MobileStorageMode.Server && (serverUrl.isBlank() || token.isBlank())) {
             status = "Server address and token are required before loading history."
             showConnectionSettings = true
@@ -423,6 +454,8 @@ private fun ClipmanApp(
         val requestedToken = token
         val requestedPassword = password
         val databaseSnapshot = database
+        val requestedRevision = currentRevision
+        val requestedPendingChanges = hasPendingLocalChanges
         isLoadingHistory = true
         if (announceResult) {
             status = "Loading history..."
@@ -430,6 +463,23 @@ private fun ClipmanApp(
         }
         scope.launch {
             val oldEntries = entries
+            if (requestedMode == MobileStorageMode.Server && !hasLoadedHistory) {
+                val cachedPreview = withContext(Dispatchers.IO) {
+                    storageMutex.withLock {
+                        runCatching { historyRepository.loadLocalOrNull(requestedPassword) }.getOrNull()
+                    }
+                }
+                if (generation != loadGeneration) {
+                    isLoadingHistory = false
+                    return@launch
+                }
+                if (cachedPreview != null) {
+                    database = cachedPreview
+                    entries = cachedPreview.Entries
+                    hasLoadedHistory = true
+                    status = "Cached history loaded; refreshing Clipman Server."
+                }
+            }
             val result = withContext(Dispatchers.IO) {
                 storageMutex.withLock {
                     runCatching {
@@ -437,12 +487,18 @@ private fun ClipmanApp(
                             MobileSyncResult(historyRepository.loadLocal(requestedPassword), "", false)
                         } else {
                             try {
+                                if (checkRevisionFirst && requestedRevision.isNotBlank() && !requestedPendingChanges) {
+                                    val metadata = ServerStorageClient(requestedServerUrl, requestedToken, requestedPassword).metadata()
+                                    if (metadata == requestedRevision) {
+                                        return@runCatching MobileSyncResult(databaseSnapshot, requestedRevision, false)
+                                    }
+                                }
                                 historyRepository.synchronize(requestedServerUrl, requestedToken, requestedPassword, databaseSnapshot)
                             } catch (error: Throwable) {
                                 val cached = historyRepository.loadLocalOrNull(requestedPassword) ?: throw error
                                 MobileSyncResult(
                                     database = cached,
-                                    revision = "",
+                                    revision = requestedRevision,
                                     uploaded = false,
                                     pendingError = error.message ?: error::class.java.simpleName
                                 )
@@ -454,6 +510,13 @@ private fun ClipmanApp(
             if (generation != loadGeneration) return@launch
             isLoadingHistory = false
             result.onSuccess { sync ->
+                if (sync.pendingError == null) {
+                    pollingFailureCount = 0
+                    hasPendingLocalChanges = false
+                } else {
+                    pollingFailureCount = minOf(pollingFailureCount + 1, 4)
+                    status = "Using local history; server sync is pending: ${sync.pendingError}"
+                }
                 val loadedDatabase = sync.database
                 if (storageMode == MobileStorageMode.Local || sync.revision != currentRevision || entries.isEmpty() || !SyncConflictResolver.hasSameContent(database, loadedDatabase)) {
                     currentRevision = sync.revision
@@ -488,6 +551,7 @@ private fun ClipmanApp(
                     addClipboardAfterLoad = addClipboardOnLaunch
                 }
             }.onFailure { error ->
+                pollingFailureCount = minOf(pollingFailureCount + 1, 4)
                 status = "Could not load history: ${error.message ?: error::class.java.simpleName}"
                 if (announceResult && storageMode == MobileStorageMode.Server && !hasLoadedHistory) showConnectionSettings = true
                 if (announceResult) announce(view, "Could not load history")
@@ -509,6 +573,7 @@ private fun ClipmanApp(
         database = updatedLocal
         entries = updatedLocal.Entries
         hasLoadedHistory = true
+        if (requestedMode == MobileStorageMode.Server) hasPendingLocalChanges = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 storageMutex.withLock {
@@ -527,12 +592,15 @@ private fun ClipmanApp(
                 database = sync.database
                 entries = sync.database.Entries
                 currentRevision = sync.revision
+                hasPendingLocalChanges = false
+                pollingFailureCount = 0
                 status = if (requestedMode == MobileStorageMode.Local) "$actionText complete in local history." else "$actionText complete."
                 if (actionText == "Adding Android clipboard text") {
                     playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
                 }
                 announce(view, "$actionText complete")
             }.onFailure { error ->
+                pollingFailureCount = minOf(pollingFailureCount + 1, 4)
                 status = if (requestedMode == MobileStorageMode.Server) {
                     "$actionText saved locally; server sync is pending: ${error.message ?: error::class.java.simpleName}"
                 } else {
@@ -625,18 +693,23 @@ private fun ClipmanApp(
         status = "Server details loaded. Enter the history password, then choose Load History."
     }
 
-    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings) {
+    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings, appIsForeground) {
         val ready = storageMode == MobileStorageMode.Local || (serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank())
-        if (!attemptedInitialLoad && !showConnectionSettings && ready) {
-            attemptedInitialLoad = true
-            loadHistory()
+        if (appIsForeground && !showConnectionSettings && ready) {
+            if (!attemptedInitialLoad) {
+                attemptedInitialLoad = true
+                loadHistory()
+            } else {
+                loadHistory(announceResult = false, updateStatusWhenUnchanged = false, checkRevisionFirst = true)
+            }
         }
     }
 
-    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings) {
-        while (storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
-            delay(5000)
-            loadHistory(announceResult = false, updateStatusWhenUnchanged = false)
+    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings, appIsForeground, pollingFailureCount) {
+        while (appIsForeground && storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
+            val delaySeconds = minOf(60L, 5L * (1L shl pollingFailureCount.coerceIn(0, 4)))
+            delay(delaySeconds * 1_000L)
+            loadHistory(announceResult = false, updateStatusWhenUnchanged = false, checkRevisionFirst = true)
         }
     }
 
@@ -757,6 +830,30 @@ private fun ClipmanApp(
             }
         )
     }
+    if (showConnectionExportWarning) {
+        AlertDialog(
+            onDismissRequest = { showConnectionExportWarning = false },
+            title = { Text("Export private server connection?") },
+            text = { Text("This file contains the private server token. Store and share it securely, and never place it beside an exported clipboard history.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConnectionExportWarning = false
+                    runCatching { ServerConnectionConfig.create(serverUrl, token) }
+                        .onSuccess { content ->
+                            pendingConnectionExport = content
+                            exportServerConnection.launch("Clipman Server.clpconf")
+                        }
+                        .onFailure { error ->
+                            status = error.message ?: "Could not prepare the server connection file."
+                            announce(view, status)
+                        }
+                }) { Text("Export") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConnectionExportWarning = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -787,6 +884,7 @@ private fun ClipmanApp(
                 onImportServerFile = {
                     importServerConnection.launch(arrayOf("*/*"))
                 },
+                onExportServerFile = { showConnectionExportWarning = true },
                 password = password,
                 onPasswordChanged = { password = it },
                 deviceName = deviceName,
@@ -808,6 +906,14 @@ private fun ClipmanApp(
                 onPlaySoundsChanged = { playSounds = it },
                 useHaptics = useHaptics,
                 onUseHapticsChanged = { useHaptics = it },
+                onOpenTipJar = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://onj.me/donate")))
+                    }.onFailure {
+                        status = "Could not open the tip jar."
+                        announce(view, status)
+                    }
+                },
                 onCancel = { if (!isSavingSettings) discardSettingsChanges() },
                 onSave = saveSettings@{
                     if (isSavingSettings) return@saveSettings
@@ -1162,6 +1268,7 @@ private fun ConnectionSettingsScreen(
     onTokenChanged: (String) -> Unit,
     onPasteToken: () -> Unit,
     onImportServerFile: () -> Unit,
+    onExportServerFile: () -> Unit,
     password: String,
     onPasswordChanged: (String) -> Unit,
     deviceName: String,
@@ -1183,6 +1290,7 @@ private fun ConnectionSettingsScreen(
     onPlaySoundsChanged: (Boolean) -> Unit,
     useHaptics: Boolean,
     onUseHapticsChanged: (Boolean) -> Unit,
+    onOpenTipJar: () -> Unit,
     onCancel: () -> Unit,
     onSave: () -> Unit
 ) {
@@ -1211,6 +1319,11 @@ private fun ConnectionSettingsScreen(
             )
             TextButton(onClick = onSave, enabled = !isSaving) { Text(if (isSaving) "Saving" else "Save") }
         }
+        Text(
+            text = "Device",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
         OutlinedTextField(
             value = deviceName,
             onValueChange = onDeviceNameChanged,
@@ -1318,6 +1431,9 @@ private fun ConnectionSettingsScreen(
                 TextButton(onClick = onImportServerFile, enabled = !isSaving) {
                     Text("Import server connection file")
                 }
+                TextButton(onClick = onExportServerFile, enabled = !isSaving) {
+                    Text("Export server connection file")
+                }
                 if (showServerConnection) {
                     OutlinedTextField(
                         value = serverUrl,
@@ -1371,6 +1487,13 @@ private fun ConnectionSettingsScreen(
         Text("Version: ${BuildConfig.VERSION_NAME}")
         Text("Build: ${BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS}")
         Text("Built: ${formatBuildStamp(BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS)}")
+        Text(
+            text = "Support Clipman",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        TextButton(onClick = onOpenTipJar, enabled = !isSaving) { Text("Open Tip Jar") }
+        Text("Tips are optional and do not unlock features.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -1488,7 +1611,7 @@ private fun ClipEntryCard(
     val labelParts = buildList {
         if (entry.Pinned) add("Pinned")
         if (entry.Group.isNotBlank()) add("Group: ${entry.Group}")
-        if (entry.SourceMachine.isNotBlank()) add("Machine: ${entry.SourceMachine}")
+        if (entry.SourceMachine.isNotBlank()) add("Device: ${entry.SourceMachine}")
         add("${index + 1} of $total")
     }
     val links = remember(entry.Text) { extractLinks(entry.Text) }
@@ -1627,7 +1750,7 @@ private fun entryMetadataLines(entry: ClipEntry, linkCount: Int): List<String> =
     buildList {
         if (entry.Name.isNotBlank()) add("Name: ${entry.Name}")
         if (entry.Group.isNotBlank()) add("Group: ${entry.Group}")
-        if (entry.SourceMachine.isNotBlank()) add("Machine: ${entry.SourceMachine}")
+        if (entry.SourceMachine.isNotBlank()) add("Device: ${entry.SourceMachine}")
         add("Pinned: ${if (entry.Pinned) "Yes" else "No"}")
         add("Template: ${if (entry.IsTemplate) "Yes" else "No"}")
         add("Added: ${formatUnixMilliseconds(entry.CreatedUnixMs)}")
@@ -1687,7 +1810,7 @@ private fun handleRemoteAdditions(
         copyToClipboard(context, newestRemote.Text)
     }
     playFeedback(context, ClipmanSound.Remote, playSounds, useHaptics)
-    return newestRemote.SourceMachine.takeIf { it.isNotBlank() } ?: "another machine"
+    return newestRemote.SourceMachine.takeIf { it.isNotBlank() } ?: "another device"
 }
 
 private fun playFeedback(

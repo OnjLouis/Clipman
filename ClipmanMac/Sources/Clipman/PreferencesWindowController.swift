@@ -130,7 +130,12 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         serverTokenField.setAccessibilityHelp("Server authentication token. The token is hidden on screen and saved in this Mac user's Keychain.")
         let importServerButton = button(title: "Import Server File...", action: #selector(importServerConnection))
         importServerButton.setAccessibilityHelp("Import a Clipman Server connection file, review its address, then save preferences.")
-        addRow("Server token", serverTokenField, importServerButton)
+        let exportServerButton = button(title: "Export Server File...", action: #selector(exportServerConnection))
+        exportServerButton.setAccessibilityHelp("Export the current Clipman Server address and private token to a connection file.")
+        let serverFileButtons = NSStackView(views: [importServerButton, exportServerButton])
+        serverFileButtons.orientation = .horizontal
+        serverFileButtons.spacing = 8
+        addRow("Server token", serverTokenField, serverFileButtons)
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("History password", passwordField)
@@ -166,7 +171,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         autoCopyRemoteCheckbox.target = nil
         autoCopyRemoteCheckbox.action = nil
         autoCopyRemoteCheckbox.setAccessibilityLabel("Copy latest remote text to this Mac clipboard")
-        autoCopyRemoteCheckbox.setAccessibilityHelp("When enabled, new text copied on another machine sharing this database is placed on this Mac clipboard. This is off by default.")
+        autoCopyRemoteCheckbox.setAccessibilityHelp("When enabled, new text copied on another device sharing this database is placed on this Mac clipboard. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, autoCopyRemoteCheckbox])
 
         pasteAfterEnterCheckbox.target = nil
@@ -303,6 +308,36 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         } catch {
             let alert = NSAlert()
             alert.messageText = "Could not import server connection"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    @objc private func exportServerConnection() {
+        do {
+            let data = try ServerSettingsSanitizer.connectionConfigData(
+                address: serverUrlField.stringValue,
+                token: serverTokenField.stringValue
+            )
+            let alert = NSAlert()
+            alert.messageText = "Export Clipman Server connection?"
+            alert.informativeText = "This file contains the private Clipman Server token. Anyone with the file can connect to that server. Save it only somewhere you trust, then delete it or move it to a password manager after configuring your devices."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Export")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [UTType(filenameExtension: "clpconf") ?? .json]
+            panel.nameFieldStringValue = "clipman-server-connection.clpconf"
+            panel.canCreateDirectories = true
+            panel.prompt = "Export"
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try data.write(to: url, options: .atomic)
+            statusLabel.stringValue = "The Clipman Server connection file was exported."
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not export server connection"
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }

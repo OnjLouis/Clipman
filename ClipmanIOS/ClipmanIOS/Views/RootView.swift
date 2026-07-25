@@ -38,6 +38,11 @@ struct RootView: View {
                 break
             }
         }
+        .onChange(of: app.showingSettings) { isShowing in
+            if !isShowing {
+                app.settingsClosed()
+            }
+        }
     }
 }
 

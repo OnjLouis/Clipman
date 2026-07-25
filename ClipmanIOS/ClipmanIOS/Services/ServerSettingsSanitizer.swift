@@ -14,6 +14,25 @@ extension UTType {
 }
 
 enum ServerSettingsSanitizer {
+    static func connectionConfigData(address: String, token: String) throws -> Data {
+        let cleanedAddress = cleanDisplayURL(address)
+        let cleanedToken = cleanToken(token)
+        guard let url = URL(string: cleanedAddress),
+              let host = url.host,
+              !cleanedToken.isEmpty
+        else { throw ConnectionConfigError.invalidAddress }
+        let port = url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 80)
+        let object: [String: Any] = [
+            "clipman": "server-connection",
+            "version": 1,
+            "address": cleanedAddress.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            "host": host,
+            "port": port,
+            "token": cleanedToken
+        ]
+        return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
+
     static func cleanDisplayURL(_ value: String) -> String {
         var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if let labeled = text.range(of: #"(?i)\b(?:Server address|Address|URL)\s*:\s*(\S+)"#, options: .regularExpression) {
@@ -79,6 +98,7 @@ enum ServerSettingsSanitizer {
 }
 
 enum ConnectionConfigError: LocalizedError, Sendable {
+    case invalidAddress
     case invalidFile
     case unsupportedVersion
     case missingDetails
@@ -86,6 +106,7 @@ enum ConnectionConfigError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
+        case .invalidAddress: return "Enter a valid server address, port, and token before exporting."
         case .invalidFile: return "This is not a Clipman Server connection file."
         case .unsupportedVersion: return "This Clipman Server connection-file version is not supported."
         case .missingDetails: return "The connection file does not contain both a server address and token."

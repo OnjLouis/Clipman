@@ -20,4 +20,23 @@ class ServerConnectionConfigTest {
             ServerConnectionConfig.parse("""{"address":"clipman://server.example:54321","token":"test-token"}""")
         }
     }
+
+    @Test
+    fun exportedConnectionFileRoundTrips() {
+        val exported = ServerConnectionConfig.create(
+            "clipman://server.example:54321/",
+            "test-token"
+        )
+        val details = ServerConnectionConfig.parse(exported)
+        assertEquals("clipman://server.example:54321", details.address)
+        assertEquals("test-token", details.token)
+    }
+
+    @Test
+    fun exportedHttpsConnectionUsesDefaultPort() {
+        val exported = ServerConnectionConfig.create("https://server.example", "test-token")
+        val details = ServerConnectionConfig.parse(exported)
+        assertEquals("https://server.example", details.address)
+        assertEquals("test-token", details.token)
+    }
 }

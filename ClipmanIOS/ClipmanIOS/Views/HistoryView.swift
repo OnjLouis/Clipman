@@ -280,7 +280,7 @@ private extension ClipEntry {
     var detailText: String {
         [
             Group.isEmpty ? nil : "Group: \(Group)",
-            SourceMachine.isEmpty ? nil : "Machine: \(SourceMachine)"
+            SourceMachine.isEmpty ? nil : "Device: \(SourceMachine)"
         ]
         .compactMap { $0 }
         .joined(separator: "; ")
@@ -291,7 +291,7 @@ private extension ClipEntry {
             Pinned ? "Pinned" : nil,
             displayText,
             Group.isEmpty ? nil : "Group: \(Group)",
-            SourceMachine.isEmpty ? nil : "Machine: \(SourceMachine)"
+            SourceMachine.isEmpty ? nil : "Device: \(SourceMachine)"
         ]
         .compactMap { $0 }
         .joined(separator: "; ")
@@ -303,7 +303,7 @@ private extension LinkExtractor.LinkItem {
         [
             url.absoluteString,
             entry.Group.isEmpty ? nil : "Group: \(entry.Group)",
-            entry.SourceMachine.isEmpty ? nil : "Machine: \(entry.SourceMachine)"
+            entry.SourceMachine.isEmpty ? nil : "Device: \(entry.SourceMachine)"
         ]
         .compactMap { $0 }
         .joined(separator: "; ")

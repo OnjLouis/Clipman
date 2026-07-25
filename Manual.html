@@ -45,7 +45,7 @@
 <body>
   <h1>Clipman: Accessible Clipboard Management Tool</h1>
 
-  <p>Clipman is a small accessible clipboard management tool for Windows and macOS, designed for fast keyboard and screen-reader use. It keeps a searchable clipboard history and can store that history in a cloud service or network share. Add, remove, move, rename, group, pin, or edit text entries on one machine, and other machines watching the same shared database can pick up those changes automatically.</p>
+  <p>Clipman is a small accessible clipboard management tool for Windows, macOS, Android, iPhone, and iPad, designed for fast keyboard and screen-reader use. It keeps a searchable clipboard history and can share that history through a cloud service or network share on desktop, or through optional Clipman Server storage across all supported platforms. Add, remove, move, rename, group, pin, or edit an entry on one device, and other devices watching the same shared history can pick up the change automatically.</p>
 
   <p>Project page: <a href="https://github.com/OnjLouis/Clipman">https://github.com/OnjLouis/Clipman</a></p>
 
@@ -138,7 +138,7 @@
       <tr><td>Copy selected text entry without closing history</td><td><code>Ctrl+C</code></td><td><code>Command+C</code></td></tr>
       <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
       <tr><td>Paste clipboard text into history</td><td><code>Ctrl+V</code></td><td><code>Command+V</code></td></tr>
-      <tr><td>Push selected text entry to other synced machines</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
+      <tr><td>Push selected text entry to other synced devices</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
       <tr><td>Pin or unpin selected entry</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
       <tr><td>Open Entry Properties</td><td><code>F2</code></td><td><code>F2</code></td></tr>
       <tr><td>View selected text in a read-only window</td><td><code>F4</code></td><td><code>F4</code></td></tr>
@@ -193,7 +193,7 @@
 
   <p>The Remember history password on this computer checkbox controls convenience versus exposure. When unchecked, Clipman asks for the history password when it starts and keeps the password only for the current run. When checked, Windows stores an unlockable password protected by Windows for the current user and machine, including on Windows 7, and Mac stores it in that user's Keychain for the selected database path. That is convenient for automatic startup, but it cannot protect against malware already running as the same signed-in user. The Use no password button clears the saved history password, clears any session-only password, and rewrites the current database without password encryption. It exists because blank password fields mean "keep the current password"; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
 
-  <p><strong>Sensitive data:</strong> Sensitive-data exclusions are off by default and machine-specific. When the mode is set to Exclude from history, Clipman checks automatic clipboard text capture against the presets you enable. Matching text is not stored in Clipman history, and the system clipboard is not changed, so your immediate paste still works. This filter does not apply to existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman.</p>
+  <p><strong>Sensitive data:</strong> Sensitive-data exclusions are off by default and device-specific. When the mode is set to Exclude from history, Clipman checks automatic clipboard text capture against the presets you enable. Matching text is not stored in Clipman history, and the system clipboard is not changed, so your immediate paste still works. This filter does not apply to existing history, imports, Send To, Quick Paste, Push to other devices, or entries manually copied from Clipman.</p>
 
   <p>The built-in presets include credit card numbers with Luhn validation, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys, and approximate US driver-license shapes. International phone numbers include compact E.164-style numbers such as <code>+447890123456</code> and common spaced, dashed, dotted, or bracketed variants. Built-in presets are deliberately unchecked by default because pattern matching can have false positives.</p>
 
@@ -202,7 +202,7 @@
 
   <p><strong>Windows:</strong> Clipman runs in the notification area and opens the history window with the configured global hotkey. Windows Preferences includes Send To integration, Windows startup registration, command-line import/export support, and Windows-protected password remembering when explicitly enabled.</p>
 
-  <p><strong>Mac:</strong> Clipman is packaged as <code>Clipman.app</code> and runs as a menu bar app. Release builds may be unsigned or ad-hoc signed; after unzipping, move or drag <code>Clipman.app</code> to <code>/Applications</code>. If macOS blocks the first launch, Control-click or Option-click the app and choose Open. With VoiceOver, use <code>VO+Shift+M</code> on the app in Finder for the same context menu, then choose Open.</p>
+  <p><strong>Mac:</strong> Clipman is packaged as a signed and notarized <code>Clipman.app</code> and runs as a menu bar app. After unzipping, move or drag <code>Clipman.app</code> to <code>/Applications</code>, then open it normally.</p>
 
   <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
 
@@ -226,7 +226,7 @@
 
   <p>In Entry Properties and the <code>F4</code> text review window, word navigation is tuned for URLs and code-like strings. On Windows, <code>Ctrl+Left</code> and <code>Ctrl+Right</code> stop at punctuation and symbol boundaries such as slashes, question marks, ampersands, equals signs, dashes, and underscores. On Mac, use <code>Option+Left</code> and <code>Option+Right</code>. Add <code>Shift</code> on either platform to extend the selection.</p>
 
-  <p>The <code>F4</code> text review window shows the clipboard text first, followed by a separate Details list or table in tab order. Details include useful metadata such as name, group, source machine, pinned/template state, added and last-used times, manual order where present, text length, link count, and entry ID.</p>
+  <p>The <code>F4</code> text review window shows the clipboard text first, followed by a separate Details list or table in tab order. Details include useful metadata such as name, group, source device, pinned/template state, added and last-used times, manual order where present, text length, link count, and entry ID.</p>
 
   <p>For example, an entry containing <code>1234</code> can be shown as <code>Test: 1234</code>. The name is metadata only: copying, cutting, exporting to text, and viewing full text use the clipboard text without the name.</p>
 
@@ -251,9 +251,9 @@
   <p>On Windows, the Group filter applies when you press <code>Enter</code> in the group field or move focus away from it. Arrowing through the group list does not immediately throw focus back to the history list. On Mac, open the group filter with <code>Option+G</code> or the toolbar Filter button, then choose the filter from the menu.</p>
 
   <h2 id="sorting-and-manual-order">Sorting and Manual Order</h2>
-  <p>The Text history list includes the entry text, name, group, machine, added time, and last-used time. The machine column records the computer that added or most recently re-added the entry, which helps when several computers share the same database.</p>
+  <p>The Text history list includes the entry text, name, group, device, added time, and last-used time. The Device column records the computer, phone, or tablet that added or most recently re-added the entry, which helps when several devices share the same database.</p>
 
-  <p>The View menu on Windows includes Text history, Links history, and File history commands with <code>Alt+T</code>, <code>Alt+L</code>, and <code>Alt+I</code>. The View menu on Windows, and the Sort controls or Clipman menu on Mac, can sort normal Text history entries by last used, added date, text, group, machine, or manual order. On File history, the same controls sort by time captured, file count, name, operation, source application, or manual order.</p>
+  <p>The View menu on Windows includes Text history, Links history, and File history commands with <code>Alt+T</code>, <code>Alt+L</code>, and <code>Alt+I</code>. The View menu on Windows, and the Sort controls or Clipman menu on Mac, can sort normal Text history entries by last used, added date, text, group, device, or manual order. On File history, the same controls sort by time captured, file count, name, operation, source application, or manual order.</p>
 
   <p>Sort direction labels describe the next result plainly, such as oldest first, newest first, A first, Z first, fewest files first, or most files first. Pinned entries and pinned file events stay above normal items and keep their own manual order. Move pinned and normal items separately.</p>
 
@@ -291,7 +291,7 @@
       </tr>
       <tr>
         <td>Edit</td>
-        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, push to other machines, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history. When a selected pinned text entry or file event is in the first ten pinned items, the menu also shows the relevant pinned shortcut.</td>
+        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, push to other devices, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history. When a selected pinned text entry or file event is in the first ten pinned items, the menu also shows the relevant pinned shortcut.</td>
       </tr>
       <tr>
         <td>Actions</td>
@@ -315,7 +315,7 @@
   <h2 id="sensitive-data">Sensitive Data Exclusions</h2>
   <p>Sensitive-data exclusions live in Preferences. They are off by default. Set the mode to <strong>Exclude from history</strong>, then check the presets you want. When automatic clipboard text matches a checked preset, Clipman does not save that text to history. The system clipboard or Mac pasteboard is not changed, so your immediate paste still works.</p>
 
-  <p>This feature is deliberately conservative. It applies only to automatic text capture. It does not filter existing history, imports, Send To, Quick Paste, Push to other machines, or entries manually copied from Clipman. Presets can have false positives, so enable only the ones that fit the work you do.</p>
+  <p>This feature is deliberately conservative. It applies only to automatic text capture. It does not filter existing history, imports, Send To, Quick Paste, Push to other devices, or entries manually copied from Clipman. Presets can have false positives, so enable only the ones that fit the work you do.</p>
 
   <table>
     <thead>
@@ -353,15 +353,16 @@
   <p>Ignored applications and sensitive-data exclusions solve different problems. Ignored applications are best when an entire app should never be captured. Sensitive-data exclusions are best when ordinary apps sometimes copy text matching a known sensitive pattern.</p>
 
   <h2 id="database-and-sync">Database and Sync</h2>
+  <p>Clipman supports three storage approaches. <strong>Local storage</strong> keeps history on one device. <strong>Shared-folder storage</strong> lets the Windows and Mac clients use a folder provided by a cloud-sync service, network share, or filesystem mount. <strong>Clipman Server</strong> lets Windows, Mac, Android, and iOS clients synchronize through a separately hosted server while retaining a local cache. Clipman does not contain a WebDAV client and cannot connect directly to a WebDAV URL; WebDAV works only when the operating system or another tool has already mounted it as a normal folder.</p>
   <p>On Windows, Clipman defaults to a portable <code>Settings</code> folder beside <code>clipman.exe</code>. On Mac, Clipman stores a small pointer under Application Support and keeps the active machine settings in the selected Clipman data folder. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code>, <code>Settings\Laptop-settings.json</code>, or <code>MacBook-settings.json</code>. This lets multiple computers share one data folder without fighting over hotkeys, monitoring state, startup choices, or window position. The shared text history database is <code>clipman-history.clipdb</code>.</p>
-  <p>If you choose a different data folder, Clipman stores this machine's active settings in that folder beside <code>clipman-history.clipdb</code> and the machine-specific file-history database. A small <code>settings-location.json</code> pointer remains in the app's local <code>Settings</code> folder so Clipman can find the selected data folder on the next launch. That pointer stores locations per computer name, so two machines using different local paths to reach the same cloud or network data folder do not overwrite each other's location. If a cloud service creates a conflict copy of the pointer, Clipman merges the known clients back into one pointer file. If the selected folder is unavailable when Clipman starts, Clipman reports that location and stops rather than silently switching to the default folder; reconnect the drive, cloud service, WebDAV mount, or network share and start Clipman again.</p>
+  <p>If you choose a different data folder, Clipman stores this machine's active settings in that folder beside <code>clipman-history.clipdb</code> and the machine-specific file-history database. A small <code>settings-location.json</code> pointer remains in the app's local <code>Settings</code> folder so Clipman can find the selected data folder on the next launch. That pointer stores locations per computer name, so two machines using different local paths to reach the same cloud or network data folder do not overwrite each other's location. If a cloud service creates a conflict copy of the pointer, Clipman merges the known clients back into one pointer file. If the selected folder is unavailable when Clipman starts, Clipman reports that location and stops rather than silently switching to the default folder; reconnect the drive, cloud service, mounted filesystem, or network share and start Clipman again.</p>
   <p>If the default data folder is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different data folder, Clipman stores the shared history as <code>clipman-history.clipdb</code> inside that folder. Existing explicit <code>.clipdb</code> file paths remain readable for compatibility. If an explicit data location is missing at startup, Clipman asks whether to browse for the data folder in a new location, use the default database beside Clipman, or stop startup.</p>
 
   <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, Spotlight, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's data folder to the same synced or network-shared folder. Clipman uses the <code>clipman-history.clipdb</code> file inside that folder for shared text history.</p>
 
-  <p>Multiple running Clipman instances can use the same history database. When one machine writes a new entry, the database is saved atomically and the other machines reload it when the changed file arrives. Each text entry stores the machine name that added or most recently re-added it, and the history list includes a Machine column and machine sort mode so shared setups can tell which computer supplied an entry.</p>
+  <p>Multiple running Clipman instances can use the same history database. When one device writes a new entry, the database is saved atomically and the other devices reload it when the changed file arrives. Each text entry stores the device name that added or most recently re-added it, and the history list includes a Device column and device sort mode so shared setups can tell which computer, phone, or tablet supplied an entry.</p>
 
-  <p>Preferences can optionally put newly created text entries received from another machine onto this machine's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another machine updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. To intentionally send an existing selected entry to other machines, use <strong>Push to other machines</strong> from the entry menu, or press <code>Ctrl+P</code> on Windows and <code>Command+P</code> on Mac. This creates a fresh shared-history event from the selected text so other opted-in machines can receive it as the latest remote text. When duplicate removal is enabled, Clipman refreshes the selected entry instead of leaving an extra duplicate behind. This preference is machine-specific and does not change the shared database format.</p>
+  <p>Preferences can optionally put newly created text entries received from another device onto this device's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another device updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. To intentionally send an existing selected entry to other devices, use <strong>Push to other devices</strong> from the entry menu, or press <code>Ctrl+P</code> on Windows and <code>Command+P</code> on Mac. This creates a fresh shared-history event from the selected text so other opted-in devices can receive it as the latest remote text. When duplicate removal is enabled, Clipman refreshes the selected entry instead of leaving an extra duplicate behind. This preference is device-specific and does not change the shared database format.</p>
 
   <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. Background clipboard captures do not display blocking error dialogs while storage is missing. On Mac, Clipman pauses monitoring and adds a Retry Storage command to the status menu until the data folder returns. On Windows, the notification-area menu and tooltip report that storage is unavailable and offer Retry storage. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
 
@@ -403,7 +404,7 @@
 
   <p>Clipman Server 2.1 can also create and renew a private-CA HTTPS certificate. Windows and macOS server menus provide commands to create the certificate and temporarily share only its public authority; installed Linux servers provide <code>clipmanserver cert</code> and <code>clipmanserver share-ca</code>. Every client must explicitly trust that authority. On iPhone and iPad, installing the downloaded profile must be followed by enabling it under <strong>Settings &gt; General &gt; About &gt; Certificate Trust Settings</strong>. Read the server manual before using this mode.</p>
 
-  <p>On Linux, <code>Linux/install-clipman-server.sh</code> installs the server and its startup helper. On first setup, Clipman Server creates <code>clipman-server-connection.clpconf</code> beside its settings file. In Clipman Preferences, choose <strong>Import server file</strong> on Windows or <strong>Import Server File</strong> on Mac, review the server address, enter a unique history password if one is not already configured, then apply the settings. On Android or iOS, tap the <code>.clpconf</code> file in the system file browser to open it in Clipman, or use <strong>Import server connection file</strong> in Clipman Settings. Clipman requires the normal device unlock, displays the address for review, keeps the token hidden, and does not start server synchronization merely because the file was imported. The server also writes a readable <code>clipman-server-connection.txt</code> file for manual setup and older clients. Both files contain the private server token; delete them or move the details to a password manager once every client is configured.</p>
+  <p>On Linux, <code>Linux/install-clipman-server.sh</code> installs the server and its startup helper. On first setup, Clipman Server creates <code>clipman-server-connection.clpconf</code> beside its settings file. In Clipman Preferences, choose <strong>Import server file</strong> on Windows or <strong>Import Server File</strong> on Mac, review the server address, enter a unique history password if one is not already configured, then apply the settings. On Android or iOS, tap the <code>.clpconf</code> file in the system file browser to open it in Clipman, or use <strong>Import server connection file</strong> in Clipman Settings. Clipman 2.2.0 can export the currently configured connection from the same Preferences or Settings area on Windows, Mac, Android, and iOS. Clipman warns before export because the file contains the private server token; store and share it securely, and never keep it beside an exported clipboard history. Imported details still require review and Save before synchronization begins. The server also writes a readable <code>clipman-server-connection.txt</code> file for manual setup and older clients. Both files contain the private server token; delete them or move the details to a password manager once every client is configured.</p>
 
   <p>To start a server from an existing history, connect first from the Clipman client that already has the desired history and history password. Do not manually copy a <code>.clipdb</code> into the server's database folders; clients derive the correct server bucket from the server token and the history password, and the server deliberately does not know the history password.</p>
 
@@ -413,7 +414,11 @@
 
   <p>Android and iOS clients can choose <strong>Local</strong> or <strong>Server</strong> in Settings. Local mode keeps <code>clipman-history.clipdb</code> in the mobile operating system's private app storage and does not require a server. Server mode uses the same private file as an offline cache. Server details remain saved while Local mode is selected, and switching back to Server merges local additions, edits, pins, and deletions with the server history before uploading, so work done without a connection is not blindly replaced.</p>
 
+  <p>When a mobile client starts in Server mode, it displays its encrypted on-device cache first and refreshes from the server in the background. A normal launch therefore does not show an empty history merely because the network response has not arrived yet.</p>
+
   <p>Android and iOS Settings also offer <strong>Require biometric or device authentication</strong>. It is off by default. When enabled, Clipman asks for Face ID, Touch ID, biometrics, or the device credential before showing history after the app returns to the foreground.</p>
+
+  <p>Mobile Settings includes optional ways to support Clipman. Android opens Clipman's donation page, while iOS presents one-time tips through Apple's in-app purchase system. Tips do not unlock features, content, or services.</p>
 
   <p>Clipman Android can check GitHub for updates automatically while the app is open, at most once per day. Use <strong>Check Now</strong> in Settings for an immediate check. Clipman verifies the downloaded package name, version, digest when supplied by GitHub, and application signing key before opening Android's installer. Android always asks the user to approve the installation; Clipman does not silently replace itself. TestFlight provides update delivery for iPhone and iPad.</p>
 
@@ -562,6 +567,15 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.2.0</h3>
+  <ul>
+    <li>Added private Clipman Server connection-file export to Preferences or Settings on Windows, Mac, Android, and iOS, with a warning that the exported token must be stored and shared securely.</li>
+    <li>Renamed visible source attribution and sorting from Machine to Device across clients, while keeping the existing shared database format compatible.</li>
+    <li>Improved Android and iOS foreground synchronization: both show their encrypted local cache before contacting the server, use a fixed five-second check, fetch the database only when its revision changes, pause while Settings is open or the app is in the background, and back off repeated connection failures.</li>
+    <li>Added optional mobile tips. Android opens Clipman's donation page, while iOS uses Apple's in-app purchase flow. Tips do not unlock features or change Clipman's free functionality.</li>
+    <li>Cleaned abandoned Windows updater temporary folders after interrupted updates.</li>
+  </ul>
+
   <h3>2.1.0</h3>
   <ul>
     <li>Required a nonblank history password for Clipman Server connections and prevented imported server files from starting synchronization before the connection is deliberately applied.</li>
@@ -623,7 +637,7 @@
 
   <h3>2.0.4</h3>
   <ul>
-    <li>Fixed custom data-folder changes so Windows and Mac keep the selected folder authoritative across restarts. If a WebDAV mount, cloud folder, network share, or settings file is unavailable at startup, Clipman now reports the problem instead of silently reverting to the default folder. Closes <a href="https://github.com/OnjLouis/Clipman/issues/30">issue #30</a>.</li>
+    <li>Fixed custom data-folder changes so Windows and Mac keep the selected folder authoritative across restarts. If an operating-system-mounted WebDAV folder, cloud folder, network share, or settings file is unavailable at startup, Clipman now reports the problem instead of silently reverting to the default folder. Closes <a href="https://github.com/OnjLouis/Clipman/issues/30">issue #30</a>.</li>
     <li>Improved Clipman Server write safety by serializing simultaneous uploads to the same database, rejecting stale concurrent revisions, and applying an adjustable database upload-size limit.</li>
     <li>Improved iOS server refresh reliability by preventing overlapping background refreshes and bounding conflict retries when creating a server database.</li>
   </ul>

@@ -129,6 +129,39 @@ namespace Clipman
             }
         }
 
+        public static bool TryCreateConnectionConfig(string addressValue, string tokenValue, out string json, out string error)
+        {
+            json = string.Empty;
+            error = string.Empty;
+            var address = CleanUrl(addressValue);
+            var token = CleanToken(tokenValue);
+            if (address.Length == 0 || token.Length == 0)
+            {
+                error = "Enter both a Clipman Server address and token before exporting the connection file.";
+                return false;
+            }
+
+            Uri uri;
+            var transport = CleanTransportUrl(address);
+            if (!Uri.TryCreate(transport, UriKind.Absolute, out uri) || string.IsNullOrWhiteSpace(uri.Host))
+            {
+                error = "The Clipman Server address is not valid.";
+                return false;
+            }
+
+            var values = new Dictionary<string, object>
+            {
+                { "clipman", "server-connection" },
+                { "version", 1 },
+                { "address", address },
+                { "host", uri.Host },
+                { "port", uri.IsDefaultPort ? (string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80) : uri.Port },
+                { "token", token }
+            };
+            json = new JavaScriptSerializer().Serialize(values);
+            return true;
+        }
+
         private static string GetString(Dictionary<string, object> values, string key)
         {
             object value;

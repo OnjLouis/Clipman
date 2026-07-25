@@ -3,7 +3,7 @@ param(
     [string]$OutputDirectory = "",
     [string]$GradlePath = "",
     [ValidateRange(30, 900)]
-    [int]$GradleNetworkTimeoutSeconds = 180
+    [int]$GradleNetworkTimeoutSeconds = 600
 )
 
 $ErrorActionPreference = "Stop"

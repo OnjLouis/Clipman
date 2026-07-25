@@ -121,20 +121,23 @@
   <p>Settings includes:</p>
   <ul>
     <li><strong>History storage</strong>: switches between private Local history and Clipman Server. Switching modes keeps the other mode's settings and merges local changes when Server mode resumes.</li>
-    <li><strong>Copy remote additions to Android clipboard</strong>: when another machine adds new text to the shared history, Clipman can place that new text on the Android clipboard while the app is open.</li>
+    <li><strong>Copy remote additions to Android clipboard</strong>: when another device adds new text to the shared history, Clipman can place that new text on the Android clipboard while the app is open.</li>
     <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
     <li><strong>Use haptic feedback</strong>: vibrates for supported feedback events.</li>
     <li><strong>Require biometric or device authentication</strong>: when enabled, locks Clipman whenever it leaves the foreground and requires Android authentication when you return. This is off by default.</li>
     <li><strong>Check for updates automatically</strong>: checks the Clipman GitHub release at most once per day while the app is open. Disable it to use only manual checks.</li>
     <li><strong>Check Now</strong>: checks immediately and reports whether this Android build is current.</li>
-    <li><strong>Server connection</strong>: imports a private <code>.clpconf</code> server file, or shows server address, server token, history password, and show-password controls for manual setup.</li>
+    <li><strong>Server connection</strong>: imports or exports a private <code>.clpconf</code> server file, or shows server address, server token, history password, and show-password controls for manual setup.</li>
+    <li><strong>Support Clipman</strong>: opens the optional Tip Jar. Tips do not unlock features or change Clipman's free functionality.</li>
     <li><strong>Build information</strong>: shows the app version, readable UTC build time, and exact build stamp so a tester can identify the installed build unambiguously.</li>
   </ul>
 
   <p>Choose <strong>Cancel</strong> at the top, or use Android Back, to discard changes and return to history. Choose <strong>Save</strong> to apply changes and return to history. A history refresh that finishes while Settings is open does not close the Settings screen.</p>
 
-  <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. The <code>.clpconf</code> file contains the private server token; delete it or move it to a password manager after configuring your devices.</p>
+  <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. Export creates a new connection file from the address and token currently shown in Settings. Every <code>.clpconf</code> file contains the private server token; store and share it securely, never keep it beside an exported clipboard history, and delete it or move it to a password manager after configuring your devices.</p>
+
+  <p>When Clipman starts in Server mode, it displays the encrypted local cache before contacting the server. While Clipman is in the foreground and Settings is closed, it then checks the server revision every five seconds. It downloads history only when the revision changes, pauses checks in the background, and progressively slows retries during an outage. Returning to Clipman or closing Settings triggers an immediate refresh.</p>
 
   <p>If only some custom sounds are available, Clipman uses those and falls back to bundled defaults for the rest.</p>
 
