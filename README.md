@@ -1,12 +1,12 @@
 # Clipman: Accessible Clipboard Management Tool
 
-Clipman is a small accessible clipboard management tool for Windows, macOS, Android, iPhone, and iPad, designed for fast keyboard and screen-reader use. Its clients can share the same text history through a synced or network-shared data folder on desktop, or through optional Clipman Server storage across all supported platforms. Add, remove, move, rename, group, pin, or edit an entry on one device, and other devices watching that shared history can pick up the change automatically.
+Clipman is a small accessible clipboard management tool for Windows, macOS, Linux, Android, iPhone, and iPad, designed for fast keyboard and screen-reader use. Its clients can share the same text history through a synced or network-shared data folder on Windows and macOS, or through optional Clipman Server storage across all supported platforms. Add, remove, move, rename, group, pin, or edit an entry on one device, and other devices watching that shared history can pick up the change automatically.
 
 For the full manual, open `Manual.html` from the Clipman folder or press `F1` in the history window.
 
 Project page: <https://github.com/OnjLouis/Clipman>
 
-Windows and macOS downloads are attached to releases in this repository.
+Windows, macOS, Linux, and Android downloads are attached to releases in this repository. The Linux archive includes its own platform-specific accessible manual and per-user installer.
 
 iPhone and iPad users can [join the Clipman public beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
 
@@ -187,6 +187,12 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.2.1
+
+- Added the accessible Linux desktop app, with Text, Links and File History, groups, templates, Quick Paste, per-device Secrets, privacy exclusions, import/export, automatic updates, encrypted offline reading, global shortcuts under X11, and a dedicated Linux manual.
+- Fixed Windows startup when another process temporarily holds the existing machine settings file. Clipman now retries the atomic replacement and can continue with readable existing settings instead of failing to start. This addresses [issue #41](https://github.com/OnjLouis/Clipman/issues/41).
+- Fixed Mac history-password changes so local text history, per-device File History, and Secrets are re-encrypted together without making an existing local database unreadable.
 
 ### 2.2.0
 

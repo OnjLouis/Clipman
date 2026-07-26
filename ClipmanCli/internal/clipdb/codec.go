@@ -48,49 +48,8 @@ func DefaultLimits() Limits {
 }
 
 func Decode(blob []byte, password string, limits Limits) (model.Database, error) {
-	if limits.MaxBlobBytes <= 0 {
-		limits.MaxBlobBytes = DefaultMaxBlobBytes
-	}
-	if limits.MaxJSONBytes <= 0 {
-		limits.MaxJSONBytes = DefaultMaxJSONBytes
-	}
-	if limits.MaxEntries <= 0 {
-		limits.MaxEntries = DefaultMaxEntries
-	}
-	if limits.MaxTextBytes <= 0 {
-		limits.MaxTextBytes = DefaultMaxTextBytes
-	}
-	if limits.MaxJSONDepth <= 0 {
-		limits.MaxJSONDepth = DefaultMaxJSONDepth
-	}
-	if int64(len(blob)) > limits.MaxBlobBytes {
-		return model.Database{}, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
-	}
-	var compressed []byte
-	switch {
-	case bytes.HasPrefix(blob, encryptedMagic):
-		if password == "" {
-			return model.Database{}, ErrPasswordRequired
-		}
-		plain, err := decrypt(blob, password)
-		if err != nil {
-			return model.Database{}, err
-		}
-		compressed = plain
-	case bytes.HasPrefix(blob, compressedMagic):
-		compressed = blob[len(compressedMagic):]
-	default:
-		compressed = blob
-	}
-	jsonBytes, err := gunzipLimited(compressed, limits.MaxJSONBytes)
+	jsonBytes, limits, err := decodeJSON(blob, password, limits)
 	if err != nil {
-		return model.Database{}, fmt.Errorf("invalid Clipman database: %w", err)
-	}
-	jsonBytes = bytes.TrimPrefix(jsonBytes, []byte{0xEF, 0xBB, 0xBF})
-	if !utf8.Valid(jsonBytes) {
-		return model.Database{}, errors.New("invalid Clipman JSON: text is not valid UTF-8")
-	}
-	if err := checkJSONDepth(jsonBytes, limits.MaxJSONDepth); err != nil {
 		return model.Database{}, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
@@ -116,8 +75,92 @@ func Decode(blob []byte, password string, limits Limits) (model.Database, error)
 	return database, nil
 }
 
+func DecodeFileHistory(blob []byte, password string, limits Limits) (model.FileDatabase, error) {
+	jsonBytes, limits, err := decodeJSON(blob, password, limits)
+	if err != nil {
+		return model.FileDatabase{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
+	var database model.FileDatabase
+	if err := decoder.Decode(&database); err != nil {
+		return model.FileDatabase{}, fmt.Errorf("invalid Clipman file-history JSON: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return model.FileDatabase{}, errors.New("invalid Clipman file-history JSON: trailing data")
+	}
+	if int64(len(database.Events)) > limits.MaxEntries {
+		return model.FileDatabase{}, fmt.Errorf("file history exceeds %d-event limit", limits.MaxEntries)
+	}
+	for _, event := range database.Events {
+		for _, path := range event.Files {
+			if int64(len(path)) > limits.MaxTextBytes {
+				return model.FileDatabase{}, fmt.Errorf("file-history path exceeds %d-byte limit", limits.MaxTextBytes)
+			}
+		}
+	}
+	return database, nil
+}
+
+func decodeJSON(blob []byte, password string, limits Limits) ([]byte, Limits, error) {
+	if limits.MaxBlobBytes <= 0 {
+		limits.MaxBlobBytes = DefaultMaxBlobBytes
+	}
+	if limits.MaxJSONBytes <= 0 {
+		limits.MaxJSONBytes = DefaultMaxJSONBytes
+	}
+	if limits.MaxEntries <= 0 {
+		limits.MaxEntries = DefaultMaxEntries
+	}
+	if limits.MaxTextBytes <= 0 {
+		limits.MaxTextBytes = DefaultMaxTextBytes
+	}
+	if limits.MaxJSONDepth <= 0 {
+		limits.MaxJSONDepth = DefaultMaxJSONDepth
+	}
+	if int64(len(blob)) > limits.MaxBlobBytes {
+		return nil, limits, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
+	}
+	var compressed []byte
+	switch {
+	case bytes.HasPrefix(blob, encryptedMagic):
+		if password == "" {
+			return nil, limits, ErrPasswordRequired
+		}
+		plain, err := decrypt(blob, password)
+		if err != nil {
+			return nil, limits, err
+		}
+		compressed = plain
+	case bytes.HasPrefix(blob, compressedMagic):
+		compressed = blob[len(compressedMagic):]
+	default:
+		compressed = blob
+	}
+	jsonBytes, err := gunzipLimited(compressed, limits.MaxJSONBytes)
+	if err != nil {
+		return nil, limits, fmt.Errorf("invalid Clipman database: %w", err)
+	}
+	jsonBytes = bytes.TrimPrefix(jsonBytes, []byte{0xEF, 0xBB, 0xBF})
+	if !utf8.Valid(jsonBytes) {
+		return nil, limits, errors.New("invalid Clipman JSON: text is not valid UTF-8")
+	}
+	if err := checkJSONDepth(jsonBytes, limits.MaxJSONDepth); err != nil {
+		return nil, limits, err
+	}
+	return jsonBytes, limits, nil
+}
+
 func Encode(database model.Database, password string, existing []byte) ([]byte, error) {
-	jsonBytes, err := json.Marshal(database)
+	return encodeJSON(database, password, existing)
+}
+
+func EncodeFileHistory(database model.FileDatabase, password string, existing []byte) ([]byte, error) {
+	return encodeJSON(database, password, existing)
+}
+
+func encodeJSON(value any, password string, existing []byte) ([]byte, error) {
+	jsonBytes, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}

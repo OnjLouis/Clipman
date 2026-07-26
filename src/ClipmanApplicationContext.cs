@@ -64,7 +64,7 @@ namespace Clipman
         public ClipmanApplicationContext()
         {
             appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-            settingsStore = new SettingsStore(appDirectory);
+            settingsStore = new SettingsStore(appDirectory, Program.WriteRuntimeLog);
             settings = settingsStore.Load();
             ResolveDatabaseLocation();
             ResolveDatabasePassword();

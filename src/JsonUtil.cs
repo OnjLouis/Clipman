@@ -1,5 +1,7 @@
+using System;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 
 namespace Clipman
@@ -41,17 +43,58 @@ namespace Clipman
                 Directory.CreateDirectory(dir);
             }
 
-            var temp = path + ".tmp";
+            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             var json = Serializer.Serialize(value);
-            File.WriteAllText(temp, PrettyPrint(json), Encoding.UTF8);
-            if (File.Exists(path))
+            try
             {
-                File.Replace(temp, path, null);
+                File.WriteAllText(temp, PrettyPrint(json), Encoding.UTF8);
+                ReplaceTempWithRetry(temp, path);
             }
-            else
+            finally
             {
-                File.Move(temp, path);
+                try
+                {
+                    if (File.Exists(temp)) File.Delete(temp);
+                }
+                catch
+                {
+                }
             }
+        }
+
+        private static void ReplaceTempWithRetry(string temp, string path)
+        {
+            Exception last = null;
+            for (var attempt = 0; attempt < 8; attempt++)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Replace(temp, path, null);
+                    }
+                    else
+                    {
+                        File.Move(temp, path);
+                    }
+                    return;
+                }
+                catch (IOException ex)
+                {
+                    last = ex;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    last = ex;
+                }
+
+                if (attempt < 7)
+                {
+                    Thread.Sleep(50 * (attempt + 1));
+                }
+            }
+
+            throw new IOException("Clipman could not replace " + path + " after waiting for the file to become available.", last);
         }
 
         public static string SerializePretty<T>(T value)

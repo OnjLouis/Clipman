@@ -45,7 +45,7 @@
 <body>
   <h1>Clipman: Accessible Clipboard Management Tool</h1>
 
-  <p>Clipman is a small accessible clipboard management tool for Windows, macOS, Android, iPhone, and iPad, designed for fast keyboard and screen-reader use. It keeps a searchable clipboard history and can share that history through a cloud service or network share on desktop, or through optional Clipman Server storage across all supported platforms. Add, remove, move, rename, group, pin, or edit an entry on one device, and other devices watching the same shared history can pick up the change automatically.</p>
+  <p>Clipman is a small accessible clipboard management tool for Windows, macOS, Linux, Android, iPhone, and iPad, designed for fast keyboard and screen-reader use. It keeps a searchable clipboard history and can share that history through a cloud service or network share on Windows and macOS, or through optional Clipman Server storage across all supported platforms. Add, remove, move, rename, group, pin, or edit an entry on one device, and other devices watching the same shared history can pick up the change automatically.</p>
 
   <p>Project page: <a href="https://github.com/OnjLouis/Clipman">https://github.com/OnjLouis/Clipman</a></p>
 
@@ -88,7 +88,7 @@
   </ul>
 
   <h2 id="notes">Notes</h2>
-  <p>Clipman runs as a portable Windows app or a Mac menu bar app. It stores machine-specific settings separately from shared clipboard history, so several computers can use the same data folder without sharing hotkeys, startup choices, or local-only preferences.</p>
+  <p>Clipman runs as a portable Windows app, a Mac menu bar app, or a per-user Linux desktop app. It stores device-specific settings separately from shared clipboard history, so several computers can share history without sharing hotkeys, startup choices, or local-only preferences.</p>
 
   <h2 id="basic-use">Basic Use</h2>
   <ul>
@@ -101,7 +101,7 @@
   </ul>
 
   <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
-  <p>Most commands are shared between Windows and Mac, but the modifier keys follow each platform's conventions. Windows uses <code>Ctrl</code>, <code>Alt</code>, <code>Shift</code>, and sometimes <code>Win</code>. Mac uses <code>Command</code>, <code>Option</code>, and <code>Control</code>. Global hotkeys can be changed in Preferences where supported.</p>
+  <p>Most commands are shared between Windows and Mac, but the modifier keys follow each platform's conventions. Windows uses <code>Ctrl</code>, <code>Alt</code>, <code>Shift</code>, and sometimes <code>Win</code>. Mac uses <code>Command</code>, <code>Option</code>, and <code>Control</code>. Global hotkeys can be changed in Preferences where supported. The Linux download includes a dedicated manual with its GTK and X11 shortcuts.</p>
   <table>
     <thead>
       <tr>
@@ -203,6 +203,8 @@
   <p><strong>Windows:</strong> Clipman runs in the notification area and opens the history window with the configured global hotkey. Windows Preferences includes Send To integration, Windows startup registration, command-line import/export support, and Windows-protected password remembering when explicitly enabled.</p>
 
   <p><strong>Mac:</strong> Clipman is packaged as a signed and notarized <code>Clipman.app</code> and runs as a menu bar app. After unzipping, move or drag <code>Clipman.app</code> to <code>/Applications</code>, then open it normally.</p>
+
+  <p><strong>Linux:</strong> Clipman is a GTK 4 desktop app that connects to Clipman Server and keeps an encrypted offline read cache. Its archive includes a per-user installer and a dedicated accessible manual covering desktop dependencies, X11 and Wayland differences, shortcuts, updates, File History, Secrets, and installed files.</p>
 
   <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
 
@@ -567,6 +569,13 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.2.1</h3>
+  <ul>
+    <li>Added the accessible Linux desktop app, with Text, Links and File History, groups, templates, Quick Paste, per-device Secrets, privacy exclusions, import/export, automatic updates, encrypted offline reading, global shortcuts under X11, and a dedicated Linux manual.</li>
+    <li>Fixed Windows startup when another process temporarily holds the existing machine settings file. Clipman now retries the atomic replacement and can continue with readable existing settings instead of failing to start. This addresses <a href="https://github.com/OnjLouis/Clipman/issues/41">issue #41</a>.</li>
+    <li>Fixed Mac history-password changes so local text history, per-device File History, and Secrets are re-encrypted together without making an existing local database unreadable.</li>
+  </ul>
+
   <h3>2.2.0</h3>
   <ul>
     <li>Added private Clipman Server connection-file export to Preferences or Settings on Windows, Mac, Android, and iOS, with a warning that the exported token must be stored and shared securely.</li>

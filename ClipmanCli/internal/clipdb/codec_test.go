@@ -64,6 +64,32 @@ func TestRoundTripPreservesUnknownFields(t *testing.T) {
 	}
 }
 
+func TestFileHistoryRoundTripPreservesContractAndUnknownFields(t *testing.T) {
+	raw := []byte(`{"Version":1,"UpdatedUnixMs":7,"FutureRoot":"keep","Events":[{"Id":"event1","CapturedUnixMs":6,"Source":"Files","Operation":"Copy","SourceMachine":"Fedora","ContainsText":true,"FileCount":2,"Files":["/tmp/one.txt","/tmp/two.txt"],"Formats":["text/uri-list"],"Pinned":true,"ManualOrder":3,"FutureEvent":42}]}`)
+	var database model.FileDatabase
+	if err := json.Unmarshal(raw, &database); err != nil {
+		t.Fatal(err)
+	}
+	blob, err := EncodeFileHistory(database, "secret", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeFileHistory(blob, "secret", DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Events) != 1 || decoded.Events[0].Files[1] != "/tmp/two.txt" || !decoded.Events[0].Pinned {
+		t.Fatalf("unexpected file history: %+v", decoded)
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"FutureRoot":"keep"`)) || !bytes.Contains(encoded, []byte(`"FutureEvent":42`)) {
+		t.Fatalf("unknown file-history fields lost: %s", encoded)
+	}
+}
+
 func TestDecodeLimitsDecompression(t *testing.T) {
 	database := model.NewDatabase(1)
 	database.Entries = []model.Entry{{ID: "1", Text: string(bytes.Repeat([]byte("x"), 2048))}}

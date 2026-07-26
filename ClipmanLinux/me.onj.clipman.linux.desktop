@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Clipman
+Comment=Accessible clipboard history
+Exec=clipman-linux %U
+Icon=me.onj.clipman.linux
+Terminal=false
+Categories=Utility;GTK;Accessibility;
+Keywords=clipboard;history;accessible;
+MimeType=application/x-clipman-server-connection;
+StartupNotify=true

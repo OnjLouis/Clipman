@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+root="${CLIPMAN_LINUX_ROOT:-$data_home/clipman-linux}"
+export CLIPMAN_GUI_BACKEND="${CLIPMAN_GUI_BACKEND:-$root/libexec/clipman-gui-backend}"
+exec python3 "$root/clipman.py" "$@"

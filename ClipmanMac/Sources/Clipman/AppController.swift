@@ -1418,9 +1418,41 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) -> Bool {
         let previousSettings = self.settings!
         let previousDatabasePath = previousSettings.databasePath
+        let previousPassword = currentDatabasePassword(for: previousDatabasePath)
+        let requestedPassword = passwordToSave?.isEmpty == false ? passwordToSave! : previousPassword
+        var localDatabasesRekeyed = false
+        if requestedPassword != previousPassword {
+            do {
+                try LocalDatabasePasswordMigrator.migrate(
+                    textHistoryURL: textHistoryURL(for: previousSettings),
+                    fileHistoryURL: fileHistoryURL(for: previousSettings),
+                    secretsURL: secretsURL(for: previousSettings),
+                    from: previousPassword,
+                    to: requestedPassword
+                )
+                localDatabasesRekeyed = true
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Clipman could not change the history password"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Close")
+                alert.runModal()
+                return false
+            }
+        }
         do {
             try settingsStore.save(settings)
         } catch {
+            if localDatabasesRekeyed {
+                try? LocalDatabasePasswordMigrator.migrate(
+                    textHistoryURL: textHistoryURL(for: previousSettings),
+                    fileHistoryURL: fileHistoryURL(for: previousSettings),
+                    secretsURL: secretsURL(for: previousSettings),
+                    from: requestedPassword,
+                    to: previousPassword
+                )
+            }
             let alert = NSAlert()
             alert.messageText = "Clipman could not save Preferences"
             alert.informativeText = error.localizedDescription
@@ -1441,9 +1473,6 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         if !settings.rememberDatabasePassword {
             try? keychain.delete(for: settings.databasePath)
             try? keychain.delete(for: previousDatabasePath)
-        }
-        if passwordToSave?.isEmpty == false {
-            try? secretStore.changeDatabasePassword()
         }
         sounds.useDataFolder(settingsStore.dataFolder(for: settings))
         sounds.isEnabled = settings.soundsEnabled

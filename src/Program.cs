@@ -280,7 +280,7 @@ namespace Clipman
             return Path.Combine(LogDirectory(), "Runtime.log");
         }
 
-        private static void WriteRuntimeLog(string message, Exception exception)
+        internal static void WriteRuntimeLog(string message, Exception exception)
         {
             WriteLogFile("Runtime.log", message, exception);
         }

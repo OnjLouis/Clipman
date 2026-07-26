@@ -13,11 +13,13 @@ namespace Clipman
         public string AppSettingsDirectory { get; private set; }
         public string SettingsDirectory { get; private set; }
         public string SettingsPath { get; private set; }
+        private readonly Action<string, Exception> warningLogger;
 
-        public SettingsStore(string appDirectory)
+        public SettingsStore(string appDirectory, Action<string, Exception> warningLogger = null)
         {
             AppDirectory = appDirectory;
             AppSettingsDirectory = Path.Combine(appDirectory, "Settings");
+            this.warningLogger = warningLogger;
             SetActiveSettingsDirectory(AppSettingsDirectory);
         }
 
@@ -62,8 +64,28 @@ namespace Clipman
             {
                 settings.FileHistorySortDescending = DefaultFileHistorySortDescending(settings.FileHistorySortMode);
             }
-            Save(settings);
+            var loadedFromExistingSettings = File.Exists(SettingsPath);
+            try
+            {
+                Save(settings);
+            }
+            catch (Exception ex)
+            {
+                if (!loadedFromExistingSettings || !IsSettingsWriteException(ex)) throw;
+                if (warningLogger != null)
+                {
+                    warningLogger(
+                        "Clipman continued startup with its existing settings because the normalized settings file was temporarily unavailable for writing.",
+                        ex);
+                }
+            }
             return settings;
+        }
+
+        private static bool IsSettingsWriteException(Exception ex)
+        {
+            if (ex is IOException || ex is UnauthorizedAccessException) return true;
+            return ex != null && ex.InnerException != null && IsSettingsWriteException(ex.InnerException);
         }
 
         public void Save(AppSettings settings)

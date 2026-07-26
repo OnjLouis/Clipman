@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipman for Linux Manual</title>
+<style>
+body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1rem;color:#171717;background:#fff}h1,h2{line-height:1.2}table{border-collapse:collapse;width:100%}th,td{border:1px solid #777;padding:.45rem;text-align:left;vertical-align:top}code,kbd{font-family:ui-monospace,monospace}nav ul{columns:2}a{color:#0645ad}@media(max-width:42rem){nav ul{columns:1}}@media(prefers-color-scheme:dark){body{color:#eee;background:#171717}a{color:#8ab4f8}}
+</style>
+</head>
+<body>
+<h1>Clipman for Linux</h1>
+<p>Clipman is an accessible clipboard history manager for Linux, Windows, macOS, Android and iOS. The Linux edition connects to Clipman Server and uses the same encrypted history as your other devices. Add, edit, group, pin, reorder or delete an entry on one device and the change appears on every other connected device.</p>
+<p>The Linux interface provides separate Text, Links and File History sections, Groups, multi-selection, templates, Quick Paste, machine-local Secrets, privacy exclusions, import and export, text transformations, global shortcuts, automatic updates and an encrypted offline read cache.</p>
+
+<nav aria-label="Contents"><h2>Contents</h2><ul>
+<li><a href="#install">Install</a></li><li><a href="#setup">Set up</a></li><li><a href="#history">History sections</a></li><li><a href="#groups">Groups</a></li><li><a href="#entries">Entries and templates</a></li><li><a href="#quick-paste">Quick Paste</a></li><li><a href="#file-history">File History</a></li><li><a href="#secrets">Secrets</a></li><li><a href="#privacy">Privacy controls</a></li><li><a href="#actions">Text actions</a></li><li><a href="#transfer">Import and export</a></li><li><a href="#preferences">Preferences</a></li><li><a href="#shortcuts">Keyboard shortcuts</a></li><li><a href="#accessibility">Accessibility</a></li><li><a href="#updates">Updates</a></li><li><a href="#offline">Offline use</a></li><li><a href="#files">Installed files</a></li><li><a href="#security">Security</a></li><li><a href="#project">Project and license</a></li>
+</ul></nav>
+
+<h2 id="install">Install</h2>
+<p>Extract the Linux archive, open a terminal in the extracted folder and run <code>./install.sh</code>. Installation is per-user and does not require root access. The installer checks required components before copying Clipman.</p>
+<p>On Arch Linux, install prerequisites with <code>sudo pacman -S gtk4 python-gobject libkeybinder3 xdotool</code>. Debian or Ubuntu users need <code>gir1.2-gtk-4.0 gir1.2-keybinder-3.0 python3-gi xdotool</code>. Fedora users need <code>gtk4 python3-gobject keybinder3 xdotool</code>.</p>
+
+<h2 id="setup">Set up</h2>
+<ol><li>Open Clipman from the application menu.</li><li>Enter the Clipman Server address, server token, history password and a device name.</li><li>Alternatively, choose <strong>Import Clipman Server Connection File</strong> and select a <code>.clpconf</code> file. Enter the history password separately.</li><li>Choose whether to remember the history password on this device, then select <strong>Save and Connect</strong>.</li></ol>
+<p>The server token authorizes access to the server. The history password identifies and decrypts one database bucket. A connection file contains the server address and token, never the history password.</p>
+
+<h2 id="history">History sections</h2>
+<p>Clipman has Text, Links and File History sections. Use the section button, <kbd>Ctrl+Tab</kbd>, <kbd>Ctrl+Shift+Tab</kbd>, or the View menu to switch. Direct shortcuts are <kbd>Alt+T</kbd>, <kbd>Alt+L</kbd> and <kbd>Alt+I</kbd>.</p>
+<p>Activate an entry or press <kbd>Enter</kbd> to copy it and hide Clipman. <kbd>Ctrl+C</kbd> copies while leaving the window open. Search includes entry text, names, groups and device names; File History search also includes paths, operations and source information. Type the beginning of a displayed entry to move directly to it.</p>
+<p>Pinned entries remain in their own ordered section above normal entries and are numbered for <kbd>Ctrl+1</kbd> through <kbd>Ctrl+0</kbd>. They are not affected by normal sorting or cleanup. The <strong>Normal Entries</strong> row separates the two sections. Press <kbd>Backspace</kbd> to move to the first normal entry, then press <kbd>Up Arrow</kbd> once to reach the separator.</p>
+<p>The View, Sort menu offers Manual Order, Newest First, Oldest First, Text, Group and Device for Text and Links. File History can be sorted by manual order, capture time, file count, name, operation or source application. Sort choices persist between sessions; pinned order remains manual.</p>
+<p>Use Shift with the arrow keys to select a contiguous range, or <kbd>Ctrl+A</kbd> to select every visible row. Copy, cut, group, transform, push, pin, delete, file restore and file-path commands act on the complete selection where applicable. Entry Properties, Details, Go to File, Paste After Selected and manual movement require one selected row.</p>
+<p>Clipman checks the server every two seconds. Unchanged results do not rebuild the list, move focus or produce repeated screen-reader announcements. Local clipboard capture is event-driven where the desktop reports changes and shares that existing two-second tick as a compatibility fallback instead of running a second polling loop.</p>
+
+<h2 id="groups">Groups</h2>
+<p>The labelled Group control filters Text and Links; press <kbd>Alt+G</kbd> to focus it. The Groups menu presents All, Pinned, Normal, Ungrouped and every named group. The first ten choices use <kbd>Alt+1</kbd> through <kbd>Alt+0</kbd>. Choose <strong>Group Entry</strong> or press <kbd>Ctrl+G</kbd> to assign one or several selected entries to a new or existing group.</p>
+<p>Groups are stored in the shared database, so group names and assignments travel with entries. File History is machine-local and does not use groups.</p>
+
+<h2 id="entries">Entries and templates</h2>
+<p><strong>Entry Properties</strong> changes the name, group, text, pinned state and template state. The editor includes template samples, individual fields and a resolved preview. Insertions occur at the text cursor and automatically mark the entry as a template. Stored template text remains literal; fields resolve only when copied.</p>
+<p><strong>View Full Text</strong> shows the complete text followed by a details list containing name, group, device, character and word counts, pin/template state, added time and last-used time. Multiline entries are condensed into one navigable history row while preserving all text in Properties and Details.</p>
+<p><kbd>Ctrl+X</kbd> cuts an unpinned entry. <kbd>Ctrl+V</kbd> adds current clipboard text after the selected normal entry. <kbd>Ctrl+P</kbd> marks the selected entry as newly pushed from this device and also places it on this clipboard, allowing devices with remote clipboard receipt enabled to receive it.</p>
+
+<h2 id="quick-paste">Quick Paste</h2>
+<p>Open Entry Properties, or choose <strong>Set as Quick Paste Target</strong> from Edit or the context menu, to assign an existing Text or Links entry its own global Quick Paste hotkey. Each assignment has one of three modes: paste and restore the previous clipboard, paste and leave the target on the clipboard, or copy the target without sending a paste command. Template entries resolve immediately before use.</p>
+<p>The Quick Paste menu lists every live target and its hotkey. Choosing a target moves to that history entry so you can review or remove the assignment with <kbd>F2</kbd>. Assigned rows include the hotkey and mode in their visible and accessible details; unassigned rows do not carry extra wording. Deleting an entry also removes its machine-local hotkey, preventing inaccessible stale assignments.</p>
+<p>Quick Paste is available in X11 sessions when <code>xdotool</code> is installed. Wayland compositors may prevent synthesized paste commands; Copy to Clipboard Only remains usable.</p>
+
+<h2 id="file-history">File History</h2>
+<p>File History records files copied or cut while Clipman is running. It is stored only on the current device and does not sync file paths to other devices. Each event includes the first filename, operation, file count, source, device and capture time. Repeated copies of the same file set replace the existing event instead of creating duplicates.</p>
+<p>Press <kbd>Enter</kbd> to restore available files to the clipboard and hide Clipman. <kbd>Ctrl+C</kbd> copies their paths as text. <kbd>Ctrl+Enter</kbd> opens the location of a single available file or folder. File details list every path and format.</p>
+<p>File events can be pinned, moved in Manual Order, sorted, searched and deleted like text entries. <kbd>Ctrl+1</kbd> through <kbd>Ctrl+0</kbd> restore numbered pinned file events; add Shift to copy their paths instead. Clearing or removing unavailable events keeps pinned events and never deletes files from disk. File History keeps up to 200 events.</p>
+
+<h2 id="secrets">Secrets</h2>
+<p>Secrets is an optional machine-local area for short private values you type deliberately. Open it from Options or press <kbd>Ctrl+Shift+E</kbd>, then enter the current history password before Clipman reveals secret names or assigned hotkeys. Secret values are never shown in the list, captured into ordinary history, synchronized through Clipman Server, or included in history import and export.</p>
+<p>Add or edit a secret by entering its name and value twice. An optional global hotkey pastes the secret and restores the previous text clipboard. Press Enter or choose Paste in the unlocked Secrets manager to do the same. Deletion requires confirmation. Secrets are stored in a separate encrypted <code>&lt;device&gt;-secrets.clipdb</code> file using the current history password.</p>
+<p>Secrets is a convenience feature, not a replacement for a full password manager. Software running as the same user may still observe keystrokes or clipboard contents during the brief paste operation.</p>
+
+<h2 id="privacy">Privacy controls</h2>
+<p>Ignored Applications accepts one X11 process or application name per line. Automatic text capture from a matching foreground application is skipped. Automatically Group by Source Application uses the same source information to place new entries into app-named groups. Desktop environments do not expose this information consistently under Wayland, so both features are best supported under X11.</p>
+<p>Sensitive Data exclusions are off by default. When enabled, selected presets can exclude valid credit-card numbers, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys and approximate US driver-license shapes from automatic history. Credit-card detection includes a Luhn checksum, and complete HTTP or HTTPS URLs are not treated as tokens. Exclusions do not alter the system clipboard and do not block <strong>Add Clipboard</strong>, allowing an intentional override.</p>
+
+<h2 id="actions">Text actions</h2>
+<p>The Actions menu changes selected Text or Links entries and puts the result on the clipboard. It provides plain text copy, whitespace trimming, single-line conversion, blank-line removal, URL tracking removal, cleaner sharing links, line-ending conversion, uppercase/lowercase, HTML encode/decode/to-text and URL encode/decode. These commands are omitted from the File History Edit menu because they do not apply to files.</p>
+
+<h2 id="transfer">Import and export</h2>
+<p>The File menu imports <code>.clipdb</code> history files by merging or replacing the current text history. Enter the password used by the imported file, or leave it blank for an unencrypted file. Import and Replace removes current text/link entries before adding the imported entries.</p>
+<p>Export always requires confirmation of the current history password. The exported file can keep the current password, use a new password, or use no password. An export never changes the password used by the live database.</p>
+<p>Clear Text History also requires the current history password and propagates the deletion safely through Clipman Server. File History is cleared separately and retains pinned events.</p>
+
+<h2 id="preferences">Preferences</h2>
+<p>Preferences has six tabs. Use <kbd>Ctrl+1</kbd> through <kbd>Ctrl+6</kbd> to switch, and Clipman remembers the last tab.</p>
+<table><thead><tr><th>Tab</th><th>Contents</th></tr></thead><tbody>
+<tr><td>General</td><td>Clipboard monitoring, sounds, source-application grouping, remote clipboard receipt, optional paste after Enter, dynamic history section, automatic URL cleanup, Links History, saved list position and duplicate handling.</td></tr>
+<tr><td>File History</td><td>Automatic removal of unavailable unpinned file events.</td></tr>
+<tr><td>Hotkeys</td><td>Global Show History and Toggle Monitoring shortcuts.</td></tr>
+<tr><td>Storage and Password</td><td>Server connection changes, ignored applications and the Linux display-server compatibility note.</td></tr>
+<tr><td>Startup and Updates</td><td>Desktop-session startup, optional capture of the existing clipboard at startup, update frequency and silent automatic installation.</td></tr>
+<tr><td>Sensitive Data</td><td>Opt-in automatic-capture exclusions and their individual presets.</td></tr>
+</tbody></table>
+<p>Automatic remote clipboard receipt, dynamic history and automatic tracking removal are opt-in. Missing custom sounds fall back to factory sounds.</p>
+
+<h2 id="shortcuts">Keyboard shortcuts</h2>
+<table><thead><tr><th>Action</th><th>Shortcut</th></tr></thead><tbody>
+<tr><td>Copy/restore selected item and hide Clipman</td><td><kbd>Enter</kbd></td></tr>
+<tr><td>Copy selected text, or file paths, and stay open</td><td><kbd>Ctrl+C</kbd></td></tr>
+<tr><td>Cut selected unpinned text entry</td><td><kbd>Ctrl+X</kbd></td></tr>
+<tr><td>Paste clipboard text after selected entry</td><td><kbd>Ctrl+V</kbd></td></tr>
+<tr><td>New entry</td><td><kbd>Ctrl+N</kbd></td></tr>
+<tr><td>Select all visible entries</td><td><kbd>Ctrl+A</kbd></td></tr>
+<tr><td>Import or export</td><td><kbd>Ctrl+I</kbd> or <kbd>Ctrl+E</kbd></td></tr>
+<tr><td>Group selected entry</td><td><kbd>Ctrl+G</kbd></td></tr>
+<tr><td>Push selected entry to other devices</td><td><kbd>Ctrl+P</kbd></td></tr>
+<tr><td>Entry Properties</td><td><kbd>F2</kbd></td></tr>
+<tr><td>Entry or file-event details</td><td><kbd>F4</kbd></td></tr>
+<tr><td>Delete unpinned item</td><td><kbd>Delete</kbd></td></tr>
+<tr><td>Pin or unpin</td><td><kbd>Shift+Enter</kbd></td></tr>
+<tr><td>Move in Manual Order</td><td><kbd>Alt+Up</kbd> or <kbd>Alt+Down</kbd></td></tr>
+<tr><td>Copy/restore pinned item 1 through 10</td><td><kbd>Ctrl+1</kbd> through <kbd>Ctrl+0</kbd></td></tr>
+<tr><td>Copy pinned file paths 1 through 10</td><td><kbd>Ctrl+Shift+1</kbd> through <kbd>Ctrl+Shift+0</kbd></td></tr>
+<tr><td>Choose group 1 through 10</td><td><kbd>Alt+1</kbd> through <kbd>Alt+0</kbd></td></tr>
+<tr><td>Search; next; previous</td><td><kbd>Ctrl+F</kbd>, <kbd>F3</kbd>, <kbd>Shift+F3</kbd></td></tr>
+<tr><td>Text, Links or File History</td><td><kbd>Alt+T</kbd>, <kbd>Alt+L</kbd>, <kbd>Alt+I</kbd></td></tr>
+<tr><td>Next or previous history section</td><td><kbd>Ctrl+Tab</kbd> or <kbd>Ctrl+Shift+Tab</kbd></td></tr>
+<tr><td>Top, bottom or first normal item</td><td><kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Backspace</kbd></td></tr>
+<tr><td>Move ten entries</td><td><kbd>Page Up</kbd> or <kbd>Page Down</kbd></td></tr>
+<tr><td>Open context menu</td><td>Application key or <kbd>Shift+F10</kbd></td></tr>
+<tr><td>Hide Clipman</td><td><kbd>Escape</kbd></td></tr>
+<tr><td>Show or hide globally</td><td><kbd>Ctrl+Alt+Backslash</kbd> by default</td></tr>
+<tr><td>Turn monitoring on/off globally</td><td><kbd>Ctrl+Alt+Grave</kbd> by default</td></tr>
+<tr><td>Preferences</td><td><kbd>Ctrl+,</kbd></td></tr>
+<tr><td>Secrets</td><td><kbd>Ctrl+Shift+E</kbd></td></tr>
+<tr><td>Assigned Quick Paste or secret</td><td>User-assigned global hotkey</td></tr>
+<tr><td>Manual, update check or project page</td><td><kbd>F1</kbd>, <kbd>Shift+F1</kbd>, <kbd>Ctrl+F1</kbd></td></tr>
+<tr><td>Diagnostics</td><td><kbd>Alt+F1</kbd></td></tr>
+</tbody></table>
+
+<h2 id="accessibility">Accessibility</h2>
+<p>The interface uses native GTK 4 controls exposed through AT-SPI. A conventional menu bar exposes commands and shortcuts. Tab and Shift+Tab move between controls; Up and Down move one history entry. Every history row is one focus stop. Its accessible text includes relevant state, group, device and list position without duplicating visible content.</p>
+<p>History polling does not reconstruct unchanged rows, so Orca focus and braille position remain stable. Status changes are announced without taking keyboard focus. Tab and Shift+Tab leave multiline editors instead of inserting tab characters.</p>
+<p>Global shortcuts and background clipboard monitoring work normally under X11. Wayland compositors control those capabilities and support varies. Use <strong>Add Clipboard</strong> when a compositor prevents automatic capture.</p>
+
+<h2 id="updates">Updates</h2>
+<p>Choose <strong>Help, Check for Updates</strong> or press <kbd>Shift+F1</kbd>. Preferences can check at startup, hourly or daily. Automatic checks and silent installation are both opt-in.</p>
+<p>Clipman accepts only a Linux GUI archive for the current processor architecture. It verifies the GitHub SHA-256 digest, archive size, HTTPS origin, safe paths, packaged version and required files before installation. Settings, server credentials, custom sounds, file history and encrypted cache are retained.</p>
+
+<h2 id="offline">Offline use</h2>
+<p>After a successful connection, Clipman keeps an encrypted owner-only read cache. Existing text and links remain readable and copyable if the server becomes unavailable. Server-backed edits are disabled until the connection recovers, preventing an unverified offline edit from overwriting newer shared data. Machine-local File History remains available.</p>
+
+<h2 id="files">Installed files</h2>
+<table><thead><tr><th>Location</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>~/.local/share/clipman-linux</code></td><td>Application, backend, manual and factory sounds.</td></tr>
+<tr><td><code>~/.local/bin/clipman-linux</code></td><td>Launcher.</td></tr>
+<tr><td><code>~/.clipman/config.toml</code></td><td>Owner-only server profile shared with Clipman CLI.</td></tr>
+<tr><td><code>~/.clipman/gui-cache.clipdb</code></td><td>Encrypted offline read cache.</td></tr>
+<tr><td><code>~/.clipman/&lt;device&gt;-file-history.clipdb</code></td><td>Encrypted machine-local File History.</td></tr>
+<tr><td><code>~/.clipman/&lt;device&gt;-secrets.clipdb</code></td><td>Encrypted machine-local Secrets.</td></tr>
+<tr><td><code>~/.config/clipman-linux/settings.json</code></td><td>Linux interface preferences.</td></tr>
+<tr><td><code>~/.config/clipman-linux/sounds</code></td><td>Optional sound replacements. Missing sounds fall back to factory versions.</td></tr>
+</tbody></table>
+<p>Run <code>./uninstall.sh</code> from the extracted archive to remove the application. Private configuration, encrypted cache and file history are retained unless you remove them separately.</p>
+
+<h2 id="security">Security</h2>
+<p>Clipman Server stores encrypted database blobs and does not know the history password. Public servers must use HTTPS. Plain HTTP is accepted only for loopback, private-network and VPN addresses. Remembered credentials and local databases are restricted to their Linux user account.</p>
+<p>Treat a <code>.clpconf</code> file as a credential because it contains a server token. Exporting with no history password creates an unencrypted clipboard history file; use that option only when the destination is appropriate.</p>
+
+<h2 id="project">Project and license</h2>
+<p>Clipman is released under the MIT License. See <code>LICENSE.txt</code>. Visit the <a href="https://github.com/OnjLouis/Clipman">Clipman project on GitHub</a> for downloads, source and issue reporting, or visit <a href="https://onj.me">Andre Louis's website</a>.</p>
+</body>
+</html>

@@ -50,6 +50,45 @@ do {
         expect(error as? ClipDatabaseError == .incorrectPassword, "wrong password should report incorrectPassword")
     }
 
+    let migrationDirectory = temporaryURL("migration").deletingLastPathComponent()
+    let migrationTextURL = migrationDirectory.appendingPathComponent("text.clipdb")
+    let migrationFilesURL = migrationDirectory.appendingPathComponent("files.clipdb")
+    let migrationSecretsURL = migrationDirectory.appendingPathComponent("secrets.clipdb")
+    try ClipDatabaseFile.saveAtomic(
+        migrationTextURL,
+        database: ClipDatabase(Entries: [ClipEntry(Text: "preserved text")]),
+        password: "old-password"
+    )
+    try ClipDatabaseFile.saveAtomicCodable(
+        migrationFilesURL,
+        value: FileClipboardDatabase(Events: [FileClipboardEvent(Files: ["/tmp/preserved.txt"])]),
+        password: "old-password"
+    )
+    try ClipDatabaseFile.saveAtomicCodable(
+        migrationSecretsURL,
+        value: SecretDatabase(Entries: [SecretEntry(Name: "Preserved", Value: "secret value")]),
+        password: "old-password"
+    )
+    try LocalDatabasePasswordMigrator.migrate(
+        textHistoryURL: migrationTextURL,
+        fileHistoryURL: migrationFilesURL,
+        secretsURL: migrationSecretsURL,
+        from: "old-password",
+        to: "new-password"
+    )
+    let migratedText = try ClipDatabaseFile.load(migrationTextURL, password: "new-password")
+    let migratedFiles = try ClipDatabaseFile.loadCodable(migrationFilesURL, password: "new-password", defaultValue: FileClipboardDatabase())
+    let migratedSecrets = try ClipDatabaseFile.loadCodable(migrationSecretsURL, password: "new-password", defaultValue: SecretDatabase())
+    expect(migratedText.Entries.first?.Text == "preserved text", "password migration should preserve text history")
+    expect(migratedFiles.Events.first?.Files.first == "/tmp/preserved.txt", "password migration should preserve file history")
+    expect(migratedSecrets.Entries.first?.Value == "secret value", "password migration should preserve secrets")
+    do {
+        _ = try ClipDatabaseFile.load(migrationTextURL, password: "old-password")
+        expect(false, "old password should not open migrated text history")
+    } catch {
+        expect(error as? ClipDatabaseError == .incorrectPassword, "old password should be rejected after migration")
+    }
+
     let unknownURL = temporaryURL("unknown.clipdb")
     let json = """
     {
