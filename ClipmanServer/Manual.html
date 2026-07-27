@@ -240,9 +240,9 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
 
-  <p>On Windows, use the Clipman Server notification-area menu and choose <strong>Check for updates</strong>. On macOS, use the Clipman Server menu-bar item and choose <strong>Check for Updates</strong>. If a newer server ZIP is available, the wrapper downloads the ZIP, closes the wrapper, replaces the platform-specific server app, and starts the updated wrapper again.</p>
+  <p>Windows and macOS check daily for server updates and install them automatically by default. Use <strong>Install updates automatically</strong> in the notification-area or menu-bar menu to turn that behavior off or back on. <strong>Check for updates</strong> remains available for an immediate manual check. If a newer server ZIP is available, the wrapper downloads the ZIP, closes the wrapper, replaces the platform-specific server app, and starts the updated wrapper again.</p>
 
-  <p>Server 2.1.1 separates server releases from Clipman client releases. Install 2.1.1 once from the server download on the releases page; later server-only updates can then be found by the server updater without making Clipman clients think that a client update is available. It also fixes the container entrypoint so Docker writes first-run connection files and then keeps the server process running, resolving <a href="https://github.com/OnjLouis/Clipman/issues/38">issue #38</a>.</p>
+  <p>Server 2.3.0 aligns the packaged server version with Clipman 2.3.0, makes automatic updates the default on Windows, macOS and new Linux installations, and ensures server updaters ignore ordinary Clipman client releases. Server and client releases remain independent after this point.</p>
 
   <p>The Windows and macOS wrappers also support these command-line switches for scripts and diagnostics:</p>
 
@@ -263,9 +263,9 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
   <pre><code>clipmanserver check-update
 clipmanserver update</code></pre>
 
-  <p>The Linux updater downloads the exact versioned server ZIP over HTTPS, requires and verifies its GitHub SHA-256 digest, rejects unsafe archive paths, checks the package manifest, and stages the replacement. It backs up only installed program, launcher, helper, and service files; it never includes settings, databases, logs, backups, certificates, or tokens. After installation it restarts the server and checks the health endpoint. If the updated service does not become healthy, the previous program files are restored and restarted automatically.</p>
+  <p>Every server updater downloads the exact versioned server ZIP over HTTPS and requires its GitHub SHA-256 digest before replacing program files. Linux additionally rejects unsafe archive paths, checks the package manifest, and stages the replacement. It backs up only installed program, launcher, helper, and service files; it never includes settings, databases, logs, backups, certificates, or tokens. After installation it restarts the server and checks the health endpoint. If the updated service does not become healthy, the previous program files are restored and restarted automatically.</p>
 
-  <p>Automatic daily Linux updates are optional:</p>
+  <p>New Linux installations enable automatic daily updates when a systemd user service is available. Use these commands to inspect, enable or disable them:</p>
 
   <pre><code>clipmanserver enable-auto-updates
 clipmanserver update-status

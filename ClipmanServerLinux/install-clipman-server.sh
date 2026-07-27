@@ -303,4 +303,13 @@ EOF
   echo
   echo "Or use:"
   echo "  clipmanserver start"
+  if systemctl --user daemon-reload >/dev/null 2>&1 && systemctl --user enable --now clipman-server-update.timer >/dev/null 2>&1; then
+    echo
+    echo "Automatic daily server updates are enabled."
+    echo "Disable them with: clipmanserver disable-auto-updates"
+  else
+    echo
+    echo "Automatic updates could not be enabled in this session."
+    echo "Enable them later with: clipmanserver enable-auto-updates"
+  fi
 fi

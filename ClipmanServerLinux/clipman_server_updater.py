@@ -166,7 +166,11 @@ def run(command: Iterable[str], *, env: Optional[Dict[str, str]] = None, check: 
 
 def health_url(config: Dict[str, Any]) -> str:
     secure = bool(str(config.get("CertFile", "")).strip() and str(config.get("KeyFile", "")).strip())
-    host = str(config.get("AdvertiseHost") or config.get("Host") or "127.0.0.1").strip()
+    # Direct TLS must use the advertised name so certificate validation is meaningful.
+    # Plain HTTP may sit behind a reverse proxy whose public name does not expose the
+    # private backend port, so verify that service through its local bind address.
+    host_value = config.get("AdvertiseHost") if secure else config.get("Host")
+    host = str(host_value or "127.0.0.1").strip()
     if host in {"0.0.0.0", "::"}:
         host = "127.0.0.1"
     if ":" in host and not host.startswith("["):

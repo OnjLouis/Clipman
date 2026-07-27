@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -47,6 +48,8 @@ namespace ClipmanServerWrapper
     internal sealed class ServerTrayContext : ApplicationContext
     {
         private const string StartupValueName = "Clipman Server";
+        private const string PreferencesRegistryPath = @"Software\Clipman Server";
+        private const string AutomaticUpdatesValueName = "AutomaticUpdates";
         private const int BindErrorExitCode = 20;
         private readonly string appDirectory;
         private readonly string scriptPath;
@@ -59,6 +62,7 @@ namespace ClipmanServerWrapper
         private Process serverProcess;
         private Process certificateShareProcess;
         private System.Windows.Forms.Timer restartTimer;
+        private System.Windows.Forms.Timer automaticUpdateTimer;
         private int unexpectedRestartCount;
         private DateTime serverStartedUtc;
         private bool stoppingServer;
@@ -90,6 +94,7 @@ namespace ClipmanServerWrapper
             };
 
             StartServer();
+            ScheduleAutomaticUpdateCheck(TimeSpan.FromMinutes(1));
         }
 
         private ContextMenuStrip BuildMenu()
@@ -106,6 +111,9 @@ namespace ClipmanServerWrapper
                 menu.Items.Add("Open settings folder", null, delegate { OpenFolder(settingsDirectory); });
                 menu.Items.Add("Open logs folder", null, delegate { OpenFolder(logDirectory); });
                 menu.Items.Add("Check for updates", null, delegate { ServerUpdateService.CheckForUpdates(null, false, ExitThread); });
+                var automaticUpdates = new ToolStripMenuItem("Install updates automatically") { Checked = AreAutomaticUpdatesEnabled(), CheckOnClick = false };
+                automaticUpdates.Click += delegate { SetAutomaticUpdatesEnabled(!AreAutomaticUpdatesEnabled()); };
+                menu.Items.Add(automaticUpdates);
                 var controlText = string.Equals(StatusText(), "running", StringComparison.OrdinalIgnoreCase) ? "Restart server" : "Start server";
                 menu.Items.Add(controlText, null, delegate { RestartServer(); });
                 var startup = new ToolStripMenuItem("Run at Windows startup") { Checked = IsStartupEnabled(), CheckOnClick = false };
@@ -511,6 +519,76 @@ namespace ClipmanServerWrapper
             }
         }
 
+        private bool AreAutomaticUpdatesEnabled()
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(PreferencesRegistryPath, false))
+                {
+                    var value = key == null ? null : key.GetValue(AutomaticUpdatesValueName);
+                    return value == null || Convert.ToInt32(value) != 0;
+                }
+            }
+            catch { return true; }
+        }
+
+        private void SetAutomaticUpdatesEnabled(bool enabled)
+        {
+            using (var key = Registry.CurrentUser.CreateSubKey(PreferencesRegistryPath))
+            {
+                key.SetValue(AutomaticUpdatesValueName, enabled ? 1 : 0, RegistryValueKind.DWord);
+            }
+
+            if (enabled)
+            {
+                ScheduleAutomaticUpdateCheck(TimeSpan.FromMinutes(1));
+                tray.ShowBalloonTip(2000, "Clipman Server", "Automatic server updates enabled.", ToolTipIcon.Info);
+            }
+            else
+            {
+                StopAutomaticUpdateTimer();
+                tray.ShowBalloonTip(2000, "Clipman Server", "Automatic server updates disabled.", ToolTipIcon.Info);
+            }
+        }
+
+        private void ScheduleAutomaticUpdateCheck(TimeSpan delay)
+        {
+            StopAutomaticUpdateTimer();
+            if (!AreAutomaticUpdatesEnabled())
+            {
+                return;
+            }
+
+            automaticUpdateTimer = new System.Windows.Forms.Timer
+            {
+                Interval = (int)Math.Min(int.MaxValue, Math.Max(1000, delay.TotalMilliseconds))
+            };
+            automaticUpdateTimer.Tick += delegate
+            {
+                StopAutomaticUpdateTimer();
+                ScheduleAutomaticUpdateCheck(TimeSpan.FromDays(1));
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    ServerUpdateService.CheckForUpdates(null, true, delegate
+                    {
+                        uiContext.Post(delegate { ExitThread(); }, null);
+                    });
+                });
+            };
+            automaticUpdateTimer.Start();
+        }
+
+        private void StopAutomaticUpdateTimer()
+        {
+            if (automaticUpdateTimer == null)
+            {
+                return;
+            }
+            automaticUpdateTimer.Stop();
+            automaticUpdateTimer.Dispose();
+            automaticUpdateTimer = null;
+        }
+
         private static PythonLauncher FindPythonLauncher()
         {
             var candidates = new[]
@@ -662,6 +740,7 @@ namespace ClipmanServerWrapper
                 restartTimer.Stop();
                 restartTimer.Dispose();
             }
+            StopAutomaticUpdateTimer();
             if (certificateShareProcess != null)
             {
                 try { if (!certificateShareProcess.HasExited) certificateShareProcess.Kill(); } catch { }
@@ -848,6 +927,11 @@ namespace ClipmanServerWrapper
                     if (!installSilently) MessageBox.Show(owner, "Clipman Server " + remote + " is available, but no ClipmanServer ZIP asset was found.", "Clipman Server updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
+                if (!IsValidSha256Digest(asset.Digest))
+                {
+                    if (!installSilently) MessageBox.Show(owner, "Clipman Server " + remote + " is available, but its ZIP does not have a valid GitHub SHA-256 digest.", "Clipman Server updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
 
                 if (!installSilently)
                 {
@@ -866,7 +950,7 @@ namespace ClipmanServerWrapper
                     }
                 }
 
-                StartUpdate(asset.BrowserDownloadUrl, exitApp);
+                StartUpdate(asset.BrowserDownloadUrl, asset.Digest, exitApp);
             }
             catch (Exception ex)
             {
@@ -877,7 +961,7 @@ namespace ClipmanServerWrapper
             }
         }
 
-        private static void StartUpdate(string zipUrl, Action exitApp)
+        private static void StartUpdate(string zipUrl, string expectedDigest, Action exitApp)
         {
             var exePath = Application.ExecutablePath;
             var tempRoot = Path.Combine(Path.GetTempPath(), "ClipmanServerUpdater-" + Guid.NewGuid().ToString("N"));
@@ -891,6 +975,7 @@ namespace ClipmanServerWrapper
                 Arguments =
                     "--apply-update" +
                     " --update-url " + Quote(zipUrl) +
+                    " --update-digest " + Quote(expectedDigest) +
                     " --update-exe " + Quote(exePath) +
                     " --update-wait-pid " + Process.GetCurrentProcess().Id,
                 WorkingDirectory = tempRoot,
@@ -911,15 +996,17 @@ namespace ClipmanServerWrapper
         private static void ApplyUpdateFromCommandLine(string[] args)
         {
             string zipUrl;
+            string expectedDigest;
             string exePath;
             string pidText;
             TryGetOptionValue(args, "--update-url", out zipUrl);
+            TryGetOptionValue(args, "--update-digest", out expectedDigest);
             TryGetOptionValue(args, "--update-exe", out exePath);
             TryGetOptionValue(args, "--update-wait-pid", out pidText);
 
             try
             {
-                if (string.IsNullOrWhiteSpace(zipUrl) || string.IsNullOrWhiteSpace(exePath))
+                if (string.IsNullOrWhiteSpace(zipUrl) || string.IsNullOrWhiteSpace(exePath) || !IsValidSha256Digest(expectedDigest))
                 {
                     throw new InvalidOperationException("The updater was not given enough information to install the update.");
                 }
@@ -935,6 +1022,7 @@ namespace ClipmanServerWrapper
                 var stage = Path.Combine(root, "stage");
                 Directory.CreateDirectory(stage);
                 DownloadFile(zipUrl, zip);
+                VerifySha256Digest(zip, expectedDigest);
                 ZipFile.ExtractToDirectory(zip, stage);
                 var sourceExe = Directory.GetFiles(stage, "Clipman Server.exe", SearchOption.AllDirectories)
                     .FirstOrDefault(path => path.IndexOf(Path.DirectorySeparatorChar + "Windows" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -995,7 +1083,8 @@ namespace ClipmanServerWrapper
                     release.Assets.Add(new GitHubAsset
                     {
                         Name = GetString(asset, "name"),
-                        BrowserDownloadUrl = GetString(asset, "browser_download_url")
+                        BrowserDownloadUrl = GetString(asset, "browser_download_url"),
+                        Digest = GetString(asset, "digest")
                     });
                 }
             }
@@ -1026,6 +1115,34 @@ namespace ClipmanServerWrapper
             using (var client = GitHubClient())
             {
                 client.DownloadFile(url, destination);
+            }
+        }
+
+        private static bool IsValidSha256Digest(string digest)
+        {
+            var value = (digest ?? string.Empty).Trim();
+            if (!value.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) || value.Length != 71)
+            {
+                return false;
+            }
+            return value.Substring(7).All(Uri.IsHexDigit);
+        }
+
+        private static void VerifySha256Digest(string path, string expectedDigest)
+        {
+            if (!IsValidSha256Digest(expectedDigest))
+            {
+                throw new InvalidDataException("GitHub did not provide a valid SHA-256 digest for the server update.");
+            }
+            string actual;
+            using (var stream = File.OpenRead(path))
+            using (var sha256 = SHA256.Create())
+            {
+                actual = "sha256:" + BitConverter.ToString(sha256.ComputeHash(stream)).Replace("-", string.Empty).ToLowerInvariant();
+            }
+            if (!string.Equals(actual, expectedDigest.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("The downloaded server update failed its SHA-256 check.");
             }
         }
 
@@ -1149,6 +1266,7 @@ namespace ClipmanServerWrapper
         {
             public string Name { get; set; }
             public string BrowserDownloadUrl { get; set; }
+            public string Digest { get; set; }
         }
     }
 }

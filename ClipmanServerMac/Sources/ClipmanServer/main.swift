@@ -20,6 +20,7 @@ private final class CertificateShareOutputState: @unchecked Sendable {
 }
 
 final class ServerController: NSObject, NSApplicationDelegate {
+    private static let automaticUpdatesKey = "InstallUpdatesAutomatically"
     private let bindErrorExitCode: Int32 = 20
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var serverProcess: Process?
@@ -29,6 +30,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
     private var serverStartedAt: Date?
     private var quitting = false
     private var statusOverride: String?
+    private var automaticUpdateTimer: Timer?
 
     private var appBundle: Bundle { Bundle.main }
     private var resourceURL: URL { appBundle.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath) }
@@ -50,10 +52,12 @@ final class ServerController: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
         startServer()
+        scheduleAutomaticUpdateCheck(after: 60)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         quitting = true
+        automaticUpdateTimer?.invalidate()
         stopServer()
     }
 
@@ -74,6 +78,9 @@ final class ServerController: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Open Settings Folder", action: #selector(openSettingsFolder), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Logs Folder", action: #selector(openLogsFolder), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: ""))
+        let automaticUpdates = NSMenuItem(title: "Install Updates Automatically", action: #selector(toggleAutomaticUpdates), keyEquivalent: "")
+        automaticUpdates.state = automaticUpdatesEnabled ? .on : .off
+        menu.addItem(automaticUpdates)
         let serverControlTitle = statusText() == "running" ? "Restart Server" : "Start Server"
         menu.addItem(NSMenuItem(title: serverControlTitle, action: #selector(restartServer), keyEquivalent: ""))
         let loginItem = NSMenuItem(title: "Run at Login", action: #selector(toggleRunAtLogin), keyEquivalent: "")
@@ -398,6 +405,33 @@ final class ServerController: NSObject, NSApplicationDelegate {
         ServerUpdateService.checkForUpdates(silentInstall: false)
     }
 
+    @objc private func toggleAutomaticUpdates() {
+        let enabled = !automaticUpdatesEnabled
+        UserDefaults.standard.set(enabled, forKey: Self.automaticUpdatesKey)
+        automaticUpdateTimer?.invalidate()
+        automaticUpdateTimer = nil
+        if enabled {
+            scheduleAutomaticUpdateCheck(after: 60)
+        }
+        refreshMenu()
+        showNotification(enabled ? "Automatic server updates enabled." : "Automatic server updates disabled.")
+    }
+
+    private var automaticUpdatesEnabled: Bool {
+        guard UserDefaults.standard.object(forKey: Self.automaticUpdatesKey) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: Self.automaticUpdatesKey)
+    }
+
+    private func scheduleAutomaticUpdateCheck(after delay: TimeInterval) {
+        automaticUpdateTimer?.invalidate()
+        guard automaticUpdatesEnabled else { return }
+        automaticUpdateTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self, !self.quitting, self.automaticUpdatesEnabled else { return }
+            self.scheduleAutomaticUpdateCheck(after: 24 * 60 * 60)
+            ServerUpdateService.checkForUpdates(silentInstall: true)
+        }
+    }
+
     @objc private func quit() {
         if certificateShareProcess?.isRunning == true {
             certificateShareProcess?.terminate()
@@ -506,11 +540,11 @@ enum ServerUpdateService {
             return true
         }
         if args.contains("--check-updates") {
-            checkForUpdates(silentInstall: false)
+            checkForUpdatesSynchronously(silentInstall: false)
             return true
         }
         if args.contains("--install-update") {
-            checkForUpdates(silentInstall: args.contains("--silent") || args.contains("--yes"))
+            checkForUpdatesSynchronously(silentInstall: args.contains("--silent") || args.contains("--yes"))
             return true
         }
         if args.contains("--apply-update") {
@@ -521,6 +555,40 @@ enum ServerUpdateService {
     }
 
     static func checkForUpdates(silentInstall: Bool) {
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let candidate = try latestServerAsset()
+                DispatchQueue.main.async {
+                    guard let candidate else {
+                        if !silentInstall { showAlert("Could not find a Clipman Server release asset.") }
+                        return
+                    }
+                    guard compareVersions(candidate.version, currentVersion()) == .orderedDescending else {
+                        if !silentInstall { showAlert("Clipman Server is up to date. Current version: \(currentVersion()).") }
+                        return
+                    }
+
+                    if !silentInstall {
+                        let alert = NSAlert()
+                        alert.messageText = "Clipman Server \(candidate.version) is available."
+                        alert.informativeText = "Clipman Server will close, download the server ZIP, replace this Mac server app, and restart. Server settings and databases are kept in Application Support."
+                        alert.addButton(withTitle: "Update")
+                        alert.addButton(withTitle: "Later")
+                        guard alert.runModal() == .alertFirstButtonReturn else { return }
+                    }
+                    startUpdate(downloadURL: candidate.downloadURL, expectedDigest: candidate.digest)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    if !silentInstall {
+                        showAlert("Could not check for Clipman Server updates:\n\n\(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
+    private static func checkForUpdatesSynchronously(silentInstall: Bool) {
         do {
             guard let candidate = try latestServerAsset() else {
                 if !silentInstall { showAlert("Could not find a Clipman Server release asset.") }
@@ -539,7 +607,7 @@ enum ServerUpdateService {
                 alert.addButton(withTitle: "Later")
                 guard alert.runModal() == .alertFirstButtonReturn else { return }
             }
-            startUpdate(downloadURL: candidate.downloadURL)
+            startUpdate(downloadURL: candidate.downloadURL, expectedDigest: candidate.digest)
         } catch {
             if !silentInstall {
                 showAlert("Could not check for Clipman Server updates:\n\n\(error.localizedDescription)")
@@ -547,7 +615,7 @@ enum ServerUpdateService {
         }
     }
 
-    private static func startUpdate(downloadURL: URL) {
+    private static func startUpdate(downloadURL: URL, expectedDigest: String) {
         let appPath = Bundle.main.bundlePath
         let executablePath = Bundle.main.executablePath ?? ""
         let temp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ClipmanServerUpdater-\(UUID().uuidString)", isDirectory: true)
@@ -561,6 +629,7 @@ enum ServerUpdateService {
             process.arguments = [
                 "--apply-update",
                 "--update-url", downloadURL.absoluteString,
+                "--update-digest", expectedDigest,
                 "--update-app", appPath,
                 "--update-wait-pid", String(ProcessInfo.processInfo.processIdentifier)
             ]
@@ -575,6 +644,8 @@ enum ServerUpdateService {
     private static func applyUpdateFromCommandLine(_ args: [String]) {
         guard let zipURLText = value(after: "--update-url", in: args),
               let zipURL = URL(string: zipURLText),
+              let expectedDigest = value(after: "--update-digest", in: args),
+              isValidSHA256Digest(expectedDigest),
               let appPath = value(after: "--update-app", in: args) else {
             showAlert("The updater was not given enough information to install the update.")
             return
@@ -590,6 +661,7 @@ enum ServerUpdateService {
             try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
             let data = try Data(contentsOf: zipURL)
             try data.write(to: zip)
+            try verifySHA256Digest(of: zip, expected: expectedDigest)
             try run("/usr/bin/unzip", ["-q", zip.path, "-d", stage.path])
             guard let sourceApp = findMacServerApp(in: stage) else {
                 throw NSError(domain: "ClipmanServerUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: "The server update ZIP did not contain macOS/Clipman Server.app."])
@@ -603,15 +675,13 @@ enum ServerUpdateService {
         }
     }
 
-    private static func latestServerAsset() throws -> (version: String, downloadURL: URL)? {
+    private static func latestServerAsset() throws -> (version: String, downloadURL: URL, digest: String)? {
         let data = try Data(contentsOf: releasesURL)
         guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
-        return rows.compactMap { row -> (version: String, downloadURL: URL)? in
+        return rows.compactMap { row -> (version: String, downloadURL: URL, digest: String)? in
             guard (row["draft"] as? Bool) != true, (row["prerelease"] as? Bool) != true else { return nil }
             let tag = ((row["tag_name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let prefix = "server-v"
-            guard tag.lowercased().hasPrefix(prefix) else { return nil }
-            let version = String(tag.dropFirst(prefix.count))
+            guard let version = serverVersion(from: tag) else { return nil }
             let expectedName = "ClipmanServer-\(version).zip"
             guard !version.isEmpty,
                   let assets = row["assets"] as? [[String: Any]],
@@ -620,9 +690,45 @@ enum ServerUpdateService {
                       return name.caseInsensitiveCompare(expectedName) == .orderedSame
                   }),
                   let urlText = asset["browser_download_url"] as? String,
-                  let url = URL(string: urlText) else { return nil }
-            return (version, url)
+                  let url = URL(string: urlText),
+                  let digest = asset["digest"] as? String,
+                  isValidSHA256Digest(digest) else { return nil }
+            return (version, url, digest)
         }.sorted { compareVersions($0.version, $1.version) == .orderedDescending }.first
+    }
+
+    private static func serverVersion(from tag: String) -> String? {
+        let prefix = "server-v"
+        guard tag.lowercased().hasPrefix(prefix) else { return nil }
+        let version = String(tag.dropFirst(prefix.count))
+        let components = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard (2...4).contains(components.count), components.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) else {
+            return nil
+        }
+        return version
+    }
+
+    private static func isValidSHA256Digest(_ digest: String) -> Bool {
+        let value = digest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard value.hasPrefix("sha256:"), value.count == 71 else { return false }
+        return value.dropFirst(7).allSatisfy { $0.isHexDigit }
+    }
+
+    private static func verifySHA256Digest(of file: URL, expected: String) throws {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/shasum")
+        process.arguments = ["-a", "256", file.path]
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let hash = output.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+        guard process.terminationStatus == 0,
+              expected.caseInsensitiveCompare("sha256:\(hash)") == .orderedSame else {
+            throw NSError(domain: "ClipmanServerUpdate", code: 2, userInfo: [NSLocalizedDescriptionKey: "The downloaded server update failed its SHA-256 check."])
+        }
     }
 
     private static func findMacServerApp(in folder: URL) -> URL? {

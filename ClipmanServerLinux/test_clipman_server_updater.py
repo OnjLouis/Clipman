@@ -32,13 +32,17 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
                 "assets": [{"name": "ClipmanServer-9.0.0.zip", "browser_download_url": "https://example.test/client.zip"}],
             },
             {
+                "tag_name": "server-v2.1.1",
+                "assets": [{"name": "ClipmanServer-2.1.1.zip", "browser_download_url": "https://example.test/server.zip"}],
+            },
+            {
                 "tag_name": "server-v2.2.0",
                 "prerelease": True,
                 "assets": [{"name": "ClipmanServer-2.2.0.zip", "browser_download_url": "https://example.test/preview.zip"}],
             },
         ]
 
-        self.assertIsNone(updater.find_update(releases, "2.1.0"))
+        self.assertIsNone(updater.find_update(releases, "2.1.1"))
 
     def test_unsafe_zip_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -66,6 +70,16 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             "KeyFile": "/tls/server.key",
         }
         self.assertEqual("https://server.example.test:61234/api/v1/health", updater.health_url(settings))
+
+    def test_health_url_uses_local_http_backend_behind_reverse_proxy(self):
+        settings = {
+            "Host": "127.0.0.1",
+            "AdvertiseHost": "clipboard.example.test",
+            "Port": 25767,
+            "CertFile": "",
+            "KeyFile": "",
+        }
+        self.assertEqual("http://127.0.0.1:25767/api/v1/health", updater.health_url(settings))
 
     def test_failed_health_check_restores_previous_program(self):
         with tempfile.TemporaryDirectory() as temporary:

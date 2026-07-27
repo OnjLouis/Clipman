@@ -70,6 +70,20 @@ function Build-WindowsServerWrapper([string]$outputPath) {
     if ($LASTEXITCODE -ne 0) {
         throw "Windows Clipman Server wrapper build failed with exit code $LASTEXITCODE"
     }
+
+    # Verify the packaged executable itself rejects ordinary Clipman client tags.
+    $assembly = [Reflection.Assembly]::LoadFile($outputPath)
+    $updateType = $assembly.GetType('ClipmanServerWrapper.ServerUpdateService', $true)
+    $versionText = $updateType.GetMethod('VersionText', [Reflection.BindingFlags]'NonPublic,Static')
+    if ($null -eq $versionText) {
+        throw 'Windows Clipman Server updater tag validator was not found in the built executable.'
+    }
+    if ([string]$versionText.Invoke($null, @("v$version")) -ne '') {
+        throw 'Windows Clipman Server updater incorrectly accepted a Clipman client release tag.'
+    }
+    if ([string]$versionText.Invoke($null, @("server-v$version")) -ne $version) {
+        throw 'Windows Clipman Server updater rejected its versioned server release tag.'
+    }
 }
 
 $version = Get-ClipmanVersion
