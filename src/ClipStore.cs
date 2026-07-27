@@ -274,7 +274,7 @@ namespace Clipman
             return AddText(text, duplicateMode, maxEntries, maxDays, string.Empty);
         }
 
-        public ClipEntry AddText(string text, string duplicateMode, int maxEntries, int maxDays, string group)
+        public ClipEntry AddText(string text, string duplicateMode, int maxEntries, int maxDays, string group, RichTextPayload richText = null)
         {
             if (string.IsNullOrEmpty(text))
             {
@@ -293,21 +293,31 @@ namespace Clipman
                 {
                     existing.LastUsedUnixMs = TimeUtil.NowUnixMs();
                     existing.SourceMachine = CurrentMachineName();
+                    var normalizedRichText = RichTextData.Normalize(richText);
+                    if (normalizedRichText != null)
+                    {
+                        existing.RichText = normalizedRichText;
+                        existing.RichTextUpdatedUnixMs = existing.LastUsedUnixMs;
+                    }
                     PruneLocked(maxEntries, maxDays);
                     SaveLocked();
                     OnChanged();
                     return Clone(existing);
                 }
 
+                var now = TimeUtil.NowUnixMs();
+                var newEntryRichText = RichTextData.Normalize(richText);
                 var entry = new ClipEntry
                 {
                     Id = Guid.NewGuid().ToString("N"),
                     Text = text,
                     Group = (group ?? string.Empty).Trim(),
                     SourceMachine = CurrentMachineName(),
-                    CreatedUnixMs = TimeUtil.NowUnixMs(),
-                    LastUsedUnixMs = TimeUtil.NowUnixMs(),
-                    ManualOrder = NextManualOrderLocked()
+                    CreatedUnixMs = now,
+                    LastUsedUnixMs = now,
+                    ManualOrder = NextManualOrderLocked(),
+                    RichText = newEntryRichText,
+                    RichTextUpdatedUnixMs = newEntryRichText == null ? 0 : now
                 };
                 database.Entries.Add(entry);
                 PruneLocked(maxEntries, maxDays);
@@ -352,7 +362,9 @@ namespace Clipman
                         LastUsedUnixMs = stamp,
                         Pinned = false,
                         IsTemplate = entry.IsTemplate,
-                        ManualOrder = NextManualOrderLocked()
+                        ManualOrder = NextManualOrderLocked(),
+                        RichText = RichTextData.Clone(entry.RichText),
+                        RichTextUpdatedUnixMs = entry.RichTextUpdatedUnixMs
                     });
                 }
 
@@ -427,7 +439,9 @@ namespace Clipman
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? TimeUtil.NowUnixMs() : entry.LastUsedUnixMs,
                         Pinned = entry.Pinned,
                         IsTemplate = entry.IsTemplate,
-                        ManualOrder = entry.ManualOrder
+                        ManualOrder = entry.ManualOrder,
+                        RichText = RichTextData.Clone(entry.RichText),
+                        RichTextUpdatedUnixMs = entry.RichTextUpdatedUnixMs
                     });
                 }
                 NormalizeManualOrderLocked();
@@ -540,7 +554,13 @@ namespace Clipman
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
                 entry.Name = (name ?? string.Empty).Trim();
-                entry.Text = text ?? string.Empty;
+                var nextText = text ?? string.Empty;
+                if (!string.Equals(entry.Text ?? string.Empty, nextText, StringComparison.Ordinal))
+                {
+                    entry.RichText = null;
+                    entry.RichTextUpdatedUnixMs = TimeUtil.NowUnixMs();
+                }
+                entry.Text = nextText;
                 entry.LastUsedUnixMs = TimeUtil.NowUnixMs();
                 SaveLocked();
                 OnChanged();
@@ -595,8 +615,11 @@ namespace Clipman
             {
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
-                entry.Text = text ?? string.Empty;
+                var nextText = text ?? string.Empty;
+                entry.Text = nextText;
                 entry.LastUsedUnixMs = TimeUtil.NowUnixMs();
+                entry.RichText = null;
+                entry.RichTextUpdatedUnixMs = entry.LastUsedUnixMs;
                 SaveLocked();
                 OnChanged();
             }
@@ -710,7 +733,9 @@ namespace Clipman
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
                         Pinned = entry.Pinned,
                         IsTemplate = entry.IsTemplate,
-                        ManualOrder = order++
+                        ManualOrder = order++,
+                        RichText = RichTextData.Clone(entry.RichText),
+                        RichTextUpdatedUnixMs = entry.RichTextUpdatedUnixMs
                     };
                     database.Entries.Add(newEntry);
                     inserted.Add(Clone(newEntry));
@@ -764,7 +789,9 @@ namespace Clipman
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
                         Pinned = false,
                         IsTemplate = entry.IsTemplate,
-                        ManualOrder = order++
+                        ManualOrder = order++,
+                        RichText = RichTextData.Clone(entry.RichText),
+                        RichTextUpdatedUnixMs = entry.RichTextUpdatedUnixMs
                     };
                     database.Entries.Add(newEntry);
                     inserted.Add(Clone(newEntry));
@@ -1232,6 +1259,12 @@ namespace Clipman
                 existing.Pinned = true;
                 changed = true;
             }
+            if (incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs)
+            {
+                existing.RichText = RichTextData.Clone(incoming.RichText);
+                existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs;
+                changed = true;
+            }
             if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder))
             {
                 if (existing.ManualOrder != incoming.ManualOrder)
@@ -1335,7 +1368,9 @@ namespace Clipman
                 LastUsedUnixMs = entry.LastUsedUnixMs,
                 Pinned = entry.Pinned,
                 IsTemplate = entry.IsTemplate,
-                ManualOrder = entry.ManualOrder
+                ManualOrder = entry.ManualOrder,
+                RichText = RichTextData.Clone(entry.RichText),
+                RichTextUpdatedUnixMs = entry.RichTextUpdatedUnixMs
             };
         }
 

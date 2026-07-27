@@ -90,13 +90,15 @@
 
   <p>Local mode stores <code>clipman-history.clipdb</code> in Android's private app storage. Server mode keeps that local copy as an offline cache and merges it with the server. If the connection is unavailable, changes remain local and retry while Clipman is open. Switching back to Server mode merges both histories, including deletion records, instead of replacing either side.</p>
 
+  <p>Enable <strong>Preserve copied formatting and show Rich Text history</strong> in Settings before using Paste when you want Clipman to retain HTML supplied by browsers, messaging apps, email clients, and editors. Formatted entries appear in a separate Rich Text section and are copied back with HTML plus the normal plain-text fallback. Android preserves RTF received from Windows, Mac, or iOS, but Android's standard text clipboard does not publish RTF, so RTF-only entries copy as plain text on Android.</p>
+
   <p>Your server address, token, and history password remain saved when you switch to Local mode. The token control is disabled until Server mode is selected again. Once configured, the server connection section is collapsed in Settings; use <strong>Show server connection</strong> to open it.</p>
 
   <h2 id="main-screen">Main Screen</h2>
   <p>The main toolbar includes:</p>
   <ul>
-    <li><strong>Text</strong> or <strong>Links</strong>: switches between ordinary text history and link history.</li>
-    <li><strong>Paste</strong>: adds the current Android clipboard text to Clipman history.</li>
+    <li><strong>Switch to Text</strong>, <strong>Switch to Rich Text</strong>, or <strong>Switch to Links</strong>: moves to the next enabled history section. Rich Text appears only when formatting preservation is enabled.</li>
+    <li><strong>Paste</strong>: adds the current Android clipboard text and available HTML formatting to Clipman history when Rich Text history is enabled.</li>
     <li><strong>Group</strong>: filters entries by group.</li>
     <li><strong>Settings</strong>: opens the full-screen Settings screen.</li>
     <li><strong>Top</strong>: returns to the beginning of the current history list.</li>
@@ -123,6 +125,7 @@
     <li><strong>History storage</strong>: switches between private Local history and Clipman Server. Switching modes keeps the other mode's settings and merges local changes when Server mode resumes.</li>
     <li><strong>Copy remote additions to Android clipboard</strong>: when another device adds new text to the shared history, Clipman can place that new text on the Android clipboard while the app is open.</li>
     <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
+    <li><strong>Preserve copied formatting and show Rich Text history</strong>: captures and restores Android HTML clipboard formatting and adds Rich Text to the history-section switcher. This is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
     <li><strong>Use haptic feedback</strong>: vibrates for supported feedback events.</li>
     <li><strong>Require biometric or device authentication</strong>: when enabled, locks Clipman whenever it leaves the foreground and requires Android authentication when you return. This is off by default.</li>

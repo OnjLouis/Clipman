@@ -6,7 +6,7 @@ namespace Clipman
 {
     internal sealed class TextViewerForm : Form
     {
-        private readonly TextBox textBox;
+        private readonly TextBoxBase textBox;
 
         public TextViewerForm(string text)
             : this("Clipman Entry Text", text, "Clipboard entry text", "Read-only clipboard entry text.", false, null)
@@ -19,6 +19,11 @@ namespace Clipman
         }
 
         public TextViewerForm(string title, string text, string accessibleName, string accessibleDescription, bool showCopyButton, IReadOnlyList<KeyValuePair<string, string>> details)
+            : this(title, text, accessibleName, accessibleDescription, showCopyButton, details, null)
+        {
+        }
+
+        public TextViewerForm(string title, string text, string accessibleName, string accessibleDescription, bool showCopyButton, IReadOnlyList<KeyValuePair<string, string>> details, RichTextPayload richText)
         {
             Text = title;
             StartPosition = FormStartPosition.CenterParent;
@@ -26,17 +31,43 @@ namespace Clipman
             Height = 600;
             KeyPreview = true;
 
-            textBox = new TextBox
+            var normalizedRichText = RichTextData.Normalize(richText);
+            if (normalizedRichText != null && !string.IsNullOrEmpty(normalizedRichText.RtfBase64))
             {
-                Dock = DockStyle.Fill,
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Both,
-                WordWrap = false,
-                Text = text ?? string.Empty,
-                AccessibleName = accessibleName,
-                AccessibleDescription = accessibleDescription
-            };
+                var richViewer = new RichTextBox
+                {
+                    Dock = DockStyle.Fill,
+                    ReadOnly = true,
+                    ScrollBars = RichTextBoxScrollBars.Both,
+                    WordWrap = false,
+                    DetectUrls = true,
+                    AccessibleName = accessibleName,
+                    AccessibleDescription = accessibleDescription
+                };
+                try
+                {
+                    richViewer.Rtf = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(normalizedRichText.RtfBase64));
+                }
+                catch
+                {
+                    richViewer.Text = text ?? string.Empty;
+                }
+                textBox = richViewer;
+            }
+            else
+            {
+                textBox = new TextBox
+                {
+                    Dock = DockStyle.Fill,
+                    Multiline = true,
+                    ReadOnly = true,
+                    ScrollBars = ScrollBars.Both,
+                    WordWrap = false,
+                    Text = text ?? string.Empty,
+                    AccessibleName = accessibleName,
+                    AccessibleDescription = accessibleDescription
+                };
+            }
             TextBoundaryNavigator.Attach(textBox);
 
             var content = new TableLayoutPanel

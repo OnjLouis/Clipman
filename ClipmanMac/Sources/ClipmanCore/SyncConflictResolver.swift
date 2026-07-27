@@ -203,6 +203,10 @@ public enum SyncConflictResolver {
             existing.SourceMachine = incoming.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         existing.Pinned = existing.Pinned || incoming.Pinned
+        if incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs {
+            existing.RichText = incoming.RichText
+            existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs
+        }
         if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
             existing.ManualOrder = incoming.ManualOrder
         }

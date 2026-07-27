@@ -35,6 +35,7 @@ namespace Clipman
         private readonly TabControl tabs;
         private readonly TabPage textTab;
         private readonly TabPage linksTab;
+        private readonly TabPage richTextTab;
         private readonly TabPage fileTab;
         private readonly ListView list;
         private readonly ListView fileEventsList;
@@ -67,6 +68,7 @@ namespace Clipman
         private DateTime lastFileTypeSearchUtc = DateTime.MinValue;
         private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
+        private bool listPositionSaveFailureLogged;
 
         public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
@@ -107,6 +109,7 @@ namespace Clipman
             };
             textTab = new TabPage("Text history");
             linksTab = new TabPage("Links history");
+            richTextTab = new TabPage("Rich text history");
             fileTab = new TabPage("File history");
 
             filterPanel = new FlowLayoutPanel
@@ -394,7 +397,7 @@ namespace Clipman
         {
             var selectedTab = CurrentHistoryTab();
             RebuildHistoryTabs();
-            SelectHistoryTab(HistoryTabs.Normalize(selectedTab, settings.LinksHistoryEnabled), false);
+            SelectHistoryTab(HistoryTabs.Normalize(selectedTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled), false);
             Reload();
         }
 
@@ -406,6 +409,8 @@ namespace Clipman
         private List<ClipEntry> TextEntriesForActiveTab(List<ClipEntry> source)
         {
             if (source == null) return new List<ClipEntry>();
+            if (IsRichTextHistoryTabActive()) return source.Where(e => e != null && e.RichText != null).ToList();
+            if (settings.RichTextHistoryEnabled) source = source.Where(e => e == null || e.RichText == null).ToList();
             if (!settings.LinksHistoryEnabled) return source;
             var showingLinks = IsLinksHistoryTabActive();
             return source.Where(e => LinkClassifier.IsLinkOnlyText(e == null ? null : e.Text) == showingLinks).ToList();
@@ -413,6 +418,7 @@ namespace Clipman
 
         private string TextHistoryStatusSuffix()
         {
+            if (IsRichTextHistoryTabActive()) return " rich text entries.";
             return IsLinksHistoryTabActive() ? " link entries." : " clipboard entries.";
         }
 
@@ -510,9 +516,12 @@ namespace Clipman
             sortMachineMenuItem = new ToolStripMenuItem("&Device", null, (s, e) => SetSortMode("Machine"));
             sortManualMenuItem = new ToolStripMenuItem("&Manual order", null, (s, e) => SetSortMode("Manual"));
             sortDirectionMenuItem = new ToolStripMenuItem("", null, (s, e) => ToggleSortDirection());
-            view.DropDownItems.Add("Text history\tAlt+T", null, (s, e) => SelectMainTab());
-            view.DropDownItems.Add("Links history\tAlt+L", null, (s, e) => SelectLinksTab());
-            view.DropDownItems.Add("File history\tAlt+I", null, (s, e) => SelectFileClipboardTab());
+            view.DropDownItems.Add("&Text history\tAlt+T", null, (s, e) => SelectMainTab());
+            view.DropDownItems.Add("&Links history\tAlt+L", null, (s, e) => SelectLinksTab());
+            view.DropDownItems.Add("&Rich text history\tAlt+R", null, (s, e) => SelectRichTextTab());
+            view.DropDownItems.Add("F&ile history\tAlt+I", null, (s, e) => SelectFileClipboardTab());
+            view.DropDownItems.Add("Move tab l&eft\tAlt+Left", null, (s, e) => MoveActiveHistoryTab(-1));
+            view.DropDownItems.Add("Move tab ri&ght\tAlt+Right", null, (s, e) => MoveActiveHistoryTab(1));
             view.DropDownItems.Add("-");
             view.DropDownItems.Add(sortDirectionMenuItem);
             view.DropDownItems.Add("-");
@@ -1261,6 +1270,16 @@ namespace Clipman
                     RemoveUnavailableFileClipboardEvents();
                     return true;
                 }
+                if (key == Keys.Left)
+                {
+                    MoveActiveHistoryTab(-1);
+                    return true;
+                }
+                if (key == Keys.Right)
+                {
+                    MoveActiveHistoryTab(1);
+                    return true;
+                }
                 if (key == Keys.Up)
                 {
                     MoveSelectedActiveTab(-1);
@@ -1286,6 +1305,11 @@ namespace Clipman
                     SelectFileClipboardTab();
                     return true;
                 }
+                if (key == Keys.R)
+                {
+                    SelectRichTextTab();
+                    return true;
+                }
                 if (key == Keys.G)
                 {
                     if (!IsFileClipboardTabActive())
@@ -1305,7 +1329,6 @@ namespace Clipman
 
         private void CloseHistoryWindow()
         {
-            SaveCurrentListPositionIfEnabled();
             Hide();
         }
 
@@ -1334,13 +1357,13 @@ namespace Clipman
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            SaveCurrentListPositionIfEnabled();
             if (e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;
                 Hide();
                 return;
             }
+            SaveCurrentListPositionIfEnabled();
             base.OnFormClosing(e);
         }
 
@@ -2189,8 +2212,21 @@ namespace Clipman
         private void SaveListPositionIndex(int selectedIndex)
         {
             if (!settings.SaveListPosition) return;
+            if (settings.LastSelectedIndex == selectedIndex) return;
             settings.LastSelectedIndex = selectedIndex;
-            saveSettings();
+            if (BestEffortSettingsSave.Try(saveSettings, LogListPositionSaveFailure))
+            {
+                listPositionSaveFailureLogged = false;
+            }
+        }
+
+        private void LogListPositionSaveFailure(Exception ex)
+        {
+            if (listPositionSaveFailureLogged) return;
+            listPositionSaveFailureLogged = true;
+            Program.WriteRuntimeLog(
+                "Clipman could not save the current list position because the settings file was temporarily unavailable. The requested history action continued.",
+                ex);
         }
 
         private void CopySelectedPlainText(bool closeAfterCopy)
@@ -2688,7 +2724,8 @@ namespace Clipman
                 "Clipboard entry text",
                 "Read-only clipboard entry text.",
                 false,
-                details))
+                details,
+                selected.Count == 1 ? selected[0].RichText : null))
             {
                 viewer.ShowDialog(this);
             }
@@ -2716,8 +2753,20 @@ namespace Clipman
             }
             details.Add(new KeyValuePair<string, string>("Text length", (entry.Text ?? string.Empty).Length.ToString(CultureInfo.InvariantCulture)));
             details.Add(new KeyValuePair<string, string>("Links", CountLinks(entry.Text).ToString(CultureInfo.InvariantCulture)));
+            if (entry.RichText != null)
+            {
+                details.Add(new KeyValuePair<string, string>("Formatting", RichTextFormatDescription(entry.RichText)));
+            }
             AddDetail(details, "Entry ID", entry.Id);
             return details;
+        }
+
+        private static string RichTextFormatDescription(RichTextPayload payload)
+        {
+            var formats = new List<string>();
+            if (!string.IsNullOrEmpty(payload.HtmlFragment)) formats.Add("HTML");
+            if (!string.IsNullOrEmpty(payload.RtfBase64)) formats.Add("RTF");
+            return formats.Count == 0 ? "Plain text only" : string.Join(" and ", formats);
         }
 
         private static void AddDetail(List<KeyValuePair<string, string>> details, string name, string value)
@@ -3127,34 +3176,76 @@ namespace Clipman
             return tabs != null && tabs.SelectedTab == linksTab;
         }
 
+        private bool IsRichTextHistoryTabActive()
+        {
+            return tabs != null && tabs.SelectedTab == richTextTab;
+        }
+
         private string CurrentHistoryTab()
         {
             if (tabs == null) return HistoryTabs.Text;
             if (tabs.SelectedTab == fileTab) return HistoryTabs.Files;
             if (tabs.SelectedTab == linksTab) return HistoryTabs.Links;
+            if (tabs.SelectedTab == richTextTab) return HistoryTabs.RichText;
             return HistoryTabs.Text;
         }
 
         private void RebuildHistoryTabs()
         {
             if (tabs == null) return;
-            var selected = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
+            var selected = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
             tabs.TabPages.Clear();
-            tabs.TabPages.Add(textTab);
-            if (settings.LinksHistoryEnabled)
+            foreach (var tabId in HistoryTabs.VisibleOrder(settings.HistoryTabOrder, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled))
             {
-                tabs.TabPages.Add(linksTab);
+                var page = TabPageForHistoryTab(tabId);
+                if (page != null) tabs.TabPages.Add(page);
             }
-            tabs.TabPages.Add(fileTab);
             SelectHistoryTab(selected, false);
             AttachTextControlsToActiveTextTab();
             tabs.AccessibleDescription = string.Empty;
         }
 
+        private TabPage TabPageForHistoryTab(string tabId)
+        {
+            if (string.Equals(tabId, HistoryTabs.Links, StringComparison.OrdinalIgnoreCase)) return linksTab;
+            if (string.Equals(tabId, HistoryTabs.RichText, StringComparison.OrdinalIgnoreCase)) return richTextTab;
+            if (string.Equals(tabId, HistoryTabs.Files, StringComparison.OrdinalIgnoreCase)) return fileTab;
+            return textTab;
+        }
+
+        private void MoveActiveHistoryTab(int direction)
+        {
+            if (tabs == null || tabs.TabPages.Count == 0) return;
+            var selected = CurrentHistoryTab();
+            List<string> moved;
+            if (!HistoryTabs.TryMoveVisible(settings.HistoryTabOrder, selected, direction, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled, out moved))
+            {
+                statusText.Text = "The " + TabPageForHistoryTab(selected).Text + " tab cannot move any farther " + (direction < 0 ? "left." : "right.");
+                return;
+            }
+            var keepTabControlFocus = tabs.Focused;
+            settings.HistoryTabOrder = moved;
+            saveSettings();
+            RebuildHistoryTabs();
+            if (keepTabControlFocus)
+            {
+                FocusHistoryTabControlNow();
+            }
+            else if (IsFileClipboardTabActive())
+            {
+                FocusFileClipboardListNow();
+            }
+            else
+            {
+                FocusHistoryListNow();
+            }
+            statusText.Text = "Moved " + TabPageForHistoryTab(selected).Text + " tab " + (direction < 0 ? "left." : "right.");
+        }
+
         private void AttachTextControlsToActiveTextTab()
         {
             if (list == null || filterPanel == null) return;
-            var target = IsLinksHistoryTabActive() ? linksTab : textTab;
+            var target = IsLinksHistoryTabActive() ? linksTab : IsRichTextHistoryTabActive() ? richTextTab : textTab;
             if (list.Parent != target)
             {
                 target.Controls.Add(list);
@@ -3176,6 +3267,11 @@ namespace Clipman
                 list.AccessibleName = "Links history";
                 list.AccessibleDescription = "HTTP and HTTPS link clipboard entries. Press Enter to copy the selected link entry to the clipboard.";
             }
+            else if (IsRichTextHistoryTabActive())
+            {
+                list.AccessibleName = "Rich text history";
+                list.AccessibleDescription = "Clipboard entries with preserved HTML or RTF formatting. Press Enter to copy the selected entry with its plain-text fallback and available formatting.";
+            }
             else
             {
                 list.AccessibleName = "Text history";
@@ -3186,10 +3282,11 @@ namespace Clipman
         private void SelectHistoryTab(string tabId, bool focus)
         {
             if (tabs == null || tabs.TabPages.Count == 0) return;
-            var normalized = HistoryTabs.Normalize(tabId, settings.LinksHistoryEnabled);
+            var normalized = HistoryTabs.Normalize(tabId, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
             var target = normalized == HistoryTabs.Files
                 ? fileTab
-                : normalized == HistoryTabs.Links && settings.LinksHistoryEnabled ? linksTab : textTab;
+                : normalized == HistoryTabs.Links && settings.LinksHistoryEnabled ? linksTab
+                : normalized == HistoryTabs.RichText && settings.RichTextHistoryEnabled ? richTextTab : textTab;
             if (!tabs.TabPages.Contains(target))
             {
                 target = textTab;
@@ -3237,6 +3334,18 @@ namespace Clipman
             statusText.Text = "File history tab.";
         }
 
+        private void SelectRichTextTab()
+        {
+            if (!settings.RichTextHistoryEnabled)
+            {
+                statusText.Text = "Rich text history is disabled in Preferences.";
+                return;
+            }
+            SelectHistoryTab(HistoryTabs.RichText, false);
+            FocusHistoryListNow();
+            statusText.Text = "Rich text history tab.";
+        }
+
         private void FocusHistoryTabControlNow()
         {
             if (!Visible || tabs == null) return;
@@ -3273,6 +3382,10 @@ namespace Clipman
             {
                 SelectLinksTab();
             }
+            else if (nextTab == richTextTab)
+            {
+                SelectRichTextTab();
+            }
             else
             {
                 SelectMainTab();
@@ -3294,7 +3407,7 @@ namespace Clipman
         private void FocusGroupFilter()
         {
             if (tabs == null || groupFilter == null) return;
-            SelectHistoryTab(IsLinksHistoryTabActive() ? HistoryTabs.Links : HistoryTabs.Text, false);
+            SelectHistoryTab(IsLinksHistoryTabActive() ? HistoryTabs.Links : IsRichTextHistoryTabActive() ? HistoryTabs.RichText : HistoryTabs.Text, false);
             ActiveControl = groupFilter;
             groupFilter.Select();
             groupFilter.Focus();

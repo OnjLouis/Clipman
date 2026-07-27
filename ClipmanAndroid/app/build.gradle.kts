@@ -20,8 +20,8 @@ android {
         applicationId = "me.onj.clipman"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "2.2.0"
+        versionCode = 12
+        versionName = "2.3.0"
         buildConfigField("String", "CLIPMAN_BUILD_STAMP_UTC_MS", "\"$sharedBuildStamp\"")
     }
 

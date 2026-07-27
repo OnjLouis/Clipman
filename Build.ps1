@@ -1,6 +1,7 @@
 param(
     [string]$OutputPath = "$PSScriptRoot\portable\clipman.exe",
-    [switch]$DesktopOnly
+    [switch]$DesktopOnly,
+    [switch]$PreserveBuildStamp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,16 +93,25 @@ $references = @(
 ) -join ','
 
 $buildInfoPath = Join-Path $PSScriptRoot 'src\BuildInfo.cs'
-$buildStamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-@(
-    'namespace Clipman',
-    '{',
-    '    internal static class BuildInfo',
-    '    {',
-    "        public const long BuildStampUtcMs = ${buildStamp}L;",
-    '    }',
-    '}'
-) -join [Environment]::NewLine | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
+if ($PreserveBuildStamp) {
+    $buildInfoText = Get-Content -LiteralPath $buildInfoPath -Raw
+    $buildStampMatch = [regex]::Match($buildInfoText, 'BuildStampUtcMs\s*=\s*(?<stamp>\d+)L')
+    if (!$buildStampMatch.Success) {
+        throw "Could not read the existing build stamp from $buildInfoPath"
+    }
+    $buildStamp = [long]$buildStampMatch.Groups['stamp'].Value
+} else {
+    $buildStamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    @(
+        'namespace Clipman',
+        '{',
+        '    internal static class BuildInfo',
+        '    {',
+        "        public const long BuildStampUtcMs = ${buildStamp}L;",
+        '    }',
+        '}'
+    ) -join [Environment]::NewLine | Set-Content -LiteralPath $buildInfoPath -Encoding UTF8
+}
 
 $iOSInfoPath = Join-Path $PSScriptRoot 'ClipmanIOS\ClipmanIOS\Support\Info.plist'
 if (!$DesktopOnly) {

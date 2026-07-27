@@ -1,7 +1,5 @@
 package me.onj.clipman
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -255,6 +253,7 @@ private enum class HistorySort(val label: String) {
 
 private enum class HistorySection(val label: String) {
     Text("Text"),
+    RichText("Rich Text"),
     Links("Links")
 }
 
@@ -266,6 +265,7 @@ private data class MobileSettingsSnapshot(
     val deviceName: String,
     val copyRemoteToClipboard: Boolean,
     val addClipboardOnLaunch: Boolean,
+    val richTextEnabled: Boolean,
     val requireAuthentication: Boolean,
     val checkForUpdatesAutomatically: Boolean,
     val playSounds: Boolean,
@@ -292,8 +292,8 @@ private fun ClipmanApp(
     val storageMutex = remember { Mutex() }
     val scope = rememberCoroutineScope()
     val textListState = rememberLazyListState()
+    val richTextListState = rememberLazyListState()
     val linksListState = rememberLazyListState()
-    val pagerState = rememberPagerState(pageCount = { HistorySection.entries.size })
     var serverUrl by remember { mutableStateOf(settings.serverUrl) }
     var storageMode by remember { mutableStateOf(settings.storageMode) }
     var token by remember { mutableStateOf(settings.serverToken) }
@@ -305,6 +305,7 @@ private fun ClipmanApp(
     }
     var copyRemoteToClipboard by remember { mutableStateOf(settings.copyRemoteToClipboard) }
     var addClipboardOnLaunch by remember { mutableStateOf(settings.addClipboardOnLaunch) }
+    var richTextEnabled by remember { mutableStateOf(settings.richTextEnabled) }
     var requireAuthentication by remember { mutableStateOf(settings.requireAuthentication) }
     var checkForUpdatesAutomatically by remember { mutableStateOf(settings.checkForUpdatesAutomatically) }
     var playSounds by remember { mutableStateOf(settings.playSounds) }
@@ -312,6 +313,8 @@ private fun ClipmanApp(
     var status by remember { mutableStateOf("Not loaded.") }
     var search by remember { mutableStateOf("") }
     var section by remember { mutableStateOf(HistorySection.Text) }
+    val visibleSections = remember(richTextEnabled) { visibleHistorySections(richTextEnabled) }
+    val pagerState = rememberPagerState(pageCount = { visibleSections.size })
     var sortMode by remember { mutableStateOf(HistorySort.Manual) }
     var groupFilter by remember { mutableStateOf("") }
     var entries by remember { mutableStateOf<List<ClipEntry>>(emptyList()) }
@@ -411,6 +414,7 @@ private fun ClipmanApp(
         deviceName = settings.deviceName
         copyRemoteToClipboard = settings.copyRemoteToClipboard
         addClipboardOnLaunch = settings.addClipboardOnLaunch
+        richTextEnabled = settings.richTextEnabled
         requireAuthentication = settings.requireAuthentication
         checkForUpdatesAutomatically = settings.checkForUpdatesAutomatically
         playSounds = settings.playSounds
@@ -430,6 +434,7 @@ private fun ClipmanApp(
         settings.deviceName = snapshot.deviceName
         settings.copyRemoteToClipboard = snapshot.copyRemoteToClipboard
         settings.addClipboardOnLaunch = snapshot.addClipboardOnLaunch
+        settings.richTextEnabled = snapshot.richTextEnabled
         settings.requireAuthentication = snapshot.requireAuthentication
         settings.checkForUpdatesAutomatically = snapshot.checkForUpdatesAutomatically
         settings.playSounds = snapshot.playSounds
@@ -530,6 +535,7 @@ private fun ClipmanApp(
                         enabled = storageMode == MobileStorageMode.Server && !announceResult,
                         localMachine = deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
                         shouldCopyToClipboard = copyRemoteToClipboard,
+                        richTextEnabled = richTextEnabled,
                         playSounds = playSounds,
                         useHaptics = useHaptics
                     )
@@ -538,9 +544,9 @@ private fun ClipmanApp(
                     } else if (remoteSource != null) {
                         "Clipboard updated by $remoteSource."
                     } else if (storageMode == MobileStorageMode.Local) {
-                        "Local history loaded. ${loadedStatusText(entries)}"
+                        "Local history loaded. ${loadedStatusText(entries, richTextEnabled)}"
                     } else {
-                        loadedStatusText(entries)
+                        loadedStatusText(entries, richTextEnabled)
                     }
                 } else if (updateStatusWhenUnchanged) {
                     status = "History is already up to date."
@@ -611,13 +617,19 @@ private fun ClipmanApp(
     }
 
     fun addCurrentClipboardText() {
-        val clipboardText = readClipboardText(context).trim()
+        val clipboardContent = RichTextClipboard.read(context, richTextEnabled)
+        val clipboardText = clipboardContent.text.trim()
         if (clipboardText.isEmpty()) {
             status = "The Android clipboard does not contain text to add."
             return
         }
         saveDatabaseChange("Adding Android clipboard text") { database ->
-            SyncConflictResolver.addText(database, clipboardText, deviceName.ifBlank { AndroidSettings.defaultDeviceName() })
+            SyncConflictResolver.addText(
+                database,
+                clipboardText,
+                deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
+                clipboardContent.richText
+            )
         }
     }
 
@@ -713,13 +725,8 @@ private fun ClipmanApp(
         }
     }
 
-    val sectionEntries = remember(entries, section) {
-        entries.filter { entry ->
-            when (section) {
-                HistorySection.Text -> !entry.isLinkEntry()
-                HistorySection.Links -> entry.isLinkEntry()
-            }
-        }
+    val sectionEntries = remember(entries, section, richTextEnabled) {
+        entries.filter { entryBelongsToSection(it, section, richTextEnabled) }
     }
     val groups = remember(sectionEntries) {
         sectionEntries.map { it.Group.trim() }
@@ -730,20 +737,29 @@ private fun ClipmanApp(
     val visibleEntries = remember(sectionEntries, search, sortMode, groupFilter) {
         filteredAndSortedEntries(sectionEntries, search, sortMode, groupFilter)
     }
-    val selectedListState = if (section == HistorySection.Text) textListState else linksListState
+    val selectedListState = when (section) {
+        HistorySection.Text -> textListState
+        HistorySection.RichText -> richTextListState
+        HistorySection.Links -> linksListState
+    }
 
     LaunchedEffect(section, groupFilter, search, sortMode) {
         if (visibleEntries.isNotEmpty()) selectedListState.scrollToItem(0)
     }
 
-    LaunchedEffect(section) {
-        if (pagerState.currentPage != section.ordinal) {
-            pagerState.animateScrollToPage(section.ordinal)
+    LaunchedEffect(richTextEnabled) {
+        if (section !in visibleSections) section = HistorySection.Text
+    }
+
+    LaunchedEffect(section, visibleSections) {
+        val page = visibleSections.indexOf(section).coerceAtLeast(0)
+        if (pagerState.currentPage != page) {
+            pagerState.animateScrollToPage(page)
         }
     }
 
-    LaunchedEffect(pagerState.currentPage) {
-        val newSection = HistorySection.entries[pagerState.currentPage]
+    LaunchedEffect(pagerState.currentPage, visibleSections) {
+        val newSection = visibleSections.getOrNull(pagerState.currentPage) ?: HistorySection.Text
         if (section != newSection) {
             section = newSection
             groupFilter = ""
@@ -780,7 +796,7 @@ private fun ClipmanApp(
             links = links,
             onDismiss = { viewingEntry = null },
             onCopy = {
-                copyToClipboard(context, entry.Text)
+                RichTextClipboard.write(context, entry, richTextEnabled)
                 playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
                 announce(view, "Copied to clipboard")
                 status = "Copied selected entry to Android clipboard."
@@ -895,6 +911,8 @@ private fun ClipmanApp(
                 onCopyRemoteToClipboardChanged = { copyRemoteToClipboard = it },
                 addClipboardOnLaunch = addClipboardOnLaunch,
                 onAddClipboardOnLaunchChanged = { addClipboardOnLaunch = it },
+                richTextEnabled = richTextEnabled,
+                onRichTextEnabledChanged = { richTextEnabled = it },
                 requireAuthentication = requireAuthentication,
                 onRequireAuthenticationChanged = { requireAuthentication = it },
                 checkForUpdatesAutomatically = checkForUpdatesAutomatically,
@@ -930,6 +948,7 @@ private fun ClipmanApp(
                         deviceName = deviceName,
                         copyRemoteToClipboard = copyRemoteToClipboard,
                         addClipboardOnLaunch = addClipboardOnLaunch,
+                        richTextEnabled = richTextEnabled,
                         requireAuthentication = requireAuthentication,
                         checkForUpdatesAutomatically = checkForUpdatesAutomatically,
                         playSounds = playSounds,
@@ -964,6 +983,7 @@ private fun ClipmanApp(
                             deviceName = savedSettings.deviceName
                             copyRemoteToClipboard = savedSettings.copyRemoteToClipboard
                             addClipboardOnLaunch = savedSettings.addClipboardOnLaunch
+                            richTextEnabled = savedSettings.richTextEnabled
                             requireAuthentication = savedSettings.requireAuthentication
                             checkForUpdatesAutomatically = savedSettings.checkForUpdatesAutomatically
                             playSounds = savedSettings.playSounds
@@ -991,6 +1011,7 @@ private fun ClipmanApp(
         )
         HistoryToolbar(
             section = section,
+            sections = visibleSections,
             entriesShown = visibleEntries.size,
             totalEntries = entries.size,
             sortMode = sortMode,
@@ -1021,20 +1042,19 @@ private fun ClipmanApp(
             state = pagerState,
             modifier = Modifier.weight(1f)
         ) { page ->
-            val pageSection = HistorySection.entries[page]
+            val pageSection = visibleSections[page]
             val pageEntries = filteredAndSortedEntries(
-                entries = entries.filter { entry ->
-                    when (pageSection) {
-                        HistorySection.Text -> !entry.isLinkEntry()
-                        HistorySection.Links -> entry.isLinkEntry()
-                    }
-                },
+                entries = entries.filter { entryBelongsToSection(it, pageSection, richTextEnabled) },
                 search = search,
                 sortMode = sortMode,
                 groupFilter = if (pageSection == section) groupFilter else ""
             )
             LazyColumn(
-                state = if (pageSection == HistorySection.Text) textListState else linksListState,
+                state = when (pageSection) {
+                    HistorySection.Text -> textListState
+                    HistorySection.RichText -> richTextListState
+                    HistorySection.Links -> linksListState
+                },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -1048,7 +1068,7 @@ private fun ClipmanApp(
                         index = index,
                         total = pageEntries.size,
                         onCopy = {
-                            copyToClipboard(context, entry.Text)
+                            RichTextClipboard.write(context, entry, richTextEnabled)
                             playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
                             announce(view, "Copied to clipboard")
                             status = "Copied selected entry to Android clipboard."
@@ -1220,6 +1240,7 @@ private fun GroupPickerDialog(
 @Composable
 private fun HistoryToolbar(
     section: HistorySection,
+    sections: List<HistorySection>,
     entriesShown: Int,
     totalEntries: Int,
     sortMode: HistorySort,
@@ -1240,12 +1261,12 @@ private fun HistoryToolbar(
     ) {
         TextButton(
             onClick = {
-                onSectionChanged(
-                    if (section == HistorySection.Text) HistorySection.Links else HistorySection.Text
-                )
+                val current = sections.indexOf(section).coerceAtLeast(0)
+                onSectionChanged(sections[(current + 1) % sections.size])
             }
         ) {
-            Text(if (section == HistorySection.Text) "Switch to Links" else "Switch to Text")
+            val current = sections.indexOf(section).coerceAtLeast(0)
+            Text("Switch to ${sections[(current + 1) % sections.size].label}")
         }
         TextButton(onClick = onAddClipboard) { Text("Paste") }
         TextButton(onClick = onGroup, enabled = groups.isNotEmpty()) {
@@ -1279,6 +1300,8 @@ private fun ConnectionSettingsScreen(
     onCopyRemoteToClipboardChanged: (Boolean) -> Unit,
     addClipboardOnLaunch: Boolean,
     onAddClipboardOnLaunchChanged: (Boolean) -> Unit,
+    richTextEnabled: Boolean,
+    onRichTextEnabledChanged: (Boolean) -> Unit,
     requireAuthentication: Boolean,
     onRequireAuthenticationChanged: (Boolean) -> Unit,
     checkForUpdatesAutomatically: Boolean,
@@ -1382,6 +1405,12 @@ private fun ConnectionSettingsScreen(
             checked = addClipboardOnLaunch,
             onCheckedChange = onAddClipboardOnLaunchChanged,
             label = "Add current clipboard to history on launch",
+            enabled = !isSaving
+        )
+        SettingCheckboxRow(
+            checked = richTextEnabled,
+            onCheckedChange = onRichTextEnabledChanged,
+            label = "Preserve copied formatting and show Rich Text history",
             enabled = !isSaving
         )
         SettingCheckboxRow(
@@ -1715,10 +1744,29 @@ private fun ClipEntry.isLinkEntry(): Boolean {
     return Patterns.WEB_URL.matcher(text).matches()
 }
 
-private fun loadedStatusText(entries: List<ClipEntry>): String {
-    val links = entries.count { it.isLinkEntry() }
-    val text = (entries.size - links).coerceAtLeast(0)
-    return "Loaded ${entries.size} clipboard entries: $text text, $links links."
+private fun visibleHistorySections(richTextEnabled: Boolean): List<HistorySection> =
+    if (richTextEnabled) {
+        listOf(HistorySection.Text, HistorySection.RichText, HistorySection.Links)
+    } else {
+        listOf(HistorySection.Text, HistorySection.Links)
+    }
+
+private fun entryBelongsToSection(entry: ClipEntry, section: HistorySection, richTextEnabled: Boolean): Boolean {
+    if (richTextEnabled && entry.RichText != null) return section == HistorySection.RichText
+    return when (section) {
+        HistorySection.Text -> !entry.isLinkEntry()
+        HistorySection.RichText -> false
+        HistorySection.Links -> entry.isLinkEntry()
+    }
+}
+
+private fun loadedStatusText(entries: List<ClipEntry>, richTextEnabled: Boolean): String {
+    val richText = if (richTextEnabled) entries.count { it.RichText != null } else 0
+    val remaining = if (richTextEnabled) entries.filter { it.RichText == null } else entries
+    val links = remaining.count { it.isLinkEntry() }
+    val text = (remaining.size - links).coerceAtLeast(0)
+    val richPart = if (richTextEnabled) ", $richText rich text" else ""
+    return "Loaded ${entries.size} clipboard entries: $text text$richPart, $links links."
 }
 
 private fun extractLinks(text: String): List<String> =
@@ -1753,6 +1801,7 @@ private fun entryMetadataLines(entry: ClipEntry, linkCount: Int): List<String> =
         if (entry.SourceMachine.isNotBlank()) add("Device: ${entry.SourceMachine}")
         add("Pinned: ${if (entry.Pinned) "Yes" else "No"}")
         add("Template: ${if (entry.IsTemplate) "Yes" else "No"}")
+        add("Formatting: ${entry.richTextDescription()}")
         add("Added: ${formatUnixMilliseconds(entry.CreatedUnixMs)}")
         add("Last used: ${formatUnixMilliseconds(entry.LastUsedUnixMs)}")
         if (entry.ManualOrder > 0) add("Manual order: ${entry.ManualOrder}")
@@ -1794,6 +1843,7 @@ private fun handleRemoteAdditions(
     enabled: Boolean,
     localMachine: String,
     shouldCopyToClipboard: Boolean,
+    richTextEnabled: Boolean,
     playSounds: Boolean,
     useHaptics: Boolean
 ): String? {
@@ -1807,7 +1857,7 @@ private fun handleRemoteAdditions(
         ?: return null
 
     if (shouldCopyToClipboard) {
-        copyToClipboard(context, newestRemote.Text)
+        RichTextClipboard.write(context, newestRemote, richTextEnabled)
     }
     playFeedback(context, ClipmanSound.Remote, playSounds, useHaptics)
     return newestRemote.SourceMachine.takeIf { it.isNotBlank() } ?: "another device"
@@ -1838,20 +1888,12 @@ private fun vibrate(context: Context) {
     }
 }
 
-private fun copyToClipboard(context: Context, text: String) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText("Clipman entry", text))
-}
-
 private fun announce(view: View, message: String) {
     view.announceForAccessibility(message)
 }
 
 private fun readClipboardText(context: Context): String {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val clip = clipboard.primaryClip ?: return ""
-    if (clip.itemCount <= 0) return ""
-    return clip.getItemAt(0).coerceToText(context)?.toString() ?: ""
+    return RichTextClipboard.read(context, includeRichText = false).text
 }
 
 private fun cleanServerToken(value: String): String {
@@ -1873,4 +1915,13 @@ private fun java.io.Reader.readLimitedText(maxChars: Int): String {
         output.append(buffer, 0, count)
     }
     return output.toString()
+}
+
+private fun ClipEntry.richTextDescription(): String {
+    val payload = RichTextClipboard.normalize(RichText) ?: return "Plain text"
+    val formats = buildList {
+        if (payload.HtmlFragment.isNotEmpty()) add("HTML")
+        if (payload.RtfBase64.isNotEmpty()) add("RTF")
+    }
+    return formats.joinToString(" and ").ifEmpty { "Plain text" }
 }

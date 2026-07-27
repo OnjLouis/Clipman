@@ -40,10 +40,14 @@ object SyncConflictResolver {
     fun hasSameContent(left: ClipDatabase, right: ClipDatabase): Boolean =
         left.Entries == right.Entries && left.DeletedEntries == right.DeletedEntries
 
-    fun addText(database: ClipDatabase, text: String, machineName: String): ClipDatabase {
+    fun addText(database: ClipDatabase, text: String, machineName: String, richText: RichTextPayload? = null): ClipDatabase {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return database
         val now = TimeUtil.nowUnixMs()
+        val existing = database.Entries.firstOrNull { it.Text == trimmed }
+        val normalizedRichText = RichTextClipboard.normalize(richText)
+        val storedRichText = normalizedRichText ?: existing?.RichText
+        val richTextUpdated = if (normalizedRichText == null) existing?.RichTextUpdatedUnixMs ?: 0 else now
         val withoutDuplicate = database.Entries.filterNot { it.Text == trimmed }
         val nextManualOrder = withoutDuplicate.maxOfOrNull { it.ManualOrder }?.plus(1) ?: 1
         val entry = ClipEntry(
@@ -52,7 +56,9 @@ object SyncConflictResolver {
             SourceMachine = machineName,
             CreatedUnixMs = now,
             LastUsedUnixMs = now,
-            ManualOrder = nextManualOrder
+            ManualOrder = nextManualOrder,
+            RichText = storedRichText,
+            RichTextUpdatedUnixMs = richTextUpdated
         )
         return normalize(database.copy(Entries = withoutDuplicate + entry, UpdatedUnixMs = now))
     }
@@ -65,7 +71,9 @@ object SyncConflictResolver {
             Name = entry.Name.trim(),
             Group = entry.Group.trim(),
             SourceMachine = entry.SourceMachine.trim(),
-            LastUsedUnixMs = now
+            LastUsedUnixMs = now,
+            RichText = if (entry.Text.trim() == database.Entries.firstOrNull { it.Id == entry.Id }?.Text) entry.RichText else null,
+            RichTextUpdatedUnixMs = if (entry.Text.trim() == database.Entries.firstOrNull { it.Id == entry.Id }?.Text) entry.RichTextUpdatedUnixMs else now
         )
         if (updated.Text.isBlank()) return deleteEntry(database, entry.Id)
         return normalize(database.copy(
@@ -133,6 +141,8 @@ object SyncConflictResolver {
             SourceMachine = if (incoming.SourceMachine.isNotBlank() && (incomingWins || incomingCreatedWins)) incoming.SourceMachine.trim() else existing.SourceMachine,
             Pinned = existing.Pinned || incoming.Pinned,
             IsTemplate = existing.IsTemplate || incoming.IsTemplate,
+            RichText = if (incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs) incoming.RichText else existing.RichText,
+            RichTextUpdatedUnixMs = maxOf(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs),
             ManualOrder = when {
                 existing.ManualOrder <= 0L -> incoming.ManualOrder
                 incoming.ManualOrder > 0L && incoming.ManualOrder < existing.ManualOrder -> incoming.ManualOrder

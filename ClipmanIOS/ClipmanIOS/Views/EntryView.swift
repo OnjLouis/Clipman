@@ -62,6 +62,7 @@ struct EntryView: View {
         }
         lines.append("Pinned: \(entry.Pinned ? "Yes" : "No")")
         lines.append("Template: \(entry.IsTemplate ? "Yes" : "No")")
+        lines.append("Formatting: \(formattingDescription)")
         lines.append("Added: \(formatUnixMilliseconds(entry.CreatedUnixMs))")
         lines.append("Last used: \(formatUnixMilliseconds(entry.LastUsedUnixMs))")
         if entry.ManualOrder > 0 {
@@ -73,6 +74,14 @@ struct EntryView: View {
             lines.append("Entry ID: \(entry.Id)")
         }
         return lines
+    }
+
+    private var formattingDescription: String {
+        guard let payload = MobileRichTextClipboard.normalize(entry.RichText) else { return "Plain text" }
+        var formats: [String] = []
+        if !payload.HtmlFragment.isEmpty { formats.append("HTML") }
+        if !payload.RtfBase64.isEmpty { formats.append("RTF") }
+        return formats.isEmpty ? "Plain text" : formats.joined(separator: " and ")
     }
 
     private func formatUnixMilliseconds(_ value: Int64) -> String {

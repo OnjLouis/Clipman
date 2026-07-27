@@ -6,6 +6,7 @@ import UIKit
 final class ClipmanAppModel: ObservableObject {
     enum Section: String, CaseIterable, Identifiable {
         case text = "Text"
+        case richText = "Rich Text"
         case links = "Links"
 
         var id: String { rawValue }
@@ -66,10 +67,24 @@ final class ClipmanAppModel: ObservableObject {
         return ["All"] + values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
+    var visibleSections: [Section] {
+        var sections: [Section] = [.text]
+        if settings.richTextEnabled { sections.append(.richText) }
+        if settings.linksEnabled { sections.append(.links) }
+        return sections
+    }
+
     var visibleEntries: [ClipEntry] {
         var entries = database.Entries
-        if selectedSection == .text {
-            entries = entries.filter { !pureLinkEntryIDs.contains($0.Id) }
+        switch selectedSection {
+        case .text:
+            entries = entries.filter {
+                (!settings.richTextEnabled || $0.RichText == nil) && !pureLinkEntryIDs.contains($0.Id)
+            }
+        case .richText:
+            entries = settings.richTextEnabled ? entries.filter { $0.RichText != nil } : []
+        case .links:
+            entries = []
         }
         if groupFilter != "All" {
             entries = entries.filter { $0.Group.caseInsensitiveCompare(groupFilter) == .orderedSame }
@@ -93,6 +108,9 @@ final class ClipmanAppModel: ObservableObject {
 
     var visibleLinkItems: [LinkExtractor.LinkItem] {
         var items = linkItems
+        if settings.richTextEnabled {
+            items = items.filter { $0.entry.RichText == nil }
+        }
         if groupFilter != "All" {
             items = items.filter { $0.entry.Group.caseInsensitiveCompare(groupFilter) == .orderedSame }
         }
@@ -115,9 +133,26 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func switchSection(_ section: Section) {
-        guard settings.linksEnabled, selectedSection != section else { return }
+        guard visibleSections.contains(section), selectedSection != section else { return }
         selectedSection = section
         status = "\(section.rawValue) clipboard history."
+    }
+
+    func switchToAdjacentSection(_ offset: Int) {
+        let sections = visibleSections
+        guard let current = sections.firstIndex(of: selectedSection) else {
+            switchSection(.text)
+            return
+        }
+        let target = current + offset
+        guard sections.indices.contains(target) else { return }
+        switchSection(sections[target])
+    }
+
+    var nextSection: Section {
+        let sections = visibleSections
+        guard let current = sections.firstIndex(of: selectedSection) else { return .text }
+        return sections[(current + 1) % sections.count]
     }
 
     func unlock() {
@@ -148,7 +183,7 @@ final class ClipmanAppModel: ObservableObject {
                     // The import completion opens Settings once the file has finished loading.
                 } else if pendingServerConnection != nil || !serverConnectionImportError.isEmpty {
                     showingSettings = true
-                } else if loaded, settings.addClipboardOnLaunch, UIPasteboard.general.hasStrings {
+                } else if loaded, settings.addClipboardOnLaunch, MobileRichTextClipboard.containsText() {
                     showingClipboardImport = true
                 }
                 startPolling()
@@ -242,7 +277,7 @@ final class ClipmanAppModel: ObservableObject {
         if !newSettings.requireAuthentication {
             isUnlocked = true
         }
-        if !settings.linksEnabled && selectedSection == .links {
+        if !visibleSections.contains(selectedSection) {
             selectedSection = .text
         }
         SettingsStore.save(newSettings)
@@ -364,7 +399,7 @@ final class ClipmanAppModel: ObservableObject {
             pollingFailureCount = 0
             if !showStatus, previousNewest != nil, let newest = newestRemoteEntry(in: merged), newest.Id != previousNewest?.Id, newest.Id != lastRemoteEntryID {
                 if settings.autoCopyRemote {
-                    UIPasteboard.general.string = newest.Text
+                    MobileRichTextClipboard.write(newest, includeRichText: settings.richTextEnabled)
                 }
                 lastRemoteEntryID = newest.Id
                 let source = newest.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -397,15 +432,22 @@ final class ClipmanAppModel: ObservableObject {
         }
     }
 
-    func addPastedClipboardText(_ pastedText: String?) {
+    func addPastedClipboardPayload(_ payload: MobileClipboardPayload?) {
         showingClipboardImport = false
-        guard let text = pastedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+        guard let payload,
+              !payload.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             status = "Clipboard does not contain text."
             soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             return
         }
+        let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let alreadyExists = database.Entries.contains { $0.Text == text }
-        database = SyncConflictResolver.addText(database: database, text: text, machineName: machineName)
+        database = SyncConflictResolver.addText(
+            database: database,
+            text: text,
+            machineName: machineName,
+            richText: settings.richTextEnabled ? payload.richText : nil
+        )
         queueUpload(successMessage: alreadyExists ? "Clipboard text already exists in history." : "Clipboard text added.")
     }
 
@@ -415,7 +457,7 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func copy(_ entry: ClipEntry) {
-        UIPasteboard.general.string = entry.Text
+        MobileRichTextClipboard.write(entry, includeRichText: settings.richTextEnabled)
         database = markUsed(entry)
         soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
         status = "Copied to clipboard."
@@ -518,8 +560,11 @@ final class ClipmanAppModel: ObservableObject {
 
     private func loadedStatusText() -> String {
         let total = database.Entries.count
-        let links = pureLinkEntryIDs.count
-        let text = max(0, total - links)
-        return "Loaded \(total) clipboard entries: \(text) text, \(links) links."
+        let richText = settings.richTextEnabled ? database.Entries.filter { $0.RichText != nil }.count : 0
+        let remaining = settings.richTextEnabled ? database.Entries.filter { $0.RichText == nil } : database.Entries
+        let links = remaining.filter { pureLinkEntryIDs.contains($0.Id) }.count
+        let text = max(0, remaining.count - links)
+        let richPart = settings.richTextEnabled ? ", \(richText) rich text" : ""
+        return "Loaded \(total) clipboard entries: \(text) text\(richPart), \(links) links."
     }
 }

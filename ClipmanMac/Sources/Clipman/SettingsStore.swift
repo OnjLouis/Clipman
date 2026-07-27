@@ -163,9 +163,14 @@ final class SettingsStore {
             settings.lastSelectedTab = 0
             changed = true
         }
-        let normalizedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled)
+        let normalizedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled, richTextEnabled: settings.richTextHistoryEnabled)
         if normalizedHistoryTab != settings.lastSelectedHistoryTab {
             settings.lastSelectedHistoryTab = normalizedHistoryTab
+            changed = true
+        }
+        let normalizedHistoryTabOrder = HistoryTabID.normalizeOrder(settings.historyTabOrder)
+        if normalizedHistoryTabOrder != settings.historyTabOrder {
+            settings.historyTabOrder = normalizedHistoryTabOrder
             changed = true
         }
         let legacySelectedTab = normalizedHistoryTab == HistoryTabID.files ? 1 : 0

@@ -47,6 +47,16 @@ final class PreferencesWindow: NSWindow {
     }
 }
 
+private final class PreferencesTabTextView: NSTextView {
+    override func insertTab(_ sender: Any?) {
+        window?.selectNextKeyView(sender)
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        window?.selectPreviousKeyView(sender)
+    }
+}
+
 final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldDelegate {
     weak var preferencesDelegate: PreferencesWindowControllerDelegate?
     private var settings: ClipmanSettings
@@ -66,6 +76,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let pasteAfterEnterCheckbox = NSButton(checkboxWithTitle: "After Enter, paste into the previous application", target: nil, action: nil)
     private let dynamicHistoryModeCheckbox = NSButton(checkboxWithTitle: "Open history to the most recent clipboard type", target: nil, action: nil)
     private let linksHistoryCheckbox = NSButton(checkboxWithTitle: "Show Links history tab", target: nil, action: nil)
+    private let richTextHistoryCheckbox = NSButton(checkboxWithTitle: "Preserve copied formatting and show Rich Text history", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
     private let updateFrequencyPopup = NSPopUpButton()
     private let sensitiveDataModePopup = NSPopUpButton()
@@ -73,7 +84,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let showHotkeyField = HotkeyCaptureField()
     private let toggleHotkeyField = HotkeyCaptureField()
     private let passwordField = NSSecureTextField()
-    private let ignoredApplicationsView = NSTextView()
+    private let ignoredApplicationsView = PreferencesTabTextView()
     private let statusLabel = NSTextField(labelWithString: "")
 
     init(settings: ClipmanSettings, historyIsEncrypted: Bool, rememberedPasswordExists: Bool, databasePasswordAvailable: Bool) {
@@ -192,6 +203,12 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         linksHistoryCheckbox.setAccessibilityHelp("When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.")
         grid.addRow(with: [NSGridCell.emptyContentView, linksHistoryCheckbox])
 
+        richTextHistoryCheckbox.target = nil
+        richTextHistoryCheckbox.action = nil
+        richTextHistoryCheckbox.setAccessibilityLabel("Preserve copied formatting and show Rich Text history")
+        richTextHistoryCheckbox.setAccessibilityHelp("When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows the Rich Text history tab. Enable this before copying formatted content. This is off by default.")
+        grid.addRow(with: [NSGridCell.emptyContentView, richTextHistoryCheckbox])
+
         updateFrequencyPopup.addItems(withTitles: ["Never", "At startup", "Hourly", "Daily"])
         updateFrequencyPopup.setAccessibilityLabel("Check for updates")
         addRow("Check for updates", updateFrequencyPopup)
@@ -256,6 +273,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         pasteAfterEnterCheckbox.state = settings.pasteAfterEnter ? .on : .off
         dynamicHistoryModeCheckbox.state = settings.dynamicHistoryMode ? .on : .off
         linksHistoryCheckbox.state = settings.linksHistoryEnabled ? .on : .off
+        richTextHistoryCheckbox.state = settings.richTextHistoryEnabled ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
         updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
         sensitiveDataModePopup.selectItem(withTitle: displaySensitiveDataMode(settings.sensitiveDataMode))
@@ -381,7 +399,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.pasteAfterEnter = pasteAfterEnterCheckbox.state == .on
         settings.dynamicHistoryMode = dynamicHistoryModeCheckbox.state == .on
         settings.linksHistoryEnabled = linksHistoryCheckbox.state == .on
-        settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled)
+        settings.richTextHistoryEnabled = richTextHistoryCheckbox.state == .on
+        settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled, richTextEnabled: settings.richTextHistoryEnabled)
         settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on
         settings.updateCheckFrequency = storedUpdateFrequency(updateFrequencyPopup.titleOfSelectedItem ?? "Never")
         settings.sensitiveDataMode = storedSensitiveDataMode(sensitiveDataModePopup.titleOfSelectedItem ?? "Off")

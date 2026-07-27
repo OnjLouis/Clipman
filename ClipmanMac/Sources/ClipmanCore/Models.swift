@@ -11,6 +11,8 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
     public var Pinned: Bool
     public var IsTemplate: Bool
     public var ManualOrder: Int64
+    public var RichText: RichTextPayload?
+    public var RichTextUpdatedUnixMs: Int64
     public var unknownFields: [String: JSONValue]
 
     public var id: String { Id }
@@ -26,6 +28,8 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         Pinned: Bool = false,
         IsTemplate: Bool = false,
         ManualOrder: Int64 = 0,
+        RichText: RichTextPayload? = nil,
+        RichTextUpdatedUnixMs: Int64 = 0,
         unknownFields: [String: JSONValue] = [:]
     ) {
         self.Id = Id
@@ -38,11 +42,13 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         self.Pinned = Pinned
         self.IsTemplate = IsTemplate
         self.ManualOrder = ManualOrder
+        self.RichText = RichText
+        self.RichTextUpdatedUnixMs = RichTextUpdatedUnixMs
         self.unknownFields = unknownFields
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs, Pinned, IsTemplate, ManualOrder
+        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs, Pinned, IsTemplate, ManualOrder, RichText, RichTextUpdatedUnixMs
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +63,8 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         Pinned = try known.decodeIfPresent(Bool.self, forKey: .Pinned) ?? false
         IsTemplate = try known.decodeIfPresent(Bool.self, forKey: .IsTemplate) ?? false
         ManualOrder = try known.decodeIfPresent(Int64.self, forKey: .ManualOrder) ?? 0
+        RichText = try known.decodeIfPresent(RichTextPayload.self, forKey: .RichText)
+        RichTextUpdatedUnixMs = try known.decodeIfPresent(Int64.self, forKey: .RichTextUpdatedUnixMs) ?? 0
 
         let dynamic = try decoder.container(keyedBy: DynamicCodingKey.self)
         let knownNames = Set(CodingKeys.allCases.map(\.rawValue))
@@ -82,6 +90,22 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         try dynamic.encode(Pinned, forKey: DynamicCodingKey("Pinned"))
         try dynamic.encode(IsTemplate, forKey: DynamicCodingKey("IsTemplate"))
         try dynamic.encode(ManualOrder, forKey: DynamicCodingKey("ManualOrder"))
+        try dynamic.encodeIfPresent(RichText, forKey: DynamicCodingKey("RichText"))
+        try dynamic.encode(RichTextUpdatedUnixMs, forKey: DynamicCodingKey("RichTextUpdatedUnixMs"))
+    }
+}
+
+public struct RichTextPayload: Codable, Equatable, Sendable {
+    public var Version: Int
+    public var HtmlFragment: String
+    public var RtfBase64: String
+    public var PreferredFormat: String
+
+    public init(Version: Int = 1, HtmlFragment: String = "", RtfBase64: String = "", PreferredFormat: String = "") {
+        self.Version = Version
+        self.HtmlFragment = HtmlFragment
+        self.RtfBase64 = RtfBase64
+        self.PreferredFormat = PreferredFormat
     }
 }
 

@@ -22,6 +22,7 @@ namespace Clipman
         private readonly CheckBox dynamicHistoryMode;
         private readonly CheckBox autoRemoveUrlTracking;
         private readonly CheckBox linksHistoryEnabled;
+        private readonly CheckBox richTextHistoryEnabled;
         private readonly CheckBox saveListPosition;
         private readonly CheckBox active;
         private readonly CheckBox runAtStartup;
@@ -105,6 +106,8 @@ namespace Clipman
             dynamicHistoryMode.AccessibleDescription = "When checked, opening history selects Text, Links, or Files according to the most recent clipboard data Clipman accepted during this run. This is off by default.";
             autoRemoveUrlTracking = NewCheckBox("Automatically remove URL &tracking from copied text", settings.AutoRemoveUrlTracking);
             linksHistoryEnabled = NewCheckBox("Show &Links history tab", settings.LinksHistoryEnabled);
+            richTextHistoryEnabled = NewCheckBox("Preserve copied formatting and show rich te&xt history", settings.RichTextHistoryEnabled);
+            richTextHistoryEnabled.AccessibleDescription = "When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows the Rich Text history tab. Enable this before copying formatted content. This is off by default.";
             linksHistoryEnabled.AccessibleDescription = "When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.";
             saveListPosition = NewCheckBox("Save list &position", settings.SaveListPosition);
             removeDuplicates = NewCheckBox("&Remove duplicate entries", settings.RemoveDuplicates);
@@ -122,6 +125,7 @@ namespace Clipman
             AddFullRow(generalLayout, dynamicHistoryMode);
             AddFullRow(generalLayout, autoRemoveUrlTracking);
             AddFullRow(generalLayout, linksHistoryEnabled);
+            AddFullRow(generalLayout, richTextHistoryEnabled);
             AddFullRow(generalLayout, saveListPosition);
             AddFullRow(generalLayout, removeDuplicates);
             AddRow(generalLayout, "&Duplicate handling:", duplicateMode);
@@ -400,7 +404,8 @@ namespace Clipman
             settings.DynamicHistoryMode = dynamicHistoryMode.Checked;
             settings.AutoRemoveUrlTracking = autoRemoveUrlTracking.Checked;
             settings.LinksHistoryEnabled = linksHistoryEnabled.Checked;
-            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
+            settings.RichTextHistoryEnabled = richTextHistoryEnabled.Checked;
+            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
             settings.SaveListPosition = saveListPosition.Checked;
             settings.Active = active.Checked;
             settings.AutoRemoveUnavailableFileHistoryEvents = autoRemoveUnavailableFileHistoryEvents.Checked;
@@ -840,7 +845,9 @@ namespace Clipman
                 AutoGroupByApp = current.AutoGroupByApp,
                 AutoRemoveUrlTracking = current.AutoRemoveUrlTracking,
                 LinksHistoryEnabled = current.LinksHistoryEnabled,
+                RichTextHistoryEnabled = current.RichTextHistoryEnabled,
                 LastSelectedHistoryTab = current.LastSelectedHistoryTab,
+                HistoryTabOrder = HistoryTabs.NormalizeOrder(current.HistoryTabOrder),
                 AutoRemoveUnavailableFileHistoryEvents = current.AutoRemoveUnavailableFileHistoryEvents,
                 DiagnosticsFileHistoryLimit = current.DiagnosticsFileHistoryLimit,
                 RunAtStartup = current.RunAtStartup,

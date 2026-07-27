@@ -50,7 +50,7 @@ import types
 path = pathlib.Path("ClipmanLinux/clipman.py")
 source = path.read_text(encoding="utf-8")
 for accessible_label in (
-    '["Clipboard text"]',
+    '["Formatted clipboard text" if rendered_html else "Clipboard text"]',
 ):
     assert accessible_label in source
 assert "GLib.timeout_add_seconds(2, self._poll)" in source
@@ -71,13 +71,31 @@ assert '"app.refresh"' not in source
 assert "self.status.set_selectable(True)" not in source
 assert "controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)" in source
 assert "self.cycle_section(-1 if state & Gdk.ModifierType.SHIFT_MASK else 1)" in source
-assert 'Gdk.KEY_t: "text", Gdk.KEY_l: "links", Gdk.KEY_i: "files"' in source
+assert "Gtk.AccessibleRole.TAB_LIST" in source
+assert "Gtk.AccessibleRole.TAB" in source
+assert "Gtk.AccessibleState.SELECTED" in source
+assert "def _section_tab_key_pressed" in source
+assert 'self.switch_section(section, focus_history=False)' in source
+assert 'self.section_button =' not in source
+assert '"move-tab-left": lambda *_: self.move_history_tab(-1)' in source
+assert '"app.move-tab-left": ["<Alt>Left"], "app.move-tab-right": ["<Alt>Right"]' in source
+assert 'self.preferences.values["history_tab_order"] = order' in source
+assert 'Gdk.KEY_t: "text", Gdk.KEY_l: "links", Gdk.KEY_r: "rich", Gdk.KEY_i: "files"' in source
+assert '"rich_text_history_enabled": False' in source
+assert '"app.rich": ["<Alt>r"]' in source
+assert 'RICH_HTML_MIME_TYPES = ("text/html",)' in source
+assert 'self._set_clipboard(text, rich_text)' in source
+assert 'populate_safe_rich_buffer(text.get_buffer(), rich_text, entry["text"])' in source
 assert "self.move_tab_focus(-1 if keyval == Gdk.KEY_ISO_Left_Tab" in source
 assert "Gtk.PopoverMenuBar.new_from_model(self._menu_model())" in source
 assert "Gtk.SelectionMode.MULTIPLE" in source
 assert 'Gtk.Label(label="_Group:", use_underline=True)' in source
 assert 'menu.append_submenu("Grou_ps", self.groups_menu)' in source
 assert '"app.diagnostics": ["<Alt>F1"]' in source
+
+backend_source = pathlib.Path("ClipmanCli/cmd/clipman-gui-backend/main.go").read_text(encoding="utf-8")
+assert '`json:"rich_text,omitempty"`' in backend_source
+assert 'clearRichText(e, now)' in backend_source
 assert '("_Source application", "source")' in source
 assert '("Set as _quick-paste target", "quick-assign")' in source
 assert "GLib.idle_add(quick_hotkey.grab_focus)" not in source
@@ -116,8 +134,8 @@ assert 'rm -f "$config/autostart/me.onj.clipman.linux.desktop"' in pathlib.Path(
 manual = pathlib.Path("ClipmanLinux/Manual.html").read_text(encoding="utf-8")
 for required in (
     "checks the server every two seconds", "File History", "Groups", "Import and export",
-    "Ctrl+Shift+1", "Alt+I", "Storage and Password", "Clipman project on GitHub",
-    "Quick Paste", "Secrets", "Sensitive Data", "Ctrl+A", "six tabs",
+    "Ctrl+Shift+1", "Alt+I", "Alt+R", "Rich Text history", "Storage and Password", "Clipman project on GitHub",
+    "Quick Paste", "Secrets", "Sensitive Data", "Ctrl+A", "six tabs", "tab list", "Left Arrow",
 ):
     assert required in manual, required
 for stale in ("early Linux preview", "Preview limitations", "Ctrl+R", "File history, Secrets"):
@@ -309,18 +327,56 @@ with tempfile.TemporaryDirectory() as directory:
     assert launched.read_text(encoding="utf-8") == "launched"
     assert not temporary.exists()
 
-section_harness = types.SimpleNamespace(section="text", switched=[], preferences=types.SimpleNamespace(values={"links_history_enabled": True}))
+assert module.normalize_history_tab_order(["FILES", "text", "files", "unknown"]) == ["files", "text", "links", "rich"]
+assert module.move_history_tab_order(["text", "links", "rich", "files"], "text", 1, True, True) == ["links", "text", "rich", "files"]
+assert module.move_history_tab_order(["text", "links", "rich", "files"], "text", 1, False, True) == ["rich", "links", "text", "files"]
+assert module.move_history_tab_order(["text", "links", "rich", "files"], "text", -1, True, True) is None
+section_harness = types.SimpleNamespace(section="text", switched=[], preferences=types.SimpleNamespace(values={"links_history_enabled": True, "rich_text_history_enabled": True, "history_tab_order": ["text", "links", "rich", "files"]}))
 section_harness.switch_section = lambda section: section_harness.switched.append(section)
+section_harness._available_sections = lambda: module.ClipmanApplication._available_sections(section_harness)
 module.ClipmanApplication.cycle_section(section_harness, 1)
 assert section_harness.switched == ["links"]
 section_harness.section = "links"
 module.ClipmanApplication.cycle_section(section_harness, 1)
-assert section_harness.switched == ["links", "files"]
+assert section_harness.switched == ["links", "rich"]
+section_harness.section = "rich"
+module.ClipmanApplication.cycle_section(section_harness, 1)
+assert section_harness.switched == ["links", "rich", "files"]
 section_harness.section = "files"
 module.ClipmanApplication.cycle_section(section_harness, 1)
-assert section_harness.switched == ["links", "files", "text"]
+assert section_harness.switched == ["links", "rich", "files", "text"]
 module.ClipmanApplication.cycle_section(section_harness, -1)
-assert section_harness.switched == ["links", "files", "text", "links"]
+assert section_harness.switched == ["links", "rich", "files", "text", "rich"]
+for links_enabled, rich_enabled, expected in (
+    (False, False, ["text", "files"]),
+    (True, False, ["text", "links", "files"]),
+    (False, True, ["text", "rich", "files"]),
+    (True, True, ["text", "links", "rich", "files"]),
+):
+    section_harness.preferences.values.update({
+        "links_history_enabled": links_enabled,
+        "rich_text_history_enabled": rich_enabled,
+        "history_tab_order": ["text", "links", "rich", "files"],
+    })
+    assert section_harness._available_sections() == expected
+section_harness.preferences.values.update({
+    "links_history_enabled": True,
+    "rich_text_history_enabled": True,
+    "history_tab_order": ["files", "rich", "text", "links"],
+})
+assert section_harness._available_sections() == ["files", "rich", "text", "links"]
+
+rich_payload = module.normalize_rich_text({
+    "html_fragment": "<p><b>Bold</b><script>hidden()</script></p>",
+    "rtf_base64": "e1xccnRmMSBCb2xkfQ==",
+    "preferred_format": "Html",
+})
+assert rich_payload and rich_payload["preferred_format"] == "Html"
+rich_buffer = module.Gtk.TextBuffer()
+assert module.populate_safe_rich_buffer(rich_buffer, rich_payload, "fallback")
+rich_preview = rich_buffer.get_text(rich_buffer.get_start_iter(), rich_buffer.get_end_iter(), True)
+assert "Bold" in rich_preview and "hidden" not in rich_preview
+assert module.normalize_rich_text({"html_fragment": "x" * (module.MAX_RICH_HTML_BYTES + 1)}) is None
 
 hotkey_events = []
 hotkey_application = types.SimpleNamespace(
@@ -445,6 +501,7 @@ def harness(capture_on_start):
         preferences=types.SimpleNamespace(values={
             "capture_on_start": capture_on_start, "ignored_applications": [],
             "sensitive_data_mode": "off", "sensitive_data_presets": [],
+            "rich_text_history_enabled": False,
         }),
         last_clipboard_text=None,
         last_clipboard_files=None,
@@ -454,11 +511,14 @@ def harness(capture_on_start):
         own_clipboard_text=None,
         clipboard_source_application="",
         capture_current_clipboard=capture_on_start,
+        clipboard_read_busy=True,
         captured=[],
         sounds=types.SimpleNamespace(play=lambda _name: None),
     )
-    value._put_text = lambda text, quiet=False, automatic=False, source="": value.captured.append((text, quiet, automatic, source))
+    value._put_text = lambda text, quiet=False, automatic=False, source="", rich_text=None: value.captured.append((text, quiet, automatic, source))
     value._capture_file_paths = lambda *_args: None
+    value._process_clipboard_text = lambda clipboard, text, rich: module.ClipmanApplication._process_clipboard_text(value, clipboard, text, rich)
+    value._read_rich_clipboard = lambda clipboard, text, callback: callback(clipboard, text, None)
     return value
 
 value = harness(False)

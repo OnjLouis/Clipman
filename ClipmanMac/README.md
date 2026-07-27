@@ -60,8 +60,9 @@ When database compatibility changes, also perform a manual cross-platform smoke:
 
 The history window includes an accessible toolbar after the history type control. The Clipman button remains tabbable as the main command menu; Set Group, Set to current filter, Filter, selected group status, Sort, Direction, and Preferences are exposed in the toolbar for VoiceOver navigation without adding extra Tab stops.
 
-- `Control+1`: Text History.
-- `Control+2`: File History.
+- `Control+1` through `Control+4`: switch to the visible history area currently shown at that position. The Clipman menu shows the current assignments.
+- `Option+Left` or `Option+Right`: move the focused history tab, keep focus on it, and update the positional `Control+number` assignments.
+- `Tab` or `Shift+Tab`: enter the selected history tab from the normal key loop and continue between the main controls and history list.
 - `Option+M`: Open the Clipman actions menu.
 - `Command+G`: group selected text entries.
 - `Option+G`: open the group filter menu.

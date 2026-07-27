@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -362,6 +363,7 @@ namespace Clipman
             var autoRemoteCopyTurnedOn = !settings.AutoCopyLatestRemoteText && updated.AutoCopyLatestRemoteText;
             var saveListPositionTurnedOff = settings.SaveListPosition && !updated.SaveListPosition;
             var linksHistoryVisibilityChanged = settings.LinksHistoryEnabled != updated.LinksHistoryEnabled;
+            var richTextHistoryVisibilityChanged = settings.RichTextHistoryEnabled != updated.RichTextHistoryEnabled;
             var oldSettingsDirectory = settingsStore.SettingsDirectory;
             settingsStore.Save(updated);
             databasePassword = nextDatabasePassword;
@@ -394,7 +396,9 @@ namespace Clipman
             settings.AutoGroupByApp = updated.AutoGroupByApp;
             settings.AutoRemoveUrlTracking = updated.AutoRemoveUrlTracking;
             settings.LinksHistoryEnabled = updated.LinksHistoryEnabled;
-            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(updated.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
+            settings.RichTextHistoryEnabled = updated.RichTextHistoryEnabled;
+            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(updated.LastSelectedHistoryTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
+            settings.HistoryTabOrder = HistoryTabs.NormalizeOrder(updated.HistoryTabOrder);
             settings.AutoRemoveUnavailableFileHistoryEvents = updated.AutoRemoveUnavailableFileHistoryEvents;
             settings.DiagnosticsFileHistoryLimit = updated.DiagnosticsFileHistoryLimit;
             settings.SensitiveDataMode = SensitiveDataExclusion.NormalizeMode(updated.SensitiveDataMode);
@@ -481,7 +485,7 @@ namespace Clipman
             {
                 if (settings.Active) sounds.On(settings.SoundsEnabled); else sounds.Off(settings.SoundsEnabled);
             }
-            if (historyForm != null && !historyForm.IsDisposed && (databaseChanged || linksHistoryVisibilityChanged))
+            if (historyForm != null && !historyForm.IsDisposed && (databaseChanged || linksHistoryVisibilityChanged || richTextHistoryVisibilityChanged))
             {
                 historyForm.RefreshTabsAndReload();
             }
@@ -544,7 +548,7 @@ namespace Clipman
         {
             if (entry == null) return;
             IgnoreClipboardChanges(1);
-            Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
+            SetEntryClipboard(entry);
             store.MarkUsed(entry.Id);
             sounds.Copy(settings.SoundsEnabled);
         }
@@ -658,6 +662,8 @@ namespace Clipman
                 return;
             }
 
+            var richText = settings.RichTextHistoryEnabled ? RichTextData.CaptureFromClipboard() : null;
+
             if (store.HasRecentlyTouchedRemoteText(text, Environment.MachineName, 90000))
             {
                 return;
@@ -676,6 +682,7 @@ namespace Clipman
                 if (!string.Equals(cleaned, text, StringComparison.Ordinal))
                 {
                     text = cleaned;
+                    richText = null;
                     try
                     {
                         IgnoreClipboardChanges(1);
@@ -689,7 +696,7 @@ namespace Clipman
             }
 
             var group = settings.AutoGroupByApp ? FriendlyProcessName(sourceProcessName) : string.Empty;
-            store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group);
+            store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group, richText);
             if (IsStorageUnavailable())
             {
                 sounds.Skip(settings.SoundsEnabled);
@@ -699,7 +706,7 @@ namespace Clipman
 
             if (!recordedFileEvent)
             {
-                lastReceivedHistoryTab = LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text;
+                lastReceivedHistoryTab = richText != null ? HistoryTabs.RichText : LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text;
             }
 
             sounds.Copy(settings.SoundsEnabled);
@@ -1180,6 +1187,11 @@ namespace Clipman
         {
             var sharedState = SharedUpdateStateStore.Load(settingsStore.SettingsDirectory);
             var serverStatus = store.GetServerSyncStatus();
+            var entries = store.GetEntries();
+            var richEntries = entries.Where(e => RichTextData.Normalize(e.RichText) != null).ToList();
+            var richHtmlEntries = richEntries.Count(e => !string.IsNullOrEmpty(e.RichText.HtmlFragment));
+            var richRtfEntries = richEntries.Count(e => !string.IsNullOrEmpty(e.RichText.RtfBase64));
+            long richBytes = richEntries.Sum(e => (long)Encoding.UTF8.GetByteCount(e.RichText.HtmlFragment ?? string.Empty) + RichTextData.DecodedRtfByteCount(e.RichText.RtfBase64));
             var ignored = settings.IgnoredProcesses == null || settings.IgnoredProcesses.Count == 0
                 ? "None"
                 : string.Join(", ", settings.IgnoredProcesses);
@@ -1200,7 +1212,9 @@ namespace Clipman
                 "Database path: " + settings.DatabasePath + "\r\n" +
                 "Database path type: " + (settings.UseDefaultDatabasePath ? "Default beside Clipman" : "Explicit") + "\r\n" +
                 "Database storage status: " + (string.IsNullOrWhiteSpace(store.LastStorageError) ? "OK" : "Unavailable: " + store.LastStorageError) + "\r\n" +
-                "Entries: " + store.GetEntries().Count + "\r\n" +
+                "Entries: " + entries.Count + "\r\n" +
+                "Rich text history: " + (settings.RichTextHistoryEnabled ? "enabled" : "disabled") + "\r\n" +
+                "Rich text payloads: " + richEntries.Count + " entries (HTML " + richHtmlEntries + ", RTF " + richRtfEntries + ", " + richBytes + " bytes)\r\n" +
                 "File history path: " + fileEventStore.DatabasePath + "\r\n" +
                 "File history storage status: " + (string.IsNullOrWhiteSpace(fileEventStore.LastStorageError) ? "OK" : "Unavailable: " + fileEventStore.LastStorageError) + "\r\n" +
                 "File history events: " + fileEventStore.GetEvents().Count + "\r\n" +
@@ -1347,7 +1361,7 @@ namespace Clipman
                 if (mode == QuickPasteModes.CopyOnly)
                 {
                     IgnoreClipboardChanges(1);
-                    Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
+                    SetEntryClipboard(entry);
                     store.MarkUsed(entry.Id);
                     sounds.Copy(settings.SoundsEnabled);
                     return;
@@ -1367,7 +1381,7 @@ namespace Clipman
                 }
 
                 IgnoreClipboardChanges(mode == QuickPasteModes.PasteKeep ? 1 : 2);
-                Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
+                SetEntryClipboard(entry);
                 store.MarkUsed(entry.Id);
                 sounds.Copy(settings.SoundsEnabled);
                 if (mode == QuickPasteModes.PasteKeep)
@@ -1736,8 +1750,20 @@ namespace Clipman
             lastAutoCopiedRemoteEntryId = entry.Id ?? string.Empty;
             lastAutoCopiedRemoteEntryStamp = stamp;
             IgnoreClipboardChanges(1);
-            Clipboard.SetText(ResolvedEntryText(entry), TextDataFormat.UnicodeText);
+            SetEntryClipboard(entry);
             sounds.Remote(settings.SoundsEnabled);
+        }
+
+        private static void SetEntryClipboard(ClipEntry entry)
+        {
+            var text = ResolvedEntryText(entry);
+            var data = new DataObject();
+            data.SetText(text, TextDataFormat.UnicodeText);
+            if (entry != null && !entry.IsTemplate && string.Equals(text, entry.Text ?? string.Empty, StringComparison.Ordinal))
+            {
+                RichTextData.AddToDataObject(data, entry.RichText);
+            }
+            Clipboard.SetDataObject(data, true);
         }
 
         private static string ResolvedEntryText(ClipEntry entry)

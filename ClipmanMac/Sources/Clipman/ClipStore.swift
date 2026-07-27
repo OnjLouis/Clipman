@@ -171,7 +171,7 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    func addText(_ text: String, group: String = "", maxEntries: Int = 1000, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+    func addText(_ text: String, group: String = "", richText: RichTextPayload? = nil, maxEntries: Int = 1000, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         guard !text.isEmpty else {
             Task { @MainActor in
                 completion?(false)
@@ -190,17 +190,24 @@ final class ClipStore: @unchecked Sendable {
             if let index = self.database.Entries.firstIndex(where: { $0.Text == text }) {
                 self.database.Entries[index].LastUsedUnixMs = now
                 self.database.Entries[index].SourceMachine = self.machineName
+                if let richText = RichTextData.normalize(richText) {
+                    self.database.Entries[index].RichText = richText
+                    self.database.Entries[index].RichTextUpdatedUnixMs = now
+                }
                 if !trimmedGroup.isEmpty {
                     self.database.Entries[index].Group = trimmedGroup
                 }
             } else {
+                let normalizedRichText = RichTextData.normalize(richText)
                 self.database.Entries.append(ClipEntry(
                     Text: text,
                     Group: trimmedGroup,
                     SourceMachine: self.machineName,
                     CreatedUnixMs: now,
                     LastUsedUnixMs: now,
-                    ManualOrder: self.nextManualOrderLocked()
+                    ManualOrder: self.nextManualOrderLocked(),
+                    RichText: normalizedRichText,
+                    RichTextUpdatedUnixMs: normalizedRichText == nil ? 0 : now
                 ))
             }
             self.pruneLocked(maxEntries: maxEntries)
@@ -275,8 +282,13 @@ final class ClipStore: @unchecked Sendable {
             guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
             self.database.Entries[index].Name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let textChanged = self.database.Entries[index].Text != text
             self.database.Entries[index].Text = text
             self.database.Entries[index].LastUsedUnixMs = TimeUtil.nowUnixMs()
+            if textChanged {
+                self.database.Entries[index].RichText = nil
+                self.database.Entries[index].RichTextUpdatedUnixMs = self.database.Entries[index].LastUsedUnixMs
+            }
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
         }

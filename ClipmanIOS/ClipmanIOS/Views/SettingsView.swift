@@ -39,6 +39,7 @@ struct SettingsView: View {
                     Toggle("Play sounds", isOn: $draft.soundsEnabled)
                     Toggle("Use haptics", isOn: $draft.hapticsEnabled)
                     Toggle("Enable links history", isOn: $draft.linksEnabled)
+                    Toggle("Preserve copied formatting and show Rich Text history", isOn: $draft.richTextEnabled)
                     Toggle("Copy latest remote item to iOS clipboard", isOn: $draft.autoCopyRemote)
                     Toggle("Offer to add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
                     Toggle("Require biometric or device authentication", isOn: $draft.requireAuthentication)

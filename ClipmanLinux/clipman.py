@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
 import html
+import base64
+import binascii
 import os
 import pathlib
 import re
@@ -10,12 +12,14 @@ import sys
 import threading
 import time
 import urllib.parse
+from html.parser import HTMLParser
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gtk
+gi.require_version("Pango", "1.0")
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango
 from update_service import UpdateError, find_update, stage_update
 
 
@@ -32,6 +36,7 @@ except OSError:
     BUILD_STAMP = "unknown"
 DEFAULT_SHOW_HOTKEY = "<Control><Alt>backslash"
 DEFAULT_TOGGLE_HOTKEY = "<Control><Alt>grave"
+DEFAULT_HISTORY_TAB_ORDER = ["text", "links", "rich", "files"]
 FILE_MANAGER_CLIPBOARD_PREFIXES = {
     "x-special/nautilus-clipboard",
     "x-special/gnome-copied-files",
@@ -43,6 +48,41 @@ FILE_CLIPBOARD_MIME_TYPES = (
     "x-special/mate-copied-files",
     "text/uri-list",
 )
+RICH_HTML_MIME_TYPES = ("text/html",)
+RICH_RTF_MIME_TYPES = ("text/rtf", "application/rtf")
+MAX_RICH_HTML_BYTES = 768 * 1024
+MAX_RICH_RTF_BYTES = 1024 * 1024
+MAX_RICH_COMBINED_BYTES = 1792 * 1024
+
+
+def normalize_history_tab_order(values):
+    result = []
+    for value in values if isinstance(values, list) else []:
+        normalized = str(value).strip().lower()
+        if normalized in DEFAULT_HISTORY_TAB_ORDER and normalized not in result:
+            result.append(normalized)
+    result.extend(section for section in DEFAULT_HISTORY_TAB_ORDER if section not in result)
+    return result
+
+
+def move_history_tab_order(values, selected, direction, links_enabled, rich_text_enabled):
+    order = normalize_history_tab_order(values)
+    visible = [
+        section for section in order
+        if (section != "links" or links_enabled) and (section != "rich" or rich_text_enabled)
+    ]
+    try:
+        selected_index = visible.index(selected)
+    except ValueError:
+        return None
+    target_index = selected_index + (-1 if direction < 0 else 1)
+    if direction == 0 or target_index < 0 or target_index >= len(visible):
+        return None
+    first, second = order.index(visible[selected_index]), order.index(visible[target_index])
+    order[first], order[second] = order[second], order[first]
+    return order
+
+
 TRACKING_PARAMETERS = {
     "fbclid", "gclid", "dclid", "msclkid", "gbraid", "wbraid", "igshid", "mc_cid", "mc_eid",
     "mkt_tok", "vero_id", "_hsenc", "_hsmi", "yclid", "twclid", "li_fat_id", "sc_cid",
@@ -100,6 +140,133 @@ def entry_summary(entry, limit=240):
     if name and text:
         return f"{name}: {text}"
     return name or text or str(entry.get("display", "Empty entry"))
+
+
+def normalize_rich_text(value):
+    if not isinstance(value, dict):
+        return None
+    html_fragment = str(value.get("html_fragment") or "")
+    if len(html_fragment.encode("utf-8")) > MAX_RICH_HTML_BYTES:
+        html_fragment = ""
+    rtf_base64 = str(value.get("rtf_base64") or "")
+    try:
+        rtf = base64.b64decode(rtf_base64, validate=True) if rtf_base64 else b""
+    except (binascii.Error, ValueError, TypeError):
+        rtf, rtf_base64 = b"", ""
+    if len(rtf) > MAX_RICH_RTF_BYTES:
+        rtf, rtf_base64 = b"", ""
+    if len(html_fragment.encode("utf-8")) + len(rtf) > MAX_RICH_COMBINED_BYTES:
+        if html_fragment:
+            rtf, rtf_base64 = b"", ""
+        else:
+            return None
+    if not html_fragment and not rtf:
+        return None
+    preferred = str(value.get("preferred_format") or "").casefold()
+    if ((preferred == "html" and not html_fragment) or
+            (preferred == "rtf" and not rtf) or
+            preferred not in ("html", "rtf")):
+        preferred = "html" if html_fragment else "rtf"
+    return {
+        "version": 1,
+        "html_fragment": html_fragment,
+        "rtf_base64": rtf_base64,
+        "preferred_format": preferred.title(),
+    }
+
+
+class SafeHTMLBufferParser(HTMLParser):
+    TAGS = {
+        "b": "bold", "strong": "bold", "i": "italic", "em": "italic",
+        "u": "underline", "s": "strike", "del": "strike", "code": "code",
+        "pre": "code", "h1": "heading", "h2": "heading", "h3": "heading",
+    }
+    BLOCK_START = {"p", "div", "section", "article", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table", "tr"}
+    BLOCK_END = BLOCK_START | {"li"}
+
+    def __init__(self, buffer):
+        super().__init__(convert_charrefs=True)
+        self.buffer = buffer
+        self.active = []
+        self.ignored_depth = 0
+
+    def _insert(self, text):
+        if not text:
+            return
+        iterator = self.buffer.get_end_iter()
+        tags = [self.buffer.get_tag_table().lookup(name) for name in self.active]
+        tags = [tag for tag in tags if tag is not None]
+        if tags:
+            self.buffer.insert_with_tags(iterator, text, *tags)
+        else:
+            self.buffer.insert(iterator, text)
+
+    def _newline(self):
+        text = self.buffer.get_text(self.buffer.get_start_iter(), self.buffer.get_end_iter(), True)
+        if text and not text.endswith("\n"):
+            self._insert("\n")
+
+    def handle_starttag(self, tag, _attrs):
+        tag = tag.casefold()
+        if tag in ("script", "style", "noscript"):
+            self.ignored_depth += 1
+            return
+        if self.ignored_depth:
+            return
+        if tag in self.BLOCK_START:
+            self._newline()
+        if tag == "br":
+            self._insert("\n")
+        elif tag == "li":
+            self._newline(); self._insert("- ")
+        elif tag in ("td", "th"):
+            text = self.buffer.get_text(self.buffer.get_start_iter(), self.buffer.get_end_iter(), True)
+            if text and not text.endswith(("\n", "\t")):
+                self._insert("\t")
+        mapped = self.TAGS.get(tag)
+        if mapped:
+            self.active.append(mapped)
+
+    def handle_endtag(self, tag):
+        tag = tag.casefold()
+        if tag in ("script", "style", "noscript"):
+            self.ignored_depth = max(0, self.ignored_depth - 1)
+            return
+        if self.ignored_depth:
+            return
+        mapped = self.TAGS.get(tag)
+        if mapped and mapped in self.active:
+            index = len(self.active) - 1 - self.active[::-1].index(mapped)
+            self.active.pop(index)
+        if tag in self.BLOCK_END:
+            self._newline()
+
+    def handle_data(self, data):
+        if not self.ignored_depth:
+            self._insert(data)
+
+
+def populate_safe_rich_buffer(buffer, rich_text, fallback):
+    rich_text = normalize_rich_text(rich_text)
+    if not rich_text or not rich_text.get("html_fragment"):
+        buffer.set_text(fallback)
+        return False
+    buffer.create_tag("bold", weight=Pango.Weight.BOLD)
+    buffer.create_tag("italic", style=Pango.Style.ITALIC)
+    buffer.create_tag("underline", underline=Pango.Underline.SINGLE)
+    buffer.create_tag("strike", strikethrough=True)
+    buffer.create_tag("code", family="monospace")
+    buffer.create_tag("heading", weight=Pango.Weight.BOLD, scale=1.2)
+    try:
+        SafeHTMLBufferParser(buffer).feed(rich_text["html_fragment"])
+    except (ValueError, TypeError):
+        buffer.set_text(fallback)
+        return False
+    rendered = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True).strip()
+    if not rendered:
+        buffer.set_text(fallback)
+        return False
+    return True
 
 
 def file_event_summary(event):
@@ -374,6 +541,7 @@ class Preferences:
             "capture_on_start": False,
             "play_sounds": True,
             "last_section": "text",
+            "history_tab_order": DEFAULT_HISTORY_TAB_ORDER.copy(),
             "last_received_section": "text",
             "last_preferences_tab": 0,
             "sort_mode": "manual",
@@ -384,6 +552,7 @@ class Preferences:
             "dynamic_history_mode": False,
             "paste_after_enter": False,
             "links_history_enabled": True,
+            "rich_text_history_enabled": False,
             "save_list_position": True,
             "auto_group_by_app": False,
             "auto_remove_url_tracking": False,
@@ -409,12 +578,13 @@ class Preferences:
                         self.values[key] = loaded[key]
         except (OSError, ValueError):
             pass
-        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries"):
+        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries"):
             if not isinstance(self.values[key], bool):
                 self.values[key] = defaults[key]
-        if self.values["last_section"] not in ("text", "links", "files"):
+        if self.values["last_section"] not in ("text", "links", "rich", "files"):
             self.values["last_section"] = defaults["last_section"]
-        if self.values["last_received_section"] not in ("text", "links", "files"):
+        self.values["history_tab_order"] = normalize_history_tab_order(self.values["history_tab_order"])
+        if self.values["last_received_section"] not in ("text", "links", "rich", "files"):
             self.values["last_received_section"] = defaults["last_received_section"]
         if not isinstance(self.values["last_preferences_tab"], int) or not 0 <= self.values["last_preferences_tab"] <= 5:
             self.values["last_preferences_tab"] = 0
@@ -750,8 +920,11 @@ class ClipmanApplication(Gtk.Application):
             "pin": self.toggle_pin,
             "move-up": lambda *_: self.move_entry(-1),
             "move-down": lambda *_: self.move_entry(1),
+            "move-tab-left": lambda *_: self.move_history_tab(-1),
+            "move-tab-right": lambda *_: self.move_history_tab(1),
             "text": lambda *_: self.switch_section("text"),
             "links": lambda *_: self.switch_section("links"),
+            "rich": lambda *_: self.switch_section("rich"),
             "files": lambda *_: self.switch_section("files"),
             "clear-file-history": self.clear_file_history,
             "remove-unavailable-files": self.remove_unavailable_file_history,
@@ -817,7 +990,8 @@ class ClipmanApplication(Gtk.Application):
             "app.pin": ["<Shift>Return"], "app.go-to-file": ["<Control>Return"],
             "app.clear-file-history": ["<Control>Delete"], "app.remove-unavailable-files": ["<Alt>Delete"],
             "app.move-up": ["<Alt>Up"], "app.move-down": ["<Alt>Down"],
-            "app.text": ["<Alt>t"], "app.links": ["<Alt>l"], "app.files": ["<Alt>i"],
+            "app.move-tab-left": ["<Alt>Left"], "app.move-tab-right": ["<Alt>Right"],
+            "app.text": ["<Alt>t"], "app.links": ["<Alt>l"], "app.rich": ["<Alt>r"], "app.files": ["<Alt>i"],
             "app.top": ["<Control>Home"], "app.bottom": ["<Control>End"],
             "app.preferences": ["<Control>comma"], "app.quit": ["<Control>q"],
             "app.secrets": ["<Control><Shift>e"],
@@ -843,12 +1017,38 @@ class ClipmanApplication(Gtk.Application):
         self.menu_bar = Gtk.PopoverMenuBar.new_from_model(self._menu_model())
         root.append(self.menu_bar)
 
+        self.section_tabs = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.section_tabs.add_css_class("linked")
+        self.section_tabs.set_accessible_role(Gtk.AccessibleRole.TAB_LIST)
+        self.section_tabs.update_property([Gtk.AccessibleProperty.LABEL], ["History sections"])
+        root.append(self.section_tabs)
+        self.section_buttons = {}
+        self.updating_section_tabs = False
+        section_labels = {
+            "text": ("Text", "Alt+T"),
+            "links": ("Links", "Alt+L"),
+            "rich": ("Rich Text", "Alt+R"),
+            "files": ("Files", "Alt+I"),
+        }
+        first_button = None
+        for section, (label, shortcut) in section_labels.items():
+            button = Gtk.ToggleButton(label=label)
+            button.set_accessible_role(Gtk.AccessibleRole.TAB)
+            button.update_property([Gtk.AccessibleProperty.LABEL], [label + " history"])
+            button.set_tooltip_text(label + " history (" + shortcut + ")")
+            if first_button is None:
+                first_button = button
+            else:
+                button.set_group(first_button)
+            button.connect("toggled", self._section_tab_toggled, section)
+            key_controller = Gtk.EventControllerKey()
+            key_controller.connect("key-pressed", self._section_tab_key_pressed)
+            button.add_controller(key_controller)
+            self.section_tabs.append(button)
+            self.section_buttons[section] = button
+
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         root.append(toolbar)
-        self.section_button = Gtk.Button(label="Switch to Links")
-        self.section_button.set_tooltip_text("Switch between text, links and file clipboard history")
-        self.section_button.connect("clicked", lambda *_: self.cycle_section(1))
-        toolbar.append(self.section_button)
         self.search = Gtk.SearchEntry(placeholder_text="Search clipboard history")
         self.search.update_property([Gtk.AccessibleProperty.LABEL], ["Search clipboard history"])
         self.search.set_hexpand(True)
@@ -886,7 +1086,7 @@ class ClipmanApplication(Gtk.Application):
         self.groups_menu = Gio.Menu()
         self.actions_menu = Gio.Menu()
         self.quick_paste_menu = Gio.Menu()
-        view = Gio.Menu(); view.append("_Text History", "app.text"); view.append("_Links History", "app.links"); view.append("File H_istory", "app.files"); view.append("Go to T_op", "app.top"); view.append("Go to _Bottom", "app.bottom")
+        view = Gio.Menu(); view.append("_Text History", "app.text"); view.append("_Links History", "app.links"); view.append("_Rich Text History", "app.rich"); view.append("File H_istory", "app.files"); view.append("Move tab l_eft", "app.move-tab-left"); view.append("Move tab ri_ght", "app.move-tab-right"); view.append("Go to T_op", "app.top"); view.append("Go to _Bottom", "app.bottom")
         self.sort_menu = Gio.Menu(); view.append_submenu("_Sort", self.sort_menu)
         options = Gio.Menu(); options.append("_Preferences", "app.preferences"); options.append("S_ecrets", "app.secrets"); options.append("_Open settings folder", "app.open-settings"); options.append("_Toggle monitoring", "app.toggle-monitoring")
         help_menu = Gio.Menu(); help_menu.append("_Manual", "app.manual"); help_menu.append("_Check for Updates...", "app.check-updates"); help_menu.append("_Version History", "app.version-history"); help_menu.append("_Project page", "app.project"); help_menu.append("Con_tact", "app.contact"); help_menu.append("_Donate", "app.donate"); help_menu.append("Dia_gnostics", "app.diagnostics"); help_menu.append("_About Clipman", "app.about")
@@ -996,6 +1196,9 @@ class ClipmanApplication(Gtk.Application):
         links_action = self.action_objects.get("links")
         if links_action:
             links_action.set_enabled(self.preferences.values["links_history_enabled"])
+        rich_action = self.action_objects.get("rich")
+        if rich_action:
+            rich_action.set_enabled(self.preferences.values["rich_text_history_enabled"])
         group_action = self.lookup_action("group")
         if group_action:
             group_action.set_enabled(writable_text)
@@ -1016,8 +1219,8 @@ class ClipmanApplication(Gtk.Application):
         )
         if direct_modifiers == Gdk.ModifierType.ALT_MASK:
             key = Gdk.keyval_to_lower(keyval)
-            if key in (Gdk.KEY_t, Gdk.KEY_l, Gdk.KEY_i):
-                self.switch_section({Gdk.KEY_t: "text", Gdk.KEY_l: "links", Gdk.KEY_i: "files"}[key])
+            if key in (Gdk.KEY_t, Gdk.KEY_l, Gdk.KEY_r, Gdk.KEY_i):
+                self.switch_section({Gdk.KEY_t: "text", Gdk.KEY_l: "links", Gdk.KEY_r: "rich", Gdk.KEY_i: "files"}[key])
                 return True
             if key == Gdk.KEY_g and self.section != "files":
                 self.group_picker.grab_focus()
@@ -1098,7 +1301,7 @@ class ClipmanApplication(Gtk.Application):
 
     def move_tab_focus(self, direction):
         controls = [
-            self.section_button, self.search, self.group_picker,
+            self.section_buttons[self.section], self.search, self.group_picker,
             self.listbox,
         ]
         if self.section == "files":
@@ -1182,25 +1385,92 @@ class ClipmanApplication(Gtk.Application):
         return GLib.SOURCE_CONTINUE
 
     def _clipboard_read(self, clipboard, result, _data):
-        self.clipboard_read_busy = False
         try: text = clipboard.read_text_finish(result)
-        except GLib.Error: return
+        except GLib.Error:
+            self.clipboard_read_busy = False
+            return
+        if text is not None and is_file_manager_clipboard_payload(text):
+            self.clipboard_read_busy = False
+            mime_type = text.replace("\r\n", "\n").split("\n", 1)[0].strip().casefold()
+            paths, operation = parse_file_clipboard_payload(text, mime_type)
+            self._capture_file_paths(clipboard, paths, operation, mime_type, False)
+            return
+        self._read_rich_clipboard(clipboard, text, self._process_clipboard_text)
+
+    def _read_rich_clipboard(self, clipboard, text, callback):
+        if not self.preferences.values["rich_text_history_enabled"]:
+            callback(clipboard, text, None)
+            return
+        formats = clipboard.get_formats()
+        mime_types = []
+        html_type = next((value for value in RICH_HTML_MIME_TYPES if formats.contain_mime_type(value)), None)
+        rtf_type = next((value for value in RICH_RTF_MIME_TYPES if formats.contain_mime_type(value)), None)
+        if html_type: mime_types.append(("html", html_type, MAX_RICH_HTML_BYTES))
+        if rtf_type: mime_types.append(("rtf", rtf_type, MAX_RICH_RTF_BYTES))
+        if not mime_types:
+            callback(clipboard, text, None)
+            return
+        state = {"clipboard": clipboard, "text": text, "callback": callback, "pending": mime_types, "html": "", "rtf": b""}
+        self._read_next_rich_format(state)
+
+    def _read_next_rich_format(self, state):
+        if not state["pending"]:
+            payload = normalize_rich_text({
+                "html_fragment": state["html"],
+                "rtf_base64": base64.b64encode(state["rtf"]).decode("ascii") if state["rtf"] else "",
+                "preferred_format": "Html" if state["html"] else "Rtf",
+            })
+            state["callback"](state["clipboard"], state["text"], payload)
+            return
+        kind, mime_type, limit = state["pending"].pop(0)
+        state["current"] = (kind, limit)
+        state["clipboard"].read_async([mime_type], GLib.PRIORITY_DEFAULT, None, self._rich_stream_ready, state)
+
+    def _rich_stream_ready(self, clipboard, result, state):
+        try:
+            stream, _mime_type = clipboard.read_finish(result)
+            if stream is None:
+                raise ValueError("Clipboard returned no rich-text stream")
+            kind, limit = state["current"]
+            stream.read_bytes_async(limit + 1, GLib.PRIORITY_DEFAULT, None, self._rich_bytes_ready, (stream, state, kind, limit))
+            return
+        except (GLib.Error, ValueError):
+            self._read_next_rich_format(state)
+
+    def _rich_bytes_ready(self, stream, result, rich_state):
+        _stream, state, kind, limit = rich_state
+        try:
+            data = bytes(stream.read_bytes_finish(result).get_data())
+            if len(data) <= limit:
+                if kind == "html":
+                    state["html"] = data.rstrip(b"\x00").decode("utf-8", errors="replace")
+                else:
+                    state["rtf"] = data.rstrip(b"\x00")
+        except (GLib.Error, ValueError):
+            pass
+        finally:
+            try: stream.close(None)
+            except GLib.Error: pass
+        self._read_next_rich_format(state)
+
+    def _process_clipboard_text(self, clipboard, text, rich_text):
+        self.clipboard_read_busy = False
         first = not self.clipboard_baseline_ready
         self.clipboard_baseline_ready = True
         if text is None:
             if first: self.capture_current_clipboard = False
-            return
-        if is_file_manager_clipboard_payload(text):
-            mime_type = text.replace("\r\n", "\n").split("\n", 1)[0].strip().casefold()
-            paths, operation = parse_file_clipboard_payload(text, mime_type)
-            self._capture_file_paths(clipboard, paths, operation, mime_type, False)
             return
         if (
             time.monotonic() - self.last_file_clipboard_monotonic <= 3.0
             and is_companion_file_clipboard_text(text, self.last_clipboard_files)
         ):
             return
-        signature = ("text", text)
+        normalized_rich = normalize_rich_text(rich_text)
+        signature = (
+            "text", text,
+            normalized_rich.get("html_fragment", "") if normalized_rich else "",
+            normalized_rich.get("rtf_base64", "") if normalized_rich else "",
+        )
         if signature == self.last_clipboard_signature:
             return
         self.last_clipboard_signature = signature
@@ -1224,7 +1494,7 @@ class ClipmanApplication(Gtk.Application):
                 if match:
                     self.sounds.play("exclude")
                     return
-            self._put_text(text, quiet=True, automatic=True, source=source)
+            self._put_text(text, quiet=True, automatic=True, source=source, rich_text=normalized_rich)
 
     def _clipboard_files_read(self, clipboard, result, force=False):
         try:
@@ -1332,10 +1602,12 @@ class ClipmanApplication(Gtk.Application):
             self.file_events = incoming_file_events
         if changed or history_changed or (not self.entries and not self.file_events):
             self.rebuild_list()
-        text_count = sum(1 for entry in self.entries if entry["section"] == "text")
-        link_count = len(self.entries) - text_count
+        rich_count = sum(1 for entry in self.entries if entry.get("rich_text"))
+        plain_entries = [entry for entry in self.entries if not entry.get("rich_text")]
+        text_count = sum(1 for entry in plain_entries if entry["section"] == "text")
+        link_count = sum(1 for entry in plain_entries if entry["section"] == "links")
         prefix = "Offline read-only cache" if self.offline else "Updated"
-        self.set_status(f"{prefix}: {len(self.entries)} entries, {text_count} text, {link_count} links, {len(self.file_events)} file events.", announce)
+        self.set_status(f"{prefix}: {len(self.entries)} entries, {text_count} text, {link_count} links, {rich_count} rich text, {len(self.file_events)} file events.", announce)
 
     def _maybe_copy_remote_entry(self, entries):
         stamps = {entry.get("id", ""): entry.get("created_unix_ms", 0) for entry in entries if entry.get("id")}
@@ -1358,14 +1630,14 @@ class ClipmanApplication(Gtk.Application):
         if entry.get("is_template"):
             self.backend.call("resolve_template", {"id": entry["id"]}, lambda message: self._remote_template_result(message, entry))
         else:
-            self._copy_remote_text(entry.get("text", ""), entry.get("device", "another device"))
+            self._copy_remote_text(entry.get("text", ""), entry.get("device", "another device"), entry.get("rich_text"))
 
     def _remote_template_result(self, message, entry):
         if message.get("ok"):
             self._copy_remote_text(message["result"]["text"], entry.get("device", "another device"))
 
-    def _copy_remote_text(self, text, device):
-        self._set_clipboard(text)
+    def _copy_remote_text(self, text, device, rich_text=None):
+        self._set_clipboard(text, rich_text)
         self.sounds.play("remote")
         self.set_status("Clipboard updated by " + device + ".", True)
 
@@ -1405,6 +1677,8 @@ class ClipmanApplication(Gtk.Application):
         if not entry:
             self.sounds.play("skip"); return
         target = entry.get("section", "text")
+        if entry.get("rich_text") and self.preferences.values["rich_text_history_enabled"]:
+            target = "rich"
         if target == "links" and not self.preferences.values["links_history_enabled"]:
             target = "text"
         self.section = target
@@ -1445,6 +1719,13 @@ class ClipmanApplication(Gtk.Application):
         result = []
         for entry in self.entries:
             entry_section = entry["section"]
+            has_rich_text = bool(entry.get("rich_text"))
+            if self.preferences.values["rich_text_history_enabled"]:
+                if self.section == "rich":
+                    if not has_rich_text: continue
+                    entry_section = "rich"
+                elif has_rich_text:
+                    continue
             if entry_section == "links" and not self.preferences.values["links_history_enabled"]:
                 entry_section = "text"
             if entry_section != self.section: continue
@@ -1470,6 +1751,8 @@ class ClipmanApplication(Gtk.Application):
     def rebuild_list(self):
         if not hasattr(self, "listbox"): return
         if self.section == "links" and not self.preferences.values["links_history_enabled"]:
+            self.section = "text"
+        if self.section == "rich" and not self.preferences.values["rich_text_history_enabled"]:
             self.section = "text"
         selected_ids = {entry.get("id") for entry in self.selected_entries()}
         child = self.listbox.get_first_child()
@@ -1546,10 +1829,8 @@ class ClipmanApplication(Gtk.Application):
             self.listbox.append(row)
             if entry["id"] in selected_ids: self.listbox.select_row(row)
         if rows and not self.listbox.get_selected_rows(): self.listbox.select_row(self.listbox.get_row_at_index(0))
-        sections = ["text", "links", "files"] if self.preferences.values["links_history_enabled"] else ["text", "files"]
-        next_section = sections[(sections.index(self.section) + 1) % len(sections)].title()
-        self.section_button.set_label("Switch to " + next_section)
-        titles = {"text": "Text History", "links": "Links History", "files": "File History"}
+        self._update_section_tabs()
+        titles = {"text": "Text History", "links": "Links History", "rich": "Rich Text History", "files": "File History"}
         self.window.set_title("Clipman - " + titles[self.section])
         self.group_picker.set_visible(self.section != "files")
         self.group_label.set_visible(self.section != "files")
@@ -1649,21 +1930,102 @@ class ClipmanApplication(Gtk.Application):
         popover.connect("closed", lambda widget: widget.unparent())
         popover.popup()
 
-    def switch_section(self, section):
-        if section not in ("text", "links", "files"):
+    def _available_sections(self):
+        return [
+            section for section in normalize_history_tab_order(self.preferences.values["history_tab_order"])
+            if (section != "links" or self.preferences.values["links_history_enabled"])
+            and (section != "rich" or self.preferences.values["rich_text_history_enabled"])
+        ]
+
+    def _update_section_tabs(self):
+        available = self._available_sections()
+        if self.section not in available:
+            self.section = "text"
+        self.updating_section_tabs = True
+        try:
+            previous = None
+            for section in normalize_history_tab_order(self.preferences.values["history_tab_order"]):
+                button = self.section_buttons[section]
+                self.section_tabs.reorder_child_after(button, previous)
+                previous = button
+            for section, button in self.section_buttons.items():
+                visible = section in available
+                button.set_visible(visible)
+                button.set_focusable(visible and section == self.section)
+                button.set_active(section == self.section)
+                button.update_state([Gtk.AccessibleState.SELECTED], [1 if section == self.section else 0])
+        finally:
+            self.updating_section_tabs = False
+
+    def move_history_tab(self, direction):
+        order = move_history_tab_order(
+            self.preferences.values["history_tab_order"],
+            self.section,
+            direction,
+            self.preferences.values["links_history_enabled"],
+            self.preferences.values["rich_text_history_enabled"],
+        )
+        if order is None:
+            self.sounds.play("skip")
+            self.set_status("The current history tab cannot move any farther " + ("left." if direction < 0 else "right."), True)
+            return
+        tab_had_focus = self.window.get_focus() in self.section_buttons.values()
+        self.preferences.values["history_tab_order"] = order
+        self.preferences.save()
+        self._update_section_tabs()
+        if tab_had_focus:
+            self.section_buttons[self.section].grab_focus()
+        else:
+            self.focus_history()
+        names = {"text": "Text", "links": "Links", "rich": "Rich Text", "files": "File"}
+        self.set_status("Moved " + names[self.section] + " history tab " + ("left." if direction < 0 else "right."), True)
+
+    def _section_tab_toggled(self, button, section):
+        if self.updating_section_tabs or not button.get_active() or section == self.section:
+            return
+        self.switch_section(section, focus_history=False)
+        self.section_buttons[section].grab_focus()
+
+    def _section_tab_key_pressed(self, _controller, keyval, _keycode, state):
+        modifiers = state & (
+            Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+            Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.SUPER_MASK
+        )
+        if modifiers:
+            return False
+        sections = self._available_sections()
+        if keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
+            target = sections[(sections.index(self.section) - 1) % len(sections)]
+        elif keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right):
+            target = sections[(sections.index(self.section) + 1) % len(sections)]
+        elif keyval in (Gdk.KEY_Home, Gdk.KEY_KP_Home):
+            target = sections[0]
+        elif keyval in (Gdk.KEY_End, Gdk.KEY_KP_End):
+            target = sections[-1]
+        else:
+            return False
+        self.switch_section(target, focus_history=False)
+        self.section_buttons[target].grab_focus()
+        return True
+
+    def switch_section(self, section, focus_history=True):
+        if section not in ("text", "links", "rich", "files"):
             return
         if section == "links" and not self.preferences.values["links_history_enabled"]:
             self.sounds.play("skip"); self.set_status("Links History is disabled in Preferences.", True); return
+        if section == "rich" and not self.preferences.values["rich_text_history_enabled"]:
+            self.sounds.play("skip"); self.set_status("Rich Text History is disabled in Preferences.", True); return
         self.section = section
         self.preferences.values["last_section"] = section
         self.preferences.save()
         self.rebuild_list()
-        names = {"text": "Text", "links": "Links", "files": "File"}
+        names = {"text": "Text", "links": "Links", "rich": "Rich Text", "files": "File"}
         self.set_status(names[section] + " clipboard history.", True)
-        self.focus_history()
+        if focus_history:
+            self.focus_history()
 
     def cycle_section(self, direction):
-        sections = ["text", "links", "files"] if self.preferences.values["links_history_enabled"] else ["text", "files"]
+        sections = self._available_sections()
         try:
             index = sections.index(self.section)
         except ValueError:
@@ -1763,7 +2125,8 @@ class ClipmanApplication(Gtk.Application):
             self.backend.call("resolve_many", {"ids": [entry["id"] for entry in entries]}, lambda message: self._copy_result(message, entries, close))
         else:
             text = "\n".join(entry.get("text", "") for entry in entries)
-            self._set_clipboard(text); self._after_copy(entries, close)
+            rich_text = entries[0].get("rich_text") if len(entries) == 1 else None
+            self._set_clipboard(text, rich_text); self._after_copy(entries, close)
 
     def _copy_result(self, message, entries, close):
         if not message.get("ok"): self.show_error(message.get("error")); return
@@ -1771,9 +2134,23 @@ class ClipmanApplication(Gtk.Application):
         text = "\n".join(result.get("texts", [])) if "texts" in result else result.get("text", "")
         self._set_clipboard(text); self._after_copy(entries, close)
 
-    def _set_clipboard(self, text):
+    def _set_clipboard(self, text, rich_text=None):
         self.own_clipboard_text = text
-        self.window.get_display().get_clipboard().set(text)
+        rich_text = normalize_rich_text(rich_text)
+        if not rich_text:
+            self.window.get_display().get_clipboard().set(text)
+            return
+        encoded = text.encode("utf-8")
+        providers = [
+            Gdk.ContentProvider.new_for_bytes("text/plain;charset=utf-8", GLib.Bytes.new(encoded)),
+            Gdk.ContentProvider.new_for_bytes("text/plain", GLib.Bytes.new(encoded)),
+        ]
+        if rich_text.get("html_fragment"):
+            providers.append(Gdk.ContentProvider.new_for_bytes("text/html", GLib.Bytes.new(rich_text["html_fragment"].encode("utf-8"))))
+        if rich_text.get("rtf_base64"):
+            providers.append(Gdk.ContentProvider.new_for_bytes("text/rtf", GLib.Bytes.new(base64.b64decode(rich_text["rtf_base64"]))))
+            providers.append(Gdk.ContentProvider.new_for_bytes("application/rtf", GLib.Bytes.new(base64.b64decode(rich_text["rtf_base64"]))))
+        self.window.get_display().get_clipboard().set_content(Gdk.ContentProvider.new_union(providers))
 
     def _set_file_clipboard(self, paths, operation="Copy"):
         uris = [Gio.File.new_for_path(path).get_uri() for path in paths]
@@ -1841,7 +2218,7 @@ class ClipmanApplication(Gtk.Application):
             mime_type = text.replace("\r\n", "\n").split("\n", 1)[0].strip().casefold()
             paths, operation = parse_file_clipboard_payload(text, mime_type)
             self._capture_file_paths(clipboard, paths, operation, mime_type, True); return
-        self._put_text(text)
+        self._read_rich_clipboard(clipboard, text, lambda _clipboard, value, rich: self._put_text(value, rich_text=rich))
 
     def cut_selected(self, *_args):
         if self.section == "files":
@@ -1849,7 +2226,8 @@ class ClipmanApplication(Gtk.Application):
         entries = self.selected_entries()
         if not entries or any(entry.get("pinned") for entry in entries):
             self.sounds.play("skip"); self.set_status("Pinned entries must be unpinned before cutting.", True); return
-        self._set_clipboard("\n".join(entry.get("text", "") for entry in entries))
+        rich_text = entries[0].get("rich_text") if len(entries) == 1 else None
+        self._set_clipboard("\n".join(entry.get("text", "") for entry in entries), rich_text)
         self.backend.call("delete_many", {"ids": [entry["id"] for entry in entries]}, self._cut_response)
 
     def _cut_response(self, message):
@@ -1873,7 +2251,10 @@ class ClipmanApplication(Gtk.Application):
             self.show_error(str(error)); return
         if not text or not text.strip():
             self.sounds.play("skip"); self.set_status("Clipboard does not contain text.", True); return
-        self.backend.call("put_after", {"after_id": after_id, "text": text}, lambda message: self._operation_response(message, "Pasted clipboard text after the selected entry."))
+        self._read_rich_clipboard(clipboard, text, lambda _clipboard, value, rich: self._paste_after_rich(after_id, value, rich))
+
+    def _paste_after_rich(self, after_id, text, rich_text):
+        self.backend.call("put_after", {"after_id": after_id, "text": text, "rich_text": normalize_rich_text(rich_text)}, lambda message: self._operation_response(message, "Pasted clipboard text after the selected entry."))
 
     def push_selected(self, *_args):
         if self.section == "files":
@@ -1892,7 +2273,8 @@ class ClipmanApplication(Gtk.Application):
         self._push_entries(entries, message["result"].get("texts", []))
 
     def _push_entries(self, entries, texts):
-        self._set_clipboard("\n".join(texts))
+        rich_text = entries[0].get("rich_text") if len(entries) == 1 and not entries[0].get("is_template") else None
+        self._set_clipboard("\n".join(texts), rich_text)
         self.backend.call("push", {"ids": [entry["id"] for entry in entries]}, lambda message: self._operation_response(message, "Pushed selected entries to other devices and copied them to this clipboard."))
 
     def _operation_response(self, message, status):
@@ -1990,19 +2372,23 @@ class ClipmanApplication(Gtk.Application):
             dialog.destroy()
         dialog.connect("response", response); dialog.present(); password.grab_focus()
 
-    def _put_text(self, text, quiet=False, automatic=False, source=""):
+    def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None):
+        original_text = text
         if self.preferences.values["auto_remove_url_tracking"]:
             text = clean_tracking_text(text, False)
+        if text != original_text:
+            rich_text = None
         duplicate = "keep" if self.preferences.values["keep_duplicate_entries"] else "move"
         group = source if automatic and source and self.preferences.values["auto_group_by_app"] else ""
-        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate}, lambda m: self._put_response(m, quiet, text))
+        normalized_rich = normalize_rich_text(rich_text) if self.preferences.values["rich_text_history_enabled"] else None
+        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate, "rich_text": normalized_rich}, lambda m: self._put_response(m, quiet, text, normalized_rich))
 
-    def _put_response(self, message, quiet, text):
+    def _put_response(self, message, quiet, text, rich_text=None):
         if not message.get("ok"):
             if not quiet: self.show_error(message.get("error"))
             return
         self._history_response(message)
-        self.preferences.values["last_received_section"] = "links" if is_standalone_link(text) else "text"
+        self.preferences.values["last_received_section"] = "rich" if rich_text else "links" if is_standalone_link(text) else "text"
         self.preferences.save()
         if not quiet: self.sounds.play("copy"); self.set_status("Clipboard text added to history.", True)
 
@@ -2151,8 +2537,9 @@ class ClipmanApplication(Gtk.Application):
         content = dialog.get_content_area(); content.set_spacing(8); content.set_margin_top(12); content.set_margin_bottom(12); content.set_margin_start(12); content.set_margin_end(12)
         text = Gtk.TextView(editable=False, cursor_visible=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, vexpand=True)
         text.set_accepts_tab(False)
-        text.update_property([Gtk.AccessibleProperty.LABEL], ["Clipboard text"])
-        text.get_buffer().set_text(entry["text"])
+        rich_text = normalize_rich_text(entry.get("rich_text"))
+        rendered_html = populate_safe_rich_buffer(text.get_buffer(), rich_text, entry["text"])
+        text.update_property([Gtk.AccessibleProperty.LABEL], ["Formatted clipboard text" if rendered_html else "Clipboard text"])
         content.append(text)
         details = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         values = [
@@ -2162,6 +2549,11 @@ class ClipmanApplication(Gtk.Application):
             ("Template", "Yes" if entry.get("is_template") else "No"),
             ("Added", self.format_date(entry.get("created_unix_ms"))), ("Last used", self.format_date(entry.get("last_used_unix_ms"))),
         ]
+        if rich_text:
+            formats = []
+            if rich_text.get("html_fragment"): formats.append("HTML")
+            if rich_text.get("rtf_base64"): formats.append("RTF")
+            values.insert(5, ("Formatting", " and ".join(formats)))
         for key, value in values:
             row = Gtk.Label(label=f"{key}: {value}", xalign=0); row.set_margin_top(3); row.set_margin_bottom(3); details.append(row)
         content.append(details); dialog.set_default_size(650, 540)
@@ -2398,8 +2790,11 @@ class ClipmanApplication(Gtk.Application):
     def _secret_manager_previous(self, clipboard, result, value, dialog):
         try: previous = clipboard.read_text_finish(result)
         except GLib.Error: previous = None
+        self._read_rich_clipboard(clipboard, previous, lambda _clipboard, old_text, old_rich: self._secret_manager_with_previous(value, dialog, old_text, old_rich))
+
+    def _secret_manager_with_previous(self, value, dialog, previous, previous_rich):
         self._set_clipboard(value); dialog.destroy(); self.window.set_visible(False); self.sounds.play("copy")
-        GLib.timeout_add(120, self._paste_secret_to_previous, {"text": previous})
+        GLib.timeout_add(120, self._paste_secret_to_previous, {"text": previous, "rich_text": previous_rich})
 
     def _paste_secret_to_previous(self, restore):
         if not self.previous_window_id or not shutil.which("xdotool"):
@@ -2408,7 +2803,7 @@ class ClipmanApplication(Gtk.Application):
             completed = subprocess.run(["xdotool", "windowactivate", "--sync", self.previous_window_id, "key", "--clearmodifiers", "ctrl+v"], capture_output=True, timeout=3, check=False)
             if completed.returncode != 0: self.sounds.play("skip"); return GLib.SOURCE_REMOVE
         except (OSError, subprocess.SubprocessError): self.sounds.play("skip"); return GLib.SOURCE_REMOVE
-        GLib.timeout_add(350, self._restore_quick_paste_clipboard, restore.get("text"))
+        GLib.timeout_add(350, self._restore_quick_paste_clipboard, restore)
         return GLib.SOURCE_REMOVE
 
     def _secret_hotkey_result(self, message):
@@ -2421,8 +2816,11 @@ class ClipmanApplication(Gtk.Application):
     def _secret_hotkey_previous(self, clipboard, result, value):
         try: previous = clipboard.read_text_finish(result)
         except GLib.Error: previous = None
+        self._read_rich_clipboard(clipboard, previous, lambda _clipboard, old_text, old_rich: self._secret_hotkey_with_previous(value, old_text, old_rich))
+
+    def _secret_hotkey_with_previous(self, value, previous, previous_rich):
         self._set_clipboard(value); self.sounds.play("copy")
-        GLib.timeout_add(100, self._quick_paste_send, {"text": previous})
+        GLib.timeout_add(100, self._quick_paste_send, {"text": previous, "rich_text": previous_rich})
 
     def show_setup(self):
         self._connection_dialog("Set Up Clipman Server", configuring=True)
@@ -2584,7 +2982,8 @@ class ClipmanApplication(Gtk.Application):
         if mode == "restore":
             clipboard.read_text_async(None, lambda source, result, _data: self._quick_paste_previous_read(source, result, entry, text), None)
             return
-        self._set_clipboard(text)
+        rich_text = None if entry.get("is_template") else entry.get("rich_text")
+        self._set_clipboard(text, rich_text)
         self.backend.call("touch", {"id": entry["id"]}, self._history_response)
         self.sounds.play("copy")
         if mode == "keep":
@@ -2595,10 +2994,13 @@ class ClipmanApplication(Gtk.Application):
             previous = clipboard.read_text_finish(result)
         except GLib.Error:
             previous = None
-        self._set_clipboard(text)
+        self._read_rich_clipboard(clipboard, previous, lambda _clipboard, old_text, old_rich: self._quick_paste_with_previous(entry, text, old_text, old_rich))
+
+    def _quick_paste_with_previous(self, entry, text, previous, previous_rich):
+        self._set_clipboard(text, None if entry.get("is_template") else entry.get("rich_text"))
         self.backend.call("touch", {"id": entry["id"]}, self._history_response)
         self.sounds.play("copy")
-        GLib.timeout_add(100, self._quick_paste_send, {"text": previous})
+        GLib.timeout_add(100, self._quick_paste_send, {"text": previous, "rich_text": previous_rich})
 
     def _quick_paste_send(self, restore):
         if not shutil.which("xdotool"):
@@ -2610,15 +3012,17 @@ class ClipmanApplication(Gtk.Application):
         except (OSError, subprocess.SubprocessError):
             self.sounds.play("skip"); return GLib.SOURCE_REMOVE
         if restore is not None:
-            GLib.timeout_add(350, self._restore_quick_paste_clipboard, restore.get("text"))
+            GLib.timeout_add(350, self._restore_quick_paste_clipboard, restore)
         return GLib.SOURCE_REMOVE
 
-    def _restore_quick_paste_clipboard(self, text):
+    def _restore_quick_paste_clipboard(self, previous):
+        text = previous.get("text") if isinstance(previous, dict) else previous
         if text is None:
             self.own_clipboard_text = ""
             self.window.get_display().get_clipboard().set_content(None)
         else:
-            self._set_clipboard(text)
+            rich_text = previous.get("rich_text") if isinstance(previous, dict) else None
+            self._set_clipboard(text, rich_text)
         return GLib.SOURCE_REMOVE
 
     def toggle_history_window(self):
@@ -2628,6 +3032,8 @@ class ClipmanApplication(Gtk.Application):
         if self.preferences.values["dynamic_history_mode"]:
             target = self.preferences.values["last_received_section"]
             if target == "links" and not self.preferences.values["links_history_enabled"]:
+                target = "text"
+            if target == "rich" and not self.preferences.values["rich_text_history_enabled"]:
                 target = "text"
             if target != self.section:
                 self.section = target
@@ -2692,9 +3098,11 @@ class ClipmanApplication(Gtk.Application):
         dynamic = Gtk.CheckButton(label="Open history to the section that most recently received an item", active=self.preferences.values["dynamic_history_mode"])
         remove_tracking = Gtk.CheckButton(label="Automatically remove tracking from copied links", active=self.preferences.values["auto_remove_url_tracking"])
         links_enabled = Gtk.CheckButton(label="Show Links History", active=self.preferences.values["links_history_enabled"])
+        rich_enabled = Gtk.CheckButton(label="Preserve copied formatting and show Rich Text history", active=self.preferences.values["rich_text_history_enabled"])
+        rich_enabled.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows a separate Rich Text history section. Enable this before copying formatted content. This is off by default."])
         save_position = Gtk.CheckButton(label="Save list position", active=self.preferences.values["save_list_position"])
         duplicates = Gtk.CheckButton(label="Keep duplicate text entries", active=self.preferences.values["keep_duplicate_entries"])
-        for control in (monitor, sounds, auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, save_position, duplicates):
+        for control in (monitor, sounds, auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, save_position, duplicates):
             general.append(control)
 
         startup_run = Gtk.CheckButton(label="Run Clipman when this desktop session starts", active=self.preferences.values["run_at_startup"])
@@ -2775,7 +3183,7 @@ class ClipmanApplication(Gtk.Application):
                     "auto_group_by_app": auto_group.get_active(), "auto_copy_remote_text": auto_remote.get_active(),
                     "paste_after_enter": paste_enter.get_active(), "dynamic_history_mode": dynamic.get_active(),
                     "auto_remove_url_tracking": remove_tracking.get_active(), "keep_duplicate_entries": duplicates.get_active(),
-                    "links_history_enabled": links_enabled.get_active(), "save_list_position": save_position.get_active(),
+                    "links_history_enabled": links_enabled.get_active(), "rich_text_history_enabled": rich_enabled.get_active(), "save_list_position": save_position.get_active(),
                     "run_at_startup": startup_run.get_active(), "show_history_hotkey": show_accelerator,
                     "toggle_monitoring_hotkey": toggle_accelerator,
                     "update_check_frequency": update_keys[update_frequency.get_selected()],
@@ -2789,7 +3197,9 @@ class ClipmanApplication(Gtk.Application):
                 self.preferences.values["ignored_applications"] = [line.strip() for line in ignored_text.splitlines() if line.strip()]
                 if not self.preferences.values["links_history_enabled"] and self.section == "links":
                     self.section = "text"
-                self.preferences.save(); self._set_startup(startup_run.get_active()); self._start_timers(); self._schedule_update_checks(); self._register_hotkeys()
+                if not self.preferences.values["rich_text_history_enabled"] and self.section == "rich":
+                    self.section = "text"
+                self.preferences.save(); self._set_startup(startup_run.get_active()); self._start_timers(); self._schedule_update_checks(); self._register_hotkeys(); self.rebuild_list()
             else:
                 self.preferences.save()
             dialog.destroy()
@@ -2994,6 +3404,15 @@ class ClipmanApplication(Gtk.Application):
         self._open_uri(folder.as_uri())
 
     def show_diagnostics(self, *_args):
+        rich_entries = [normalize_rich_text(entry.get("rich_text")) for entry in self.entries]
+        rich_entries = [value for value in rich_entries if value]
+        rich_html = sum(1 for value in rich_entries if value.get("html_fragment"))
+        rich_rtf = sum(1 for value in rich_entries if value.get("rtf_base64"))
+        rich_bytes = sum(
+            len(value.get("html_fragment", "").encode("utf-8")) +
+            len(base64.b64decode(value.get("rtf_base64", "")))
+            for value in rich_entries
+        )
         text = "\n".join([
             f"Clipman for Linux: {VERSION}",
             f"Build: {VERSION}.0",
@@ -3001,8 +3420,9 @@ class ClipmanApplication(Gtk.Application):
             f"Display backend: {os.environ.get('XDG_SESSION_TYPE', 'Unknown')}",
             f"Monitoring: {'On' if self.preferences.values['monitor_clipboard'] else 'Off'}",
             f"History state: {'Offline read-only cache' if self.offline else 'Connected'}",
-            f"Text entries: {sum(1 for entry in self.entries if entry.get('section') == 'text')}",
-            f"Link entries: {sum(1 for entry in self.entries if entry.get('section') == 'links')}",
+            f"Text entries: {sum(1 for entry in self.entries if entry.get('section') == 'text' and not entry.get('rich_text'))}",
+            f"Link entries: {sum(1 for entry in self.entries if entry.get('section') == 'links' and not entry.get('rich_text'))}",
+            f"Rich-text entries: {len(rich_entries)} ({rich_html} HTML, {rich_rtf} RTF, {rich_bytes} stored bytes)",
             f"File-history events: {len(self.file_events)}",
             f"Global hotkeys: {self.hotkeys.summary()}",
             f"GUI preferences: {self.preferences.path}",

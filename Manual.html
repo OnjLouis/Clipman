@@ -62,6 +62,7 @@
     <li><a href="#pinned-entries">Pinned Entries</a></li>
     <li><a href="#entry-names-and-text">Entry Names and Text</a></li>
     <li><a href="#links-history">Links History</a></li>
+    <li><a href="#rich-text-history">Rich Text History</a></li>
     <li><a href="#groups">Groups</a></li>
     <li><a href="#sorting-and-manual-order">Sorting and Manual Order</a></li>
     <li><a href="#cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</a></li>
@@ -116,9 +117,11 @@
       <tr><td>Paste an entry assigned to Quick Paste</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
       <tr><td>Paste a saved secret</td><td>User-assigned in Secrets</td><td>User-assigned in Secrets</td></tr>
       <tr><td>Open Secrets</td><td><code>Ctrl+Shift+E</code></td><td><code>Command+Shift+E</code></td></tr>
-      <tr><td>Switch to Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+T</code></td><td><code>Control+1</code></td></tr>
-      <tr><td>Switch to Links history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+L</code> when Links history is enabled</td><td><code>Control+2</code> when Links history is enabled</td></tr>
-      <tr><td>Switch to File history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+I</code></td><td><code>Control+2</code>, or <code>Control+3</code> when Links history is enabled</td></tr>
+      <tr><td>Switch to Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+T</code></td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Switch to Links history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+L</code> when Links history is enabled</td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Switch to Rich Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+R</code> when Rich Text history is enabled</td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Switch to File history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+I</code></td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Move the current history tab left or right</td><td><code>Alt+Left</code> or <code>Alt+Right</code></td><td><code>Option+Left</code> or <code>Option+Right</code></td></tr>
       <tr><td>Open Preferences</td><td><code>Ctrl+,</code></td><td><code>Command+,</code></td></tr>
       <tr><td>Open search</td><td><code>Ctrl+F</code></td><td><code>Command+F</code></td></tr>
       <tr><td>Find next search result</td><td><code>F3</code></td><td><code>F3</code></td></tr>
@@ -165,9 +168,9 @@
   </table>
 
   <h2 id="preferences">Preferences</h2>
-  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, optional Links history, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
+  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, optional Links and Rich Text history, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
 
-  <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text or Links history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. On Mac, macOS asks for permission before Clipman can send that command; allow Clipman to control the computer when prompted, then quit and reopen Clipman if the first paste is blocked. Clipman only sends the paste command when the destination has an editable text control in focus. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
+  <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text, Links, or Rich Text history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. On Mac, macOS asks for permission before Clipman can send that command; allow Clipman to control the computer when prompted, then quit and reopen Clipman if the first paste is blocked. Clipman only sends the paste command when the destination has an editable text control in focus. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
 
   <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, Clipman opens Text, Links, or Files according to the most recent clipboard event it successfully accepted during the current run. Ignored, excluded, or failed captures do not change the destination. If Links history is disabled, a recently copied link opens in Text history instead.</p>
 
@@ -208,7 +211,7 @@
 
   <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
 
-  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu, <code>Control+1</code> switches Text history, and <code>Command+F</code> opens search. With Links history disabled, <code>Control+2</code> switches File history. With Links history enabled, <code>Control+2</code> switches Links history and <code>Control+3</code> switches File history. Pressing <code>Enter</code> from search returns focus to the history list.</p>
+  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu and <code>Command+F</code> opens search. The Clipman menu shows the current <code>Control+number</code> for each visible history area; those numbers update immediately when tabs are moved. Pressing <code>Enter</code> from search returns focus to the history list.</p>
 
   <p>Mac global hotkeys are stored by physical key code so the displayed shortcut remains readable on different keyboard layouts. Default Mac global hotkeys avoid common VoiceOver conflicts, but they can be changed in Preferences.</p>
   <h2 id="startup-state">Startup State</h2>
@@ -241,7 +244,18 @@
 
   <p>Links are not stored in a separate database and are not removed from shared text history. The Links tab is a filtered view of the same entries, so copy, cut, paste after selected, grouping, pinning, Quick Paste, templates, search, sorting, cleanup actions, and sharing across machines work like Text history wherever applicable. If the Links tab is disabled, links simply appear in Text history as before.</p>
 
-  <p>With Links history disabled, File history remains the second history area. With Links history enabled, Links history becomes the second area and File history moves to the third. On Mac this means <code>Control+2</code> opens Links and <code>Control+3</code> opens Files only when Links is enabled. On Windows, <code>Alt+L</code> opens Links when enabled, <code>Alt+I</code> opens File history, and <code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code> moves through the visible history areas.</p>
+  <p>Enabling Links history adds its tab at the saved per-device position. On Mac, the Clipman menu shows its current <code>Control+number</code> shortcut. On Windows and Linux, <code>Alt+L</code> always opens Links when enabled, <code>Alt+I</code> always opens File history, and <code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code> moves through the visible history areas in their current order.</p>
+
+  <h2 id="rich-text-history">Rich Text History</h2>
+  <p>Rich Text history is optional and off by default on Windows, Mac, Linux, Android and iOS. Enable <strong>Preserve copied formatting and show Rich Text history</strong> in Preferences or mobile Settings when you want Clipman to retain formatting supplied by applications such as browsers, word processors, email clients, and rich-text editors. Enable it before copying formatted content; entries captured earlier as plain text cannot have their original formatting reconstructed. Clipman stores bounded rich data alongside the normal plain-text fallback in the shared text-history database. The separate Rich Text section is an accessible filtered list, not a second database.</p>
+
+  <p>For example, enable the preference, copy a formatted heading or link from a browser, and then select that new entry in Rich Text History. Press <code>Enter</code> or Copy and paste into a word processor or another rich-text destination. Clipman puts the available plain and rich formats on the clipboard together, so the destination chooses the richest format it supports.</p>
+
+  <p>Pressing <code>Enter</code>, Copy, Quick Paste, or receiving a newly created remote rich-text entry can place the available formats on the clipboard together. Templates and copies that combine several entries remain plain text. F4 shows the normal text and entry details; Windows and Mac safely preview stored RTF, while Linux safely presents common stored HTML formatting. Clipman does not load stored HTML into an active browser or execute scripts, remote content, or embedded objects.</p>
+
+  <p>Formatting belongs to the exact stored text. Editing the text in Entry Properties or applying a text transformation clears the old rich payload so stale formatting cannot be attached to different content. If HTML exceeds 768 KiB, RTF exceeds 1 MiB, the combined payload exceeds 1.75 MiB, or a payload is invalid, Clipman keeps the plain text and discards the rich data. Diagnostics reports aggregate rich-entry counts and byte totals but never includes the formatted payload itself.</p>
+
+  <p>Android captures and restores HTML, the rich-text format supported by Android's standard text clipboard. It preserves RTF received from desktop or iOS clients but uses the plain-text fallback when an entry contains only RTF. iPhone and iPad capture and restore both HTML and RTF through Apple's explicit Paste control. On mobile, use the section-switch button or the screen-reader page gesture to move through Text, Rich Text and Links while the option is enabled. Clipman CLI preserves the optional fields while using plain text.</p>
 
   <h2 id="groups">Groups</h2>
   <p>Use <code>Ctrl+G</code> on Windows, <code>Command+G</code> on Mac, or the group command in the history window to assign selected entries to a group. Type a new group name, or choose an existing group from the list and press <code>Enter</code> or OK. Choose No group, or leave the group name blank, to remove the group. The Group filter can show all entries, pinned entries, named entries, ungrouped entries, or one of your custom groups.</p>
@@ -255,7 +269,7 @@
   <h2 id="sorting-and-manual-order">Sorting and Manual Order</h2>
   <p>The Text history list includes the entry text, name, group, device, added time, and last-used time. The Device column records the computer, phone, or tablet that added or most recently re-added the entry, which helps when several devices share the same database.</p>
 
-  <p>The View menu on Windows includes Text history, Links history, and File history commands with <code>Alt+T</code>, <code>Alt+L</code>, and <code>Alt+I</code>. The View menu on Windows, and the Sort controls or Clipman menu on Mac, can sort normal Text history entries by last used, added date, text, group, device, or manual order. On File history, the same controls sort by time captured, file count, name, operation, source application, or manual order.</p>
+  <p>The View menu on Windows includes Text history, Links history, Rich Text history, and File history commands with <code>Alt+T</code>, <code>Alt+L</code>, <code>Alt+R</code>, and <code>Alt+I</code> where those areas are enabled. Linux provides the same four history commands and shortcuts. Focus a tab and move it with <code>Alt+Left</code> or <code>Alt+Right</code> on Windows and Linux, or <code>Option+Left</code> or <code>Option+Right</code> on Mac. Mac keeps keyboard focus on the moved tab instead of entering its history list. The selected Mac tab is part of the normal Tab and Shift+Tab sequence; use Left or Right Arrow while it is focused to switch history areas, then Tab onward to the history list. Tab order is stored for the current device. Disabled optional tabs keep their place and return there when enabled; moving a tab does not change the fixed named shortcuts on Windows or Linux, while Mac updates the visible <code>Control+number</code> shortcuts immediately. The View menu on Windows and Linux, and the Sort controls or Clipman menu on Mac, can sort normal Text, Links, or Rich Text history entries by last used, added date, text, group, device, or manual order. On File history, the same controls sort by time captured, file count, name, operation, source application, or manual order.</p>
 
   <p>Sort direction labels describe the next result plainly, such as oldest first, newest first, A first, Z first, fewest files first, or most files first. Pinned entries and pinned file events stay above normal items and keep their own manual order. Move pinned and normal items separately.</p>
 
@@ -269,6 +283,8 @@
   <p>On Windows, the Actions menu contains simple text cleanup tools for selected entries: copy as plain text, trim whitespace, convert to single line, remove blank lines, remove URL tracking, clean links for sharing, line endings, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode. The most common actions also have shortcuts: <code>Ctrl+Shift+C</code> for plain-text copy, <code>Ctrl+Shift+T</code> for trim, <code>Ctrl+Shift+L</code> for single line, <code>Ctrl+Shift+B</code> for remove blank lines, <code>Ctrl+Shift+R</code> for remove URL tracking, <code>Ctrl+Shift+S</code> for clean link for sharing, <code>Ctrl+Shift+H</code> for HTML to readable text, and <code>Ctrl+Shift+U</code> for URL encode. Transform actions update the stored entry and also put the transformed result on the Windows clipboard. Mac includes URL cleanup and line-ending actions in the Clipman menu; <code>Command+Shift+R</code> removes URL tracking and <code>Command+Shift+S</code> cleans links for sharing. These update the stored entry and put the transformed result on the Mac clipboard.</p>
 
   <p>On Windows, <strong>Copy as plain text</strong> copies the selected entry using only the Windows plain-text clipboard format. It does not strip HTML tags from stored HTML source. Use <strong>HTML to readable text</strong> when you want Clipman to remove HTML tags and keep the readable text.</p>
+
+  <p>Text transforms change the stored plain text and therefore clear any previous Rich Text formatting for that entry. Copy as plain text does not modify the stored entry.</p>
 
   <p><strong>Remove URL tracking</strong> removes common tracking query parameters from web links, including <code>utm_*</code>, <code>fbclid</code>, <code>gclid</code>, <code>msclkid</code>, and similar marketing identifiers. It works on plain links and common HTML link attributes such as <code>href</code> and <code>src</code>. Automatic URL-tracking removal is opt-in from Preferences; when enabled, newly copied text is cleaned before Clipman stores it, and the cleaned text is placed on the Windows clipboard.</p>
 
@@ -569,6 +585,15 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.3.0</h3>
+  <ul>
+    <li>Added optional Rich Text history on Windows, Mac, Linux, Android and iOS. Enable <strong>Preserve copied formatting and show Rich Text history</strong> to retain available formatting with a plain-text fallback, review it in a separate accessible section, and restore it to compatible applications. Android captures and restores HTML; Windows, Mac, Linux and iOS support HTML and RTF. Closes <a href="https://github.com/OnjLouis/Clipman/issues/43">issue #43</a>.</li>
+    <li>Added per-device history tab ordering on Windows, Mac and Linux. Move the focused tab left or right from the View or Clipman menu or with the platform shortcut; Mac keeps focus on the moved tab, includes the selected tab in the normal Tab and Shift+Tab sequence, and updates its visible <code>Control+number</code> shortcuts to match.</li>
+    <li>Improved the Mac F4 text-review window so clip details remain visible and Tab or Shift+Tab moves reliably among the text, details and Close button.</li>
+    <li>Improved Windows settings saves on mapped WebDAV and other remote filesystems that do not support atomic file replacement. Clipman uses a verified backup-and-copy fallback when necessary, so hiding history and saving list position continue to work.</li>
+    <li>Fixed Windows history closing and actions when another process holds the machine settings file. Saving the current list position is now best effort, so Escape, Alt+F4, Close, copy, cut, and delete continue while the failed background save is recorded in diagnostics.</li>
+  </ul>
+
   <h3>2.2.1</h3>
   <ul>
     <li>Added the accessible Linux desktop app, with Text, Links and File History, groups, templates, Quick Paste, per-device Secrets, privacy exclusions, import/export, automatic updates, encrypted offline reading, global shortcuts under X11, and a dedicated Linux manual.</li>
@@ -898,14 +923,12 @@
     <li>Reviewed: Alt+O uses the standard Windows menu mnemonic path. The reported routing problem was isolated to Windows 7. See <a href="https://github.com/OnjLouis/Clipman/issues/2">issue #2</a>.</li>
     <li>Improved: File history now describes combined file clipboard operations such as Copy or Link instead of showing raw DropEffect numbers. Closes <a href="https://github.com/OnjLouis/Clipman/issues/3">issue #3</a>.</li>
     <li>Improved: Shared database paths now handle missing files and temporarily unavailable folders more gracefully, with diagnostics explaining the storage state. Closes <a href="https://github.com/OnjLouis/Clipman/issues/4">issue #4</a>.</li>
-    <li>Improved: Release smoke testing now checks open GitHub issues and verifies updater behavior before publishing.</li>
   </ul>
 
   <h3>1.1.1</h3>
   <ul>
     <li>Added a View menu command to toggle the current Text history sort direction.</li>
     <li>Improved Preferences window activation so it appears more reliably the first time it is opened after Clipman starts.</li>
-    <li>Improved live-copy smoke testing so a supplied live folder is rebuilt and refreshed in the same pass.</li>
   </ul>
 
   <h3>1.1</h3>

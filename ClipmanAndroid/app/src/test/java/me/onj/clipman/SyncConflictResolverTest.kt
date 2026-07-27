@@ -82,6 +82,60 @@ class SyncConflictResolverTest {
         assertFalse(merged.Entries.any { it.Id == "same-id" })
     }
 
+    @Test
+    fun richTextUsesIndependentTimestampAndSupportsClear() {
+        val local = database(
+            entry("rich", "formatted", 1).copy(
+                LastUsedUnixMs = 500,
+                RichText = RichTextPayload(HtmlFragment = "<b>formatted</b>", PreferredFormat = "Html"),
+                RichTextUpdatedUnixMs = 100
+            )
+        )
+        val remote = database(
+            entry("rich", "formatted", 1).copy(
+                LastUsedUnixMs = 200,
+                RichText = null,
+                RichTextUpdatedUnixMs = 300
+            )
+        )
+
+        val merged = SyncConflictResolver.merge(local, remote)
+
+        assertEquals(null, merged.Entries.first().RichText)
+        assertEquals(300, merged.Entries.first().RichTextUpdatedUnixMs)
+    }
+
+    @Test
+    fun addingAndroidHtmlStoresRichTextWithPlainFallback() {
+        val rich = RichTextPayload(HtmlFragment = "<h1>Heading</h1>", PreferredFormat = "Html")
+
+        val updated = SyncConflictResolver.addText(database(), "Heading", "Android", rich)
+
+        assertEquals("Heading", updated.Entries.single().Text)
+        assertEquals("<h1>Heading</h1>", updated.Entries.single().RichText?.HtmlFragment)
+        assertTrue(updated.Entries.single().RichTextUpdatedUnixMs > 0)
+    }
+
+    @Test
+    fun readdingPlainTextDoesNotDiscardExistingFormatting() {
+        val formatted = entry("rich", "Heading", 1).copy(
+            RichText = RichTextPayload(HtmlFragment = "<h1>Heading</h1>", PreferredFormat = "Html"),
+            RichTextUpdatedUnixMs = 50
+        )
+
+        val updated = SyncConflictResolver.addText(database(formatted), "Heading", "Android")
+
+        assertEquals("<h1>Heading</h1>", updated.Entries.single().RichText?.HtmlFragment)
+        assertEquals(50, updated.Entries.single().RichTextUpdatedUnixMs)
+    }
+
+    @Test
+    fun oversizedAndroidHtmlIsRejected() {
+        val oversized = RichTextPayload(HtmlFragment = "x".repeat(768 * 1024 + 1), PreferredFormat = "Html")
+
+        assertEquals(null, RichTextClipboard.normalize(oversized))
+    }
+
     private fun database(vararg entries: ClipEntry) = ClipDatabase(
         Version = 1,
         UpdatedUnixMs = 10,

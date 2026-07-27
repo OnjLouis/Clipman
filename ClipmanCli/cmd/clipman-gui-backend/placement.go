@@ -13,8 +13,9 @@ import (
 
 func (s *session) putAfter(raw json.RawMessage) (any, error) {
 	var p struct {
-		AfterID string `json:"after_id"`
-		Text    string `json:"text"`
+		AfterID  string        `json:"after_id"`
+		Text     string        `json:"text"`
+		RichText *richTextJSON `json:"rich_text"`
 	}
 	if err := decode(raw, &p); err != nil {
 		return nil, err
@@ -26,6 +27,15 @@ func (s *session) putAfter(raw json.RawMessage) (any, error) {
 		entry, outcome := operation.Put(db, p.Text, "", "", s.cfg.Machine, "move", merge.NewID(), false, false, now)
 		if outcome == "ignored" {
 			return false, map[string]any{"entry": exportEntry(entry), "outcome": outcome}, nil
+		}
+		if richText := normalizeRichText(p.RichText); richText != nil {
+			for index := range db.Entries {
+				if strings.EqualFold(db.Entries[index].ID, entry.ID) {
+					setRichText(&db.Entries[index], richText, now)
+					entry = db.Entries[index]
+					break
+				}
+			}
 		}
 		placeAfter(db, entry.ID, p.AfterID)
 		return true, map[string]any{"entry": exportEntry(entry), "outcome": outcome}, nil

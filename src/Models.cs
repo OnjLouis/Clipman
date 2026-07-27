@@ -18,6 +18,8 @@ namespace Clipman
         public bool Pinned { get; set; }
         public bool IsTemplate { get; set; }
         public long ManualOrder { get; set; }
+        public RichTextPayload RichText { get; set; }
+        public long RichTextUpdatedUnixMs { get; set; }
 
         public ClipEntry()
         {
@@ -44,6 +46,22 @@ namespace Clipman
             UpdatedUnixMs = TimeUtil.NowUnixMs();
             Entries = new List<ClipEntry>();
             DeletedEntries = new List<DeletedClipEntry>();
+        }
+    }
+
+    public sealed class RichTextPayload
+    {
+        public int Version { get; set; }
+        public string HtmlFragment { get; set; }
+        public string RtfBase64 { get; set; }
+        public string PreferredFormat { get; set; }
+
+        public RichTextPayload()
+        {
+            Version = 1;
+            HtmlFragment = string.Empty;
+            RtfBase64 = string.Empty;
+            PreferredFormat = string.Empty;
         }
     }
 
@@ -179,6 +197,7 @@ namespace Clipman
         public bool SoundsEnabled { get; set; }
         public bool SaveListPosition { get; set; }
         public bool LinksHistoryEnabled { get; set; }
+        public bool RichTextHistoryEnabled { get; set; }
         public bool Active { get; set; }
         public string DatabasePath { get; set; }
         public bool UseDefaultDatabasePath { get; set; }
@@ -190,6 +209,7 @@ namespace Clipman
         public int LastSelectedIndex { get; set; }
         public int LastSelectedTab { get; set; }
         public string LastSelectedHistoryTab { get; set; }
+        public List<string> HistoryTabOrder { get; set; }
         public int LastPreferencesTab { get; set; }
         public int MaxHistoryEntries { get; set; }
         public int MaxHistoryDays { get; set; }
@@ -232,6 +252,7 @@ namespace Clipman
             SoundsEnabled = true;
             SaveListPosition = true;
             LinksHistoryEnabled = false;
+            RichTextHistoryEnabled = false;
             Active = true;
             DatabasePath = string.Empty;
             UseDefaultDatabasePath = true;
@@ -242,6 +263,7 @@ namespace Clipman
             LastSelectedIndex = -1;
             LastSelectedTab = 0;
             LastSelectedHistoryTab = HistoryTabs.Text;
+            HistoryTabOrder = HistoryTabs.DefaultOrder();
             LastPreferencesTab = 0;
             MaxHistoryEntries = 1000;
             MaxHistoryDays = 0;
@@ -364,7 +386,9 @@ namespace Clipman
                     LastUsedUnixMs = e.LastUsedUnixMs,
                     Pinned = e.Pinned,
                     IsTemplate = e.IsTemplate,
-                    ManualOrder = e.ManualOrder
+                    ManualOrder = e.ManualOrder,
+                    RichText = RichTextData.Clone(e.RichText),
+                    RichTextUpdatedUnixMs = e.RichTextUpdatedUnixMs
                 })
                 .ToList();
             return Serializer.Serialize(safeEntries);

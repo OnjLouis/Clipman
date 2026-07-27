@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -33,6 +34,12 @@ import (
 )
 
 const protocolVersion = 1
+
+const (
+	maxRichHTMLBytes     = 768 * 1024
+	maxRichRTFBytes      = 1024 * 1024
+	maxRichCombinedBytes = 1792 * 1024
+)
 
 var standaloneURL = regexp.MustCompile(`(?i)^(?:(?:https?://|clipman://|www\.)\S+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:/\S*)?)$`)
 
@@ -69,18 +76,34 @@ type session struct {
 var version = "0.1.0-preview"
 
 type entryJSON struct {
-	ID             string `json:"id"`
-	Text           string `json:"text"`
-	Name           string `json:"name"`
-	Group          string `json:"group"`
-	Device         string `json:"device"`
-	CreatedUnixMs  int64  `json:"created_unix_ms"`
-	LastUsedUnixMs int64  `json:"last_used_unix_ms"`
-	Pinned         bool   `json:"pinned"`
-	IsTemplate     bool   `json:"is_template"`
-	ManualOrder    int64  `json:"manual_order"`
-	Section        string `json:"section"`
-	Display        string `json:"display"`
+	ID                    string        `json:"id"`
+	Text                  string        `json:"text"`
+	Name                  string        `json:"name"`
+	Group                 string        `json:"group"`
+	Device                string        `json:"device"`
+	CreatedUnixMs         int64         `json:"created_unix_ms"`
+	LastUsedUnixMs        int64         `json:"last_used_unix_ms"`
+	Pinned                bool          `json:"pinned"`
+	IsTemplate            bool          `json:"is_template"`
+	ManualOrder           int64         `json:"manual_order"`
+	Section               string        `json:"section"`
+	Display               string        `json:"display"`
+	RichText              *richTextJSON `json:"rich_text,omitempty"`
+	RichTextUpdatedUnixMs int64         `json:"rich_text_updated_unix_ms,omitempty"`
+}
+
+type richTextJSON struct {
+	Version         int    `json:"version"`
+	HTMLFragment    string `json:"html_fragment"`
+	RTFBase64       string `json:"rtf_base64"`
+	PreferredFormat string `json:"preferred_format"`
+}
+
+type storedRichText struct {
+	Version         int    `json:"Version"`
+	HTMLFragment    string `json:"HtmlFragment"`
+	RTFBase64       string `json:"RtfBase64"`
+	PreferredFormat string `json:"PreferredFormat"`
 }
 
 func main() {
@@ -489,12 +512,13 @@ func (s *session) mutate(fn syncengine.Mutation) (any, error) {
 
 func (s *session) put(raw json.RawMessage) (any, error) {
 	var p struct {
-		Text       string `json:"text"`
-		Name       string `json:"name"`
-		Group      string `json:"group"`
-		Pinned     bool   `json:"pinned"`
-		IsTemplate bool   `json:"is_template"`
-		Duplicate  string `json:"duplicate"`
+		Text       string        `json:"text"`
+		Name       string        `json:"name"`
+		Group      string        `json:"group"`
+		Pinned     bool          `json:"pinned"`
+		IsTemplate bool          `json:"is_template"`
+		Duplicate  string        `json:"duplicate"`
+		RichText   *richTextJSON `json:"rich_text"`
 	}
 	if err := decode(raw, &p); err != nil {
 		return nil, err
@@ -508,9 +532,19 @@ func (s *session) put(raw json.RawMessage) (any, error) {
 	if p.Duplicate == "" {
 		p.Duplicate = "move"
 	}
+	richText := normalizeRichText(p.RichText)
 	id := merge.NewID()
 	return s.mutate(func(db *model.Database, now int64) (bool, any, error) {
 		entry, outcome := operation.Put(db, p.Text, p.Name, p.Group, s.cfg.Machine, p.Duplicate, id, p.Pinned, p.IsTemplate, now)
+		if richText != nil && outcome != "ignored" {
+			for index := range db.Entries {
+				if strings.EqualFold(db.Entries[index].ID, entry.ID) {
+					setRichText(&db.Entries[index], richText, now)
+					entry = db.Entries[index]
+					break
+				}
+			}
+		}
 		return outcome != "ignored", map[string]any{"entry": exportEntry(entry), "outcome": outcome}, nil
 	})
 }
@@ -534,10 +568,14 @@ func (s *session) update(raw json.RawMessage) (any, error) {
 		for i := range db.Entries {
 			if strings.EqualFold(db.Entries[i].ID, p.ID) {
 				e := &db.Entries[i]
-				changed := e.Text != p.Text || e.Name != strings.TrimSpace(p.Name) || e.Group != strings.TrimSpace(p.Group) || e.Pinned != p.Pinned || e.IsTemplate != p.IsTemplate
+				textChanged := e.Text != p.Text
+				changed := textChanged || e.Name != strings.TrimSpace(p.Name) || e.Group != strings.TrimSpace(p.Group) || e.Pinned != p.Pinned || e.IsTemplate != p.IsTemplate
 				e.Text, e.Name, e.Group, e.Pinned, e.IsTemplate = p.Text, strings.TrimSpace(p.Name), strings.TrimSpace(p.Group), p.Pinned, p.IsTemplate
 				if changed {
 					e.LastUsedUnixMs, e.SourceMachine, db.UpdatedUnixMs = now, s.cfg.Machine, now
+				}
+				if textChanged {
+					clearRichText(e, now)
 				}
 				return changed, exportEntry(*e), nil
 			}
@@ -582,11 +620,15 @@ func (s *session) updateMany(raw json.RawMessage) (any, error) {
 			found++
 			entry := &db.Entries[index]
 			name, group := strings.TrimSpace(item.Name), strings.TrimSpace(item.Group)
-			itemChanged := entry.Text != item.Text || entry.Name != name || entry.Group != group || entry.Pinned != item.Pinned || entry.IsTemplate != item.IsTemplate
+			textChanged := entry.Text != item.Text
+			itemChanged := textChanged || entry.Name != name || entry.Group != group || entry.Pinned != item.Pinned || entry.IsTemplate != item.IsTemplate
 			entry.Text, entry.Name, entry.Group, entry.Pinned, entry.IsTemplate = item.Text, name, group, item.Pinned, item.IsTemplate
 			if itemChanged {
 				entry.LastUsedUnixMs, entry.SourceMachine = now, s.cfg.Machine
 				changed = true
+			}
+			if textChanged {
+				clearRichText(entry, now)
 			}
 		}
 		if found != len(updates) {
@@ -812,7 +854,78 @@ func exportEntry(entry model.Entry) entryJSON {
 	if display == "" {
 		display = "Empty entry"
 	}
-	return entryJSON{ID: entry.ID, Text: entry.Text, Name: entry.Name, Group: entry.Group, Device: entry.SourceMachine, CreatedUnixMs: entry.CreatedUnixMs, LastUsedUnixMs: entry.LastUsedUnixMs, Pinned: entry.Pinned, IsTemplate: entry.IsTemplate, ManualOrder: entry.ManualOrder, Section: section(entry.Text), Display: display}
+	richText, richTextUpdated := richTextFromEntry(entry)
+	return entryJSON{ID: entry.ID, Text: entry.Text, Name: entry.Name, Group: entry.Group, Device: entry.SourceMachine, CreatedUnixMs: entry.CreatedUnixMs, LastUsedUnixMs: entry.LastUsedUnixMs, Pinned: entry.Pinned, IsTemplate: entry.IsTemplate, ManualOrder: entry.ManualOrder, Section: section(entry.Text), Display: display, RichText: richText, RichTextUpdatedUnixMs: richTextUpdated}
+}
+
+func normalizeRichText(value *richTextJSON) *richTextJSON {
+	if value == nil {
+		return nil
+	}
+	html := value.HTMLFragment
+	if len([]byte(html)) > maxRichHTMLBytes {
+		html = ""
+	}
+	rtf := value.RTFBase64
+	rtfBytes, err := base64.StdEncoding.DecodeString(rtf)
+	if err != nil || len(rtfBytes) > maxRichRTFBytes {
+		rtf, rtfBytes = "", nil
+	}
+	if len([]byte(html))+len(rtfBytes) > maxRichCombinedBytes {
+		if html != "" {
+			rtf, rtfBytes = "", nil
+		} else {
+			return nil
+		}
+	}
+	if html == "" && len(rtfBytes) == 0 {
+		return nil
+	}
+	preferred := strings.ToLower(strings.TrimSpace(value.PreferredFormat))
+	if (preferred == "html" && html == "") ||
+		(preferred == "rtf" && len(rtfBytes) == 0) ||
+		(preferred != "html" && preferred != "rtf") {
+		if html != "" {
+			preferred = "html"
+		} else {
+			preferred = "rtf"
+		}
+	}
+	return &richTextJSON{Version: 1, HTMLFragment: html, RTFBase64: rtf, PreferredFormat: strings.ToUpper(preferred[:1]) + preferred[1:]}
+}
+
+func richTextFromEntry(entry model.Entry) (*richTextJSON, int64) {
+	if entry.Extra == nil {
+		return nil, 0
+	}
+	var stored storedRichText
+	if raw := entry.Extra["RichText"]; len(raw) == 0 || json.Unmarshal(raw, &stored) != nil {
+		return nil, 0
+	}
+	normalized := normalizeRichText(&richTextJSON{Version: stored.Version, HTMLFragment: stored.HTMLFragment, RTFBase64: stored.RTFBase64, PreferredFormat: stored.PreferredFormat})
+	if normalized == nil {
+		return nil, 0
+	}
+	var updated int64
+	_ = json.Unmarshal(entry.Extra["RichTextUpdatedUnixMs"], &updated)
+	return normalized, updated
+}
+
+func setRichText(entry *model.Entry, value *richTextJSON, now int64) {
+	if entry.Extra == nil {
+		entry.Extra = map[string]json.RawMessage{}
+	}
+	stored := storedRichText{Version: 1, HTMLFragment: value.HTMLFragment, RTFBase64: value.RTFBase64, PreferredFormat: value.PreferredFormat}
+	entry.Extra["RichText"], _ = json.Marshal(stored)
+	entry.Extra["RichTextUpdatedUnixMs"], _ = json.Marshal(now)
+}
+
+func clearRichText(entry *model.Entry, now int64) {
+	if entry.Extra == nil {
+		entry.Extra = map[string]json.RawMessage{}
+	}
+	delete(entry.Extra, "RichText")
+	entry.Extra["RichTextUpdatedUnixMs"], _ = json.Marshal(now)
 }
 
 func section(text string) string {

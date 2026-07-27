@@ -96,7 +96,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
             selectedHistoryTab: settings.lastSelectedHistoryTab,
+            historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         configureHistoryQuickCopyState()
@@ -397,14 +399,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         switch mode {
         case .pasteRestore:
-            monitor.writeTemporaryInternalText(text, restoreAfter: 0.35) {
+            monitor.writeTemporaryInternalText(text, richText: resolvedRichText(entry), restoreAfter: 0.35) {
                 self.sendPasteKeystroke()
             }
         case .pasteKeep:
-            monitor.writeInternalText(text)
+            monitor.writeInternalText(text, richText: resolvedRichText(entry))
             sendPasteKeystroke()
         case .copyOnly:
-            monitor.writeInternalText(text)
+            monitor.writeInternalText(text, richText: resolvedRichText(entry))
         }
         sounds.play(.copy)
         store.markUsed(entry.Id)
@@ -583,6 +585,13 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         let buildStamp = Bundle.main.object(forInfoDictionaryKey: "ClipmanBuildStampUtcMs") as? String ?? "unknown"
         let dataFolder = URL(fileURLWithPath: settings.databasePath).deletingLastPathComponent().path
         let serverStatus = store.serverSyncStatus()
+        let textEntries = store.entries()
+        let richEntries = textEntries.compactMap { RichTextData.normalize($0.RichText) }
+        let richHTMLCount = richEntries.filter { !$0.HtmlFragment.isEmpty }.count
+        let richRTFCount = richEntries.filter { !$0.RtfBase64.isEmpty }.count
+        let richBytes = richEntries.reduce(0) { total, payload in
+            total + payload.HtmlFragment.utf8.count + (Data(base64Encoded: payload.RtfBase64)?.count ?? 0)
+        }
         let report = [
             "Clipman diagnostics",
             "",
@@ -604,7 +613,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Server sync consecutive failures: \(serverStatus.consecutiveFailures)",
             "Text history: \(settings.databasePath)",
             "Local text cache: \(textHistoryURL(for: settings).path)",
-            "Text entries: \(store.entryCount())",
+            "Text entries: \(textEntries.count)",
+            "Rich text history: \(settings.richTextHistoryEnabled ? "enabled" : "disabled")",
+            "Rich text payloads: \(richEntries.count) entries (HTML \(richHTMLCount), RTF \(richRTFCount), \(richBytes) bytes)",
             "File history: \(fileHistoryURL(for: settings).path)",
             "File events: \(fileStore.eventCount())",
             "Secrets: \(secretStore.entries().count) configured",
@@ -683,7 +694,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         NSApp.terminate(nil)
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, sourceApplication: String) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String) {
         guard storageUnavailableReason.isEmpty else {
             sounds.play(.skip)
             return
@@ -695,10 +706,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             sounds.play(.exclude)
             return
         }
-        store.addText(text, group: sourceApplication) { [weak self] saved in
+        let capturedRichText = settings.richTextHistoryEnabled ? richText : nil
+        store.addText(text, group: sourceApplication, richText: capturedRichText) { [weak self] saved in
             guard let self else { return }
             if saved {
-                self.lastReceivedHistoryTab = LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text
+                self.lastReceivedHistoryTab = capturedRichText != nil ? HistoryTabID.richText : LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text
                 self.sounds.play(.copy)
             } else if self.storageUnavailableReason.isEmpty {
                 self.sounds.play(.skip)
@@ -942,7 +954,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     private func copyAndCloseHistory(_ entry: ClipEntry, controller: HistoryWindowController) {
-        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry))
+        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry), richText: resolvedRichText(entry))
         sounds.play(.copy)
         store.markUsed(entry.Id)
         controller.hide()
@@ -981,7 +993,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry]) {
         let text = entries.map(TemplateResolver.resolveEntryText).joined(separator: "\n---\n")
-        monitor.writeInternalText(text)
+        monitor.writeInternalText(text, richText: entries.count == 1 ? resolvedRichText(entries[0]) : nil)
         sounds.play(.copy)
     }
 
@@ -1008,7 +1020,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
             selectedHistoryTab: settings.lastSelectedHistoryTab,
+            historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         store.moveEntries(ids: entries.map(\.Id), direction: direction)
@@ -1296,7 +1310,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
             selectedHistoryTab: settings.lastSelectedHistoryTab,
+            historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         fileStore.moveEvents(ids: events.map(\.Id), direction: direction)
@@ -1311,10 +1327,15 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChangeHistoryTab tab: String) {
-        settings.lastSelectedHistoryTab = HistoryTabID.normalize(tab, linksEnabled: settings.linksHistoryEnabled)
+        settings.lastSelectedHistoryTab = HistoryTabID.normalize(tab, linksEnabled: settings.linksHistoryEnabled, richTextEnabled: settings.richTextHistoryEnabled)
         settings.lastSelectedTab = settings.lastSelectedHistoryTab == HistoryTabID.files ? 1 : 0
         try? settingsStore.save(settings)
         refreshHistoryWindow()
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didChangeHistoryTabOrder order: [String]) {
+        settings.historyTabOrder = HistoryTabID.normalizeOrder(order)
+        try? settingsStore.save(settings)
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChangeSortMode sortMode: String, fileHistory: Bool) {
@@ -1333,7 +1354,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
             selectedHistoryTab: settings.lastSelectedHistoryTab,
+            historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         refreshHistoryWindow()
@@ -1353,7 +1376,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
             selectedHistoryTab: settings.lastSelectedHistoryTab,
+            historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         refreshHistoryWindow()
@@ -1506,7 +1531,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             fileDescending: settings.fileHistorySortDescending,
             selectedTab: settings.lastSelectedTab,
             selectedHistoryTab: settings.lastSelectedHistoryTab,
+            historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
         refreshHistoryWindow()
@@ -1588,8 +1615,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         guard stamp > baseline.stamp || (stamp == baseline.stamp && entry.Id != baseline.id) else { return }
         remoteClipboardBaseline = (entry.Id, stamp)
-        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry))
+        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry), richText: resolvedRichText(entry))
         sounds.play(.remote)
+    }
+
+    private func resolvedRichText(_ entry: ClipEntry) -> RichTextPayload? {
+        entry.IsTemplate ? nil : RichTextData.normalize(entry.RichText)
     }
 
     private func resetRemoteClipboardBaseline() {

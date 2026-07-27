@@ -10,4 +10,6 @@ Settings can optionally require biometric or device authentication whenever Clip
 
 Clipman can check the official GitHub release for updates automatically while it is open, at most once per day, or on demand from Settings. It verifies the downloaded package before Android asks the user to approve installation.
 
+Settings can optionally preserve copied HTML formatting and add a separate Rich Text history section. Android copies HTML and the plain-text fallback together, preserves synchronized RTF fields, and uses plain text for RTF-only entries because Android's standard text clipboard does not publish RTF.
+
 Server mode displays the encrypted local cache before contacting the server. Foreground refresh then uses a fixed five-second revision check, downloads history only when it changed, pauses while Settings is open or the app is in the background, and backs off connection failures. Settings also includes an optional Tip Jar link; tips do not unlock features.

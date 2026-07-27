@@ -166,10 +166,39 @@ func mergeEntry(existing *model.Entry, incoming model.Entry) {
 		existing.Extra = map[string]json.RawMessage{}
 	}
 	for key, value := range incoming.Extra {
+		if key == "RichText" || key == "RichTextUpdatedUnixMs" {
+			continue
+		}
 		if _, ok := existing.Extra[key]; !ok || incomingWins {
 			existing.Extra[key] = append([]byte(nil), value...)
 		}
 	}
+	mergeRichTextExtra(existing.Extra, incoming.Extra)
+}
+
+func mergeRichTextExtra(existing, incoming map[string]json.RawMessage) {
+	existingStamp := rawInt64(existing["RichTextUpdatedUnixMs"])
+	incomingStamp := rawInt64(incoming["RichTextUpdatedUnixMs"])
+	if incomingStamp <= existingStamp {
+		return
+	}
+	existing["RichTextUpdatedUnixMs"] = append([]byte(nil), incoming["RichTextUpdatedUnixMs"]...)
+	if value, ok := incoming["RichText"]; ok && string(value) != "null" {
+		existing["RichText"] = append([]byte(nil), value...)
+	} else {
+		delete(existing, "RichText")
+	}
+}
+
+func rawInt64(value json.RawMessage) int64 {
+	if len(value) == 0 {
+		return 0
+	}
+	var result int64
+	if err := json.Unmarshal(value, &result); err != nil {
+		return 0
+	}
+	return result
 }
 func mergeDeleted(database *model.Database, incoming []model.DeletedEntry, now int64) {
 	database.Deleted = append(database.Deleted, incoming...)

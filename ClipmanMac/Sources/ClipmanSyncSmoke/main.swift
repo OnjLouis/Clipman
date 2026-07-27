@@ -65,6 +65,22 @@ do {
     expect(locallyUsedAfterPush.Entries.first?.CreatedUnixMs == 600, "newer push timestamp should win even when local last-used is newer")
     expect(locallyUsedAfterPush.Entries.first?.SourceMachine == "Windows", "newer push source should win even when local last-used is newer")
 
+    var richMerge = ClipDatabase(Entries: [
+        ClipEntry(
+            Id: "rich",
+            Text: "formatted",
+            LastUsedUnixMs: 500,
+            RichText: RichTextPayload(HtmlFragment: "<b>formatted</b>", PreferredFormat: "Html"),
+            RichTextUpdatedUnixMs: 100
+        )
+    ])
+    let richClear = ClipDatabase(Entries: [
+        ClipEntry(Id: "rich", Text: "formatted", LastUsedUnixMs: 200, RichText: nil, RichTextUpdatedUnixMs: 300)
+    ])
+    SyncConflictResolver.merge(into: &richMerge, source: richClear)
+    expect(richMerge.Entries.first?.RichText == nil, "newer rich-text timestamp should clear formatting independently of last-used time")
+    expect(richMerge.Entries.first?.RichTextUpdatedUnixMs == 300, "rich-text clear timestamp should survive merge")
+
     let deletedText = "https://example.com/recreated"
     let deletedHash = SyncConflictResolver.textHash(deletedText)
     let tombstoneTestNow = TimeUtil.nowUnixMs()

@@ -6,14 +6,14 @@ namespace Clipman
 {
     public static class TextBoundaryNavigator
     {
-        private static readonly Dictionary<TextBox, SelectionState> SelectionStates = new Dictionary<TextBox, SelectionState>();
+        private static readonly Dictionary<TextBoxBase, SelectionState> SelectionStates = new Dictionary<TextBoxBase, SelectionState>();
 
-        public static void Attach(TextBox textBox)
+        public static void Attach(TextBoxBase textBox)
         {
             if (textBox == null) return;
             textBox.KeyDown += TextBoxKeyDown;
-            textBox.MouseDown += (sender, e) => ClearState((TextBox)sender);
-            textBox.Leave += (sender, e) => ClearState((TextBox)sender);
+            textBox.MouseDown += (sender, e) => ClearState((TextBoxBase)sender);
+            textBox.Leave += (sender, e) => ClearState((TextBoxBase)sender);
         }
 
         private static void TextBoxKeyDown(object sender, KeyEventArgs e)
@@ -23,7 +23,7 @@ namespace Clipman
                 return;
             }
 
-            var textBox = sender as TextBox;
+            var textBox = sender as TextBoxBase;
             if (textBox == null)
             {
                 return;
@@ -43,7 +43,7 @@ namespace Clipman
             }
         }
 
-        private static void Move(TextBox textBox, int direction, bool extendSelection)
+        private static void Move(TextBoxBase textBox, int direction, bool extendSelection)
         {
             var text = textBox.Text ?? string.Empty;
             var state = GetState(textBox);
@@ -62,7 +62,7 @@ namespace Clipman
             SelectionStates[textBox] = new SelectionState(anchor, next);
         }
 
-        private static SelectionState GetState(TextBox textBox)
+        private static SelectionState GetState(TextBoxBase textBox)
         {
             SelectionState state;
             if (SelectionStates.TryGetValue(textBox, out state) && StateMatchesSelection(textBox, state))
@@ -73,14 +73,14 @@ namespace Clipman
             return new SelectionState(textBox.SelectionStart, textBox.SelectionStart);
         }
 
-        private static bool StateMatchesSelection(TextBox textBox, SelectionState state)
+        private static bool StateMatchesSelection(TextBoxBase textBox, SelectionState state)
         {
             var start = textBox.SelectionStart;
             var end = start + textBox.SelectionLength;
             return Math.Min(state.Anchor, state.Caret) == start && Math.Max(state.Anchor, state.Caret) == end;
         }
 
-        private static void ClearState(TextBox textBox)
+        private static void ClearState(TextBoxBase textBox)
         {
             if (textBox != null)
             {
@@ -88,7 +88,7 @@ namespace Clipman
             }
         }
 
-        private static int SelectionAnchor(TextBox textBox, SelectionState state, int direction)
+        private static int SelectionAnchor(TextBoxBase textBox, SelectionState state, int direction)
         {
             var start = textBox.SelectionStart;
             var length = textBox.SelectionLength;
@@ -100,7 +100,7 @@ namespace Clipman
             return state.Anchor;
         }
 
-        private static int CaretPosition(TextBox textBox, SelectionState state, int direction, bool extendSelection)
+        private static int CaretPosition(TextBoxBase textBox, SelectionState state, int direction, bool extendSelection)
         {
             var start = textBox.SelectionStart;
             var length = textBox.SelectionLength;
@@ -117,7 +117,7 @@ namespace Clipman
             return direction < 0 ? start : start + length;
         }
 
-        private static void SelectBetween(TextBox textBox, int anchor, int caret)
+        private static void SelectBetween(TextBoxBase textBox, int anchor, int caret)
         {
             if (caret < anchor)
             {
@@ -129,7 +129,7 @@ namespace Clipman
             }
         }
 
-        private static void SetSelection(TextBox textBox, int start, int end)
+        private static void SetSelection(TextBoxBase textBox, int start, int end)
         {
             start = Math.Max(0, Math.Min(start, textBox.TextLength));
             end = Math.Max(0, Math.Min(end, textBox.TextLength));

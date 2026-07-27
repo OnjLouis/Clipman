@@ -71,6 +71,7 @@ clipman-cli get --id 0123456789abcdef0123456789abcdef
 clipman-cli get --search kubectl --first
 clipman-cli rm --name old-command --yes</code></pre>
     <p>An ambiguous search is not treated as bulk deletion. Use a unique ID or a reviewed visible index.</p>
+    <p>Clipman CLI preserves optional HTML and RTF fields created by Windows or Mac Rich Text history when it reads, merges, and writes shared entries. CLI output remains the authoritative plain-text fallback and does not emit rich clipboard formats.</p>
 
     <h2 id="interactive">Interactive Use</h2>
     <p>Run <code>clipman-cli menu</code>, or run <code>clipman-cli</code> without arguments in an interactive terminal. The line renderer avoids full-screen cursor movement and is suitable for screen readers.</p>

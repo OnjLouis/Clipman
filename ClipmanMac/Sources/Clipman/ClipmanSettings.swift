@@ -18,7 +18,9 @@ struct ClipmanSettings: Codable, Equatable {
     var fileHistorySortDescending: Bool
     var lastSelectedTab: Int
     var lastSelectedHistoryTab: String
+    var historyTabOrder: [String]
     var linksHistoryEnabled: Bool
+    var richTextHistoryEnabled: Bool
     var groupFilter: String
     var runAtStartup: Bool
     var captureClipboardOnStartup: Bool
@@ -37,7 +39,7 @@ struct ClipmanSettings: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case machineName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
-        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, linksHistoryEnabled, groupFilter, runAtStartup
+        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, groupFilter, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
         case autoCopyLatestRemoteText, pasteAfterEnter, dynamicHistoryMode, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
@@ -66,7 +68,9 @@ struct ClipmanSettings: Codable, Equatable {
         fileHistorySortDescending: Bool,
         lastSelectedTab: Int,
         lastSelectedHistoryTab: String,
+        historyTabOrder: [String],
         linksHistoryEnabled: Bool,
+        richTextHistoryEnabled: Bool,
         groupFilter: String,
         runAtStartup: Bool,
         captureClipboardOnStartup: Bool,
@@ -99,7 +103,9 @@ struct ClipmanSettings: Codable, Equatable {
         self.fileHistorySortDescending = fileHistorySortDescending
         self.lastSelectedTab = lastSelectedTab
         self.lastSelectedHistoryTab = lastSelectedHistoryTab
+        self.historyTabOrder = HistoryTabID.normalizeOrder(historyTabOrder)
         self.linksHistoryEnabled = linksHistoryEnabled
+        self.richTextHistoryEnabled = richTextHistoryEnabled
         self.groupFilter = groupFilter
         self.runAtStartup = runAtStartup
         self.captureClipboardOnStartup = captureClipboardOnStartup
@@ -136,7 +142,9 @@ struct ClipmanSettings: Codable, Equatable {
         fileHistorySortDescending = try container.decodeIfPresent(Bool.self, forKey: .fileHistorySortDescending) ?? false
         lastSelectedTab = try container.decodeIfPresent(Int.self, forKey: .lastSelectedTab) ?? 0
         linksHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .linksHistoryEnabled) ?? false
+        richTextHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .richTextHistoryEnabled) ?? false
         lastSelectedHistoryTab = try container.decodeIfPresent(String.self, forKey: .lastSelectedHistoryTab) ?? (lastSelectedTab == 1 ? HistoryTabID.files : HistoryTabID.text)
+        historyTabOrder = HistoryTabID.normalizeOrder(try container.decodeIfPresent([String].self, forKey: .historyTabOrder))
         groupFilter = try container.decodeIfPresent(String.self, forKey: .groupFilter) ?? "All"
         runAtStartup = try container.decodeIfPresent(Bool.self, forKey: .runAtStartup) ?? false
         captureClipboardOnStartup = try container.decodeIfPresent(Bool.self, forKey: .captureClipboardOnStartup) ?? false
@@ -186,7 +194,9 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(fileHistorySortDescending, forKey: .fileHistorySortDescending)
         try container.encode(lastSelectedTab, forKey: .lastSelectedTab)
         try container.encode(lastSelectedHistoryTab, forKey: .lastSelectedHistoryTab)
+        try container.encode(HistoryTabID.normalizeOrder(historyTabOrder), forKey: .historyTabOrder)
         try container.encode(linksHistoryEnabled, forKey: .linksHistoryEnabled)
+        try container.encode(richTextHistoryEnabled, forKey: .richTextHistoryEnabled)
         try container.encode(groupFilter, forKey: .groupFilter)
         try container.encode(runAtStartup, forKey: .runAtStartup)
         try container.encode(captureClipboardOnStartup, forKey: .captureClipboardOnStartup)
@@ -222,7 +232,9 @@ struct ClipmanSettings: Codable, Equatable {
             fileHistorySortDescending: false,
             lastSelectedTab: 0,
             lastSelectedHistoryTab: HistoryTabID.text,
+            historyTabOrder: HistoryTabID.defaultOrder,
             linksHistoryEnabled: false,
+            richTextHistoryEnabled: false,
             groupFilter: "All",
             runAtStartup: false,
             captureClipboardOnStartup: false,

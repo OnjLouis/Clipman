@@ -174,6 +174,11 @@ namespace Clipman
             if (!string.IsNullOrWhiteSpace(incoming.SourceMachine) && (incomingWins || incomingCreatedWins)) existing.SourceMachine = incoming.SourceMachine.Trim();
             existing.Pinned = existing.Pinned || incoming.Pinned;
             existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate;
+            if (incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs)
+            {
+                existing.RichText = RichTextData.Clone(incoming.RichText);
+                existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs;
+            }
             if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder)) existing.ManualOrder = incoming.ManualOrder;
         }
 
@@ -213,7 +218,9 @@ namespace Clipman
                 LastUsedUnixMs = entry.LastUsedUnixMs,
                 Pinned = entry.Pinned,
                 IsTemplate = entry.IsTemplate,
-                ManualOrder = entry.ManualOrder
+                ManualOrder = entry.ManualOrder,
+                RichText = RichTextData.Clone(entry.RichText),
+                RichTextUpdatedUnixMs = entry.RichTextUpdatedUnixMs
             };
         }
 

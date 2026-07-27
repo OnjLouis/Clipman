@@ -79,3 +79,31 @@ func TestExactDeletedIdentityCannotBeRecreated(t *testing.T) {
 		t.Fatalf("deleted identity survived: %+v", target.Entries)
 	}
 }
+
+func TestRichTextUsesIndependentTimestampAndSupportsClear(t *testing.T) {
+	now := int64(2_000_000_000_000)
+	target := model.NewDatabase(now)
+	target.Entries = []model.Entry{{
+		ID: "rich", Text: "same", LastUsedUnixMs: 500,
+		Extra: map[string]json.RawMessage{
+			"RichText":              json.RawMessage(`{"Version":1,"HtmlFragment":"<b>same</b>"}`),
+			"RichTextUpdatedUnixMs": json.RawMessage(`100`),
+		},
+	}}
+	source := model.NewDatabase(now)
+	source.Entries = []model.Entry{{
+		ID: "rich", Text: "same", LastUsedUnixMs: 200,
+		Extra: map[string]json.RawMessage{
+			"RichTextUpdatedUnixMs": json.RawMessage(`300`),
+		},
+	}}
+
+	Merge(&target, source, now)
+	entry := target.Entries[0]
+	if _, exists := entry.Extra["RichText"]; exists {
+		t.Fatal("newer explicit rich-text clear was ignored")
+	}
+	if string(entry.Extra["RichTextUpdatedUnixMs"]) != "300" {
+		t.Fatalf("rich-text timestamp=%s", entry.Extra["RichTextUpdatedUnixMs"])
+	}
+}

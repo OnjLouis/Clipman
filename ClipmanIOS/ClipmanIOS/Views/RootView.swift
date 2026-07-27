@@ -52,13 +52,13 @@ struct ClipboardImportView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
-                Text("Add Clipboard Text")
+                Text("Add Clipboard Content")
                     .font(.largeTitle)
                     .bold()
-                Text("Choose Paste to add the current iOS clipboard text to Clipman, or Cancel to leave history unchanged.")
+                Text("Choose Paste to add the current iOS clipboard text and available formatting to Clipman, or Cancel to leave history unchanged.")
                     .multilineTextAlignment(.center)
-                PasteButton(payloadType: String.self) { values in
-                    app.addPastedClipboardText(values.first)
+                PasteButton(payloadType: MobileClipboardPayload.self) { values in
+                    app.addPastedClipboardPayload(values.first)
                 }
                 .buttonStyle(.borderedProminent)
                 Button("Cancel") {

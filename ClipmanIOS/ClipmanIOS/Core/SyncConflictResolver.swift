@@ -28,17 +28,30 @@ enum SyncConflictResolver {
         return merged
     }
 
-    static func addText(database: ClipDatabase, text: String, machineName: String) -> ClipDatabase {
+    static func addText(database: ClipDatabase, text: String, machineName: String, richText: RichTextPayload? = nil) -> ClipDatabase {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return database }
         var result = database
         let now = TimeUtil.nowUnixMs()
+        let normalizedRichText = MobileRichTextClipboard.normalize(richText)
         if let index = result.Entries.firstIndex(where: { $0.Text == trimmed }) {
             result.Entries[index].LastUsedUnixMs = now
             result.Entries[index].SourceMachine = machineName
+            if let normalizedRichText {
+                result.Entries[index].RichText = normalizedRichText
+                result.Entries[index].RichTextUpdatedUnixMs = now
+            }
         } else {
             let nextOrder = (result.Entries.map(\.ManualOrder).max() ?? 0) + 1
-            result.Entries.append(ClipEntry(Text: trimmed, SourceMachine: machineName, CreatedUnixMs: now, LastUsedUnixMs: now, ManualOrder: nextOrder))
+            result.Entries.append(ClipEntry(
+                Text: trimmed,
+                SourceMachine: machineName,
+                CreatedUnixMs: now,
+                LastUsedUnixMs: now,
+                ManualOrder: nextOrder,
+                RichText: normalizedRichText,
+                RichTextUpdatedUnixMs: normalizedRichText == nil ? 0 : now
+            ))
         }
         normalize(&result)
         return result
@@ -53,6 +66,10 @@ enum SyncConflictResolver {
         updated.Group = updated.Group.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.SourceMachine = machineName
         updated.LastUsedUnixMs = TimeUtil.nowUnixMs()
+        if updated.Text != result.Entries[index].Text {
+            updated.RichText = nil
+            updated.RichTextUpdatedUnixMs = updated.LastUsedUnixMs
+        }
         if updated.Text.isEmpty {
             return deleteEntry(database: database, entryID: entry.Id, machineName: machineName)
         }
@@ -160,6 +177,10 @@ enum SyncConflictResolver {
         }
         existing.Pinned = existing.Pinned || incoming.Pinned
         existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate
+        if incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs {
+            existing.RichText = incoming.RichText
+            existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs
+        }
         if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
             existing.ManualOrder = incoming.ManualOrder
         }

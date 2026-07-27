@@ -13,11 +13,21 @@ data class ClipEntry(
     val LastUsedUnixMs: Long = 0,
     val Pinned: Boolean = false,
     val IsTemplate: Boolean = false,
-    val ManualOrder: Long = 0
+    val ManualOrder: Long = 0,
+    val RichText: RichTextPayload? = null,
+    val RichTextUpdatedUnixMs: Long = 0
 ) {
     val displayText: String
         get() = if (Name.isBlank()) Text else "$Name: $Text"
 }
+
+@Serializable
+data class RichTextPayload(
+    val Version: Int = 1,
+    val HtmlFragment: String = "",
+    val RtfBase64: String = "",
+    val PreferredFormat: String = ""
+)
 
 @Serializable
 data class DeletedClipEntry(

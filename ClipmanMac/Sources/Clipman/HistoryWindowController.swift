@@ -18,12 +18,26 @@ private final class MetadataTableDataSource: NSObject, NSTableViewDataSource, NS
         guard rows.indices.contains(row) else { return nil }
         let value = tableColumn?.identifier.rawValue == "value" ? rows[row].1 : rows[row].0
         let identifier = NSUserInterfaceItemIdentifier(tableColumn?.identifier.rawValue ?? "detail")
-        let field = (tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField) ?? NSTextField(labelWithString: "")
-        field.identifier = identifier
-        field.stringValue = value
-        field.lineBreakMode = .byTruncatingTail
-        field.setAccessibilityLabel(value)
-        return field
+        let cell: NSTableCellView
+        if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView {
+            cell = reused
+        } else {
+            cell = NSTableCellView()
+            cell.identifier = identifier
+            let field = NSTextField(labelWithString: "")
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.lineBreakMode = .byTruncatingTail
+            cell.textField = field
+            cell.addSubview(field)
+            NSLayoutConstraint.activate([
+                field.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
+                field.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+                field.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            ])
+        }
+        cell.textField?.stringValue = value
+        cell.textField?.setAccessibilityLabel(value)
+        return cell
     }
 }
 
@@ -153,6 +167,200 @@ private class BoundaryAwareTextView: NSTextView {
     }
 }
 
+private final class HistoryModeButton: NSButton {
+    var onNavigate: ((Int) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if modifiers.isEmpty, event.keyCode == UInt16(kVK_LeftArrow) {
+            onNavigate?(-1)
+            return
+        }
+        if modifiers.isEmpty, event.keyCode == UInt16(kVK_RightArrow) {
+            onNavigate?(1)
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+private final class ReadOnlyTextPanel: NSPanel {
+    var onRequestClose: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onRequestClose?()
+    }
+
+    override func performClose(_ sender: Any?) {
+        onRequestClose?()
+    }
+}
+
+@MainActor
+private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
+    private let panel: ReadOnlyTextPanel
+    private let textView: BoundaryAwareTextView
+    private let detailsTable: NSTableView?
+    private let closeButton: NSButton
+    private let detailsDataSource: MetadataTableDataSource?
+    private var modalIsRunning = false
+
+    init(title: String, accessibilityLabel: String, text: String, details: [(String, String)], richText: RichTextPayload?) {
+        panel = ReadOnlyTextPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: details.isEmpty ? 470 : 650),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = title
+        panel.minSize = NSSize(width: 560, height: details.isEmpty ? 360 : 500)
+
+        textView = BoundaryAwareTextView(frame: NSRect(x: 0, y: 0, width: 640, height: 300))
+        textView.string = text
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        if let richText = RichTextData.normalize(richText),
+           let rtf = Data(base64Encoded: richText.RtfBase64),
+           let attributed = try? NSAttributedString(
+               data: rtf,
+               options: [.documentType: NSAttributedString.DocumentType.rtf],
+               documentAttributes: nil
+           ) {
+            textView.isRichText = true
+            textView.textStorage?.setAttributedString(attributed)
+        }
+        textView.setAccessibilityLabel(accessibilityLabel)
+
+        let textScroll = NSScrollView()
+        textScroll.borderType = .bezelBorder
+        textScroll.hasVerticalScroller = true
+        textScroll.documentView = textView
+
+        let rootStack = NSStackView()
+        rootStack.orientation = .vertical
+        rootStack.spacing = 10
+        rootStack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        rootStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let heading = NSTextField(labelWithString: title)
+        heading.font = .boldSystemFont(ofSize: 15)
+        rootStack.addArrangedSubview(heading)
+        rootStack.addArrangedSubview(textScroll)
+        textScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+
+        if details.isEmpty {
+            detailsTable = nil
+            detailsDataSource = nil
+        } else {
+            let detailsLabel = NSTextField(labelWithString: "Clip details")
+            detailsLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+            rootStack.addArrangedSubview(detailsLabel)
+
+            let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 640, height: max(160, CGFloat(details.count) * 24 + 28)))
+            table.allowsColumnReordering = false
+            table.allowsColumnResizing = true
+            table.allowsMultipleSelection = false
+            table.usesAlternatingRowBackgroundColors = true
+            table.rowHeight = 24
+            table.setAccessibilityLabel("Clip details")
+            let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+            nameColumn.title = "Property"
+            nameColumn.width = 180
+            nameColumn.minWidth = 120
+            let valueColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("value"))
+            valueColumn.title = "Value"
+            valueColumn.width = 450
+            valueColumn.minWidth = 200
+            table.addTableColumn(nameColumn)
+            table.addTableColumn(valueColumn)
+            let dataSource = MetadataTableDataSource(rows: details)
+            table.dataSource = dataSource
+            table.delegate = dataSource
+            detailsTable = table
+            detailsDataSource = dataSource
+
+            let detailsScroll = NSScrollView()
+            detailsScroll.borderType = .bezelBorder
+            detailsScroll.hasVerticalScroller = true
+            detailsScroll.documentView = table
+            rootStack.addArrangedSubview(detailsScroll)
+            detailsScroll.heightAnchor.constraint(equalToConstant: 160).isActive = true
+        }
+
+        closeButton = NSButton(title: "Close", target: nil, action: nil)
+        closeButton.keyEquivalent = "\u{1b}"
+        closeButton.keyEquivalentModifierMask = []
+        let buttonRow = NSStackView()
+        buttonRow.orientation = .horizontal
+        buttonRow.addArrangedSubview(NSView())
+        buttonRow.addArrangedSubview(closeButton)
+        rootStack.addArrangedSubview(buttonRow)
+
+        super.init()
+        closeButton.target = self
+        closeButton.action = #selector(close)
+        panel.onRequestClose = { [weak self] in self?.close() }
+        panel.delegate = self
+
+        guard let content = panel.contentView else { return }
+        content.addSubview(rootStack)
+        NSLayoutConstraint.activate([
+            rootStack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            rootStack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            rootStack.topAnchor.constraint(equalTo: content.topAnchor),
+            rootStack.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        ])
+
+        if let detailsTable {
+            textView.nextKeyView = detailsTable
+            detailsTable.nextKeyView = closeButton
+            closeButton.nextKeyView = textView
+        } else {
+            textView.nextKeyView = closeButton
+            closeButton.nextKeyView = textView
+        }
+        panel.initialFirstResponder = textView
+    }
+
+    func runModal(relativeTo parent: NSWindow?) {
+        if let parent {
+            panel.setFrameOrigin(NSPoint(
+                x: parent.frame.midX - panel.frame.width / 2,
+                y: parent.frame.midY - panel.frame.height / 2
+            ))
+        } else {
+            panel.center()
+        }
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(textView)
+        modalIsRunning = true
+        NSApp.runModal(for: panel)
+        modalIsRunning = false
+        panel.orderOut(nil)
+    }
+
+    @objc private func close() {
+        if modalIsRunning {
+            NSApp.stopModal()
+        }
+        panel.orderOut(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if modalIsRunning {
+            NSApp.stopModal()
+        }
+    }
+}
+
 private final class DialogTabTextView: BoundaryAwareTextView {
     override func insertTab(_ sender: Any?) {
         window?.selectNextKeyView(sender)
@@ -229,6 +437,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindowDidRequestClearNormalFileHistory(_ controller: HistoryWindowController)
     func historyWindowDidRequestRemoveUnavailableFileHistory(_ controller: HistoryWindowController)
     func historyWindow(_ controller: HistoryWindowController, didChangeHistoryTab tab: String)
+    func historyWindow(_ controller: HistoryWindowController, didChangeHistoryTabOrder order: [String])
     func historyWindow(_ controller: HistoryWindowController, didChangeSortMode sortMode: String, fileHistory: Bool)
     func historyWindowDidToggleSortDirection(_ controller: HistoryWindowController, fileHistory: Bool)
     func historyWindow(_ controller: HistoryWindowController, didChangeGroupFilter groupFilter: String)
@@ -268,6 +477,7 @@ final class HistoryWindow: NSWindow {
     var onGoToFile: (() -> Void)?
     var onMoveUp: (() -> Void)?
     var onMoveDown: (() -> Void)?
+    var onMoveHistoryTab: ((Int) -> Void)?
     var onSwitchMode: ((Int) -> Void)?
     var onPinnedShortcut: ((Int) -> Void)?
     var onActionsMenu: (() -> Void)?
@@ -303,7 +513,7 @@ final class HistoryWindow: NSWindow {
                 onPinnedShortcut?(digitIndex)
                 return true
             }
-            if modifiers == [.control], digitIndex >= 0 && digitIndex <= 2 {
+            if modifiers == [.control], digitIndex >= 0 && digitIndex <= 3 {
                 onSwitchMode?(digitIndex)
                 return true
             }
@@ -326,6 +536,14 @@ final class HistoryWindow: NSWindow {
         }
         if event.keyCode == UInt16(kVK_ANSI_E), modifiers == [.command, .shift] {
             onSecrets?()
+            return true
+        }
+        if event.keyCode == UInt16(kVK_LeftArrow), modifiers == [.option] {
+            onMoveHistoryTab?(-1)
+            return true
+        }
+        if event.keyCode == UInt16(kVK_RightArrow), modifiers == [.option] {
+            onMoveHistoryTab?(1)
             return true
         }
         if event.keyCode == UInt16(kVK_UpArrow), modifiers == [.option] {
@@ -520,12 +738,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private enum Mode {
         case text
         case links
+        case richText
         case files
 
         var tabID: String {
             switch self {
             case .text: return HistoryTabID.text
             case .links: return HistoryTabID.links
+            case .richText: return HistoryTabID.richText
             case .files: return HistoryTabID.files
             }
         }
@@ -541,7 +761,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
     private let searchField = NSSearchField()
-    private let modeControl = NSSegmentedControl()
+    private let modeTabStack = NSStackView()
+    private var modeButtons: [String: HistoryModeButton] = [:]
     private let actionsButton = NSButton(title: "Clipman", target: nil, action: nil)
     private let toolbarStack = NSStackView()
     private let groupButton = NSButton(title: "Set Group...", target: nil, action: nil)
@@ -553,6 +774,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let preferencesButton = NSButton(title: "Preferences...", target: nil, action: nil)
     private var mode: Mode = .text
     private var linksHistoryEnabled = false
+    private var richTextHistoryEnabled = false
+    private var historyTabOrder = HistoryTabID.defaultOrder
     private var textSortMode = "LastUsed"
     private var textSortDescending = true
     private var fileSortMode = "Manual"
@@ -613,9 +836,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.onGoToFile = { [weak self] in self?.goToSelectedFileEvent() }
         window.onMoveUp = { [weak self] in self?.moveSelectedItems(direction: -1) }
         window.onMoveDown = { [weak self] in self?.moveSelectedItems(direction: 1) }
+        window.onMoveHistoryTab = { [weak self] direction in self?.moveCurrentHistoryTab(direction: direction) }
         window.onSwitchMode = { [weak self] index in
             guard let self else { return }
-            self.setMode(self.modeForVisibleSegment(index), notify: true)
+            self.switchToVisibleMode(at: index)
         }
         window.onPinnedShortcut = { [weak self] index in self?.activatePinnedShortcut(index: index) }
         window.onActionsMenu = { [weak self] in self?.showActionsMenu() }
@@ -685,14 +909,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         setMode(modeForTabID(tabID), notify: false)
     }
 
-    func configureSort(textSortMode: String, textDescending: Bool, fileSortMode: String, fileDescending: Bool, selectedTab: Int, selectedHistoryTab: String, linksHistoryEnabled: Bool, groupFilter: String) {
+    func configureSort(textSortMode: String, textDescending: Bool, fileSortMode: String, fileDescending: Bool, selectedTab: Int, selectedHistoryTab: String, historyTabOrder: [String], linksHistoryEnabled: Bool, richTextHistoryEnabled: Bool, groupFilter: String) {
         self.textSortMode = textSortMode
         self.textSortDescending = textDescending
         self.fileSortMode = fileSortMode
         self.fileSortDescending = fileDescending
         self.groupFilter = groupFilter.isEmpty ? "All" : groupFilter
         self.linksHistoryEnabled = linksHistoryEnabled
-        mode = modeForTabID(HistoryTabID.normalize(selectedHistoryTab.isEmpty ? (selectedTab == 1 ? HistoryTabID.files : HistoryTabID.text) : selectedHistoryTab, linksEnabled: linksHistoryEnabled))
+        self.richTextHistoryEnabled = richTextHistoryEnabled
+        self.historyTabOrder = HistoryTabID.normalizeOrder(historyTabOrder)
+        mode = modeForTabID(HistoryTabID.normalize(selectedHistoryTab.isEmpty ? (selectedTab == 1 ? HistoryTabID.files : HistoryTabID.text) : selectedHistoryTab, linksEnabled: linksHistoryEnabled, richTextEnabled: richTextHistoryEnabled))
         configureModeControl()
         updateToolbarState()
         applyFilter(preferredSelectedID: rememberedSelectionID(for: mode))
@@ -770,9 +996,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         stack.addArrangedSubview(searchField)
 
         configureModeControl()
-        modeControl.target = self
-        modeControl.action = #selector(modeChanged)
-        stack.addArrangedSubview(modeControl)
+        stack.addArrangedSubview(modeTabStack)
 
         configureToolbar()
         stack.addArrangedSubview(toolbarStack)
@@ -795,48 +1019,116 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         stack.addArrangedSubview(scrollView)
         scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
         updateToolbarState()
+        configureMainKeyViewLoop()
     }
 
     private func visibleModes() -> [Mode] {
-        linksHistoryEnabled ? [.text, .links, .files] : [.text, .files]
+        HistoryTabID.visibleOrder(historyTabOrder, linksEnabled: linksHistoryEnabled, richTextEnabled: richTextHistoryEnabled)
+            .map { modeForTabID($0) }
     }
 
-    private func modeForVisibleSegment(_ index: Int) -> Mode {
+    private func switchToVisibleMode(at index: Int) {
         let modes = visibleModes()
-        guard modes.indices.contains(index) else { return .text }
-        return modes[index]
+        guard modes.indices.contains(index) else { return }
+        setMode(modes[index], notify: true)
+    }
+
+    private func moveCurrentHistoryTab(direction: Int) {
+        let selectedTabID = focusedModeTabID() ?? mode.tabID
+        guard let moved = HistoryTabID.moving(
+            historyTabOrder,
+            selected: selectedTabID,
+            direction: direction,
+            linksEnabled: linksHistoryEnabled,
+            richTextEnabled: richTextHistoryEnabled
+        ) else {
+            NSSound.beep()
+            return
+        }
+        historyTabOrder = moved
+        configureModeControl()
+        historyDelegate?.historyWindow(self, didChangeHistoryTabOrder: moved)
+        focusModeButton(tabID: selectedTabID)
     }
 
     private func modeForTabID(_ tabID: String) -> Mode {
         if tabID.caseInsensitiveCompare(HistoryTabID.files) == .orderedSame { return .files }
         if linksHistoryEnabled, tabID.caseInsensitiveCompare(HistoryTabID.links) == .orderedSame { return .links }
+        if richTextHistoryEnabled, tabID.caseInsensitiveCompare(HistoryTabID.richText) == .orderedSame { return .richText }
         return .text
     }
 
     private func configureModeControl() {
         let modes = visibleModes()
-        modeControl.trackingMode = .selectOne
-        modeControl.segmentCount = modes.count
-        for (index, visibleMode) in modes.enumerated() {
-            modeControl.setLabel(modeTitle(for: visibleMode), forSegment: index)
-            modeControl.setWidth(130, forSegment: index)
-            modeControl.setToolTip(modeTitle(for: visibleMode), forSegment: index)
+        for view in modeTabStack.arrangedSubviews {
+            modeTabStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
-        if let selected = modes.firstIndex(of: mode) {
-            modeControl.selectedSegment = selected
-        } else {
+        modeButtons.removeAll()
+        modeTabStack.orientation = .horizontal
+        modeTabStack.spacing = 6
+        modeTabStack.distribution = .fillEqually
+        modeTabStack.setAccessibilityLabel("History sections")
+
+        if !modes.contains(mode) {
             mode = .text
-            modeControl.selectedSegment = 0
         }
-        modeControl.setAccessibilityLabel(linksHistoryEnabled
-            ? "History type. Text History, Control+1. Links History, Control+2. File History, Control+3."
-            : "History type. Text History, Control+1. File History, Control+2.")
+        for (index, visibleMode) in modes.enumerated() {
+            let title = modeTitle(for: visibleMode)
+            let button = HistoryModeButton(title: title, target: self, action: #selector(modeButtonClicked(_:)))
+            button.identifier = NSUserInterfaceItemIdentifier(visibleMode.tabID)
+            button.setButtonType(.toggle)
+            button.bezelStyle = .rounded
+            button.state = visibleMode == mode ? .on : .off
+            button.toolTip = "\(title), Control+\(index + 1)"
+            button.setAccessibilityLabel(title)
+            button.setAccessibilityHelp("Control+\(index + 1). Use Left or Right Arrow to switch sections. Use Option+Left or Option+Right to move this section.")
+            button.onNavigate = { [weak self] direction in
+                self?.navigateModeTabs(from: visibleMode.tabID, direction: direction)
+            }
+            modeButtons[visibleMode.tabID] = button
+            modeTabStack.addArrangedSubview(button)
+        }
+        configureMainKeyViewLoop()
+    }
+
+    private func configureMainKeyViewLoop() {
+        guard let selectedModeButton = modeButtons[mode.tabID] else { return }
+        let keyViews: [NSView] = [searchField, selectedModeButton, actionsButton, tableView]
+        for (index, view) in keyViews.enumerated() {
+            view.nextKeyView = keyViews[(index + 1) % keyViews.count]
+        }
+    }
+
+    private func focusedModeTabID() -> String? {
+        guard let button = window?.firstResponder as? HistoryModeButton else { return nil }
+        return button.identifier?.rawValue
+    }
+
+    private func focusModeButton(tabID: String) {
+        guard let button = modeButtons[tabID] else { return }
+        window?.makeFirstResponder(button)
+        NSAccessibility.post(element: button, notification: .focusedUIElementChanged)
+    }
+
+    private func navigateModeTabs(from tabID: String, direction: Int) {
+        let modes = visibleModes()
+        guard let current = modes.firstIndex(where: { $0.tabID == tabID }) else { return }
+        let target = current + direction
+        guard modes.indices.contains(target) else {
+            NSSound.beep()
+            return
+        }
+        let targetMode = modes[target]
+        setMode(targetMode, notify: true, focusTable: false)
+        focusModeButton(tabID: targetMode.tabID)
     }
 
     private func modeTitle(for mode: Mode) -> String {
         switch mode {
         case .text: return "Text History"
         case .links: return "Links History"
+        case .richText: return "Rich Text History"
         case .files: return "File History"
         }
     }
@@ -896,6 +1188,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let direction = sortDirectionTitle(descending: currentSortDescending())
         directionButton.title = direction
         directionButton.setAccessibilityLabel("Sort direction, \(direction)")
+        configureMainKeyViewLoop()
     }
 
     private func installKeyMonitor() {
@@ -932,8 +1225,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         return false
     }
 
-    @objc private func modeChanged() {
-        setMode(modeForVisibleSegment(modeControl.selectedSegment), notify: true)
+    @objc private func modeButtonClicked(_ sender: HistoryModeButton) {
+        guard let tabID = sender.identifier?.rawValue else { return }
+        let selectedMode = modeForTabID(tabID)
+        setMode(selectedMode, notify: true, focusTable: false)
+        focusModeButton(tabID: selectedMode.tabID)
     }
 
     @objc private func actionsClicked() {
@@ -968,9 +1264,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         chooseSelectedEntry()
     }
 
-    private func setMode(_ newMode: Mode, notify: Bool) {
+    private func setMode(_ newMode: Mode, notify: Bool, focusTable: Bool = true) {
         guard newMode != mode else {
-            tableView.window?.makeFirstResponder(tableView)
+            if focusTable {
+                tableView.window?.makeFirstResponder(tableView)
+            } else {
+                focusModeButton(tabID: newMode.tabID)
+            }
             return
         }
         rememberSelectionForCurrentMode()
@@ -982,17 +1282,27 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if notify {
             historyDelegate?.historyWindow(self, didChangeHistoryTab: mode.tabID)
         }
-        tableView.window?.makeFirstResponder(tableView)
+        if focusTable {
+            tableView.window?.makeFirstResponder(tableView)
+        } else {
+            focusModeButton(tabID: newMode.tabID)
+        }
     }
 
     private func applyFilter(preferredSelectedID: String?) {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch mode {
-        case .text, .links:
-            let linkMode = mode == .links
-            let tabEntries = linksHistoryEnabled
-                ? allEntries.filter { LinkClassifier.isLinkOnlyText($0.Text) == linkMode }
-                : allEntries
+        case .text, .links, .richText:
+            let tabEntries: [ClipEntry]
+            if mode == .richText {
+                tabEntries = allEntries.filter { $0.RichText != nil }
+            } else {
+                let withoutRich = richTextHistoryEnabled ? allEntries.filter { $0.RichText == nil } : allEntries
+                let linkMode = mode == .links
+                tabEntries = linksHistoryEnabled
+                    ? withoutRich.filter { LinkClassifier.isLinkOnlyText($0.Text) == linkMode }
+                    : withoutRich
+            }
             let grouped = filterEntriesByGroup(tabEntries)
             if query.isEmpty {
                 filteredEntries = grouped
@@ -1062,7 +1372,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private func rebuildRows() {
         rows.removeAll()
         switch mode {
-        case .text, .links:
+        case .text, .links, .richText:
             let pinned = filteredEntries.filter(\.Pinned)
             let normal = filteredEntries.filter { !$0.Pinned }
             rows.append(contentsOf: pinned.map(Row.entry))
@@ -1093,7 +1403,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let row = tableView.selectedRow
         let id = selectedID()
         switch mode {
-        case .text, .links:
+        case .text, .links, .richText:
             rememberedTextSelectionID = id
             rememberedTextSelectionRow = row >= 0 ? row : nil
         case .files:
@@ -1104,14 +1414,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func rememberedSelectionID(for mode: Mode) -> String? {
         switch mode {
-        case .text, .links: return rememberedTextSelectionID
+        case .text, .links, .richText: return rememberedTextSelectionID
         case .files: return rememberedFileSelectionID
         }
     }
 
     private func rememberedSelectionRow(for mode: Mode) -> Int? {
         switch mode {
-        case .text, .links: return rememberedTextSelectionRow
+        case .text, .links, .richText: return rememberedTextSelectionRow
         case .files: return rememberedFileSelectionRow
         }
     }
@@ -1175,13 +1485,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             addGroupFilterItems(to: menu)
             menu.addItem(.separator())
         }
-        addMenuItem("Text History", action: #selector(menuTextHistory), to: menu, shortcut: "Control+1").state = mode == .text ? .on : .off
-        if linksHistoryEnabled {
-            addMenuItem("Links History", action: #selector(menuLinksHistory), to: menu, shortcut: "Control+2").state = mode == .links ? .on : .off
-            addMenuItem("File History", action: #selector(menuFileHistory), to: menu, shortcut: "Control+3").state = mode == .files ? .on : .off
-        } else {
-            addMenuItem("File History", action: #selector(menuFileHistory), to: menu, shortcut: "Control+2").state = mode == .files ? .on : .off
+        for (index, visibleMode) in visibleModes().enumerated() {
+            addMenuItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, shortcut: "Control+\(index + 1)").state = mode == visibleMode ? .on : .off
         }
+        addMenuItem("Move History Tab Left", action: #selector(menuMoveHistoryTabLeft), to: menu, shortcut: "Option+Left")
+        addMenuItem("Move History Tab Right", action: #selector(menuMoveHistoryTabRight), to: menu, shortcut: "Option+Right")
         menu.addItem(.separator())
 
         let sortMenu = NSMenu(title: mode == .files ? "Sort File History By" : "Sort Text History By")
@@ -1338,7 +1646,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func pinnedRows() -> [Row] {
         switch mode {
-        case .text, .links: return filteredEntries.filter(\.Pinned).map(Row.entry)
+        case .text, .links, .richText: return filteredEntries.filter(\.Pinned).map(Row.entry)
         case .files: return filteredFileEvents.filter(\.Pinned).map(Row.fileEvent)
         }
     }
@@ -1387,7 +1695,19 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuMoveDown() { moveSelectedItems(direction: 1) }
     @objc private func menuTextHistory() { setMode(.text, notify: true) }
     @objc private func menuLinksHistory() { setMode(.links, notify: true) }
+    @objc private func menuRichTextHistory() { setMode(.richText, notify: true) }
     @objc private func menuFileHistory() { setMode(.files, notify: true) }
+    @objc private func menuMoveHistoryTabLeft() { moveCurrentHistoryTab(direction: -1) }
+    @objc private func menuMoveHistoryTabRight() { moveCurrentHistoryTab(direction: 1) }
+
+    private func menuSelector(for mode: Mode) -> Selector {
+        switch mode {
+        case .text: return #selector(menuTextHistory)
+        case .links: return #selector(menuLinksHistory)
+        case .richText: return #selector(menuRichTextHistory)
+        case .files: return #selector(menuFileHistory)
+        }
+    }
     @objc private func menuJumpToNormal() { jumpToFirstNormalEntry() }
     @objc private func menuFind() { focusSearch() }
     @objc private func menuFindNext() { selectSearchResult(direction: 1) }
@@ -1521,7 +1841,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return
         }
         switch mode {
-        case .text, .links:
+        case .text, .links, .richText:
             let entries = selectedEntries()
             guard !entries.isEmpty else { return }
             if entries.contains(where: \.Pinned) {
@@ -1557,7 +1877,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 title: "Clipboard Entry Text",
                 accessibilityLabel: "Selected clipboard entry text",
                 text: entry.Text,
-                details: clipboardEntryDetails(entry)
+                details: clipboardEntryDetails(entry),
+                richText: entry.RichText
             )
             return
         }
@@ -1618,6 +1939,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         details.append(("Text length", String(entry.Text.count)))
         details.append(("Links", String(countLinks(in: entry.Text))))
+        if let richText = RichTextData.normalize(entry.RichText) {
+            var formats: [String] = []
+            if !richText.HtmlFragment.isEmpty { formats.append("HTML") }
+            if !richText.RtfBase64.isEmpty { formats.append("RTF") }
+            details.append(("Formatting", formats.joined(separator: " and ")))
+        }
         addDetail(&details, "Entry ID", entry.Id)
         return details
     }
@@ -1637,71 +1964,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         return regex.numberOfMatches(in: text, options: [], range: range)
     }
 
-    private func showReadOnlyText(title: String, accessibilityLabel: String, text: String, details: [(String, String)] = []) {
-        let alert = NSAlert()
-        alert.messageText = title
-        let closeButton = alert.addButton(withTitle: "Close")
-        closeButton.keyEquivalent = "\u{1b}"
-        closeButton.keyEquivalentModifierMask = []
-        let textView = BoundaryAwareTextView(frame: NSRect(x: 0, y: 0, width: 560, height: 280))
-        textView.string = text
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        textView.setAccessibilityLabel(accessibilityLabel)
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 560, height: 280))
-        scroll.borderType = .bezelBorder
-        scroll.hasVerticalScroller = true
-        scroll.documentView = textView
-
-        if details.isEmpty {
-            alert.accessoryView = scroll
-        } else {
-            let stack = NSStackView()
-            stack.orientation = .vertical
-            stack.spacing = 8
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(scroll)
-            scroll.widthAnchor.constraint(equalToConstant: 560).isActive = true
-            scroll.heightAnchor.constraint(equalToConstant: 260).isActive = true
-
-            let detailsLabel = NSTextField(labelWithString: "Details")
-            detailsLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-            stack.addArrangedSubview(detailsLabel)
-
-            let detailsTable = NSTableView()
-            detailsTable.headerView = nil
-            detailsTable.allowsColumnReordering = false
-            detailsTable.allowsColumnResizing = true
-            detailsTable.allowsMultipleSelection = false
-            detailsTable.setAccessibilityLabel("Entry details")
-            let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
-            nameColumn.title = "Property"
-            nameColumn.width = 160
-            let valueColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("value"))
-            valueColumn.title = "Value"
-            valueColumn.width = 380
-            detailsTable.addTableColumn(nameColumn)
-            detailsTable.addTableColumn(valueColumn)
-            let dataSource = MetadataTableDataSource(rows: details)
-            detailsTable.dataSource = dataSource
-            detailsTable.delegate = dataSource
-
-            let detailsScroll = NSScrollView()
-            detailsScroll.borderType = .bezelBorder
-            detailsScroll.hasVerticalScroller = true
-            detailsScroll.documentView = detailsTable
-            stack.addArrangedSubview(detailsScroll)
-            detailsScroll.widthAnchor.constraint(equalToConstant: 560).isActive = true
-            detailsScroll.heightAnchor.constraint(equalToConstant: 135).isActive = true
-
-            alert.accessoryView = stack
-            alert.window.initialFirstResponder = textView
-            alert.layout()
-            _ = dataSource
-        }
-        alert.runModal()
+    private func showReadOnlyText(title: String, accessibilityLabel: String, text: String, details: [(String, String)] = [], richText: RichTextPayload? = nil) {
+        let controller = ReadOnlyTextPanelController(
+            title: title,
+            accessibilityLabel: accessibilityLabel,
+            text: text,
+            details: details,
+            richText: richText
+        )
+        controller.runModal(relativeTo: window)
     }
 
     private func setQuickCopyTarget() {
@@ -1908,7 +2179,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func copySelectedEntries() {
         switch mode {
-        case .text, .links:
+        case .text, .links, .richText:
             let entries = selectedEntries()
             guard !entries.isEmpty else { return }
             historyDelegate?.historyWindow(self, didCopy: entries)
@@ -1921,7 +2192,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func moveSelectedItems(direction: Int) {
         switch mode {
-        case .text, .links:
+        case .text, .links, .richText:
             let entries = selectedEntries()
             guard !entries.isEmpty else {
                 NSSound.beep()

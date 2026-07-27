@@ -1,4 +1,5 @@
 import AppKit
+import ClipmanCore
 
 private struct PasteboardSnapshot {
     let items: [[NSPasteboard.PasteboardType: Data]]
@@ -32,7 +33,7 @@ private struct PasteboardSnapshot {
 
 @MainActor
 protocol ClipboardMonitorDelegate: AnyObject {
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, sourceApplication: String)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool)
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor)
 }
@@ -75,20 +76,22 @@ final class ClipboardMonitor: @unchecked Sendable {
         timer = nil
     }
 
-    func writeInternalText(_ text: String) {
+    func writeInternalText(_ text: String, richText: RichTextPayload? = nil) {
         suppressRemoteEchoText(text)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        RichTextData.write(richText, to: pasteboard)
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
     }
 
-    func writeTemporaryInternalText(_ text: String, restoreAfter delay: TimeInterval, action: () -> Void) {
+    func writeTemporaryInternalText(_ text: String, richText: RichTextPayload? = nil, restoreAfter delay: TimeInterval, action: () -> Void) {
         let pasteboard = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        RichTextData.write(richText, to: pasteboard)
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
         action()
@@ -203,7 +206,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             appDiagnostic: appDiagnostic,
             pasteboardDiagnostic: pasteboardDiagnostic
         )
-        delegate?.clipboardMonitor(self, didCapture: text, sourceApplication: sourceApplicationName())
+        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName())
     }
 
     private func shouldSuppressRemoteEcho(_ text: String) -> Bool {

@@ -18,15 +18,15 @@ struct HistoryView: View {
             .navigationTitle("Clipman")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    PasteButton(payloadType: String.self) { values in
-                        app.addPastedClipboardText(values.first)
+                    PasteButton(payloadType: MobileClipboardPayload.self) { values in
+                        app.addPastedClipboardPayload(values.first)
                     }
-                        .accessibilityHint("Adds the current iOS clipboard text to Clipman.")
-                    Button(app.selectedSection == .text ? "Switch to Links" : "Switch to Text") {
-                        app.selectedSection = app.selectedSection == .text ? .links : .text
+                        .accessibilityHint("Adds the current iOS clipboard text and available formatting to Clipman.")
+                    Button("Switch to \(app.nextSection.rawValue)") {
+                        app.switchSection(app.nextSection)
                     }
-                    .disabled(!app.settings.linksEnabled)
-                    .accessibilityLabel(app.selectedSection == .text ? "Switch to Links" : "Switch to Text")
+                    .disabled(app.visibleSections.count < 2)
+                    .accessibilityLabel("Switch to \(app.nextSection.rawValue)")
                     Button("Settings") { app.showingSettings = true }
                 }
             }
@@ -39,9 +39,9 @@ struct HistoryView: View {
             .accessibilityScrollAction { edge in
                 switch edge {
                 case .leading:
-                    app.switchSection(.links)
+                    app.switchToAdjacentSection(1)
                 case .trailing:
-                    app.switchSection(.text)
+                    app.switchToAdjacentSection(-1)
                 default:
                     break
                 }

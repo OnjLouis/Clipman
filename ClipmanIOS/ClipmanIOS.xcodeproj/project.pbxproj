@@ -18,6 +18,7 @@
 		40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */; };
 		49026C38259E970B438B4E54 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CD05FE0E19C7744ACFD87B4 /* Security.framework */; };
 		55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */; };
+		5750CF7FAE9FBA004D4FD2FB /* MobileRichTextClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */; };
 		5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C5029F5D137A6D4490F765 /* HistoryView.swift */; };
 		5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98DD96F176CD3DE6A07D271 /* SoundService.swift */; };
 		60B3DA13369B6F9C5E9EEAAF /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */; };
@@ -64,6 +65,7 @@
 		70E9160FA444DB6E3A61314E /* EntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryView.swift; sourceTree = "<group>"; };
 		721C35A41DED299959E74C8A /* ServerSettingsSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsSanitizer.swift; sourceTree = "<group>"; };
 		73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipDatabaseFile.swift; sourceTree = "<group>"; };
+		76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRichTextClipboard.swift; sourceTree = "<group>"; };
 		7CD05FE0E19C7744ACFD87B4 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		89C5029F5D137A6D4490F765 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		93D166EC7141EE64B5371FD2 /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
@@ -189,6 +191,7 @@
 				3757E95599655BFEB3101654 /* DatabaseWorker.swift */,
 				93D166EC7141EE64B5371FD2 /* Gzip.swift */,
 				98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */,
+				76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */,
 				642C84289DC631AC184C2C31 /* Models.swift */,
 				034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */,
 				59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */,
@@ -304,6 +307,7 @@
 				C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */,
 				40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */,
 				C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */,
+				5750CF7FAE9FBA004D4FD2FB /* MobileRichTextClipboard.swift in Sources */,
 				80DF3940EAE12616EAA0047D /* Models.swift in Sources */,
 				A8912F558B14C788063B7A9B /* RootView.swift in Sources */,
 				C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */,
@@ -325,7 +329,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 22000;
+				CURRENT_PROJECT_VERSION = 23000;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -335,7 +339,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.2.0;
+				MARKETING_VERSION = 2.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -408,7 +412,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 22000;
+				CURRENT_PROJECT_VERSION = 23000;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -418,7 +422,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.2.0;
+				MARKETING_VERSION = 2.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;

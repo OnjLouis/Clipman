@@ -2,20 +2,30 @@ package clipdb
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/model"
 )
 
+var windowsFixtures = map[string]string{
+	"windows-compressed.clipdb": "Q0xJUERCMR+LCAAAAAAABAB9UUtOwzAQ3VfqHaysu0j4FdjyrUQAqQ0sKAsTT4QlZxyNbRGp6oE4AwtuwFW4Ap6ET0QRlixr3mfGevP+8roaj4RIboCctpgcimzSAUWjpAdVoG5zx/A07U8Wby85QU8amLzjWohV/0RqpiKapNnW9s7u3nT/QD6UCqrfdTL5Niyg9Ww5B2OsqMjW4lajsk9OvD0vaYlzKC0qYTTCwHYpa2BbpVsfaMickQ0NUx6cdwNibgOVkMvykVtFweec040WRwR/R5B+RdDJLqTzhfs3qk53rRGBc/EU4AeeuQXUjYmTIlVJ4wZcLjFIc0UKiPv2+Jqf+34Fx2AgfnFjE51kPFp/AN3aX47gAQAA",
+	"windows-encrypted.clipdb":  "Q0xJUERCMgEdKYFI3cYzY08n2tjBA9z2r+pqdN6aI06BdVJy2bsHUzg2GRp3XK3t4kknl7FIqL8iy+bFjWh+g+NRO4U4NSeLlnwMo6HuxmTUxcWrHEYoUSja+h6dYITdrhDEw5cWmxN8TSC4C764HdIGxcseikMTVLe02faqiUvMjzLApV9rPJlfI28Yew5z7LaFJVMXJ9ctAfvdOVwZA4t9Of9LS0ITuRe5/NuUXiw53GHN6yHw5AWr6R3CJFSwn+9ZzWXUgkFGbt+rjYw5ieqd4CT7unfoqsWEHgjHmZGH+o/M8Lw/8mGkRIISWn+tVpfq3GcurDMFN+A7BzLBGlE290P8d8/oO+rvnpo3ljtqNJixPH5pZ5HunHv/NFkqNKeWqI8AKvfE7gr3R1QRpCK6Yn9OwWzTXXorx8k41r9jQbus4q3aweoCEON2Kt3tRsLsdt7YCsU=",
+}
+
+func windowsFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := base64.StdEncoding.DecodeString(windowsFixtures[name])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func TestDecodeWindowsFixtures(t *testing.T) {
 	for _, test := range []struct{ name, password string }{{"windows-compressed.clipdb", ""}, {"windows-encrypted.clipdb", "pässphrase"}} {
-		data, err := os.ReadFile(filepath.Join("..", "..", "testdata", test.name))
-		if err != nil {
-			t.Fatal(err)
-		}
+		data := windowsFixture(t, test.name)
 		database, err := Decode(data, test.password, DefaultLimits())
 		if err != nil {
 			t.Fatalf("Decode(%s): %v", test.name, err)
@@ -31,10 +41,7 @@ func TestDecodeWindowsFixtures(t *testing.T) {
 }
 
 func TestEncryptedAuthenticationBeforeDecrypt(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "windows-encrypted.clipdb"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := windowsFixture(t, "windows-encrypted.clipdb")
 	data[len(data)-1] ^= 1
 	if _, err := Decode(data, "pässphrase", DefaultLimits()); err != ErrPasswordOrData {
 		t.Fatalf("error=%v", err)

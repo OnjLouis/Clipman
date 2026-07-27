@@ -194,7 +194,8 @@ namespace Clipman
             {
                 settings.LastSelectedTab = 0;
             }
-            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled);
+            settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
+            settings.HistoryTabOrder = HistoryTabs.NormalizeOrder(settings.HistoryTabOrder);
             if (settings.LastPreferencesTab < 0 || settings.LastPreferencesTab > 5)
             {
                 settings.LastPreferencesTab = 0;

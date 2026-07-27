@@ -40,6 +40,36 @@ func TestExportEntryUsesNameThenFirstLine(t *testing.T) {
 	}
 }
 
+func TestRichTextExportBoundsAndClear(t *testing.T) {
+	value := normalizeRichText(&richTextJSON{
+		HTMLFragment:    "<b>formatted</b>",
+		RTFBase64:       "e1xccnRmMVxcYiBmb3JtYXR0ZWR9",
+		PreferredFormat: "html",
+	})
+	if value == nil || value.PreferredFormat != "Html" {
+		t.Fatalf("valid rich text was rejected: %#v", value)
+	}
+	entry := model.Entry{ID: "rich", Text: "formatted"}
+	setRichText(&entry, value, 123)
+	exported := exportEntry(entry)
+	if exported.RichText == nil || exported.RichText.HTMLFragment != "<b>formatted</b>" || exported.RichTextUpdatedUnixMs != 123 {
+		t.Fatalf("rich text did not round trip: %#v", exported)
+	}
+	clearRichText(&entry, 456)
+	exported = exportEntry(entry)
+	if exported.RichText != nil || exported.RichTextUpdatedUnixMs != 0 {
+		t.Fatalf("cleared rich text remained visible: %#v", exported)
+	}
+	var updated int64
+	if err := json.Unmarshal(entry.Extra["RichTextUpdatedUnixMs"], &updated); err != nil || updated != 456 {
+		t.Fatalf("clear timestamp was not retained: %d, %v", updated, err)
+	}
+	tooLarge := normalizeRichText(&richTextJSON{HTMLFragment: strings.Repeat("x", maxRichHTMLBytes+1)})
+	if tooLarge != nil {
+		t.Fatal("oversized rich text was accepted")
+	}
+}
+
 func TestConfiguredSessionMutationRoundTrip(t *testing.T) {
 	var blob []byte
 	revision := ""
@@ -107,7 +137,7 @@ func TestConfiguredSessionMutationRoundTrip(t *testing.T) {
 		t.Fatalf("saved password was not retained: password=%q ok=%v err=%v", password, ok, passwordErr)
 	}
 
-	created, err := s.put(json.RawMessage(`{"text":"private text","name":"Example","group":"Tests","pinned":false,"is_template":true,"duplicate":"move"}`))
+	created, err := s.put(json.RawMessage(`{"text":"private text","name":"Example","group":"Tests","pinned":false,"is_template":true,"duplicate":"move","rich_text":{"html_fragment":"<b>private text</b>","rtf_base64":"e1xccnRmMSBwcml2YXRlIHRleHR9","preferred_format":"Html"}}`))
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -116,6 +146,9 @@ func TestConfiguredSessionMutationRoundTrip(t *testing.T) {
 	}
 	if len(s.database.Entries) != 1 || !s.database.Entries[0].IsTemplate {
 		t.Fatalf("entry was not stored as template: %#v", created)
+	}
+	if rich, _ := richTextFromEntry(s.database.Entries[0]); rich == nil || rich.HTMLFragment != "<b>private text</b>" {
+		t.Fatalf("rich text was not stored: %#v", rich)
 	}
 	s.offline = true
 	refreshed, err := s.refresh(false)
@@ -133,6 +166,13 @@ func TestConfiguredSessionMutationRoundTrip(t *testing.T) {
 	}
 	if s.database.Entries[0].Name != "Renamed" || !s.database.Entries[0].Pinned {
 		t.Fatal("entry update did not persist")
+	}
+	if rich, updated := richTextFromEntry(s.database.Entries[0]); rich != nil || updated != 0 {
+		t.Fatalf("edited text retained stale formatting: rich=%#v updated=%d", rich, updated)
+	}
+	var richClearedAt int64
+	if err := json.Unmarshal(s.database.Entries[0].Extra["RichTextUpdatedUnixMs"], &richClearedAt); err != nil || richClearedAt == 0 {
+		t.Fatalf("edited text did not retain a rich-text clear timestamp: %d, %v", richClearedAt, err)
 	}
 	if _, err = s.delete(json.RawMessage(`{"id":"` + id + `"}`)); err == nil {
 		t.Fatal("pinned deletion was allowed")

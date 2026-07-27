@@ -51,6 +51,10 @@ class AndroidSettings(context: Context) {
         get() = preferences.getBoolean("addClipboardOnLaunch", false)
         set(value) = preferences.edit().putBoolean("addClipboardOnLaunch", value).apply()
 
+    var richTextEnabled: Boolean
+        get() = preferences.getBoolean("richTextEnabled", false)
+        set(value) = preferences.edit().putBoolean("richTextEnabled", value).apply()
+
     var requireAuthentication: Boolean
         get() = preferences.getBoolean("requireAuthentication", false)
         set(value) = preferences.edit().putBoolean("requireAuthentication", value).apply()
