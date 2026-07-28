@@ -6,6 +6,7 @@ protocol ClipStoreDelegate: AnyObject {
     func clipStoreDidChange()
     func clipStoreNeedsPassword(for path: String) -> String?
     func clipStoreDidFail(error: Error)
+    func clipStoreServerSyncDidRecover()
 }
 
 struct ServerSyncStatus {
@@ -31,6 +32,7 @@ final class ClipStore: @unchecked Sendable {
     weak var delegate: ClipStoreDelegate?
 
     private let queue = DispatchQueue(label: "Clipman.ClipStore")
+    private let serverRequestQueue = DispatchQueue(label: "Clipman.ClipStore.ServerRequests", qos: .utility)
     private var database = ClipDatabase()
     private var source: DispatchSourceFileSystemObject?
     private var reloadWorkItem: DispatchWorkItem?
@@ -42,6 +44,10 @@ final class ClipStore: @unchecked Sendable {
     private var serverRevision = ""
     private var serverPollTimer: DispatchSourceTimer?
     private var serverSyncInProgress = false
+    private var serverPollInProgress = false
+    private var serverConfigurationGeneration: UInt64 = 0
+    private var serverFailureReported = false
+    private var serverUploadPending = false
     private var serverLastPollUnixMs: Int64 = 0
     private var serverLastSuccessUnixMs: Int64 = 0
     private var serverLastUploadUnixMs: Int64 = 0
@@ -73,27 +79,29 @@ final class ClipStore: @unchecked Sendable {
         queue.async {
             self.serverPollTimer?.cancel()
             self.serverPollTimer = nil
+            self.serverConfigurationGeneration &+= 1
+            self.serverPollInProgress = false
             self.serverRevision = ""
             self.resetServerStatusLocked()
             self.serverClient = enabled ? ServerStorageClient(serverURL: serverURL, token: serverToken, databasePassword: self.password) : nil
             guard let client = self.serverClient, client.isConfigured else {
                 self.serverClient = nil
+                if self.serverFailureReported {
+                    self.serverFailureReported = false
+                    DispatchQueue.main.async { self.delegate?.clipStoreServerSyncDidRecover() }
+                }
                 return
             }
 
-            do {
-                try self.syncFromServerLocked(uploadLocalWhenMissing: true)
-                self.startServerPollTimerLocked()
-                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
-            } catch {
-                self.markServerFailureLocked()
-                self.reportServerFailureLocked(error)
-                if !self.isDatabasePasswordError(error) {
-                    self.startServerPollTimerLocked()
-                } else {
-                    self.serverClient = nil
-                }
-            }
+            self.startServerPollTimerLocked()
+            self.pollServerLocked()
+        }
+    }
+
+    func retryServerSync() {
+        queue.async {
+            self.serverNextPollUnixMs = 0
+            self.pollServerLocked()
         }
     }
 
@@ -196,6 +204,7 @@ final class ClipStore: @unchecked Sendable {
                 }
                 if !trimmedGroup.isEmpty {
                     self.database.Entries[index].Group = trimmedGroup
+                    self.database.Entries[index].ModifiedUnixMs = now
                 }
             } else {
                 let normalizedRichText = RichTextData.normalize(richText)
@@ -205,6 +214,7 @@ final class ClipStore: @unchecked Sendable {
                     SourceMachine: self.machineName,
                     CreatedUnixMs: now,
                     LastUsedUnixMs: now,
+                    ModifiedUnixMs: now,
                     ManualOrder: self.nextManualOrderLocked(),
                     RichText: normalizedRichText,
                     RichTextUpdatedUnixMs: normalizedRichText == nil ? 0 : now
@@ -257,6 +267,7 @@ final class ClipStore: @unchecked Sendable {
             guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
             self.database.Entries[index].Pinned.toggle()
+            self.database.Entries[index].ModifiedUnixMs = TimeUtil.nowUnixMs()
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
         }
@@ -281,10 +292,12 @@ final class ClipStore: @unchecked Sendable {
         queue.async {
             guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
+            let now = TimeUtil.nowUnixMs()
             self.database.Entries[index].Name = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let textChanged = self.database.Entries[index].Text != text
             self.database.Entries[index].Text = text
-            self.database.Entries[index].LastUsedUnixMs = TimeUtil.nowUnixMs()
+            self.database.Entries[index].LastUsedUnixMs = now
+            self.database.Entries[index].ModifiedUnixMs = now
             if textChanged {
                 self.database.Entries[index].RichText = nil
                 self.database.Entries[index].RichTextUpdatedUnixMs = self.database.Entries[index].LastUsedUnixMs
@@ -299,6 +312,7 @@ final class ClipStore: @unchecked Sendable {
             guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
             self.database.Entries[index].IsTemplate = isTemplate
+            self.database.Entries[index].ModifiedUnixMs = TimeUtil.nowUnixMs()
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
         }
@@ -311,9 +325,11 @@ final class ClipStore: @unchecked Sendable {
         queue.async {
             guard self.mergeLatestBeforeWriteLocked() else { return }
             var changed = false
+            let now = TimeUtil.nowUnixMs()
             for index in self.database.Entries.indices where idSet.contains(self.database.Entries[index].Id) {
                 self.database.Entries[index].Group = trimmed
-                self.database.Entries[index].LastUsedUnixMs = TimeUtil.nowUnixMs()
+                self.database.Entries[index].LastUsedUnixMs = now
+                self.database.Entries[index].ModifiedUnixMs = now
                 changed = true
             }
             guard changed else { return }
@@ -355,9 +371,14 @@ final class ClipStore: @unchecked Sendable {
             }
             ordered.insert(contentsOf: moving, at: insertionIndex)
 
+            let now = TimeUtil.nowUnixMs()
             for (offset, entry) in ordered.enumerated() {
                 guard let index = self.database.Entries.firstIndex(where: { $0.Id == entry.Id }) else { continue }
-                self.database.Entries[index].ManualOrder = Int64(offset + 1)
+                let nextOrder = Int64(offset + 1)
+                if self.database.Entries[index].ManualOrder != nextOrder {
+                    self.database.Entries[index].ManualOrder = nextOrder
+                    self.database.Entries[index].ModifiedUnixMs = now
+                }
             }
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
@@ -389,6 +410,7 @@ final class ClipStore: @unchecked Sendable {
                     SourceMachine: entry.SourceMachine.isEmpty ? self.machineName : entry.SourceMachine,
                     CreatedUnixMs: entry.CreatedUnixMs == 0 ? now : entry.CreatedUnixMs,
                     LastUsedUnixMs: entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
+                    ModifiedUnixMs: entry.ModifiedUnixMs == 0 ? now : entry.ModifiedUnixMs,
                     Pinned: false,
                     IsTemplate: entry.IsTemplate,
                     ManualOrder: order + Int64(offset)
@@ -419,6 +441,9 @@ final class ClipStore: @unchecked Sendable {
                     }
                     if entry.LastUsedUnixMs == 0 {
                         entry.LastUsedUnixMs = entry.CreatedUnixMs
+                    }
+                    if entry.ModifiedUnixMs == 0 {
+                        entry.ModifiedUnixMs = TimeUtil.nowUnixMs()
                     }
                     if entry.ManualOrder <= 0 {
                         entry.ManualOrder = self.nextManualOrderLocked()
@@ -485,6 +510,7 @@ final class ClipStore: @unchecked Sendable {
                 else { continue }
                 self.database.Entries[index].Text = text
                 self.database.Entries[index].LastUsedUnixMs = now
+                self.database.Entries[index].ModifiedUnixMs = now
                 changed = true
             }
             guard changed else { return }
@@ -550,7 +576,7 @@ final class ClipStore: @unchecked Sendable {
 
     private func mergeLatestBeforeWriteLocked() -> Bool {
         do {
-            if serverClient != nil && !serverSyncInProgress {
+            if shouldAttemptSynchronousServerRequestLocked() {
                 do {
                     try syncFromServerLocked(uploadLocalWhenMissing: false)
                 } catch {
@@ -578,16 +604,19 @@ final class ClipStore: @unchecked Sendable {
             SyncConflictResolver.normalize(&database)
             database.UpdatedUnixMs = TimeUtil.nowUnixMs()
             try ClipDatabaseFile.saveAtomic(databaseURL, database: database, password: password)
-            if serverClient != nil && !serverSyncInProgress {
+            if shouldAttemptSynchronousServerRequestLocked() {
                 do {
                     try uploadToServerLocked()
                 } catch {
+                    serverUploadPending = true
                     markServerFailureLocked()
                     reportServerFailureLocked(error)
                     if isDatabasePasswordError(error) {
                         return false
                     }
                 }
+            } else if serverClient != nil {
+                serverUploadPending = true
             }
             resetWatcherLocked()
             return true
@@ -613,6 +642,10 @@ final class ClipStore: @unchecked Sendable {
         }
         serverConsecutiveFailures = 0
         serverNextPollUnixMs = 0
+        if serverFailureReported {
+            serverFailureReported = false
+            DispatchQueue.main.async { self.delegate?.clipStoreServerSyncDidRecover() }
+        }
     }
 
     private func markServerFailureLocked() {
@@ -620,6 +653,14 @@ final class ClipStore: @unchecked Sendable {
         serverConsecutiveFailures = min(serverConsecutiveFailures + 1, 8)
         let delay = min(60, 2 << min(serverConsecutiveFailures, 5))
         serverNextPollUnixMs = now + Int64(delay * 1000)
+        serverFailureReported = true
+    }
+
+    private func shouldAttemptSynchronousServerRequestLocked() -> Bool {
+        serverClient != nil
+            && !serverSyncInProgress
+            && !serverPollInProgress
+            && serverConsecutiveFailures == 0
     }
 
     private func reportServerFailureLocked(_ error: Error) {
@@ -639,20 +680,35 @@ final class ClipStore: @unchecked Sendable {
     }
 
     private func pollServerLocked() {
-        guard let client = serverClient, client.isConfigured, !serverSyncInProgress else { return }
-        do {
-            let now = TimeUtil.nowUnixMs()
-            if serverNextPollUnixMs > now { return }
-            serverLastPollUnixMs = now
-            let metadata = try client.metadata()
-            markServerSuccessLocked(upload: false)
-            if metadata.revision != serverRevision {
-                try syncFromServerLocked(uploadLocalWhenMissing: false)
-                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+        guard let client = serverClient, client.isConfigured, !serverSyncInProgress, !serverPollInProgress else { return }
+        let now = TimeUtil.nowUnixMs()
+        if serverNextPollUnixMs > now { return }
+        serverLastPollUnixMs = now
+        serverPollInProgress = true
+        let generation = serverConfigurationGeneration
+        serverRequestQueue.async { [weak self] in
+            let result = Result { try client.metadata() }
+            self?.queue.async { [weak self] in
+                guard let self, generation == self.serverConfigurationGeneration else { return }
+                self.serverPollInProgress = false
+                self.handleServerMetadataResultLocked(result)
             }
-        } catch ServerStorageError.notFound {
+        }
+    }
+
+    private func handleServerMetadataResultLocked(_ result: Result<ServerDatabaseMetadata, Error>) {
+        switch result {
+        case .success(let metadata):
+            let revisionChanged = metadata.revision != serverRevision
+            guard revisionChanged || serverUploadPending else {
+                markServerSuccessLocked(upload: false)
+                return
+            }
             do {
-                try syncFromServerLocked(uploadLocalWhenMissing: true)
+                try syncFromServerLocked(uploadLocalWhenMissing: false)
+                if revisionChanged {
+                    DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+                }
             } catch {
                 markServerFailureLocked()
                 reportServerFailureLocked(error)
@@ -662,7 +718,20 @@ final class ClipStore: @unchecked Sendable {
                     serverClient = nil
                 }
             }
-        } catch {
+        case .failure(ServerStorageError.notFound):
+            do {
+                try syncFromServerLocked(uploadLocalWhenMissing: true)
+                DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            } catch {
+                markServerFailureLocked()
+                reportServerFailureLocked(error)
+                if isDatabasePasswordError(error) {
+                    serverPollTimer?.cancel()
+                    serverPollTimer = nil
+                    serverClient = nil
+                }
+            }
+        case .failure(let error):
             markServerFailureLocked()
             reportServerFailureLocked(error)
             if isDatabasePasswordError(error) {
@@ -694,6 +763,7 @@ final class ClipStore: @unchecked Sendable {
                 serverRevision = metadata.revision
                 markServerSuccessLocked(upload: true)
             }
+            serverUploadPending = false
             markServerSuccessLocked(upload: false)
         } catch ServerStorageError.notFound {
             if uploadLocalWhenMissing && (!database.Entries.isEmpty || !database.DeletedEntries.isEmpty) {
@@ -702,6 +772,7 @@ final class ClipStore: @unchecked Sendable {
                 let data = try Data(contentsOf: databaseURL)
                 let metadata = try client.upload(data: data, expectedRevision: "")
                 serverRevision = metadata.revision
+                serverUploadPending = false
                 markServerSuccessLocked(upload: true)
             } else {
                 throw ServerStorageError.notFound
@@ -715,16 +786,19 @@ final class ClipStore: @unchecked Sendable {
         do {
             let metadata = try client.upload(data: data, expectedRevision: serverRevision)
             serverRevision = metadata.revision
+            serverUploadPending = false
             markServerSuccessLocked(upload: true)
         } catch ServerStorageError.conflict {
             try syncFromServerLocked(uploadLocalWhenMissing: false)
             let mergedData = try Data(contentsOf: databaseURL)
             let metadata = try client.upload(data: mergedData, expectedRevision: serverRevision)
             serverRevision = metadata.revision
+            serverUploadPending = false
             markServerSuccessLocked(upload: true)
         } catch ServerStorageError.notFound {
             let metadata = try client.upload(data: data, expectedRevision: "")
             serverRevision = metadata.revision
+            serverUploadPending = false
             markServerSuccessLocked(upload: true)
         } catch {
             markServerFailureLocked()
@@ -756,6 +830,10 @@ final class ClipStore: @unchecked Sendable {
         for entry in normalizedLocal.Entries where !entry.Text.isEmpty {
             if SyncConflictResolver.isDeleted(entry, in: normalizedServer) { continue }
             if !serverIDs.contains(entry.Id) && !normalizedServer.Entries.contains(where: { $0.Text == entry.Text }) {
+                return true
+            }
+            if let serverEntry = normalizedServer.Entries.first(where: { $0.Id == entry.Id }),
+               entry.ModifiedUnixMs > serverEntry.ModifiedUnixMs {
                 return true
             }
         }

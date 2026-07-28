@@ -13,6 +13,7 @@ type Entry struct {
 	SourceMachine  string
 	CreatedUnixMs  int64
 	LastUsedUnixMs int64
+	ModifiedUnixMs int64
 	Pinned         bool
 	IsTemplate     bool
 	ManualOrder    int64
@@ -66,6 +67,9 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	if err := decodeInt64(raw, "LastUsedUnixMs", &e.LastUsedUnixMs); err != nil {
 		return err
 	}
+	if err := decodeInt64(raw, "ModifiedUnixMs", &e.ModifiedUnixMs); err != nil {
+		return err
+	}
 	if err := decodeBool(raw, "Pinned", &e.Pinned); err != nil {
 		return err
 	}
@@ -75,7 +79,7 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	if err := decodeInt64(raw, "ManualOrder", &e.ManualOrder); err != nil {
 		return err
 	}
-	removeKeys(e.Extra, "Id", "Text", "Name", "Group", "SourceMachine", "CreatedUnixMs", "LastUsedUnixMs", "Pinned", "IsTemplate", "ManualOrder")
+	removeKeys(e.Extra, "Id", "Text", "Name", "Group", "SourceMachine", "CreatedUnixMs", "LastUsedUnixMs", "ModifiedUnixMs", "Pinned", "IsTemplate", "ManualOrder")
 	return nil
 }
 
@@ -88,10 +92,11 @@ func (e Entry) MarshalJSON() ([]byte, error) {
 	setRaw(raw, "SourceMachine", e.SourceMachine)
 	setRaw(raw, "CreatedUnixMs", e.CreatedUnixMs)
 	setRaw(raw, "LastUsedUnixMs", e.LastUsedUnixMs)
+	setRaw(raw, "ModifiedUnixMs", e.ModifiedUnixMs)
 	setRaw(raw, "Pinned", e.Pinned)
 	setRaw(raw, "IsTemplate", e.IsTemplate)
 	setRaw(raw, "ManualOrder", e.ManualOrder)
-	return marshalOrdered(raw, []string{"Id", "Text", "Name", "Group", "SourceMachine", "CreatedUnixMs", "LastUsedUnixMs", "Pinned", "IsTemplate", "ManualOrder"})
+	return marshalOrdered(raw, []string{"Id", "Text", "Name", "Group", "SourceMachine", "CreatedUnixMs", "LastUsedUnixMs", "ModifiedUnixMs", "Pinned", "IsTemplate", "ManualOrder"})
 }
 
 func (d *DeletedEntry) UnmarshalJSON(data []byte) error {

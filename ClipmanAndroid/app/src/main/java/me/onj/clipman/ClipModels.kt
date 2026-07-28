@@ -11,6 +11,7 @@ data class ClipEntry(
     val SourceMachine: String = "",
     val CreatedUnixMs: Long = 0,
     val LastUsedUnixMs: Long = 0,
+    val ModifiedUnixMs: Long = 0,
     val Pinned: Boolean = false,
     val IsTemplate: Boolean = false,
     val ManualOrder: Long = 0,

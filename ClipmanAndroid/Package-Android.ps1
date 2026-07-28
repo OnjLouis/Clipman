@@ -33,6 +33,7 @@ if (!(Test-Path -LiteralPath $GradlePath)) {
 $buildWorkRoot = Join-Path ([IO.Path]::GetTempPath()) 'ClipmanAndroid-build'
 $projectCache = Join-Path $buildWorkRoot 'project-cache'
 $kotlinCache = Join-Path $buildWorkRoot 'kotlin-cache'
+$externalBuildRoot = Join-Path $buildWorkRoot 'outputs'
 if ([string]::IsNullOrWhiteSpace($env:GRADLE_USER_HOME)) {
     $env:GRADLE_USER_HOME = Join-Path $buildWorkRoot 'gradle-user-home'
 }
@@ -49,7 +50,8 @@ Write-Host "Gradle dependency connection and read timeout: $GradleNetworkTimeout
 & $GradlePath -p $projectRoot ':app:testDebugUnitTest' $taskName --no-daemon --stacktrace `
     "-Dorg.gradle.internal.http.connectionTimeout=$networkTimeoutMilliseconds" `
     "-Dorg.gradle.internal.http.socketTimeout=$networkTimeoutMilliseconds" `
-    --project-cache-dir $projectCache "-Pkotlin.project.persistent.dir=$kotlinCache"
+    --project-cache-dir $projectCache "-Pkotlin.project.persistent.dir=$kotlinCache" `
+    "-PclipmanBuildRoot=$externalBuildRoot"
 if ($LASTEXITCODE -ne 0) {
     throw "Android build failed with exit code $LASTEXITCODE."
 }
@@ -63,7 +65,7 @@ if (!$versionMatch.Success) {
 $versionName = $versionMatch.Groups[1].Value
 
 $variantFolder = if ($Configuration.Equals("Release", [StringComparison]::OrdinalIgnoreCase)) { "release" } else { "debug" }
-$sourceApk = Join-Path $projectRoot "app\build\outputs\apk\$variantFolder\app-$variantFolder.apk"
+$sourceApk = Join-Path $externalBuildRoot "app\outputs\apk\$variantFolder\app-$variantFolder.apk"
 if (!(Test-Path -LiteralPath $sourceApk)) {
     throw "Expected APK not found: $sourceApk"
 }
@@ -83,7 +85,8 @@ Write-Host "Packaged $targetApk"
 $generatedPaths = @(
     (Join-Path $projectRoot 'app\build'),
     (Join-Path $projectRoot '.gradle'),
-    (Join-Path $projectRoot '.kotlin')
+    (Join-Path $projectRoot '.kotlin'),
+    $externalBuildRoot
 )
 foreach ($generatedPath in $generatedPaths) {
     for ($attempt = 1; $attempt -le 10 -and (Test-Path -LiteralPath $generatedPath); $attempt++) {

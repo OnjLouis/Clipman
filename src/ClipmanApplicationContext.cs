@@ -971,16 +971,16 @@ namespace Clipman
             HotkeyDefinition show;
             if (HotkeyDefinition.TryParse(settings.ShowHistoryHotkey, out show))
             {
-                showHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, ShowHotkeyId, show.Modifiers, show.Key);
+                showHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, ShowHotkeyId, GlobalHotkeyModifiers(show.Modifiers), show.Key);
             }
 
             HotkeyDefinition toggle;
             if (HotkeyDefinition.TryParse(settings.ToggleActiveHotkey, out toggle))
             {
-                toggleHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, ToggleHotkeyId, toggle.Modifiers, toggle.Key);
+                toggleHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, ToggleHotkeyId, GlobalHotkeyModifiers(toggle.Modifiers), toggle.Key);
                 if (settings.ToggleActiveHotkey.Trim().Equals("Ctrl+Alt+`", StringComparison.OrdinalIgnoreCase))
                 {
-                    toggleAlternateHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, ToggleHotkeyAlternateId, toggle.Modifiers, Keys.Oem8);
+                    toggleAlternateHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, ToggleHotkeyAlternateId, GlobalHotkeyModifiers(toggle.Modifiers), Keys.Oem8);
                 }
             }
 
@@ -1001,7 +1001,7 @@ namespace Clipman
                     quickCopyId++;
                 }
 
-                if (NativeMethods.RegisterHotKey(messageWindow.Handle, quickCopyId, quickCopy.Modifiers, quickCopy.Key))
+                if (NativeMethods.RegisterHotKey(messageWindow.Handle, quickCopyId, GlobalHotkeyModifiers(quickCopy.Modifiers), quickCopy.Key))
                 {
                     quickCopyHotkeyEntryIds[quickCopyId] = binding.EntryId.Trim();
                     quickCopyHotkeysRegistered++;
@@ -1025,13 +1025,18 @@ namespace Clipman
                     secretId++;
                 }
 
-                if (NativeMethods.RegisterHotKey(messageWindow.Handle, secretId, secretHotkey.Modifiers, secretHotkey.Key))
+                if (NativeMethods.RegisterHotKey(messageWindow.Handle, secretId, GlobalHotkeyModifiers(secretHotkey.Modifiers), secretHotkey.Key))
                 {
                     secretHotkeyEntryIds[secretId] = secret.Id.Trim();
                     secretHotkeysRegistered++;
                 }
                 secretId++;
             }
+        }
+
+        private static NativeMethods.Modifiers GlobalHotkeyModifiers(NativeMethods.Modifiers modifiers)
+        {
+            return modifiers | NativeMethods.Modifiers.NoRepeat;
         }
 
         private void PruneInvalidQuickPasteBindings()

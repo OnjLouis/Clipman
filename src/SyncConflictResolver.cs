@@ -161,6 +161,12 @@ namespace Clipman
         {
             var incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs;
             var incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs;
+            var incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs;
+            var bothLegacy = incoming.ModifiedUnixMs <= 0 && existing.ModifiedUnixMs <= 0;
+            var legacyTextRepair = bothLegacy &&
+                !string.IsNullOrWhiteSpace(existing.Id) &&
+                string.Equals(existing.Id, incoming.Id, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(existing.Text ?? string.Empty, incoming.Text ?? string.Empty, StringComparison.Ordinal);
             if (incoming.LastUsedUnixMs > existing.LastUsedUnixMs) existing.LastUsedUnixMs = incoming.LastUsedUnixMs;
             if (incoming.CreatedUnixMs > 0 &&
                 (existing.CreatedUnixMs == 0 ||
@@ -169,17 +175,42 @@ namespace Clipman
             {
                 existing.CreatedUnixMs = incoming.CreatedUnixMs;
             }
-            if (!string.IsNullOrWhiteSpace(incoming.Name) && incomingWins) existing.Name = incoming.Name.Trim();
-            if (!string.IsNullOrWhiteSpace(incoming.Group) && incomingWins) existing.Group = incoming.Group.Trim();
+            if (incomingModifiedWins)
+            {
+                var textChanged = !string.Equals(existing.Text ?? string.Empty, incoming.Text ?? string.Empty, StringComparison.Ordinal);
+                existing.Text = incoming.Text ?? string.Empty;
+                existing.Name = (incoming.Name ?? string.Empty).Trim();
+                existing.Group = (incoming.Group ?? string.Empty).Trim();
+                existing.Pinned = incoming.Pinned;
+                existing.IsTemplate = incoming.IsTemplate;
+                existing.ManualOrder = incoming.ManualOrder;
+                existing.ModifiedUnixMs = incoming.ModifiedUnixMs;
+                if (textChanged)
+                {
+                    existing.RichText = RichTextData.Clone(incoming.RichText);
+                    existing.RichTextUpdatedUnixMs = Math.Max(incoming.RichTextUpdatedUnixMs, incoming.ModifiedUnixMs);
+                }
+            }
+            else if (bothLegacy)
+            {
+                if (legacyTextRepair)
+                {
+                    existing.Text = incoming.Text ?? string.Empty;
+                    existing.RichText = RichTextData.Clone(incoming.RichText);
+                    existing.RichTextUpdatedUnixMs = Math.Max(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs);
+                }
+                if (!string.IsNullOrWhiteSpace(incoming.Name) && incomingWins) existing.Name = incoming.Name.Trim();
+                if (!string.IsNullOrWhiteSpace(incoming.Group) && incomingWins) existing.Group = incoming.Group.Trim();
+                existing.Pinned = existing.Pinned || incoming.Pinned;
+                existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate;
+                if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder)) existing.ManualOrder = incoming.ManualOrder;
+            }
             if (!string.IsNullOrWhiteSpace(incoming.SourceMachine) && (incomingWins || incomingCreatedWins)) existing.SourceMachine = incoming.SourceMachine.Trim();
-            existing.Pinned = existing.Pinned || incoming.Pinned;
-            existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate;
             if (incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs)
             {
                 existing.RichText = RichTextData.Clone(incoming.RichText);
                 existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs;
             }
-            if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder)) existing.ManualOrder = incoming.ManualOrder;
         }
 
         private static void NormalizeMergedDatabase(ClipDatabase database)
@@ -216,6 +247,7 @@ namespace Clipman
                 SourceMachine = entry.SourceMachine ?? string.Empty,
                 CreatedUnixMs = entry.CreatedUnixMs,
                 LastUsedUnixMs = entry.LastUsedUnixMs,
+                ModifiedUnixMs = entry.ModifiedUnixMs,
                 Pinned = entry.Pinned,
                 IsTemplate = entry.IsTemplate,
                 ManualOrder = entry.ManualOrder,

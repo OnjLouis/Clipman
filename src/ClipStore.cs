@@ -315,6 +315,7 @@ namespace Clipman
                     SourceMachine = CurrentMachineName(),
                     CreatedUnixMs = now,
                     LastUsedUnixMs = now,
+                    ModifiedUnixMs = now,
                     ManualOrder = NextManualOrderLocked(),
                     RichText = newEntryRichText,
                     RichTextUpdatedUnixMs = newEntryRichText == null ? 0 : now
@@ -360,6 +361,7 @@ namespace Clipman
                         SourceMachine = CurrentMachineName(),
                         CreatedUnixMs = stamp,
                         LastUsedUnixMs = stamp,
+                        ModifiedUnixMs = stamp,
                         Pinned = false,
                         IsTemplate = entry.IsTemplate,
                         ManualOrder = NextManualOrderLocked(),
@@ -437,6 +439,7 @@ namespace Clipman
                         SourceMachine = entry.SourceMachine ?? string.Empty,
                         CreatedUnixMs = entry.CreatedUnixMs == 0 ? TimeUtil.NowUnixMs() : entry.CreatedUnixMs,
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? TimeUtil.NowUnixMs() : entry.LastUsedUnixMs,
+                        ModifiedUnixMs = entry.ModifiedUnixMs,
                         Pinned = entry.Pinned,
                         IsTemplate = entry.IsTemplate,
                         ManualOrder = entry.ManualOrder,
@@ -516,6 +519,7 @@ namespace Clipman
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return false;
                 entry.Pinned = !entry.Pinned;
+                entry.ModifiedUnixMs = TimeUtil.NowUnixMs();
                 SaveLocked();
                 OnChanged();
                 return entry.Pinned;
@@ -529,6 +533,7 @@ namespace Clipman
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
                 entry.Pinned = pinned;
+                entry.ModifiedUnixMs = TimeUtil.NowUnixMs();
                 SaveLocked();
                 OnChanged();
             }
@@ -541,6 +546,7 @@ namespace Clipman
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
                 entry.Name = (name ?? string.Empty).Trim();
+                entry.ModifiedUnixMs = TimeUtil.NowUnixMs();
                 SaveLocked();
                 OnChanged();
             }
@@ -553,15 +559,17 @@ namespace Clipman
             {
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
+                var now = TimeUtil.NowUnixMs();
                 entry.Name = (name ?? string.Empty).Trim();
                 var nextText = text ?? string.Empty;
                 if (!string.Equals(entry.Text ?? string.Empty, nextText, StringComparison.Ordinal))
                 {
                     entry.RichText = null;
-                    entry.RichTextUpdatedUnixMs = TimeUtil.NowUnixMs();
+                    entry.RichTextUpdatedUnixMs = now;
                 }
                 entry.Text = nextText;
-                entry.LastUsedUnixMs = TimeUtil.NowUnixMs();
+                entry.LastUsedUnixMs = now;
+                entry.ModifiedUnixMs = now;
                 SaveLocked();
                 OnChanged();
             }
@@ -575,6 +583,7 @@ namespace Clipman
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
                 entry.IsTemplate = isTemplate;
+                entry.ModifiedUnixMs = TimeUtil.NowUnixMs();
                 SaveLocked();
                 OnChanged();
             }
@@ -586,9 +595,11 @@ namespace Clipman
             if (idSet.Count == 0) return;
             lock (sync)
             {
+                var now = TimeUtil.NowUnixMs();
                 foreach (var entry in database.Entries.Where(e => idSet.Contains(e.Id)))
                 {
                     entry.Group = (groupName ?? string.Empty).Trim();
+                    entry.ModifiedUnixMs = now;
                 }
                 SaveLocked();
                 OnChanged();
@@ -618,6 +629,7 @@ namespace Clipman
                 var nextText = text ?? string.Empty;
                 entry.Text = nextText;
                 entry.LastUsedUnixMs = TimeUtil.NowUnixMs();
+                entry.ModifiedUnixMs = entry.LastUsedUnixMs;
                 entry.RichText = null;
                 entry.RichTextUpdatedUnixMs = entry.LastUsedUnixMs;
                 SaveLocked();
@@ -661,9 +673,15 @@ namespace Clipman
                     ordered.InsertRange(Math.Min(ordered.Count, last + 1 - selected.Count + 1), selected);
                 }
 
+                var now = TimeUtil.NowUnixMs();
                 for (var i = 0; i < ordered.Count; i++)
                 {
-                    ordered[i].ManualOrder = i + 1;
+                    var nextOrder = i + 1L;
+                    if (ordered[i].ManualOrder != nextOrder)
+                    {
+                        ordered[i].ManualOrder = nextOrder;
+                        ordered[i].ModifiedUnixMs = now;
+                    }
                 }
                 SaveLocked();
                 OnChanged();
@@ -680,12 +698,17 @@ namespace Clipman
 
             lock (sync)
             {
+                var now = TimeUtil.NowUnixMs();
                 foreach (var entry in database.Entries)
                 {
                     long manualOrder;
                     if (order.TryGetValue(entry.Id, out manualOrder))
                     {
-                        entry.ManualOrder = manualOrder;
+                        if (entry.ManualOrder != manualOrder)
+                        {
+                            entry.ManualOrder = manualOrder;
+                            entry.ModifiedUnixMs = now;
+                        }
                     }
                 }
                 SaveLocked();
@@ -731,6 +754,7 @@ namespace Clipman
                         SourceMachine = entry.SourceMachine ?? string.Empty,
                         CreatedUnixMs = entry.CreatedUnixMs == 0 ? now : entry.CreatedUnixMs,
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
+                        ModifiedUnixMs = entry.ModifiedUnixMs == 0 ? now : entry.ModifiedUnixMs,
                         Pinned = entry.Pinned,
                         IsTemplate = entry.IsTemplate,
                         ManualOrder = order++,
@@ -787,6 +811,7 @@ namespace Clipman
                         SourceMachine = entry.SourceMachine ?? string.Empty,
                         CreatedUnixMs = entry.CreatedUnixMs == 0 ? now : entry.CreatedUnixMs,
                         LastUsedUnixMs = entry.LastUsedUnixMs == 0 ? now : entry.LastUsedUnixMs,
+                        ModifiedUnixMs = entry.ModifiedUnixMs == 0 ? now : entry.ModifiedUnixMs,
                         Pinned = false,
                         IsTemplate = entry.IsTemplate,
                         ManualOrder = order++,
@@ -1223,6 +1248,12 @@ namespace Clipman
             var changed = false;
             var incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs;
             var incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs;
+            var incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs;
+            var bothLegacy = incoming.ModifiedUnixMs <= 0 && existing.ModifiedUnixMs <= 0;
+            var legacyTextRepair = bothLegacy &&
+                !string.IsNullOrWhiteSpace(existing.Id) &&
+                string.Equals(existing.Id, incoming.Id, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(existing.Text ?? string.Empty, incoming.Text ?? string.Empty, StringComparison.Ordinal);
 
             if (incoming.LastUsedUnixMs > existing.LastUsedUnixMs)
             {
@@ -1237,15 +1268,60 @@ namespace Clipman
                 existing.CreatedUnixMs = incoming.CreatedUnixMs;
                 changed = true;
             }
-            if (!string.IsNullOrWhiteSpace(incoming.Name) && incomingWins && !string.Equals(existing.Name ?? string.Empty, incoming.Name.Trim(), StringComparison.Ordinal))
+            if (incomingModifiedWins)
             {
-                existing.Name = incoming.Name.Trim();
+                var textChanged = !string.Equals(existing.Text ?? string.Empty, incoming.Text ?? string.Empty, StringComparison.Ordinal);
+                existing.Text = incoming.Text ?? string.Empty;
+                existing.Name = (incoming.Name ?? string.Empty).Trim();
+                existing.Group = (incoming.Group ?? string.Empty).Trim();
+                existing.Pinned = incoming.Pinned;
+                existing.IsTemplate = incoming.IsTemplate;
+                existing.ManualOrder = incoming.ManualOrder;
+                existing.ModifiedUnixMs = incoming.ModifiedUnixMs;
+                if (textChanged)
+                {
+                    existing.RichText = RichTextData.Clone(incoming.RichText);
+                    existing.RichTextUpdatedUnixMs = Math.Max(incoming.RichTextUpdatedUnixMs, incoming.ModifiedUnixMs);
+                }
                 changed = true;
             }
-            if (!string.IsNullOrWhiteSpace(incoming.Group) && incomingWins && !string.Equals(existing.Group ?? string.Empty, incoming.Group.Trim(), StringComparison.Ordinal))
+            else if (bothLegacy)
             {
-                existing.Group = incoming.Group.Trim();
-                changed = true;
+                if (legacyTextRepair)
+                {
+                    existing.Text = incoming.Text ?? string.Empty;
+                    existing.RichText = RichTextData.Clone(incoming.RichText);
+                    existing.RichTextUpdatedUnixMs = Math.Max(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs);
+                    changed = true;
+                }
+                if (!string.IsNullOrWhiteSpace(incoming.Name) && incomingWins && !string.Equals(existing.Name ?? string.Empty, incoming.Name.Trim(), StringComparison.Ordinal))
+                {
+                    existing.Name = incoming.Name.Trim();
+                    changed = true;
+                }
+                if (!string.IsNullOrWhiteSpace(incoming.Group) && incomingWins && !string.Equals(existing.Group ?? string.Empty, incoming.Group.Trim(), StringComparison.Ordinal))
+                {
+                    existing.Group = incoming.Group.Trim();
+                    changed = true;
+                }
+                if (incoming.Pinned && !existing.Pinned)
+                {
+                    existing.Pinned = true;
+                    changed = true;
+                }
+                if (incoming.IsTemplate && !existing.IsTemplate)
+                {
+                    existing.IsTemplate = true;
+                    changed = true;
+                }
+                if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder))
+                {
+                    if (existing.ManualOrder != incoming.ManualOrder)
+                    {
+                        existing.ManualOrder = incoming.ManualOrder;
+                        changed = true;
+                    }
+                }
             }
             if (!string.IsNullOrWhiteSpace(incoming.SourceMachine) &&
                 (incomingWins || incomingCreatedWins) &&
@@ -1254,26 +1330,12 @@ namespace Clipman
                 existing.SourceMachine = incoming.SourceMachine.Trim();
                 changed = true;
             }
-            if (incoming.Pinned && !existing.Pinned)
-            {
-                existing.Pinned = true;
-                changed = true;
-            }
             if (incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs)
             {
                 existing.RichText = RichTextData.Clone(incoming.RichText);
                 existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs;
                 changed = true;
             }
-            if (existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder))
-            {
-                if (existing.ManualOrder != incoming.ManualOrder)
-                {
-                    existing.ManualOrder = incoming.ManualOrder;
-                    changed = true;
-                }
-            }
-
             return changed;
         }
 
@@ -1301,9 +1363,15 @@ namespace Clipman
             foreach (var entry in source.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
             {
                 if (IsDeleted(target, entry)) continue;
-                if (!targetEntries.Any(e =>
+                var targetEntry = targetEntries.FirstOrDefault(e =>
+                    !string.IsNullOrEmpty(e.Id) && string.Equals(e.Id, entry.Id, StringComparison.Ordinal));
+                if (targetEntry == null && !targetEntries.Any(e =>
                     (!string.IsNullOrEmpty(e.Id) && string.Equals(e.Id, entry.Id, StringComparison.Ordinal)) ||
                     string.Equals(e.Text, entry.Text, StringComparison.Ordinal)))
+                {
+                    return true;
+                }
+                if (targetEntry != null && entry.ModifiedUnixMs > targetEntry.ModifiedUnixMs)
                 {
                     return true;
                 }
@@ -1366,6 +1434,7 @@ namespace Clipman
                 SourceMachine = entry.SourceMachine ?? string.Empty,
                 CreatedUnixMs = entry.CreatedUnixMs,
                 LastUsedUnixMs = entry.LastUsedUnixMs,
+                ModifiedUnixMs = entry.ModifiedUnixMs,
                 Pinned = entry.Pinned,
                 IsTemplate = entry.IsTemplate,
                 ManualOrder = entry.ManualOrder,
@@ -1406,22 +1475,7 @@ namespace Clipman
             if (!File.Exists(DatabasePath)) return;
             var existing = ClipDatabaseFile.Load(DatabasePath, CurrentPassword());
             if (existing == null || existing.Entries == null || existing.Entries.Count == 0) return;
-
-            MergeDeletedEntries(database, existing);
-            ApplyDeletedEntriesLocked();
-            foreach (var entry in existing.Entries.Where(e => e != null && !string.IsNullOrEmpty(e.Text)))
-            {
-                if (IsDeleted(database, entry)) continue;
-                if (database.Entries.Any(e =>
-                    (!string.IsNullOrEmpty(e.Id) && string.Equals(e.Id, entry.Id, StringComparison.Ordinal)) ||
-                    string.Equals(e.Text, entry.Text, StringComparison.Ordinal)))
-                {
-                    continue;
-                }
-
-                database.Entries.Add(Clone(entry));
-            }
-
+            MergeDatabaseIntoLocked(database, existing);
             NormalizeManualOrderLocked();
         }
 

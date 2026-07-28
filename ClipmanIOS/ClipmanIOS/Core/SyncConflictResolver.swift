@@ -48,6 +48,7 @@ enum SyncConflictResolver {
                 SourceMachine: machineName,
                 CreatedUnixMs: now,
                 LastUsedUnixMs: now,
+                ModifiedUnixMs: now,
                 ManualOrder: nextOrder,
                 RichText: normalizedRichText,
                 RichTextUpdatedUnixMs: normalizedRichText == nil ? 0 : now
@@ -66,6 +67,7 @@ enum SyncConflictResolver {
         updated.Group = updated.Group.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.SourceMachine = machineName
         updated.LastUsedUnixMs = TimeUtil.nowUnixMs()
+        updated.ModifiedUnixMs = updated.LastUsedUnixMs
         if updated.Text != result.Entries[index].Text {
             updated.RichText = nil
             updated.RichTextUpdatedUnixMs = updated.LastUsedUnixMs
@@ -83,6 +85,7 @@ enum SyncConflictResolver {
         guard let index = result.Entries.firstIndex(where: { $0.Id == entryID }) else { return result }
         result.Entries[index].Pinned.toggle()
         result.Entries[index].LastUsedUnixMs = TimeUtil.nowUnixMs()
+        result.Entries[index].ModifiedUnixMs = result.Entries[index].LastUsedUnixMs
         normalize(&result)
         return result
     }
@@ -160,29 +163,55 @@ enum SyncConflictResolver {
     private static func mergeEntry(existing: inout ClipEntry, incoming: ClipEntry) {
         let incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs
         let incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs
+        let incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs
+        let bothLegacy = incoming.ModifiedUnixMs <= 0 && existing.ModifiedUnixMs <= 0
+        let legacyTextRepair = bothLegacy
+            && !existing.Id.isEmpty
+            && existing.Id.caseInsensitiveCompare(incoming.Id) == .orderedSame
+            && existing.Text != incoming.Text
         if incoming.LastUsedUnixMs > existing.LastUsedUnixMs {
             existing.LastUsedUnixMs = incoming.LastUsedUnixMs
         }
         if incoming.CreatedUnixMs > 0 && (existing.CreatedUnixMs == 0 || incomingCreatedWins || (!incomingWins && incoming.CreatedUnixMs < existing.CreatedUnixMs)) {
             existing.CreatedUnixMs = incoming.CreatedUnixMs
         }
-        if !incoming.Name.isEmpty && incomingWins {
-            existing.Name = incoming.Name
-        }
-        if !incoming.Group.isEmpty && incomingWins {
-            existing.Group = incoming.Group
+        if incomingModifiedWins {
+            let textChanged = existing.Text != incoming.Text
+            existing.Text = incoming.Text
+            existing.Name = incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines)
+            existing.Group = incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines)
+            existing.Pinned = incoming.Pinned
+            existing.IsTemplate = incoming.IsTemplate
+            existing.ManualOrder = incoming.ManualOrder
+            existing.ModifiedUnixMs = incoming.ModifiedUnixMs
+            if textChanged {
+                existing.RichText = incoming.RichText
+                existing.RichTextUpdatedUnixMs = max(incoming.RichTextUpdatedUnixMs, incoming.ModifiedUnixMs)
+            }
+        } else if bothLegacy {
+            if legacyTextRepair {
+                existing.Text = incoming.Text
+                existing.RichText = incoming.RichText
+                existing.RichTextUpdatedUnixMs = max(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs)
+            }
+            if !incoming.Name.isEmpty && incomingWins {
+                existing.Name = incoming.Name
+            }
+            if !incoming.Group.isEmpty && incomingWins {
+                existing.Group = incoming.Group
+            }
+            existing.Pinned = existing.Pinned || incoming.Pinned
+            existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate
+            if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
+                existing.ManualOrder = incoming.ManualOrder
+            }
         }
         if !incoming.SourceMachine.isEmpty && (incomingWins || incomingCreatedWins) {
             existing.SourceMachine = incoming.SourceMachine
         }
-        existing.Pinned = existing.Pinned || incoming.Pinned
-        existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate
         if incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs {
             existing.RichText = incoming.RichText
             existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs
-        }
-        if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
-            existing.ManualOrder = incoming.ManualOrder
         }
     }
 }

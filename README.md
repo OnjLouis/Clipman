@@ -192,6 +192,13 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 ## Changelog
 
+### 2.3.2
+
+- Fixed synchronization of edits to existing history entries. Changed text, names, groups, pinned/template state and manual position now replace older copies on other devices while creation and last-used times continue to merge independently.
+- Kept the Mac history window responsive while Clipman Server is unavailable. Availability checks now run in the background, local changes wait safely for reconnection, and the skip sound plays once per outage rather than on every retry.
+- Prevented held Windows global hotkeys from repeating. Show/Hide History, Toggle Monitoring, Quick Paste and Secrets hotkeys now act once until the keys are released.
+- Added a Mac history status line showing the active section and visible entry count. It remains outside normal Tab navigation while staying available to VoiceOver navigation.
+
 ### 2.3.1 (iOS)
 
 - Added native iOS Shortcuts and Siri actions for adding the current clipboard to Clipman and copying the latest Clipman entry. The actions can be assigned to the iPhone Action Button, preserve available rich text, honour Clipman's authentication setting, and use the encrypted local cache when the server is unavailable.

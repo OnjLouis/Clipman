@@ -27,9 +27,11 @@ object SyncConflictResolver {
                 byText[normalized.Text] = normalized
             } else {
                 val index = merged.indexOfFirst { it === existing || it.Id == existing.Id || it.Text == existing.Text }
+                val previousText = existing.Text
                 val updated = mergeEntry(existing, incoming)
                 if (index >= 0) merged[index] = updated
                 if (updated.Id.isNotBlank()) byId[updated.Id] = updated
+                if (previousText != updated.Text) byText.remove(previousText)
                 byText[updated.Text] = updated
             }
         }
@@ -56,6 +58,7 @@ object SyncConflictResolver {
             SourceMachine = machineName,
             CreatedUnixMs = now,
             LastUsedUnixMs = now,
+            ModifiedUnixMs = now,
             ManualOrder = nextManualOrder,
             RichText = storedRichText,
             RichTextUpdatedUnixMs = richTextUpdated
@@ -72,6 +75,7 @@ object SyncConflictResolver {
             Group = entry.Group.trim(),
             SourceMachine = entry.SourceMachine.trim(),
             LastUsedUnixMs = now,
+            ModifiedUnixMs = now,
             RichText = if (entry.Text.trim() == database.Entries.firstOrNull { it.Id == entry.Id }?.Text) entry.RichText else null,
             RichTextUpdatedUnixMs = if (entry.Text.trim() == database.Entries.firstOrNull { it.Id == entry.Id }?.Text) entry.RichTextUpdatedUnixMs else now
         )
@@ -86,7 +90,7 @@ object SyncConflictResolver {
         val now = TimeUtil.nowUnixMs()
         return normalize(database.copy(
             Entries = database.Entries.map {
-                if (it.Id == entryId) it.copy(Pinned = !it.Pinned, LastUsedUnixMs = now) else it
+                if (it.Id == entryId) it.copy(Pinned = !it.Pinned, LastUsedUnixMs = now, ModifiedUnixMs = now) else it
             },
             UpdatedUnixMs = now
         ))
@@ -127,7 +131,15 @@ object SyncConflictResolver {
     private fun mergeEntry(existing: ClipEntry, incoming: ClipEntry): ClipEntry {
         val incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs
         val incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs
+        val incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs
+        val bothLegacy = incoming.ModifiedUnixMs <= 0 && existing.ModifiedUnixMs <= 0
+        val legacyTextRepair = bothLegacy && existing.Id.isNotBlank() && existing.Id.equals(incoming.Id, ignoreCase = true) && existing.Text != incoming.Text
+        val textChangedByMerge = incomingModifiedWins && existing.Text != incoming.Text
         return existing.copy(
+            Text = when {
+                incomingModifiedWins || legacyTextRepair -> incoming.Text
+                else -> existing.Text
+            },
             CreatedUnixMs = when {
                 incoming.CreatedUnixMs == 0L -> existing.CreatedUnixMs
                 existing.CreatedUnixMs == 0L -> incoming.CreatedUnixMs
@@ -136,16 +148,35 @@ object SyncConflictResolver {
                 else -> existing.CreatedUnixMs
             },
             LastUsedUnixMs = maxOf(existing.LastUsedUnixMs, incoming.LastUsedUnixMs),
-            Name = if (incoming.Name.isNotBlank() && incomingWins) incoming.Name.trim() else existing.Name,
-            Group = if (incoming.Group.isNotBlank() && incomingWins) incoming.Group.trim() else existing.Group,
+            ModifiedUnixMs = if (incomingModifiedWins) incoming.ModifiedUnixMs else existing.ModifiedUnixMs,
+            Name = when {
+                incomingModifiedWins -> incoming.Name.trim()
+                bothLegacy && incoming.Name.isNotBlank() && incomingWins -> incoming.Name.trim()
+                else -> existing.Name
+            },
+            Group = when {
+                incomingModifiedWins -> incoming.Group.trim()
+                bothLegacy && incoming.Group.isNotBlank() && incomingWins -> incoming.Group.trim()
+                else -> existing.Group
+            },
             SourceMachine = if (incoming.SourceMachine.isNotBlank() && (incomingWins || incomingCreatedWins)) incoming.SourceMachine.trim() else existing.SourceMachine,
-            Pinned = existing.Pinned || incoming.Pinned,
-            IsTemplate = existing.IsTemplate || incoming.IsTemplate,
-            RichText = if (incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs) incoming.RichText else existing.RichText,
-            RichTextUpdatedUnixMs = maxOf(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs),
+            Pinned = if (incomingModifiedWins) incoming.Pinned else if (bothLegacy) existing.Pinned || incoming.Pinned else existing.Pinned,
+            IsTemplate = if (incomingModifiedWins) incoming.IsTemplate else if (bothLegacy) existing.IsTemplate || incoming.IsTemplate else existing.IsTemplate,
+            RichText = when {
+                textChangedByMerge -> incoming.RichText
+                legacyTextRepair -> incoming.RichText
+                incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs -> incoming.RichText
+                else -> existing.RichText
+            },
+            RichTextUpdatedUnixMs = when {
+                textChangedByMerge -> maxOf(incoming.RichTextUpdatedUnixMs, incoming.ModifiedUnixMs)
+                legacyTextRepair -> maxOf(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs)
+                else -> maxOf(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs)
+            },
             ManualOrder = when {
-                existing.ManualOrder <= 0L -> incoming.ManualOrder
-                incoming.ManualOrder > 0L && incoming.ManualOrder < existing.ManualOrder -> incoming.ManualOrder
+                incomingModifiedWins -> incoming.ManualOrder
+                bothLegacy && existing.ManualOrder <= 0L -> incoming.ManualOrder
+                bothLegacy && incoming.ManualOrder > 0L && incoming.ManualOrder < existing.ManualOrder -> incoming.ManualOrder
                 else -> existing.ManualOrder
             }
         )

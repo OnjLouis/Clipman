@@ -11,6 +11,7 @@ struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
     var SourceMachine: String
     var CreatedUnixMs: Int64
     var LastUsedUnixMs: Int64
+    var ModifiedUnixMs: Int64
     var Pinned: Bool
     var IsTemplate: Bool
     var ManualOrder: Int64
@@ -20,7 +21,7 @@ struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
     var id: String { Id }
 
     private enum CodingKeys: String, CodingKey {
-        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs
+        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs, ModifiedUnixMs
         case Pinned, IsTemplate, ManualOrder, RichText, RichTextUpdatedUnixMs
     }
 
@@ -32,6 +33,7 @@ struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         SourceMachine: String = "",
         CreatedUnixMs: Int64 = TimeUtil.nowUnixMs(),
         LastUsedUnixMs: Int64 = TimeUtil.nowUnixMs(),
+        ModifiedUnixMs: Int64 = 0,
         Pinned: Bool = false,
         IsTemplate: Bool = false,
         ManualOrder: Int64 = 0,
@@ -45,6 +47,7 @@ struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         self.SourceMachine = SourceMachine
         self.CreatedUnixMs = CreatedUnixMs
         self.LastUsedUnixMs = LastUsedUnixMs
+        self.ModifiedUnixMs = ModifiedUnixMs
         self.Pinned = Pinned
         self.IsTemplate = IsTemplate
         self.ManualOrder = ManualOrder
@@ -61,6 +64,7 @@ struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         SourceMachine = try values.decodeIfPresent(String.self, forKey: .SourceMachine) ?? ""
         CreatedUnixMs = try values.decodeIfPresent(Int64.self, forKey: .CreatedUnixMs) ?? 0
         LastUsedUnixMs = try values.decodeIfPresent(Int64.self, forKey: .LastUsedUnixMs) ?? CreatedUnixMs
+        ModifiedUnixMs = try values.decodeIfPresent(Int64.self, forKey: .ModifiedUnixMs) ?? 0
         Pinned = try values.decodeIfPresent(Bool.self, forKey: .Pinned) ?? false
         IsTemplate = try values.decodeIfPresent(Bool.self, forKey: .IsTemplate) ?? false
         ManualOrder = try values.decodeIfPresent(Int64.self, forKey: .ManualOrder) ?? 0

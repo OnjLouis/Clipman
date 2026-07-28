@@ -740,10 +740,13 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func clipStoreDidChange() {
         databaseErrorAlertShown = false
-        clearServerSyncWarningIfNeeded()
         clearStorageFailureIfNeeded(area: "text history")
         historyWindow.update(entries: sortedTextEntries())
         copyLatestRemoteTextIfNeeded()
+    }
+
+    func clipStoreServerSyncDidRecover() {
+        clearServerSyncWarningIfNeeded()
     }
 
     func fileHistoryStoreDidChange() {
@@ -811,7 +814,6 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     @objc private func retryStorage(_ sender: Any?) {
-        clearServerSyncWarningIfNeeded()
         seedServerCacheFromConfiguredDatabase()
         let password = currentDatabasePassword(for: settings.databasePath)
         store.setDatabaseURL(textHistoryURL(for: settings), password: password)
@@ -1678,11 +1680,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             && now - status.lastPollUnixMs > 120_000
         guard !serverSyncWarning.isEmpty || stalePoll else { return }
 
-        clearServerSyncWarningIfNeeded()
-        seedServerCacheFromConfiguredDatabase()
-        let password = currentDatabasePassword(for: settings.databasePath)
-        store.setDatabaseURL(textHistoryURL(for: settings), password: password)
-        configureTextHistoryServerStorage()
+        store.retryServerSync()
     }
 
     private func runUpdateCheckIfDue(intervalSeconds: Int64) {

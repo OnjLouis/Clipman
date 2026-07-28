@@ -765,6 +765,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var modeButtons: [String: HistoryModeButton] = [:]
     private let actionsButton = NSButton(title: "Clipman", target: nil, action: nil)
     private let toolbarStack = NSStackView()
+    private let statusLabel = NSTextField(labelWithString: "Text History: no entries.")
     private let groupButton = NSButton(title: "Set Group...", target: nil, action: nil)
     private let setToFilterButton = NSButton(title: "Set to Filter", target: nil, action: nil)
     private let groupFilterButton = NSButton(title: "Filter: All", target: nil, action: nil)
@@ -1018,7 +1019,17 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         scrollView.hasVerticalScroller = true
         stack.addArrangedSubview(scrollView)
         scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+
+        let statusSeparator = NSBox()
+        statusSeparator.boxType = .separator
+        stack.addArrangedSubview(statusSeparator)
+
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statusLabel.setAccessibilityLabel("History status")
+        stack.addArrangedSubview(statusLabel)
         updateToolbarState()
+        updateStatusBar()
         configureMainKeyViewLoop()
     }
 
@@ -1325,6 +1336,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         rebuildRows()
         tableView.reloadData()
         updateTableAccessibility()
+        updateStatusBar()
         if let preferredSelectedID,
            let index = rows.firstIndex(where: { row in
                switch row {
@@ -1352,6 +1364,42 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             tableView.selectRowIndexes(IndexSet(integer: selectedRow), byExtendingSelection: false)
         }
         rememberSelectionForCurrentMode()
+    }
+
+    private func updateStatusBar() {
+        let visibleCount: Int
+        let totalCount: Int
+
+        switch mode {
+        case .files:
+            visibleCount = filteredFileEvents.count
+            totalCount = allFileEvents.count
+        case .richText:
+            visibleCount = filteredEntries.count
+            totalCount = allEntries.filter { $0.RichText != nil }.count
+        case .text, .links:
+            visibleCount = filteredEntries.count
+            let withoutRich = richTextHistoryEnabled ? allEntries.filter { $0.RichText == nil } : allEntries
+            if linksHistoryEnabled {
+                let linkMode = mode == .links
+                totalCount = withoutRich.filter { LinkClassifier.isLinkOnlyText($0.Text) == linkMode }.count
+            } else {
+                totalCount = withoutRich.count
+            }
+        }
+
+        let itemDescription = mode == .files
+            ? (totalCount == 1 ? "file history event" : "file history events")
+            : (totalCount == 1 ? "entry" : "entries")
+        let text: String
+        if visibleCount == totalCount {
+            text = "\(modeTitle(for: mode)): \(visibleCount) \(itemDescription)."
+        } else {
+            text = "\(modeTitle(for: mode)): showing \(visibleCount) of \(totalCount) \(itemDescription)."
+        }
+        statusLabel.stringValue = text
+        statusLabel.toolTip = text
+        statusLabel.setAccessibilityValue(text)
     }
 
     private func filterEntriesByGroup(_ entries: [ClipEntry]) -> [ClipEntry] {

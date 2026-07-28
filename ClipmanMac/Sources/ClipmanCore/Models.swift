@@ -8,6 +8,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
     public var SourceMachine: String
     public var CreatedUnixMs: Int64
     public var LastUsedUnixMs: Int64
+    public var ModifiedUnixMs: Int64
     public var Pinned: Bool
     public var IsTemplate: Bool
     public var ManualOrder: Int64
@@ -25,6 +26,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         SourceMachine: String = "",
         CreatedUnixMs: Int64 = TimeUtil.nowUnixMs(),
         LastUsedUnixMs: Int64 = TimeUtil.nowUnixMs(),
+        ModifiedUnixMs: Int64 = 0,
         Pinned: Bool = false,
         IsTemplate: Bool = false,
         ManualOrder: Int64 = 0,
@@ -39,6 +41,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         self.SourceMachine = SourceMachine
         self.CreatedUnixMs = CreatedUnixMs
         self.LastUsedUnixMs = LastUsedUnixMs
+        self.ModifiedUnixMs = ModifiedUnixMs
         self.Pinned = Pinned
         self.IsTemplate = IsTemplate
         self.ManualOrder = ManualOrder
@@ -48,7 +51,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs, Pinned, IsTemplate, ManualOrder, RichText, RichTextUpdatedUnixMs
+        case Id, Text, Name, Group, SourceMachine, CreatedUnixMs, LastUsedUnixMs, ModifiedUnixMs, Pinned, IsTemplate, ManualOrder, RichText, RichTextUpdatedUnixMs
     }
 
     public init(from decoder: Decoder) throws {
@@ -60,6 +63,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         SourceMachine = try known.decodeIfPresent(String.self, forKey: .SourceMachine) ?? ""
         CreatedUnixMs = try known.decodeIfPresent(Int64.self, forKey: .CreatedUnixMs) ?? TimeUtil.nowUnixMs()
         LastUsedUnixMs = try known.decodeIfPresent(Int64.self, forKey: .LastUsedUnixMs) ?? CreatedUnixMs
+        ModifiedUnixMs = try known.decodeIfPresent(Int64.self, forKey: .ModifiedUnixMs) ?? 0
         Pinned = try known.decodeIfPresent(Bool.self, forKey: .Pinned) ?? false
         IsTemplate = try known.decodeIfPresent(Bool.self, forKey: .IsTemplate) ?? false
         ManualOrder = try known.decodeIfPresent(Int64.self, forKey: .ManualOrder) ?? 0
@@ -87,6 +91,7 @@ public struct ClipEntry: Codable, Identifiable, Equatable, Sendable {
         try dynamic.encode(SourceMachine, forKey: DynamicCodingKey("SourceMachine"))
         try dynamic.encode(CreatedUnixMs, forKey: DynamicCodingKey("CreatedUnixMs"))
         try dynamic.encode(LastUsedUnixMs, forKey: DynamicCodingKey("LastUsedUnixMs"))
+        try dynamic.encode(ModifiedUnixMs, forKey: DynamicCodingKey("ModifiedUnixMs"))
         try dynamic.encode(Pinned, forKey: DynamicCodingKey("Pinned"))
         try dynamic.encode(IsTemplate, forKey: DynamicCodingKey("IsTemplate"))
         try dynamic.encode(ManualOrder, forKey: DynamicCodingKey("ManualOrder"))

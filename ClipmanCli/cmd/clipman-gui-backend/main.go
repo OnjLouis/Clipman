@@ -572,7 +572,7 @@ func (s *session) update(raw json.RawMessage) (any, error) {
 				changed := textChanged || e.Name != strings.TrimSpace(p.Name) || e.Group != strings.TrimSpace(p.Group) || e.Pinned != p.Pinned || e.IsTemplate != p.IsTemplate
 				e.Text, e.Name, e.Group, e.Pinned, e.IsTemplate = p.Text, strings.TrimSpace(p.Name), strings.TrimSpace(p.Group), p.Pinned, p.IsTemplate
 				if changed {
-					e.LastUsedUnixMs, e.SourceMachine, db.UpdatedUnixMs = now, s.cfg.Machine, now
+					e.LastUsedUnixMs, e.ModifiedUnixMs, e.SourceMachine, db.UpdatedUnixMs = now, now, s.cfg.Machine, now
 				}
 				if textChanged {
 					clearRichText(e, now)
@@ -624,7 +624,7 @@ func (s *session) updateMany(raw json.RawMessage) (any, error) {
 			itemChanged := textChanged || entry.Name != name || entry.Group != group || entry.Pinned != item.Pinned || entry.IsTemplate != item.IsTemplate
 			entry.Text, entry.Name, entry.Group, entry.Pinned, entry.IsTemplate = item.Text, name, group, item.Pinned, item.IsTemplate
 			if itemChanged {
-				entry.LastUsedUnixMs, entry.SourceMachine = now, s.cfg.Machine
+				entry.LastUsedUnixMs, entry.ModifiedUnixMs, entry.SourceMachine = now, now, s.cfg.Machine
 				changed = true
 			}
 			if textChanged {
@@ -706,7 +706,7 @@ func (s *session) pin(raw json.RawMessage) (any, error) {
 				if db.Entries[i].Pinned == p.Pinned {
 					return false, exportEntry(db.Entries[i]), nil
 				}
-				db.Entries[i].Pinned, db.Entries[i].LastUsedUnixMs, db.UpdatedUnixMs = p.Pinned, now, now
+				db.Entries[i].Pinned, db.Entries[i].LastUsedUnixMs, db.Entries[i].ModifiedUnixMs, db.UpdatedUnixMs = p.Pinned, now, now, now
 				return true, exportEntry(db.Entries[i]), nil
 			}
 		}
@@ -736,6 +736,7 @@ func (s *session) pinMany(raw json.RawMessage) (any, error) {
 			if db.Entries[index].Pinned != p.Pinned {
 				db.Entries[index].Pinned = p.Pinned
 				db.Entries[index].LastUsedUnixMs = now
+				db.Entries[index].ModifiedUnixMs = now
 				changed = true
 			}
 		}
@@ -785,6 +786,7 @@ func (s *session) swap(raw json.RawMessage) (any, error) {
 		}
 		db.Entries[first].ManualOrder, db.Entries[second].ManualOrder = db.Entries[second].ManualOrder, db.Entries[first].ManualOrder
 		db.Entries[first].LastUsedUnixMs, db.Entries[second].LastUsedUnixMs, db.UpdatedUnixMs = now, now, now
+		db.Entries[first].ModifiedUnixMs, db.Entries[second].ModifiedUnixMs = now, now
 		return true, map[string]string{"id": p.ID, "other_id": p.OtherID}, nil
 	})
 }

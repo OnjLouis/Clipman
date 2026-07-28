@@ -184,6 +184,12 @@ public enum SyncConflictResolver {
         let incomingLastUsed = incoming.LastUsedUnixMs
         let incomingWins = incomingLastUsed >= existing.LastUsedUnixMs
         let incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs
+        let incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs
+        let bothLegacy = incoming.ModifiedUnixMs <= 0 && existing.ModifiedUnixMs <= 0
+        let legacyTextRepair = bothLegacy
+            && !existing.Id.isEmpty
+            && existing.Id.caseInsensitiveCompare(incoming.Id) == .orderedSame
+            && existing.Text != incoming.Text
         if incomingLastUsed > existing.LastUsedUnixMs {
             existing.LastUsedUnixMs = incomingLastUsed
         }
@@ -193,22 +199,43 @@ public enum SyncConflictResolver {
                 || (!incomingWins && incoming.CreatedUnixMs < existing.CreatedUnixMs)) {
             existing.CreatedUnixMs = incoming.CreatedUnixMs
         }
-        if !incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingWins {
+        if incomingModifiedWins {
+            let textChanged = existing.Text != incoming.Text
+            existing.Text = incoming.Text
             existing.Name = incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if !incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingWins {
             existing.Group = incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines)
+            existing.Pinned = incoming.Pinned
+            existing.IsTemplate = incoming.IsTemplate
+            existing.ManualOrder = incoming.ManualOrder
+            existing.ModifiedUnixMs = incoming.ModifiedUnixMs
+            if textChanged {
+                existing.RichText = incoming.RichText
+                existing.RichTextUpdatedUnixMs = max(incoming.RichTextUpdatedUnixMs, incoming.ModifiedUnixMs)
+            }
+        } else if bothLegacy {
+            if legacyTextRepair {
+                existing.Text = incoming.Text
+                existing.RichText = incoming.RichText
+                existing.RichTextUpdatedUnixMs = max(existing.RichTextUpdatedUnixMs, incoming.RichTextUpdatedUnixMs)
+            }
+            if !incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingWins {
+                existing.Name = incoming.Name.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if !incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && incomingWins {
+                existing.Group = incoming.Group.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            existing.Pinned = existing.Pinned || incoming.Pinned
+            existing.IsTemplate = existing.IsTemplate || incoming.IsTemplate
+            if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
+                existing.ManualOrder = incoming.ManualOrder
+            }
         }
         if !incoming.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (incomingWins || incomingCreatedWins) {
             existing.SourceMachine = incoming.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        existing.Pinned = existing.Pinned || incoming.Pinned
         if incoming.RichTextUpdatedUnixMs > existing.RichTextUpdatedUnixMs {
             existing.RichText = incoming.RichText
             existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs
-        }
-        if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
-            existing.ManualOrder = incoming.ManualOrder
         }
     }
 

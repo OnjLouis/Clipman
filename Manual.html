@@ -211,7 +211,7 @@
 
   <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
 
-  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu and <code>Command+F</code> opens search. The Clipman menu shows the current <code>Control+number</code> for each visible history area; those numbers update immediately when tabs are moved. Pressing <code>Enter</code> from search returns focus to the history list.</p>
+  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu and <code>Command+F</code> opens search. The Clipman menu shows the current <code>Control+number</code> for each visible history area; those numbers update immediately when tabs are moved. The status line shows the active history area and visible entry count. It is not part of normal Tab navigation, but VoiceOver can reach it with VoiceOver navigation. Pressing <code>Enter</code> from search returns focus to the history list.</p>
 
   <p>Mac global hotkeys are stored by physical key code so the displayed shortcut remains readable on different keyboard layouts. Default Mac global hotkeys avoid common VoiceOver conflicts, but they can be changed in Preferences.</p>
   <h2 id="startup-state">Startup State</h2>
@@ -587,6 +587,14 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.3.2</h3>
+  <ul>
+    <li>Fixed synchronization of edits to existing history entries. Changed text, names, groups, pinned/template state and manual position now replace older copies on other devices while creation and last-used times continue to merge independently.</li>
+    <li>Kept the Mac history window responsive while Clipman Server is unavailable. Availability checks now run in the background, local changes wait safely for reconnection, and the skip sound plays once per outage rather than on every retry.</li>
+    <li>Prevented held Windows global hotkeys from repeating. Show/Hide History, Toggle Monitoring, Quick Paste and Secrets hotkeys now act once until the keys are released.</li>
+    <li>Added a Mac history status line showing the active section and visible entry count. It remains outside normal Tab navigation while staying available to VoiceOver navigation.</li>
+  </ul>
+
   <h3>2.3.1 (iOS)</h3>
   <ul>
     <li>Added native iOS Shortcuts and Siri actions for adding the current clipboard to Clipman and copying the latest Clipman entry. The actions can be assigned to the iPhone Action Button, preserve available rich text, honour Clipman's authentication setting, and use the encrypted local cache when the server is unavailable.</li>

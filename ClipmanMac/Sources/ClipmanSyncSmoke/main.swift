@@ -81,6 +81,33 @@ do {
     expect(richMerge.Entries.first?.RichText == nil, "newer rich-text timestamp should clear formatting independently of last-used time")
     expect(richMerge.Entries.first?.RichTextUpdatedUnixMs == 300, "rich-text clear timestamp should survive merge")
 
+    var editedLocal = ClipDatabase(Entries: [
+        ClipEntry(Id: "edited", Text: "old text", Name: "Old", Group: "Old", ModifiedUnixMs: 100, Pinned: true, IsTemplate: true, ManualOrder: 1)
+    ])
+    let editedRemote = ClipDatabase(Entries: [
+        ClipEntry(Id: "edited", Text: "new text", Name: "New", Group: "New", ModifiedUnixMs: 200, Pinned: false, IsTemplate: false, ManualOrder: 2)
+    ])
+    SyncConflictResolver.merge(into: &editedLocal, source: editedRemote)
+    let edited = editedLocal.Entries.first
+    expect(edited?.Text == "new text", "newer modification should replace text")
+    expect(edited?.Name == "New" && edited?.Group == "New", "newer modification should replace editable metadata")
+    expect(edited?.Pinned == false && edited?.IsTemplate == false, "newer modification should support unpinning and disabling templates")
+    expect(edited?.ManualOrder == 2 && edited?.ModifiedUnixMs == 200, "newer modification timestamp and order should survive merge")
+
+    var newerLocal = ClipDatabase(Entries: [
+        ClipEntry(Id: "stale-edit", Text: "new text", ModifiedUnixMs: 200)
+    ])
+    let olderRemote = ClipDatabase(Entries: [
+        ClipEntry(Id: "stale-edit", Text: "old text", ModifiedUnixMs: 100)
+    ])
+    SyncConflictResolver.merge(into: &newerLocal, source: olderRemote)
+    expect(newerLocal.Entries.first?.Text == "new text", "older modification must not overwrite a newer edit")
+
+    var legacyLocal = ClipDatabase(Entries: [ClipEntry(Id: "legacy-edit", Text: "stale text")])
+    let legacyRemote = ClipDatabase(Entries: [ClipEntry(Id: "legacy-edit", Text: "edited text")])
+    SyncConflictResolver.merge(into: &legacyLocal, source: legacyRemote)
+    expect(legacyLocal.Entries.first?.Text == "edited text", "legacy same-identity edit should repair from the shared source")
+
     let deletedText = "https://example.com/recreated"
     let deletedHash = SyncConflictResolver.textHash(deletedText)
     let tombstoneTestNow = TimeUtil.nowUnixMs()

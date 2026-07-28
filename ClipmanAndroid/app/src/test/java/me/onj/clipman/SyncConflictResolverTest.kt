@@ -136,6 +136,54 @@ class SyncConflictResolverTest {
         assertEquals(null, RichTextClipboard.normalize(oversized))
     }
 
+    @Test
+    fun newerModificationReplacesEditableEntryState() {
+        val local = database(entry("edited", "old text", 1).copy(
+            ModifiedUnixMs = 100,
+            Name = "Old name",
+            Group = "Old group",
+            Pinned = true,
+            IsTemplate = true
+        ))
+        val server = database(entry("edited", "new text", 1).copy(
+            ModifiedUnixMs = 200,
+            Name = "New name",
+            Group = "New group",
+            Pinned = false,
+            IsTemplate = false
+        ))
+
+        val merged = SyncConflictResolver.merge(local, server).Entries.single()
+
+        assertEquals("new text", merged.Text)
+        assertEquals("New name", merged.Name)
+        assertEquals("New group", merged.Group)
+        assertFalse(merged.Pinned)
+        assertFalse(merged.IsTemplate)
+        assertEquals(200, merged.ModifiedUnixMs)
+    }
+
+    @Test
+    fun olderModificationCannotOverwriteNewerEdit() {
+        val local = database(entry("edited", "new text", 1).copy(ModifiedUnixMs = 200))
+        val server = database(entry("edited", "old text", 1).copy(ModifiedUnixMs = 100))
+
+        val merged = SyncConflictResolver.merge(local, server).Entries.single()
+
+        assertEquals("new text", merged.Text)
+        assertEquals(200, merged.ModifiedUnixMs)
+    }
+
+    @Test
+    fun legacySameIdentityRepairsTextFromServer() {
+        val local = database(entry("legacy", "stale text", 1))
+        val server = database(entry("legacy", "edited text", 1))
+
+        val merged = SyncConflictResolver.merge(local, server).Entries.single()
+
+        assertEquals("edited text", merged.Text)
+    }
+
     private fun database(vararg entries: ClipEntry) = ClipDatabase(
         Version = 1,
         UpdatedUnixMs = 10,

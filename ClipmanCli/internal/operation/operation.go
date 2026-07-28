@@ -136,7 +136,7 @@ func Put(database *model.Database, text, name, group, machine, duplicate, newID 
 	if newID == "" {
 		newID = merge.NewID()
 	}
-	entry := model.Entry{ID: newID, Text: text, Name: strings.TrimSpace(name), Group: strings.TrimSpace(group), SourceMachine: machine, CreatedUnixMs: now, LastUsedUnixMs: now, Pinned: pinned, IsTemplate: isTemplate, ManualOrder: maxOrder + 1, Extra: map[string]json.RawMessage{}}
+	entry := model.Entry{ID: newID, Text: text, Name: strings.TrimSpace(name), Group: strings.TrimSpace(group), SourceMachine: machine, CreatedUnixMs: now, LastUsedUnixMs: now, ModifiedUnixMs: now, Pinned: pinned, IsTemplate: isTemplate, ManualOrder: maxOrder + 1, Extra: map[string]json.RawMessage{}}
 	database.Entries = append(database.Entries, entry)
 	database.UpdatedUnixMs = now
 	return entry, "created"

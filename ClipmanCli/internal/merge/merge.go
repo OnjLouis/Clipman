@@ -141,26 +141,47 @@ func AddDeleted(database *model.Database, entry model.Entry, machine string, now
 func mergeEntry(existing *model.Entry, incoming model.Entry) {
 	incomingWins := incoming.LastUsedUnixMs >= existing.LastUsedUnixMs
 	createdWins := incoming.CreatedUnixMs > existing.CreatedUnixMs
+	incomingModifiedWins := incoming.ModifiedUnixMs > existing.ModifiedUnixMs
+	bothLegacy := incoming.ModifiedUnixMs <= 0 && existing.ModifiedUnixMs <= 0
+	legacyTextRepair := bothLegacy && existing.ID != "" && strings.EqualFold(existing.ID, incoming.ID) && existing.Text != incoming.Text
 	if incoming.LastUsedUnixMs > existing.LastUsedUnixMs {
 		existing.LastUsedUnixMs = incoming.LastUsedUnixMs
 	}
 	if incoming.CreatedUnixMs > 0 && (existing.CreatedUnixMs == 0 || createdWins || (!incomingWins && incoming.CreatedUnixMs < existing.CreatedUnixMs)) {
 		existing.CreatedUnixMs = incoming.CreatedUnixMs
 	}
-	if strings.TrimSpace(incoming.Name) != "" && incomingWins {
+	textChangedByMerge := false
+	if incomingModifiedWins {
+		textChangedByMerge = existing.Text != incoming.Text
+		existing.Text = incoming.Text
 		existing.Name = strings.TrimSpace(incoming.Name)
-	}
-	if strings.TrimSpace(incoming.Group) != "" && incomingWins {
 		existing.Group = strings.TrimSpace(incoming.Group)
+		existing.Pinned = incoming.Pinned
+		existing.IsTemplate = incoming.IsTemplate
+		existing.ManualOrder = incoming.ManualOrder
+		existing.ModifiedUnixMs = incoming.ModifiedUnixMs
+	} else if bothLegacy {
+		if legacyTextRepair {
+			existing.Text = incoming.Text
+		}
+		if strings.TrimSpace(incoming.Name) != "" && incomingWins {
+			existing.Name = strings.TrimSpace(incoming.Name)
+		}
+		if strings.TrimSpace(incoming.Group) != "" && incomingWins {
+			existing.Group = strings.TrimSpace(incoming.Group)
+		}
+		if incoming.Pinned {
+			existing.Pinned = true
+		}
+		if incoming.IsTemplate {
+			existing.IsTemplate = true
+		}
+		if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
+			existing.ManualOrder = incoming.ManualOrder
+		}
 	}
 	if strings.TrimSpace(incoming.SourceMachine) != "" && (incomingWins || createdWins) {
 		existing.SourceMachine = strings.TrimSpace(incoming.SourceMachine)
-	}
-	if incoming.Pinned {
-		existing.Pinned = true
-	}
-	if existing.ManualOrder <= 0 || (incoming.ManualOrder > 0 && incoming.ManualOrder < existing.ManualOrder) {
-		existing.ManualOrder = incoming.ManualOrder
 	}
 	if existing.Extra == nil {
 		existing.Extra = map[string]json.RawMessage{}
@@ -173,7 +194,29 @@ func mergeEntry(existing *model.Entry, incoming model.Entry) {
 			existing.Extra[key] = append([]byte(nil), value...)
 		}
 	}
-	mergeRichTextExtra(existing.Extra, incoming.Extra)
+	if textChangedByMerge {
+		replaceRichTextAfterTextChange(existing.Extra, incoming.Extra, incoming.ModifiedUnixMs)
+	} else if legacyTextRepair {
+		replaceRichTextAfterTextChange(existing.Extra, incoming.Extra, rawInt64(existing.Extra["RichTextUpdatedUnixMs"]))
+	} else {
+		mergeRichTextExtra(existing.Extra, incoming.Extra)
+	}
+}
+
+func replaceRichTextAfterTextChange(existing, incoming map[string]json.RawMessage, modifiedUnixMs int64) {
+	if value, ok := incoming["RichText"]; ok && string(value) != "null" {
+		existing["RichText"] = append([]byte(nil), value...)
+	} else {
+		delete(existing, "RichText")
+	}
+	existing["RichTextUpdatedUnixMs"], _ = json.Marshal(maxInt64(rawInt64(incoming["RichTextUpdatedUnixMs"]), modifiedUnixMs))
+}
+
+func maxInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func mergeRichTextExtra(existing, incoming map[string]json.RawMessage) {

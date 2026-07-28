@@ -15,6 +15,7 @@ namespace Clipman
         public string SourceMachine { get; set; }
         public long CreatedUnixMs { get; set; }
         public long LastUsedUnixMs { get; set; }
+        public long ModifiedUnixMs { get; set; }
         public bool Pinned { get; set; }
         public bool IsTemplate { get; set; }
         public long ManualOrder { get; set; }
@@ -384,6 +385,7 @@ namespace Clipman
                     SourceMachine = e.SourceMachine,
                     CreatedUnixMs = e.CreatedUnixMs,
                     LastUsedUnixMs = e.LastUsedUnixMs,
+                    ModifiedUnixMs = e.ModifiedUnixMs,
                     Pinned = e.Pinned,
                     IsTemplate = e.IsTemplate,
                     ManualOrder = e.ManualOrder,
