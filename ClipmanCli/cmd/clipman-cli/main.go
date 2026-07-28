@@ -29,7 +29,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/template"
 )
 
-var version = "0.1.0-dev"
+var version = "0.1.1-dev"
 
 type appError struct {
 	code int
