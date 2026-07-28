@@ -57,6 +57,25 @@ enum MobileRichTextClipboard {
         ])
     }
 
+    @MainActor
+    static func readCurrent(in pasteboard: UIPasteboard = .general) -> MobileClipboardPayload? {
+        guard containsText(in: pasteboard) else { return nil }
+        let htmlData = pasteboard.data(forPasteboardType: UTType.html.identifier)
+        let rtfData = pasteboard.data(forPasteboardType: UTType.rtf.identifier)
+        let text = pasteboard.string
+            ?? htmlData.map { plainText(from: $0, documentType: .html) }
+            ?? rtfData.map { plainText(from: $0, documentType: .rtf) }
+            ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let preferredFormat = htmlData == nil && rtfData != nil ? "Rtf" : "Html"
+        let richText = normalize(RichTextPayload(
+            HtmlFragment: htmlData.flatMap { String(data: $0, encoding: .utf8) } ?? "",
+            RtfBase64: rtfData?.base64EncodedString() ?? "",
+            PreferredFormat: preferredFormat
+        ))
+        return MobileClipboardPayload(text: text, richText: richText)
+    }
+
     static func normalize(_ payload: RichTextPayload?) -> RichTextPayload? {
         guard let payload else { return nil }
         var html = payload.HtmlFragment
@@ -88,5 +107,13 @@ enum MobileRichTextClipboard {
             }
         }
         pasteboard.setItems([item])
+    }
+
+    private static func plainText(from data: Data, documentType: NSAttributedString.DocumentType) -> String {
+        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+            .documentType: documentType,
+            .characterEncoding: String.Encoding.utf8.rawValue
+        ]
+        return (try? NSAttributedString(data: data, options: options, documentAttributes: nil).string) ?? ""
     }
 }

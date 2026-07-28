@@ -14,12 +14,14 @@
 		27F6E1A23D45B312371BFEDC /* ClipmanAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E70064E80A3EF247968D286 /* ClipmanAppModel.swift */; };
 		2C4499D2744D363D0FDAA807 /* copy.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2B73540DCE1C118E33B75CAF /* copy.wav */; };
 		31DF1873E5EA0F7A2A225723 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 283C9770D01F5E67699D4EAC /* SettingsView.swift */; };
+		33522F9AEA675F6478D6ED15 /* ClipmanAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */; };
 		3B2AEA8F73EDC017F8F34FAC /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */; };
 		40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */; };
 		49026C38259E970B438B4E54 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CD05FE0E19C7744ACFD87B4 /* Security.framework */; };
 		55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */; };
 		5750CF7FAE9FBA004D4FD2FB /* MobileRichTextClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */; };
 		5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C5029F5D137A6D4490F765 /* HistoryView.swift */; };
+		5BCCD59ECA20D5B968EE56DB /* ClipboardShortcutService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7DBCAA25A35FD37F0B90E75 /* ClipboardShortcutService.swift */; };
 		5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98DD96F176CD3DE6A07D271 /* SoundService.swift */; };
 		60B3DA13369B6F9C5E9EEAAF /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */; };
 		63230AB36E74FDD29076CE5A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D4195FBB5149532BA117A9B8 /* Assets.xcassets */; };
@@ -37,6 +39,7 @@
 		C676E48CA1A7CDAA51D4C9B5 /* EntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E9160FA444DB6E3A61314E /* EntryView.swift */; };
 		C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */; };
 		CA66F823CB2FBC5F09963CC6 /* ClipDatabaseFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */; };
+		DAEF726015B46A423C800015 /* ClipmanQuickActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00F18B48633E261F19EA0703 /* ClipmanQuickActions.swift */; };
 		E46249F68F6D5D3235439BA3 /* on.wav in Resources */ = {isa = PBXBuildFile; fileRef = AD7265F77039DB93B9E0C74C /* on.wav */; };
 		F567DBBD3AA27F09740F2C66 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 32D231A3045AB33B818FACE0 /* StoreKit.framework */; };
 		F9C33C3C942E9C0397FB4AFF /* ServerStorageClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */; };
@@ -45,6 +48,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		00F18B48633E261F19EA0703 /* ClipmanQuickActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanQuickActions.swift; sourceTree = "<group>"; };
 		02004FB0D767D5C8C6F4A4FB /* ClipmanIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ClipmanIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		032F062DF28E39F5953D7824 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDatabaseIdentity.swift; sourceTree = "<group>"; };
@@ -72,6 +76,7 @@
 		98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileHistoryRepository.swift; sourceTree = "<group>"; };
 		9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanSettings.swift; sourceTree = "<group>"; };
 		9FF7A7A080F18D87A7A2A55F /* ClipmanIOS-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ClipmanIOS-Bridging-Header.h"; sourceTree = "<group>"; };
+		A7DBCAA25A35FD37F0B90E75 /* ClipboardShortcutService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardShortcutService.swift; sourceTree = "<group>"; };
 		AD7265F77039DB93B9E0C74C /* on.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = on.wav; sourceTree = "<group>"; };
 		B2CD34934E3F13399B8433EE /* exclude.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = exclude.wav; sourceTree = "<group>"; };
 		B4692DDB07E68892AA422492 /* remote.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = remote.wav; sourceTree = "<group>"; };
@@ -80,6 +85,7 @@
 		C98DD96F176CD3DE6A07D271 /* SoundService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundService.swift; sourceTree = "<group>"; };
 		CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		D4195FBB5149532BA117A9B8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanAppIntents.swift; sourceTree = "<group>"; };
 		E794D8E5ABCF25641147F7F3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F5920DDD96B393F506A33F30 /* ClipmanIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanIOSApp.swift; sourceTree = "<group>"; };
 		FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkExtractor.swift; sourceTree = "<group>"; };
@@ -203,6 +209,9 @@
 			isa = PBXGroup;
 			children = (
 				34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */,
+				A7DBCAA25A35FD37F0B90E75 /* ClipboardShortcutService.swift */,
+				E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */,
+				00F18B48633E261F19EA0703 /* ClipmanQuickActions.swift */,
 				9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */,
 				C02D9422349D165D345B5D71 /* KeychainStore.swift */,
 				FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */,
@@ -296,8 +305,11 @@
 			files = (
 				60B3DA13369B6F9C5E9EEAAF /* AuthenticationService.swift in Sources */,
 				CA66F823CB2FBC5F09963CC6 /* ClipDatabaseFile.swift in Sources */,
+				5BCCD59ECA20D5B968EE56DB /* ClipboardShortcutService.swift in Sources */,
+				33522F9AEA675F6478D6ED15 /* ClipmanAppIntents.swift in Sources */,
 				27F6E1A23D45B312371BFEDC /* ClipmanAppModel.swift in Sources */,
 				06F7ECFE0C7AC99C48782BD3 /* ClipmanIOSApp.swift in Sources */,
+				DAEF726015B46A423C800015 /* ClipmanQuickActions.swift in Sources */,
 				B361AA587CED2A97ABD2F636 /* ClipmanSettings.swift in Sources */,
 				AD65480F3E929702A805262F /* DatabaseWorker.swift in Sources */,
 				B66FC9F132546C30E3E29127 /* EntryEditView.swift in Sources */,
@@ -329,7 +341,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 23000;
+				CURRENT_PROJECT_VERSION = 23100;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -339,7 +351,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -412,7 +424,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 23000;
+				CURRENT_PROJECT_VERSION = 23100;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -422,7 +434,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;

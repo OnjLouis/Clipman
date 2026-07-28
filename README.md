@@ -57,6 +57,7 @@ An optional Clipman CLI development preview is available from prereleases for te
 - Optional automatic update checks at startup, hourly, or daily, with silent install support when a release ZIP is available.
 - Optional Clipman Server support for hosting a shared `.clipdb` database with token authentication, password-scoped database buckets, revision checks, rolling backups, and explicit security rules for private-network versus HTTPS deployment. The server is a separate download; the normal Clipman app package is client-only.
 - Android and iOS can use private Local history without a server, or switch to Server mode while retaining an offline local cache. Returning to Server mode merges local and remote changes instead of replacing either history.
+- Clipman iOS includes Add Clipboard and Copy Latest Clip actions for Shortcuts, Siri, the iPhone Action Button, and the Home Screen icon's long-press menu.
 
 ## Default Hotkeys
 
@@ -190,6 +191,11 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.3.1 (iOS)
+
+- Added native iOS Shortcuts and Siri actions for adding the current clipboard to Clipman and copying the latest Clipman entry. The actions can be assigned to the iPhone Action Button, preserve available rich text, honour Clipman's authentication setting, and use the encrypted local cache when the server is unavailable.
+- Added matching Add Clipboard and Copy Latest Clip commands to the Clipman Home Screen icon's long-press menu.
 
 ### 2.3.0
 

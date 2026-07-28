@@ -7,6 +7,8 @@ struct MobileSyncResult: Sendable {
 }
 
 actor MobileHistoryRepository {
+    static let shared = MobileHistoryRepository()
+
     private let fileManager = FileManager.default
 
     func loadLocal(password: String) async throws -> ClipDatabase? {

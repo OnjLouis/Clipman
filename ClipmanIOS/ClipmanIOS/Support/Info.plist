@@ -58,7 +58,7 @@
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true />
     <key>ClipmanBuildStampUtcMs</key>
-    <string>1785133030391</string>
+    <string>1785241002616</string>
     <key>LSRequiresIPhoneOS</key>
     <true />
     <key>NSFaceIDUsageDescription</key>
@@ -99,6 +99,25 @@
     <dict />
     <key>UIRequiresFullScreen</key>
     <true />
+    <key>UIApplicationShortcutItems</key>
+    <array>
+        <dict>
+            <key>UIApplicationShortcutItemIconType</key>
+            <string>UIApplicationShortcutIconTypeAdd</string>
+            <key>UIApplicationShortcutItemTitle</key>
+            <string>Add Clipboard to Clipman</string>
+            <key>UIApplicationShortcutItemType</key>
+            <string>me.onj.clipman.ios.add-clipboard</string>
+        </dict>
+        <dict>
+            <key>UIApplicationShortcutItemIconType</key>
+            <string>UIApplicationShortcutIconTypeShare</string>
+            <key>UIApplicationShortcutItemTitle</key>
+            <string>Copy Latest Clip</string>
+            <key>UIApplicationShortcutItemType</key>
+            <string>me.onj.clipman.ios.copy-latest</string>
+        </dict>
+    </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>

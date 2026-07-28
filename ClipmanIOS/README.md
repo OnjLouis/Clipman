@@ -17,6 +17,8 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - Add the current iOS clipboard text into Clipman while the app is open.
 - Optionally offer to add the current iOS clipboard text after each successful unlock and initial history refresh. Clipman only presents the choice when the pasteboard advertises text. The full-screen choice uses Apple's paste control, so Paste is explicit and Cancel or a VoiceOver scrub leaves history unchanged.
 - Copy an entry back to the iOS clipboard.
+- Use the built-in <strong>Add Clipboard to Clipman</strong> and <strong>Copy Latest Clip</strong> actions from Shortcuts, Siri, or the iPhone Action Button. Both actions honour Clipman's authentication setting and continue safely from the encrypted local cache if the server is unavailable.
+- Long-press the Clipman Home Screen icon for the same Add Clipboard and Copy Latest Clip commands.
 - View, edit, pin, unpin, delete, search, and filter entries.
 - Use VoiceOver-friendly rows and actions so one swipe moves between entries.
 - When authentication is enabled, lock whenever Clipman leaves the foreground and authenticate again when returning.
@@ -52,3 +54,5 @@ In Settings, use the VoiceOver scrub gesture to cancel unsaved changes and retur
 The server address, server token, and history password fields have explicit VoiceOver labels and instructions. Secure field contents remain hidden. The server-file importer reads the address and token, presents the address for review, and waits for Save before applying it. Export warns that the resulting file contains the private server token and must be stored and shared securely. Server mode requires a nonblank, preferably unique history password.
 
 Activate Clipman's status line to move to the bottom of the current history list. The standard iOS status-bar gesture remains available for returning to the top.
+
+Clipman's App Shortcuts appear automatically in Apple's Shortcuts app. To use one with the Action Button, choose <strong>Shortcut</strong> in the Action Button settings and select either Clipman action. Siri phrases include "Add clipboard to Clipman" and "Copy latest from Clipman".

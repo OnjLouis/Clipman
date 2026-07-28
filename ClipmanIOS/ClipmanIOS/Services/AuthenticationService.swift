@@ -2,7 +2,7 @@ import Foundation
 import LocalAuthentication
 
 enum AuthenticationService {
-    static func unlock() async -> Bool {
+    static func unlock(reason: String = "Unlock Clipman clipboard history.") async -> Bool {
         #if targetEnvironment(simulator)
         return true
         #else
@@ -12,7 +12,7 @@ enum AuthenticationService {
             return false
         }
         do {
-            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock Clipman clipboard history.")
+            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
         } catch {
             return false
         }

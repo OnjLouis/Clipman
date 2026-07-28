@@ -33,7 +33,7 @@ final class ClipmanAppModel: ObservableObject {
     @Published private(set) var linkItems: [LinkExtractor.LinkItem] = []
 
     private let soundService = SoundService()
-    private let historyRepository = MobileHistoryRepository()
+    private let historyRepository = MobileHistoryRepository.shared
     private var revision = ""
     private var unlockTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
@@ -179,7 +179,9 @@ final class ClipmanAppModel: ObservableObject {
                 isUnlocked = true
                 let loaded = await refresh(showStatus: true)
                 guard !Task.isCancelled, generation == foregroundGeneration, isUnlocked else { return }
-                if isImportingServerConnection {
+                if ClipmanQuickActionCenter.shared.pendingAction != nil {
+                    processPendingQuickAction()
+                } else if isImportingServerConnection {
                     // The import completion opens Settings once the file has finished loading.
                 } else if pendingServerConnection != nil || !serverConnectionImportError.isEmpty {
                     showingSettings = true
@@ -239,8 +241,40 @@ final class ClipmanAppModel: ObservableObject {
 
     func sceneBecameActive() {
         isSceneActive = true
-        if !isUnlocked {
+        if isUnlocked {
+            processPendingQuickAction()
+        } else {
             unlock()
+        }
+    }
+
+    func processPendingQuickAction() {
+        guard isUnlocked, let action = ClipmanQuickActionCenter.shared.consume() else { return }
+        showingSettings = false
+        showingClipboardImport = false
+        switch action {
+        case .addClipboard:
+            addPastedClipboardPayload(MobileRichTextClipboard.readCurrent())
+        case .copyLatest:
+            guard let latest = database.Entries
+                .filter({ !$0.Text.isEmpty })
+                .max(by: {
+                    if $0.CreatedUnixMs == $1.CreatedUnixMs { return $0.Id < $1.Id }
+                    return $0.CreatedUnixMs < $1.CreatedUnixMs
+                }) else {
+                status = "Clipman history is empty."
+                soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+                return
+            }
+            copy(latest)
+        }
+    }
+
+    func shortcutCompleted(_ message: String) {
+        status = message
+        guard isSceneActive, isUnlocked else { return }
+        Task { [weak self] in
+            _ = await self?.refresh(showStatus: false)
         }
     }
 
