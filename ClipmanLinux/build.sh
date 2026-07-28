@@ -22,7 +22,7 @@ archive="Clipman-Linux-GUI-$version-linux-$architecture.tar.gz"
 
 rm -rf "$output"
 mkdir -p "$stage/libexec" "$stage/sounds"
-cd "$repo/ClipmanCli"
+cd "$repo/ClipmanLinuxBackend"
 go test ./...
 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$version" -o "$stage/libexec/clipman-gui-backend" ./cmd/clipman-gui-backend
 cd "$repo"
@@ -93,7 +93,7 @@ assert 'Gtk.Label(label="_Group:", use_underline=True)' in source
 assert 'menu.append_submenu("Grou_ps", self.groups_menu)' in source
 assert '"app.diagnostics": ["<Alt>F1"]' in source
 
-backend_source = pathlib.Path("ClipmanCli/cmd/clipman-gui-backend/main.go").read_text(encoding="utf-8")
+backend_source = pathlib.Path("ClipmanLinuxBackend/cmd/clipman-gui-backend/main.go").read_text(encoding="utf-8")
 assert '`json:"rich_text,omitempty"`' in backend_source
 assert 'clearRichText(e, now)' in backend_source
 assert '("_Source application", "source")' in source

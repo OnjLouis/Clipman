@@ -283,7 +283,7 @@ clipmanserver disable-auto-updates</code></pre>
   <p>You can also specify a checked port directly, for example <code>clipmanserver port 25766</code>. After changing the port, update the server address on every Clipman client or import the refreshed <code>clipman-server-connection.clpconf</code> file. Changing the port does not change the token or choose a different database bucket.</p>
 
   <h2 id="connection-info">Connection Files</h2>
-  <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, requires a nonblank history password, and waits for <strong>Save</strong> before applying it. Clipman CLI accepts it with <code>init --connection-file</code>.</p>
+  <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, requires a nonblank history password, and waits for <strong>Save</strong> before applying it.</p>
 
   <p>The server also writes <code>clipman-server-connection.txt</code> for readable manual setup and older clients. It contains:</p>
 

@@ -255,7 +255,7 @@
 
   <p>Formatting belongs to the exact stored text. Editing the text in Entry Properties or applying a text transformation clears the old rich payload so stale formatting cannot be attached to different content. If HTML exceeds 768 KiB, RTF exceeds 1 MiB, the combined payload exceeds 1.75 MiB, or a payload is invalid, Clipman keeps the plain text and discards the rich data. Diagnostics reports aggregate rich-entry counts and byte totals but never includes the formatted payload itself.</p>
 
-  <p>Android captures and restores HTML, the rich-text format supported by Android's standard text clipboard. It preserves RTF received from desktop or iOS clients but uses the plain-text fallback when an entry contains only RTF. iPhone and iPad capture and restore both HTML and RTF through Apple's explicit Paste control. On mobile, use the section-switch button or the screen-reader page gesture to move through Text, Rich Text and Links while the option is enabled. Clipman CLI preserves the optional fields while using plain text.</p>
+  <p>Android captures and restores HTML, the rich-text format supported by Android's standard text clipboard. It preserves RTF received from desktop or iOS clients but uses the plain-text fallback when an entry contains only RTF. iPhone and iPad capture and restore both HTML and RTF through Apple's explicit Paste control. On mobile, use the section-switch button or the screen-reader page gesture to move through Text, Rich Text and Links while the option is enabled.</p>
 
   <h2 id="groups">Groups</h2>
   <p>Use <code>Ctrl+G</code> on Windows, <code>Command+G</code> on Mac, or the group command in the history window to assign selected entries to a group. Type a new group name, or choose an existing group from the list and press <code>Enter</code> or OK. Choose No group, or leave the group name blank, to remove the group. The Group filter can show all entries, pinned entries, named entries, ungrouped entries, or one of your custom groups.</p>
@@ -643,7 +643,7 @@
   <h3>2.0.9</h3>
   <ul>
     <li>Fixed Windows connections to HTTPS Clipman Servers, including reverse proxies using current Let's Encrypt certificates.</li>
-    <li>Added a portable Clipman Server connection file that can fill the server address and hidden token in Windows, Mac, Android, iOS, and Clipman CLI without copying individual values. Android and iOS also register the file type so opening it can take you directly to Clipman's review-and-save flow. This implements the portable setup part of <a href="https://github.com/OnjLouis/Clipman/issues/34">issue #34</a>.</li>
+    <li>Added a portable Clipman Server connection file that can fill the server address and hidden token in Windows, Mac, Android and iOS without copying individual values. Android and iOS also register the file type so opening it can take you directly to Clipman's review-and-save flow. This implements the portable setup part of <a href="https://github.com/OnjLouis/Clipman/issues/34">issue #34</a>.</li>
     <li>Added explicit VoiceOver labels and instructions to the iOS server address, server token, and history password fields.</li>
     <li>The optional iOS launch clipboard offer now appears only when the pasteboard contains text, avoiding an empty Paste screen.</li>
   </ul>
