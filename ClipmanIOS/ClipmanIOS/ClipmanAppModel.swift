@@ -185,8 +185,8 @@ final class ClipmanAppModel: ObservableObject {
                     // The import completion opens Settings once the file has finished loading.
                 } else if pendingServerConnection != nil || !serverConnectionImportError.isEmpty {
                     showingSettings = true
-                } else if loaded, settings.addClipboardOnLaunch, MobileRichTextClipboard.containsText() {
-                    showingClipboardImport = true
+                } else if loaded, settings.addClipboardOnLaunch {
+                    requestClipboardImport(announceUnavailable: false)
                 }
                 startPolling()
             } else {
@@ -464,6 +464,17 @@ final class ClipmanAppModel: ObservableObject {
             status = error.localizedDescription
             return false
         }
+    }
+
+    func requestClipboardImport(announceUnavailable: Bool = true) {
+        guard MobileRichTextClipboard.containsText() else {
+            if announceUnavailable {
+                status = "Clipboard does not contain text."
+                soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+            }
+            return
+        }
+        showingClipboardImport = true
     }
 
     func addPastedClipboardPayload(_ payload: MobileClipboardPayload?) {

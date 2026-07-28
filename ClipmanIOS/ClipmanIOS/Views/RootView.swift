@@ -64,11 +64,20 @@ struct ClipboardImportView: View {
                     .bold()
                 Text("Choose Paste to add the current iOS clipboard text and available formatting to Clipman, or Cancel to leave history unchanged.")
                     .multilineTextAlignment(.center)
+                    .accessibilityAction(.escape) {
+                        app.cancelClipboardImport()
+                    }
+                Button("Cancel") {
+                    app.cancelClipboardImport()
+                }
+                .accessibilityAction(.escape) {
+                    app.cancelClipboardImport()
+                }
                 PasteButton(payloadType: MobileClipboardPayload.self) { values in
                     app.addPastedClipboardPayload(values.first)
                 }
                 .buttonStyle(.borderedProminent)
-                Button("Cancel") {
+                .accessibilityAction(.escape) {
                     app.cancelClipboardImport()
                 }
             }

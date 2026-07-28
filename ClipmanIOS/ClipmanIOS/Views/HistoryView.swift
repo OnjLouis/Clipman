@@ -34,7 +34,7 @@ struct HistoryView: View {
                 await app.refresh(showStatus: true)
             }
             .accessibilityAction(.magicTap) {
-                app.showingClipboardImport = true
+                app.requestClipboardImport()
             }
             .accessibilityScrollAction { edge in
                 switch edge {

@@ -196,6 +196,7 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 
 - Added native iOS Shortcuts and Siri actions for adding the current clipboard to Clipman and copying the latest Clipman entry. The actions can be assigned to the iPhone Action Button, preserve available rich text, honour Clipman's authentication setting, and use the encrypted local cache when the server is unavailable.
 - Added matching Add Clipboard and Copy Latest Clip commands to the Clipman Home Screen icon's long-press menu.
+- Prevented VoiceOver Magic Tap from opening an unusable paste confirmation when the clipboard has no pasteable text, and made VoiceOver scrub cancel the confirmation reliably.
 
 ### 2.3.0
 
