@@ -10,6 +10,10 @@ Windows, macOS, Linux, and Android downloads are attached to releases in this re
 
 iPhone and iPad users can [join the Clipman public beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
 
+## Archived command-line preview
+
+An [archived Clipman CLI development preview](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.1.1-dev) is available for terminal and headless use. It is no longer actively maintained and is not part of the supported Clipman client range.
+
 ## Features
 
 - Runs from its folder with no installer.
