@@ -3,11 +3,17 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -46,9 +52,10 @@ type optionalString struct {
 	set   bool
 }
 type globals struct {
-	configPath, server                      string
+	configPath, server, caCertFile          string
 	password                                optionalString
 	json, quiet, verbose, showVersion, help bool
+	insecure                                bool
 }
 type appContext struct {
 	globals                     globals
@@ -193,6 +200,12 @@ func parseGlobals(args []string) (globals, []string, error) {
 			g.password = optionalString{value: v, set: true}
 			continue
 		}
+		if v, ok, err := value(&i, arg, "ca-cert"); err != nil {
+			return g, nil, err
+		} else if ok {
+			g.caCertFile = v
+			continue
+		}
 		switch arg {
 		case "--json":
 			g.json = true
@@ -200,6 +213,8 @@ func parseGlobals(args []string) (globals, []string, error) {
 			g.quiet = true
 		case "--verbose":
 			g.verbose = true
+		case "--insecure":
+			g.insecure = true
 		case "--version":
 			g.showVersion = true
 		case "--help", "-h":
@@ -216,6 +231,129 @@ func addOutputFlags(fs *flag.FlagSet, g *globals) {
 	fs.BoolVar(&g.quiet, "quiet", g.quiet, "suppress status messages")
 	fs.BoolVar(&g.quiet, "q", g.quiet, "suppress status messages")
 	fs.BoolVar(&g.verbose, "verbose", g.verbose, "write diagnostic status messages")
+}
+
+// tlsOptionsForGlobals resolves the TLS trust options to use for a connection,
+// preferring explicit --insecure/--ca-cert global flags over whatever was
+// persisted to the configuration file by `init`.
+func tlsOptionsForGlobals(g globals, cfg config.Config) ([]server.Option, error) {
+	if g.insecure && g.caCertFile != "" {
+		return nil, fail(2, "--insecure and --ca-cert cannot be used together")
+	}
+	if g.insecure {
+		return []server.Option{server.WithInsecureSkipVerify()}, nil
+	}
+	if g.caCertFile != "" {
+		pem, err := readCACertFile(g.caCertFile)
+		if err != nil {
+			return nil, err
+		}
+		return []server.Option{server.WithCACertPEM(pem)}, nil
+	}
+	if cfg.TLSInsecure {
+		return []server.Option{server.WithInsecureSkipVerify()}, nil
+	}
+	if cfg.CACertPEM != "" {
+		return []server.Option{server.WithCACertPEM([]byte(cfg.CACertPEM))}, nil
+	}
+	return nil, nil
+}
+
+func readCACertFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fail(3, "cannot read CA certificate file: %v", err)
+	}
+	if !x509.NewCertPool().AppendCertsFromPEM(data) {
+		return nil, fail(2, "%s does not contain a valid PEM certificate", path)
+	}
+	return data, nil
+}
+
+// isCertificateTrustError reports whether err is a TLS failure caused by an
+// untrusted/unrecognized certificate, as opposed to a network or protocol
+// failure that a trust prompt cannot help with.
+func isCertificateTrustError(err error) bool {
+	var verifyErr *tls.CertificateVerificationError
+	if errors.As(err, &verifyErr) {
+		return true
+	}
+	var unknownAuthority x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuthority) {
+		return true
+	}
+	var hostnameErr x509.HostnameError
+	if errors.As(err, &hostnameErr) {
+		return true
+	}
+	var certInvalid x509.CertificateInvalidError
+	if errors.As(err, &certInvalid) {
+		return true
+	}
+	return false
+}
+
+// fetchServerCertificate connects to rawURL's host without verifying the
+// certificate, purely to retrieve it for display in a trust prompt. It does
+// not use the result to make the connection trusted.
+func fetchServerCertificate(ctx context.Context, rawURL string) (*x509.Certificate, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Scheme != "https" {
+		return nil, errors.New("server does not use HTTPS")
+	}
+	host := parsed.Host
+	if !strings.Contains(host, ":") {
+		host += ":443"
+	}
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 8 * time.Second}, Config: &tls.Config{InsecureSkipVerify: true}}
+	conn, err := dialer.DialContext(ctx, "tcp", host)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	state := conn.(*tls.Conn).ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		return nil, errors.New("server did not present a certificate")
+	}
+	return state.PeerCertificates[0], nil
+}
+
+func certificateFingerprintSHA256(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.Raw)
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(parts, ":")
+}
+
+// promptTrustCertificate shows the server's certificate details and fingerprint
+// and asks the user to confirm trusting it, browser-exception style. It
+// returns the PEM-encoded certificate to trust, or nil if the user declined
+// or the certificate could not be retrieved for display.
+func promptTrustCertificate(ctx context.Context, rawURL string) ([]byte, error) {
+	cert, err := fetchServerCertificate(ctx, rawURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not retrieve the server certificate to display: %v\n", err)
+		return nil, nil
+	}
+	fmt.Fprintln(os.Stderr, "The server's TLS certificate is not trusted.")
+	fmt.Fprintf(os.Stderr, "  Subject: %s\n", cert.Subject)
+	fmt.Fprintf(os.Stderr, "  Issuer: %s\n", cert.Issuer)
+	fmt.Fprintf(os.Stderr, "  Valid: %s to %s\n", cert.NotBefore.Format("2006-01-02"), cert.NotAfter.Format("2006-01-02"))
+	fmt.Fprintf(os.Stderr, "  SHA-256 fingerprint: %s\n", certificateFingerprintSHA256(cert))
+	fmt.Fprintln(os.Stderr, "Compare this fingerprint with the one shown by the server administrator before trusting it.")
+	trust, err := promptYesNo("Trust this certificate for this server", false)
+	if err != nil {
+		return nil, err
+	}
+	if !trust {
+		return nil, nil
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), nil
 }
 
 func loadContext(g globals) (*appContext, error) {
@@ -242,8 +380,12 @@ func loadContext(g globals) (*appContext, error) {
 	if g.server != "" {
 		serverURL = g.server
 	}
+	tlsOptions, err := tlsOptionsForGlobals(g, cfg)
+	if err != nil {
+		return nil, err
+	}
 	databaseID := identity.DatabaseID(token, password)
-	client, err := server.New(serverURL, token, databaseID, version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")")
+	client, err := server.New(serverURL, token, databaseID, version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")", tlsOptions...)
 	if err != nil {
 		return nil, fail(2, "invalid server configuration: %v", err)
 	}
@@ -291,6 +433,12 @@ func runInit(g globals, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return fail(2, "%v", err)
 	}
+	savePasswordExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "save-password" {
+			savePasswordExplicit = true
+		}
+	})
 	path, err := platform.ConfigPath(g.configPath)
 	if err != nil {
 		return fail(3, "cannot locate configuration: %v", err)
@@ -299,6 +447,19 @@ func runInit(g globals, args []string) error {
 		return fail(2, "configuration already exists at %s; use --force to replace it", path)
 	}
 	serverURL := g.server
+	if *connectionFile == "" && *tokenValue == "" && *tokenFile == "" && serverURL == "" && !*nonInteractive {
+		useFile, promptErr := promptYesNo("Do you have a Clipman Server connection file (.clpconf)?", false)
+		if promptErr != nil {
+			return promptErr
+		}
+		if useFile {
+			filePath, promptErr := promptLine("Path to connection file: ")
+			if promptErr != nil {
+				return promptErr
+			}
+			*connectionFile = strings.TrimSpace(filePath)
+		}
+	}
 	if *connectionFile != "" {
 		if *tokenFile != "" || *tokenValue != "" {
 			return fail(2, "--connection-file cannot be combined with --token or --token-file")
@@ -372,6 +533,22 @@ func runInit(g globals, args []string) error {
 	if password == "" {
 		return fail(5, "Clipman Server requires a nonblank history password")
 	}
+	if !savePasswordExplicit && !*nonInteractive {
+		save, promptErr := promptYesNo("Save the history password in the configuration file so it is not requested again?", false)
+		if promptErr != nil {
+			return promptErr
+		}
+		if save {
+			*savePassword = "config"
+			if !g.quiet {
+				if runtime.GOOS == "windows" {
+					fmt.Fprintln(os.Stderr, "The password will be saved, encrypted for this Windows user account.")
+				} else {
+					fmt.Fprintln(os.Stderr, "The password will be saved in the configuration file, protected only by file permissions (owner-only, not encrypted). Anyone with access to this account or root can read it.")
+				}
+			}
+		}
+	}
 	normalized, err := server.NormalizeURL(serverURL)
 	if err != nil {
 		return fail(2, "invalid server address: %v", err)
@@ -379,16 +556,59 @@ func runInit(g globals, args []string) error {
 	if server.IsInsecureRemoteURL(normalized) && !g.quiet {
 		fmt.Fprintln(os.Stderr, "Warning: plain HTTP exposes the server token on the network. Use HTTPS, a VPN, or a trusted private network.")
 	}
+	if g.insecure && g.caCertFile != "" {
+		return fail(2, "--insecure and --ca-cert cannot be used together")
+	}
+	var caCertPEM []byte
+	var tlsOptions []server.Option
+	switch {
+	case g.insecure:
+		if !g.quiet {
+			fmt.Fprintln(os.Stderr, "Warning: --insecure disables TLS certificate verification. Use only on a trusted private network.")
+		}
+		tlsOptions = append(tlsOptions, server.WithInsecureSkipVerify())
+	case g.caCertFile != "":
+		caCertPEM, err = readCACertFile(g.caCertFile)
+		if err != nil {
+			return err
+		}
+		tlsOptions = append(tlsOptions, server.WithCACertPEM(caCertPEM))
+	}
 	databaseID := identity.DatabaseID(token, password)
-	client, err := server.New(normalized, token, databaseID, version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")")
+	client, err := server.New(normalized, token, databaseID, version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")", tlsOptions...)
 	if err != nil {
 		return fail(2, "invalid server configuration: %v", err)
 	}
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_, healthErr := client.Health(healthCtx)
+	healthCancel()
+	if healthErr != nil && len(tlsOptions) == 0 && !*nonInteractive && isCertificateTrustError(healthErr) {
+		fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		trustedPEM, promptErr := promptTrustCertificate(fetchCtx, normalized)
+		fetchCancel()
+		if promptErr != nil {
+			return promptErr
+		}
+		if len(trustedPEM) > 0 {
+			caCertPEM = trustedPEM
+			tlsOptions = append(tlsOptions, server.WithCACertPEM(caCertPEM))
+			client, err = server.New(normalized, token, databaseID, version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")", tlsOptions...)
+			if err != nil {
+				return fail(2, "invalid server configuration: %v", err)
+			}
+			retryCtx, retryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			_, healthErr = client.Health(retryCtx)
+			retryCancel()
+			if healthErr == nil && !g.quiet {
+				fmt.Fprintln(os.Stderr, "Certificate trusted; it will be remembered for this server.")
+			}
+		}
+	}
+	if healthErr != nil {
+		return mapRuntimeError("server health check failed", healthErr)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err = client.Health(ctx); err != nil {
-		return mapRuntimeError("server health check failed", err)
-	}
 	exists := true
 	validated := false
 	download, err := client.Get(ctx)
@@ -404,6 +624,8 @@ func runInit(g globals, args []string) error {
 	}
 	cfg := config.Default()
 	cfg.Server = normalized
+	cfg.TLSInsecure = g.insecure
+	cfg.CACertPEM = string(caCertPEM)
 	cfg.Machine = strings.TrimSpace(*machine)
 	if cfg.Machine == "" {
 		cfg.Machine = hostname()
@@ -1033,6 +1255,26 @@ func promptLine(label string) (string, error) {
 	}
 	return strings.TrimRight(line, "\r\n"), nil
 }
+func promptYesNo(label string, defaultYes bool) (bool, error) {
+	suffix := " [y/N]: "
+	if defaultYes {
+		suffix = " [Y/n]: "
+	}
+	line, err := promptLine(label + suffix)
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "":
+		return defaultYes, nil
+	case "y", "yes":
+		return true, nil
+	case "n", "no":
+		return false, nil
+	default:
+		return false, fail(2, "please answer y or n")
+	}
+}
 func hostname() string {
 	value, err := os.Hostname()
 	if err != nil || strings.TrimSpace(value) == "" {
@@ -1095,12 +1337,12 @@ func escape(value string) string {
 	return replacer.Replace(value)
 }
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Open the accessible line-based history manager\n  sync     Download and validate current history\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --version         Show version information")
+	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Open the accessible line-based history manager\n  sync     Download and validate current history\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --version         Show version information")
 }
 
 func printCommandUsage(out io.Writer, command string) bool {
 	usage := map[string]string{
-		"init":   "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force]",
+		"init":   "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force]\n  (use the global --ca-cert FILE or --insecure option before init to trust a self-signed server certificate)\n  (without --save-password, an interactive run asks whether to save the history password)",
 		"status": "Usage: clipman-cli [global options] status [--refresh] [--json]",
 		"list":   "Usage: clipman-cli [global options] list [-n COUNT | --all] [--group NAME] [--search TEXT] [--kind history|templates|all] [--pinned-first] [--porcelain] [--json]",
 		"get":    "Usage: clipman-cli [global options] get [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--first] [--touch] [--newline] [--raw] [--json]",

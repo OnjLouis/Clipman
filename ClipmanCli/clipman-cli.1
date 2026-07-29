@@ -29,6 +29,48 @@ for the complete current syntax.
 .B init
 Configure and test a server profile. A Clipman Server connection-details file
 can supply the server address and token without manually extracting JSON.
+Run on a controlling terminal without
+.BR --connection-file ,
+.BR --token ,
+.BR --token-file ,
+or
+.BR --server ,
+it first asks
+.RB \(dq "Do you have a Clipman Server connection file (.clpconf)?" \(dq
+before prompting for that file's path or, on
+.BR n ,
+falling back to the address and token prompts.
+.B --non-interactive
+skips this question.
+.IP
+If the server presents an HTTPS certificate that is not already trusted and
+neither
+.B --ca-cert
+nor
+.B --insecure
+was given, it shows the certificate's subject, issuer, validity dates, and
+SHA-256 fingerprint and asks
+.RB \(dq "Trust this certificate for this server?" \(dq \.
+This is trust-on-first-use, the same model as an SSH host-key prompt; compare
+the fingerprint against the one the server administrator provides before
+answering
+.BR y .
+Trusting it saves the certificate to the configuration file.
+.B --non-interactive
+skips this prompt and reports the original error.
+.IP
+After the history password is entered, if
+.B --save-password
+was not given it asks
+.RB \(dq "Save the history password in the configuration file so it is not requested again?" \(dq \.
+Answering
+.B y
+behaves like
+.BR "--save-password config" .
+See
+.B SECURITY
+below: on Linux and macOS this stores the password in plain text, protected
+only by file permissions, not encryption.
 .TP
 .B status
 Check the configured server and selected history. Use
@@ -90,10 +132,11 @@ The client enforces database, JSON, nesting, entry-count, tombstone-count, and
 text-size limits. It does not print server tokens, passwords, full database
 identifiers, or clip text in diagnostics.
 .PP
-On Windows, saved tokens and passwords use DPAPI for the current user. On
-Linux and macOS, configuration is restricted to its owner with directory mode
-0700 and file mode 0600. An explicitly saved history password on those systems
-is stored in that owner-only file.
+On Windows, saved tokens and passwords are encrypted with DPAPI for the
+current user. On Linux and macOS there is no equivalent encryption yet: an
+explicitly saved history password (or token) on those systems is written in
+plain text into the owner-only configuration file (directory mode 0700, file
+mode 0600), protected only by file permissions.
 .PP
 The clipman scheme is a convenient name for plain HTTP. Use it only on
 loopback, a trusted private network, or a VPN. Use HTTPS across an untrusted

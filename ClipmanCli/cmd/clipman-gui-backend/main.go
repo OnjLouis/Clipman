@@ -393,7 +393,14 @@ func (s *session) activate(cfg config.Config, password string) error {
 		return errors.New("server token is missing")
 	}
 	databaseID := identity.DatabaseID(token, password)
-	client, err := server.New(cfg.Server, token, databaseID, "clipman-linux/"+version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")")
+	var tlsOptions []server.Option
+	switch {
+	case cfg.TLSInsecure:
+		tlsOptions = append(tlsOptions, server.WithInsecureSkipVerify())
+	case cfg.CACertPEM != "":
+		tlsOptions = append(tlsOptions, server.WithCACertPEM([]byte(cfg.CACertPEM)))
+	}
+	client, err := server.New(cfg.Server, token, databaseID, "clipman-linux/"+version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")", tlsOptions...)
 	if err != nil {
 		return err
 	}

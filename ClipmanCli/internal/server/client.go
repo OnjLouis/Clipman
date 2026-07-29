@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,12 +34,46 @@ type Metadata struct {
 	Length   int64
 }
 
-func New(rawURL, token, databaseID, version string) (*Client, error) {
+// Option customizes the TLS trust behavior of a Client. By default the
+// system trust store is used, matching Go's standard certificate verification.
+type Option func(*tlsSettings)
+type tlsSettings struct {
+	insecureSkipVerify bool
+	caCertPEM          []byte
+}
+
+// WithInsecureSkipVerify disables TLS certificate verification entirely.
+// Only safe on a trusted private network; prefer WithCACertPEM instead.
+func WithInsecureSkipVerify() Option {
+	return func(s *tlsSettings) { s.insecureSkipVerify = true }
+}
+
+// WithCACertPEM trusts the given PEM-encoded certificate(s) in addition to
+// verifying the standard chain of trust, allowing a self-signed server
+// certificate to be used without disabling verification altogether.
+func WithCACertPEM(pem []byte) Option {
+	return func(s *tlsSettings) { s.caCertPEM = pem }
+}
+
+func New(rawURL, token, databaseID, version string, opts ...Option) (*Client, error) {
 	normalized, err := NormalizeURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
+	var settings tlsSettings
+	for _, opt := range opts {
+		opt(&settings)
+	}
 	transport := &http.Transport{DialContext: (&net.Dialer{Timeout: 8 * time.Second, KeepAlive: 30 * time.Second}).DialContext, ResponseHeaderTimeout: 8 * time.Second, TLSHandshakeTimeout: 8 * time.Second}
+	if settings.insecureSkipVerify {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	} else if len(settings.caCertPEM) > 0 {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(settings.caCertPEM) {
+			return nil, errors.New("no valid certificates found in CA certificate data")
+		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: pool}
+	}
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) > 0 && (req.URL.Host != via[0].URL.Host || req.URL.Scheme != via[0].URL.Scheme) {

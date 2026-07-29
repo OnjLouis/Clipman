@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"bytes"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +16,8 @@ import (
 type Limits struct{ MaxBlobBytes, MaxJSONBytes, MaxEntries, MaxTextBytes int64 }
 type Config struct {
 	Server, Token, TokenProtected, Machine, Renderer, DefaultKind, PasswordMode, Password, PasswordProtected string
-	PinnedFirst                                                                                              bool
+	CACertPEM                                                                                                string
+	PinnedFirst, TLSInsecure                                                                                 bool
 	Limits                                                                                                   Limits
 }
 
@@ -79,6 +81,10 @@ func Save(path string, value Config) error {
 	writeString("machine", value.Machine)
 	writeString("renderer", value.Renderer)
 	fmt.Fprintf(&out, "pinned_first = %t\n", value.PinnedFirst)
+	fmt.Fprintf(&out, "tls_insecure = %t\n", value.TLSInsecure)
+	if value.CACertPEM != "" {
+		writeString("ca_cert_pem", value.CACertPEM)
+	}
 	writeString("default_kind", value.DefaultKind)
 	writeString("password_mode", strings.ToLower(strings.TrimSpace(value.PasswordMode)))
 	if value.PasswordProtected != "" {
@@ -119,6 +125,14 @@ func Validate(value Config) error {
 	}
 	if value.Password != "" && value.PasswordProtected != "" {
 		return errors.New("configuration contains both password and password_protected")
+	}
+	if value.TLSInsecure && value.CACertPEM != "" {
+		return errors.New("configuration cannot set both tls_insecure and ca_cert_pem")
+	}
+	if value.CACertPEM != "" {
+		if !x509.NewCertPool().AppendCertsFromPEM([]byte(value.CACertPEM)) {
+			return errors.New("ca_cert_pem does not contain a valid certificate")
+		}
 	}
 	if !strings.EqualFold(value.PasswordMode, "config") && (value.Password != "" || value.PasswordProtected != "") {
 		return errors.New("saved password values require password_mode config")
@@ -214,12 +228,20 @@ func assign(c *Config, section, key, raw string) error {
 		return setString(&c.Password)
 	case "password_protected":
 		return setString(&c.PasswordProtected)
+	case "ca_cert_pem":
+		return setString(&c.CACertPEM)
 	case "pinned_first":
 		value, err := strconv.ParseBool(raw)
 		if err != nil {
 			return err
 		}
 		c.PinnedFirst = value
+	case "tls_insecure":
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return err
+		}
+		c.TLSInsecure = value
 	default:
 		return fmt.Errorf("unknown config key %q", key)
 	}
