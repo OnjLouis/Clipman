@@ -201,6 +201,8 @@ Read the server package's `Manual.html` for setup, security, service-path, TLS, 
 - Fixed Android Settings losing unsaved changes when authentication was enabled and a folder picker or another deliberate Settings destination was opened.
 - Combined Android checkbox labels, states and controls into one TalkBack stop in Settings and Entry Properties.
 - Fixed the iOS encrypted-backup folder button so it reliably opens the Files folder picker.
+- Restored VoiceOver three-finger vertical page scrolling through iOS history while preserving left and right section switching.
+- Reduced foreground server polling on iOS and Android to lower battery and network use while keeping immediate refreshes for launches and local changes.
 
 ### 2.4.0
 

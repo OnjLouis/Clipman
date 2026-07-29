@@ -11,7 +11,13 @@ struct HistoryView: View {
             ScrollViewReader { proxy in
                 VStack(spacing: 8) {
                     controls
-                    entryList
+                    TabView(selection: selectedSectionBinding) {
+                        ForEach(app.visibleSections) { section in
+                            entryList(for: section)
+                                .tag(section)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                     statusBar(proxy: proxy)
                 }
             }
@@ -35,16 +41,6 @@ struct HistoryView: View {
             }
             .accessibilityAction(.magicTap) {
                 app.requestClipboardImport()
-            }
-            .accessibilityScrollAction { edge in
-                switch edge {
-                case .leading:
-                    app.switchToAdjacentSection(1)
-                case .trailing:
-                    app.switchToAdjacentSection(-1)
-                default:
-                    break
-                }
             }
             .onChange(of: app.status) { newStatus in
                 app.announceStatus(newStatus)
@@ -84,14 +80,21 @@ struct HistoryView: View {
         .padding(.horizontal)
     }
 
-    private var entryList: some View {
+    private var selectedSectionBinding: Binding<ClipmanAppModel.Section> {
+        Binding(
+            get: { app.selectedSection },
+            set: { app.switchSection($0) }
+        )
+    }
+
+    private func entryList(for section: ClipmanAppModel.Section) -> some View {
         List {
-            if app.selectedSection == .links {
-                if app.visibleLinkItems.isEmpty {
+            if section == .links {
+                if app.visibleLinkItems(in: section).isEmpty {
                     Text("No links.")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(app.visibleLinkItems) { item in
+                ForEach(app.visibleLinkItems(in: section)) { item in
                     LinkHistoryRow(
                         item: item,
                         copy: { app.copyText(item.url.absoluteString) },
@@ -102,11 +105,11 @@ struct HistoryView: View {
                     .id(item.id)
                 }
             } else {
-                if app.visibleEntries.isEmpty {
+                if app.visibleEntries(in: section).isEmpty {
                     Text("No entries.")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(app.visibleEntries) { entry in
+                ForEach(app.visibleEntries(in: section)) { entry in
                     HistoryEntryRow(
                         entry: entry,
                         copy: { app.copy(entry) },
@@ -123,7 +126,9 @@ struct HistoryView: View {
     }
 
     private var currentListIsEmpty: Bool {
-        app.selectedSection == .links ? app.visibleLinkItems.isEmpty : app.visibleEntries.isEmpty
+        app.selectedSection == .links
+            ? app.visibleLinkItems(in: app.selectedSection).isEmpty
+            : app.visibleEntries(in: app.selectedSection).isEmpty
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {

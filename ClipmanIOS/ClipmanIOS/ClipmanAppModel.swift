@@ -46,7 +46,7 @@ final class ClipmanAppModel: ObservableObject {
     private var foregroundGeneration = 0
     private var lastRemoteEntryID = ""
     private var pollingFailureCount = 0
-    private let pollingIntervalNanoseconds: UInt64 = 5_000_000_000
+    private let pollingIntervalNanoseconds: UInt64 = 15_000_000_000
     private var skipNextSettingsClosedRefresh = false
     private var pureLinkEntryIDs = Set<String>()
     private var machineName: String {
@@ -75,8 +75,12 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     var visibleEntries: [ClipEntry] {
+        visibleEntries(in: selectedSection)
+    }
+
+    func visibleEntries(in section: Section) -> [ClipEntry] {
         var entries = database.Entries
-        switch selectedSection {
+        switch section {
         case .text:
             entries = entries.filter {
                 (!settings.richTextEnabled || $0.RichText == nil) && !pureLinkEntryIDs.contains($0.Id)
@@ -107,6 +111,11 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     var visibleLinkItems: [LinkExtractor.LinkItem] {
+        visibleLinkItems(in: selectedSection)
+    }
+
+    func visibleLinkItems(in section: Section) -> [LinkExtractor.LinkItem] {
+        guard section == .links else { return [] }
         var items = linkItems
         if settings.richTextEnabled {
             items = items.filter { $0.entry.RichText == nil }

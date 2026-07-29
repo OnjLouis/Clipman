@@ -851,7 +851,7 @@ private fun ClipmanApp(
 
     LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings, appIsForeground, pollingFailureCount) {
         while (appIsForeground && storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
-            val delaySeconds = minOf(60L, 5L * (1L shl pollingFailureCount.coerceIn(0, 4)))
+            val delaySeconds = minOf(60L, 15L * (1L shl pollingFailureCount.coerceIn(0, 2)))
             delay(delaySeconds * 1_000L)
             loadHistory(announceResult = false, updateStatusWhenUnchanged = false, checkRevisionFirst = true)
         }

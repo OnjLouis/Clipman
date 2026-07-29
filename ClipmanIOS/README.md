@@ -23,7 +23,7 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - View, edit, pin, unpin, delete, search, and filter entries.
 - Use VoiceOver-friendly rows and actions so one swipe moves between entries.
 - When authentication is enabled, lock whenever Clipman leaves the foreground and authenticate again when returning.
-- Check the server revision every five seconds while active, download history only when it changed, pause behind Settings or in the background, and back off connection failures.
+- Check the server revision every fifteen seconds while active, download history only when it changed, pause behind Settings or in the background, and back off connection failures.
 - Make an optional one-time tip through Apple's in-app purchase system. Tips do not unlock features or content.
 
 ## Build Notes
@@ -49,6 +49,8 @@ The iOS Tip Jar expects three consumable in-app purchase products in App Store C
 ## Accessibility Notes
 
 Rows expose a compact VoiceOver label and custom actions for common operations. Double-tap copies the selected entry to the clipboard. Use the Actions rotor for View, Edit, Pin or Unpin, and Delete.
+
+Use a three-finger swipe up or down to move through history one page at a time. Three-finger left and right swipes continue to switch between enabled history sections.
 
 In Settings, use the VoiceOver scrub gesture to cancel unsaved changes and return to history.
 
