@@ -432,6 +432,8 @@
 
   <p>Android and iOS clients can choose <strong>Local</strong> or <strong>Server</strong> in Settings. Local mode keeps <code>clipman-history.clipdb</code> in the mobile operating system's private app storage and does not require a server. Server mode uses the same private file as an offline cache. Server details remain saved while Local mode is selected, and switching back to Server merges local additions, edits, pins, and deletions with the server history before uploading, so work done without a connection is not blindly replaced.</p>
 
+  <p>Android and iOS Settings can optionally back up encrypted history to a folder you choose through the system file picker, including supported cloud and document providers. A nonblank history password is required. Clipman writes one <code>Clipman History.clipdb</code> file containing history only; server details, tokens, settings, and passwords are never included. Use <strong>Restore and merge history backup</strong> to combine its entries and deletion records with current history instead of replacing newer information.</p>
+
   <p>When a mobile client starts in Server mode, it displays its encrypted on-device cache first and refreshes from the server in the background. A normal launch therefore does not show an empty history merely because the network response has not arrived yet.</p>
 
   <p>Clipman iOS provides <strong>Add Clipboard to Clipman</strong> and <strong>Copy Latest Clip</strong> actions through Apple's Shortcuts app and Siri. Either action can be assigned to the iPhone Action Button. Add Clipboard stores the current iOS clipboard text and available formatting; Copy Latest places the newest Clipman history entry on the iOS clipboard. Both honour Clipman's biometric or device-authentication setting, save through the encrypted local cache, and continue safely when the server is temporarily unavailable. Long-press the Clipman Home Screen icon to use the same two commands without creating a shortcut. Suggested Siri phrases include <strong>Add clipboard to Clipman</strong> and <strong>Copy latest from Clipman</strong>.</p>
@@ -587,6 +589,12 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.4.0</h3>
+  <ul>
+    <li>Added optional encrypted mobile history backup on Android and iOS. Choose a cloud or document-provider folder in Settings; Clipman writes history only and never includes server tokens, settings, or passwords. Restore merges entries and deletions instead of replacing newer history. Closes <a href="https://github.com/OnjLouis/Clipman/issues/34">issue #34</a>.</li>
+    <li>Added explicit accessibility names to Android Settings' Cancel and Save controls, and combined each Local/Server storage choice with its radio button for consistent one-swipe TalkBack navigation across devices. Closes <a href="https://github.com/OnjLouis/Clipman/issues/40">issue #40</a>.</li>
+  </ul>
+
   <h3>2.3.2</h3>
   <ul>
     <li>Fixed synchronization of edits to existing history entries. Changed text, names, groups, pinned/template state and manual position now replace older copies on other devices while creation and last-used times continue to merge independently.</li>

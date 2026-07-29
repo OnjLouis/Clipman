@@ -59,6 +59,7 @@ An [archived Clipman CLI development preview](https://github.com/OnjLouis/Clipma
 - Optional automatic update checks at startup, hourly, or daily, with silent install support when a release ZIP is available.
 - Optional Clipman Server support for hosting a shared `.clipdb` database with token authentication, password-scoped database buckets, revision checks, rolling backups, and explicit security rules for private-network versus HTTPS deployment. The server is a separate download; the normal Clipman app package is client-only.
 - Android and iOS can use private Local history without a server, or switch to Server mode while retaining an offline local cache. Returning to Server mode merges local and remote changes instead of replacing either history.
+- Android and iOS can optionally back up encrypted history to a user-selected cloud or document-provider folder. The backup contains history only, requires a nonblank history password, and can be restored by merging entries and deletions rather than replacing newer history.
 - Clipman iOS includes Add Clipboard and Copy Latest Clip actions for Shortcuts, Siri, the iPhone Action Button, and the Home Screen icon's long-press menu.
 
 ## Default Hotkeys
@@ -193,6 +194,11 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.4.0
+
+- Added optional encrypted mobile history backup on Android and iOS. Choose a cloud or document-provider folder in Settings; Clipman writes history only and never includes server tokens, settings, or passwords. Restore merges entries and deletions instead of replacing newer history. Closes [issue #34](https://github.com/OnjLouis/Clipman/issues/34).
+- Added explicit accessibility names to Android Settings' Cancel and Save controls, and combined each Local/Server storage choice with its radio button for consistent one-swipe TalkBack navigation across devices. Closes [issue #40](https://github.com/OnjLouis/Clipman/issues/40).
 
 ### 2.3.2
 

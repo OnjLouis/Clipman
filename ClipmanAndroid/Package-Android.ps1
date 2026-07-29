@@ -47,7 +47,7 @@ $taskName = if ($Configuration.Equals("Release", [StringComparison]::OrdinalIgno
 
 $networkTimeoutMilliseconds = $GradleNetworkTimeoutSeconds * 1000
 Write-Host "Gradle dependency connection and read timeout: $GradleNetworkTimeoutSeconds seconds."
-& $GradlePath -p $projectRoot ':app:testDebugUnitTest' $taskName --no-daemon --stacktrace `
+& $GradlePath -p $projectRoot ':app:testDebugUnitTest' ':app:compileDebugAndroidTestKotlin' $taskName --no-daemon --stacktrace `
     "-Dorg.gradle.internal.http.connectionTimeout=$networkTimeoutMilliseconds" `
     "-Dorg.gradle.internal.http.socketTimeout=$networkTimeoutMilliseconds" `
     --project-cache-dir $projectCache "-Pkotlin.project.persistent.dir=$kotlinCache" `

@@ -13,6 +13,10 @@ struct SettingsView: View {
     @State private var pendingConnection: ServerConnectionDetails?
     @State private var connectionImportError = ""
     @State private var connectionExportError = ""
+    @State private var showBackupFolderImporter = false
+    @State private var showBackupRestoreImporter = false
+    @State private var backupError = ""
+    @State private var backupMessage = ""
     @State private var settingsValidationError = ""
     @StateObject private var tipJar = TipJarStore()
 
@@ -32,6 +36,8 @@ struct SettingsView: View {
                         .font(.footnote)
                 }
 
+                historyBackupSection
+
                 Section("Device") {
                     TextField("Device name", text: $draft.deviceName)
                         .textInputAutocapitalization(.words)
@@ -46,47 +52,7 @@ struct SettingsView: View {
                         .accessibilityHint("When enabled, Clipman asks for Face ID, Touch ID, or the device passcode whenever the app returns to the foreground.")
                 }
 
-                Section("Server connection") {
-                    Text(serverIsConfigured ? "Server connection is configured." : "Server connection needs setup.")
-                        .foregroundStyle(serverIsConfigured ? .secondary : .primary)
-                    Button(showServerConnection ? "Hide server connection" : "Show server connection") {
-                        showServerConnection.toggle()
-                    }
-                    Button("Import server connection file") {
-                        showConnectionImporter = true
-                    }
-                    .accessibilityHint("Choose a Clipman Server connection file, review its address, then save settings.")
-                    Button("Export server connection file") {
-                        do {
-                            connectionDocument = ServerConnectionDocument(data: try ServerSettingsSanitizer.connectionConfigData(
-                                address: draft.serverURL,
-                                token: draft.serverToken
-                            ))
-                            showConnectionExportWarning = true
-                        } catch {
-                            connectionExportError = error.localizedDescription
-                        }
-                    }
-                    .accessibilityHint("Save the current server address and private access token to a Clipman Server connection file.")
-                    if showServerConnection {
-                        TextField("Server address", text: $draft.serverURL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .accessibilityLabel("Server address")
-                            .accessibilityHint("Enter the Clipman Server address and port.")
-                        SecureField("Server token", text: $draft.serverToken)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .disabled(draft.storageMode == .local)
-                            .accessibilityLabel("Server token")
-                            .accessibilityHint("Enter the access token supplied by Clipman Server.")
-                        SecureField("History password", text: $draft.historyPassword)
-                            .accessibilityLabel("History password")
-                            .accessibilityHint("Enter the password used to encrypt this clipboard history.")
-                        Text("You can paste a full token line or a clipman:// server address; Clipman will clean it when saving.")
-                            .font(.footnote)
-                    }
-                }
+                serverConnectionSection
 
                 if tipJar.isLoading || !tipJar.products.isEmpty {
                     TipJarSettingsSection(tipJar: tipJar)
@@ -109,6 +75,11 @@ struct SettingsView: View {
                         draft.serverToken = ServerSettingsSanitizer.cleanToken(draft.serverToken)
                         guard draft.storageMode != .server || !draft.historyPassword.isEmpty else {
                             settingsValidationError = "Clipman Server requires a unique history password. Enter one before saving this connection."
+                            showServerConnection = true
+                            return
+                        }
+                        guard !draft.cloudBackupEnabled || (!draft.historyPassword.isEmpty && !draft.cloudBackupBookmark.isEmpty) else {
+                            settingsValidationError = "Encrypted history backup requires a nonblank history password and a selected backup folder."
                             showServerConnection = true
                             return
                         }
@@ -142,6 +113,48 @@ struct SettingsView: View {
                     pendingConnection = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
                 } catch {
                     connectionImportError = error.localizedDescription
+                }
+            }
+            .fileImporter(
+                isPresented: $showBackupFolderImporter,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                do {
+                    guard let url = try result.get().first else { return }
+                    draft.cloudBackupBookmark = try CloudHistoryBackup.bookmark(for: url)
+                    draft.cloudBackupFolderName = url.lastPathComponent.isEmpty ? "Selected folder" : url.lastPathComponent
+                    draft.cloudBackupEnabled = true
+                    backupMessage = "Backup folder selected. Choose Save to apply it."
+                } catch {
+                    backupError = error.localizedDescription
+                }
+            }
+            .fileImporter(
+                isPresented: $showBackupRestoreImporter,
+                allowedContentTypes: [.data],
+                allowsMultipleSelection: false
+            ) { result in
+                do {
+                    guard !draft.historyPassword.isEmpty else {
+                        throw CloudHistoryBackupError.unencryptedBackup
+                    }
+                    guard draft.historyPassword == app.settings.historyPassword else {
+                        settingsValidationError = "Save the history password before restoring an encrypted backup."
+                        return
+                    }
+                    guard let url = try result.get().first else { return }
+                    let data = try CloudHistoryBackup.read(url)
+                    Task {
+                        do {
+                            try await app.mergeHistoryBackup(data)
+                            backupMessage = "History backup merged."
+                        } catch {
+                            backupError = error.localizedDescription
+                        }
+                    }
+                } catch {
+                    backupError = error.localizedDescription
                 }
             }
             .fileExporter(
@@ -194,6 +207,14 @@ struct SettingsView: View {
             } message: {
                 Text(connectionExportError)
             }
+            .alert("History backup error", isPresented: Binding(
+                get: { !backupError.isEmpty },
+                set: { if !$0 { backupError = "" } }
+            )) {
+                Button("OK") { backupError = "" }
+            } message: {
+                Text(backupError)
+            }
             .alert("History password required", isPresented: Binding(
                 get: { !settingsValidationError.isEmpty },
                 set: { if !$0 { settingsValidationError = "" } }
@@ -211,6 +232,92 @@ struct SettingsView: View {
     private var serverIsConfigured: Bool {
         !draft.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !draft.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var historyBackupSection: some View {
+        Section("Encrypted history backup") {
+            Toggle("Back up encrypted history automatically", isOn: Binding(
+                get: { draft.cloudBackupEnabled },
+                set: { enabled in
+                    if !enabled {
+                        draft.cloudBackupEnabled = false
+                    } else if draft.historyPassword.isEmpty {
+                        settingsValidationError = "Set and save a nonblank history password before enabling encrypted history backup."
+                        showServerConnection = true
+                    } else if draft.cloudBackupBookmark.isEmpty {
+                        showBackupFolderImporter = true
+                    } else {
+                        draft.cloudBackupEnabled = true
+                    }
+                }
+            ))
+            Text(draft.cloudBackupFolderName.isEmpty
+                ? "No backup folder selected."
+                : "Backup folder: \(draft.cloudBackupFolderName)")
+                .font(.footnote)
+            Button(draft.cloudBackupBookmark.isEmpty ? "Choose backup folder" : "Change backup folder") {
+                showBackupFolderImporter = true
+            }
+            Button("Restore and merge history backup") {
+                showBackupRestoreImporter = true
+            }
+            Text("Clipman writes one encrypted history file after successful changes. Restoring merges entries and deletions; it does not replace newer history. Server details, tokens, settings, and passwords are never included.")
+                .font(.footnote)
+            if !backupMessage.isEmpty {
+                Text(backupMessage)
+                    .font(.footnote)
+            }
+        }
+    }
+
+    private var serverConnectionSection: some View {
+        Section("Server connection") {
+            Text(serverIsConfigured ? "Server connection is configured." : "Server connection needs setup.")
+                .foregroundStyle(serverIsConfigured ? .secondary : .primary)
+            Button(showServerConnection ? "Hide server connection" : "Show server connection") {
+                showServerConnection.toggle()
+            }
+            Button("Import server connection file") {
+                showConnectionImporter = true
+            }
+            .accessibilityHint("Choose a Clipman Server connection file, review its address, then save settings.")
+            Button("Export server connection file") {
+                do {
+                    connectionDocument = ServerConnectionDocument(data: try ServerSettingsSanitizer.connectionConfigData(
+                        address: draft.serverURL,
+                        token: draft.serverToken
+                    ))
+                    showConnectionExportWarning = true
+                } catch {
+                    connectionExportError = error.localizedDescription
+                }
+            }
+            .accessibilityHint("Save the current server address and private access token to a Clipman Server connection file.")
+            if showServerConnection {
+                serverConnectionFields
+            }
+        }
+    }
+
+    private var serverConnectionFields: some View {
+        Group {
+            TextField("Server address", text: $draft.serverURL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityLabel("Server address")
+                .accessibilityHint("Enter the Clipman Server address and port.")
+            SecureField("Server token", text: $draft.serverToken)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(draft.storageMode == .local)
+                .accessibilityLabel("Server token")
+                .accessibilityHint("Enter the access token supplied by Clipman Server.")
+            SecureField("History password", text: $draft.historyPassword)
+                .accessibilityLabel("History password")
+                .accessibilityHint("Enter the password used to encrypt this clipboard history.")
+            Text("You can paste a full token line or a clipman:// server address; Clipman will clean it when saving.")
+                .font(.footnote)
+        }
     }
 
     private func applyPendingConnectionImport() {

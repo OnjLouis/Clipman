@@ -88,7 +88,11 @@ enum ClipboardShortcutService {
     }
 
     private static func persist(_ database: ClipDatabase, settings: ClipmanSettings) async throws -> Bool {
-        try await repository.saveLocal(database, password: settings.historyPassword)
+        _ = try await repository.saveLocal(
+            database,
+            password: settings.historyPassword,
+            backupSettings: settings
+        )
         guard settings.storageMode == .server, ServerStorageClient(settings: settings).isConfigured else {
             return true
         }

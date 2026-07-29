@@ -75,6 +75,18 @@ class AndroidSettings(context: Context) {
         get() = preferences.getBoolean("useHaptics", false)
         set(value) = preferences.edit().putBoolean("useHaptics", value).apply()
 
+    var cloudBackupEnabled: Boolean
+        get() = preferences.getBoolean("cloudBackupEnabled", false)
+        set(value) = preferences.edit().putBoolean("cloudBackupEnabled", value).apply()
+
+    var cloudBackupTreeUri: String
+        get() = getString("cloudBackupTreeUri")
+        set(value) = putString("cloudBackupTreeUri", value)
+
+    var cloudBackupLocationName: String
+        get() = preferences.getString("cloudBackupLocationName", "") ?: ""
+        set(value) = preferences.edit().putString("cloudBackupLocationName", value.trim()).apply()
+
     private fun getString(key: String): String {
         val value = preferences.getString(key, "") ?: ""
         if (value.isBlank()) return ""

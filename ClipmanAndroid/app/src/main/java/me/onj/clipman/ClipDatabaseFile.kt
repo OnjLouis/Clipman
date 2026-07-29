@@ -32,6 +32,8 @@ object ClipDatabaseFile {
         return json.decodeFromString(ClipDatabase.serializer(), text)
     }
 
+    fun isEncrypted(bytes: ByteArray): Boolean = bytes.startsWith(encryptedMagic)
+
     fun save(database: ClipDatabase, password: String): ByteArray {
         val text = json.encodeToString(ClipDatabase.serializer(), database)
         return if (password.isNotEmpty()) {

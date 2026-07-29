@@ -17,6 +17,7 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - Add the current iOS clipboard text into Clipman while the app is open.
 - Optionally offer to add the current iOS clipboard text after each successful unlock and initial history refresh. Clipman only presents the choice when the pasteboard advertises text. The full-screen choice uses Apple's paste control, so Paste is explicit and Cancel or a VoiceOver scrub leaves history unchanged.
 - Copy an entry back to the iOS clipboard.
+- Optionally back up encrypted history to a folder selected through Files, including iCloud Drive and supported third-party providers. Restore merges entries and deletion records with current history; the backup never includes server tokens, settings, or passwords.
 - Use the built-in <strong>Add Clipboard to Clipman</strong> and <strong>Copy Latest Clip</strong> actions from Shortcuts, Siri, or the iPhone Action Button. Both actions honour Clipman's authentication setting and continue safely from the encrypted local cache if the server is unavailable.
 - Long-press the Clipman Home Screen icon for the same Add Clipboard and Copy Latest Clip commands.
 - View, edit, pin, unpin, delete, search, and filter entries.

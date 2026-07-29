@@ -4,6 +4,7 @@ struct MobileSyncResult: Sendable {
     var database: ClipDatabase
     var revision: String
     var uploaded: Bool
+    var backupError: String?
 }
 
 actor MobileHistoryRepository {
@@ -18,10 +19,25 @@ actor MobileHistoryRepository {
         return try await DatabaseWorker.load(data: data, password: password)
     }
 
-    func saveLocal(_ database: ClipDatabase, password: String) async throws {
+    @discardableResult
+    func saveLocal(
+        _ database: ClipDatabase,
+        password: String,
+        backupSettings: ClipmanSettings? = nil
+    ) async throws -> String? {
         let data = try await DatabaseWorker.save(database, password: password)
         let url = try localDatabaseURL(createDirectory: true)
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+        guard let backupSettings, backupSettings.cloudBackupEnabled else { return nil }
+        guard !password.isEmpty else {
+            return "Set a nonblank history password before enabling cloud backup."
+        }
+        do {
+            try CloudHistoryBackup.write(data, bookmark: backupSettings.cloudBackupBookmark)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     func synchronize(settings: ClipmanSettings, current: ClipDatabase) async throws -> MobileSyncResult {
@@ -39,9 +55,14 @@ actor MobileHistoryRepository {
             let data = try await DatabaseWorker.save(local, password: settings.historyPassword)
             let revision = try await client.upload(data: data, expectedRevision: "")
             if cached.map({ !SyncConflictResolver.hasSameContent(local, $0) }) ?? true {
-                try await saveLocal(local, password: settings.historyPassword)
+                let backupError = try await saveLocal(
+                    local,
+                    password: settings.historyPassword,
+                    backupSettings: settings
+                )
+                return MobileSyncResult(database: local, revision: revision, uploaded: true, backupError: backupError)
             }
-            return MobileSyncResult(database: local, revision: revision, uploaded: true)
+            return MobileSyncResult(database: local, revision: revision, uploaded: true, backupError: nil)
         }
 
         for attempt in 0..<3 {
@@ -49,17 +70,27 @@ actor MobileHistoryRepository {
             let merged = SyncConflictResolver.merge(target: local, source: remote)
             guard !SyncConflictResolver.hasSameContent(merged, remote) else {
                 if cached.map({ !SyncConflictResolver.hasSameContent(merged, $0) }) ?? true {
-                    try await saveLocal(merged, password: settings.historyPassword)
+                    let backupError = try await saveLocal(
+                        merged,
+                        password: settings.historyPassword,
+                        backupSettings: settings
+                    )
+                    return MobileSyncResult(database: merged, revision: download.revision, uploaded: false, backupError: backupError)
                 }
-                return MobileSyncResult(database: merged, revision: download.revision, uploaded: false)
+                return MobileSyncResult(database: merged, revision: download.revision, uploaded: false, backupError: nil)
             }
             do {
                 let data = try await DatabaseWorker.save(merged, password: settings.historyPassword)
                 let revision = try await client.upload(data: data, expectedRevision: download.revision)
                 if cached.map({ !SyncConflictResolver.hasSameContent(merged, $0) }) ?? true {
-                    try await saveLocal(merged, password: settings.historyPassword)
+                    let backupError = try await saveLocal(
+                        merged,
+                        password: settings.historyPassword,
+                        backupSettings: settings
+                    )
+                    return MobileSyncResult(database: merged, revision: revision, uploaded: true, backupError: backupError)
                 }
-                return MobileSyncResult(database: merged, revision: revision, uploaded: true)
+                return MobileSyncResult(database: merged, revision: revision, uploaded: true, backupError: nil)
             } catch ServerStorageError.conflict where attempt < 2 {
                 download = try await client.download()
             }

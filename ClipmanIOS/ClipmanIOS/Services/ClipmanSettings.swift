@@ -21,6 +21,9 @@ struct ClipmanSettings: Equatable, Sendable {
     var requireAuthentication: Bool
     var linksEnabled: Bool
     var richTextEnabled: Bool
+    var cloudBackupEnabled: Bool
+    var cloudBackupBookmark: Data
+    var cloudBackupFolderName: String
 
     @MainActor
     static var empty: ClipmanSettings {
@@ -36,7 +39,10 @@ struct ClipmanSettings: Equatable, Sendable {
             addClipboardOnLaunch: false,
             requireAuthentication: false,
             linksEnabled: true,
-            richTextEnabled: false
+            richTextEnabled: false,
+            cloudBackupEnabled: false,
+            cloudBackupBookmark: Data(),
+            cloudBackupFolderName: ""
         )
     }
 }
@@ -55,6 +61,9 @@ enum SettingsStore {
         static let serverToken = "serverToken"
         static let historyPassword = "historyPassword"
         static let deviceName = "deviceName"
+        static let cloudBackupEnabled = "cloudBackupEnabled"
+        static let cloudBackupBookmark = "cloudBackupBookmark"
+        static let cloudBackupFolderName = "cloudBackupFolderName"
     }
 
     @MainActor
@@ -69,6 +78,13 @@ enum SettingsStore {
         settings.requireAuthentication = UserDefaults.standard.object(forKey: Keys.requireAuthentication) as? Bool ?? false
         settings.linksEnabled = UserDefaults.standard.object(forKey: Keys.linksEnabled) as? Bool ?? true
         settings.richTextEnabled = UserDefaults.standard.object(forKey: Keys.richTextEnabled) as? Bool ?? false
+        settings.cloudBackupEnabled = UserDefaults.standard.object(forKey: Keys.cloudBackupEnabled) as? Bool ?? false
+        settings.cloudBackupBookmark = UserDefaults.standard.data(forKey: Keys.cloudBackupBookmark) ?? Data()
+        settings.cloudBackupFolderName = UserDefaults.standard.string(forKey: Keys.cloudBackupFolderName) ?? ""
+        if settings.cloudBackupBookmark.isEmpty {
+            settings.cloudBackupEnabled = false
+            settings.cloudBackupFolderName = ""
+        }
         settings.deviceName = UserDefaults.standard.string(forKey: Keys.deviceName) ?? UIDeviceMachine.name
         if settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             settings.deviceName = UIDeviceMachine.name
@@ -88,6 +104,9 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.requireAuthentication, forKey: Keys.requireAuthentication)
         UserDefaults.standard.set(settings.linksEnabled, forKey: Keys.linksEnabled)
         UserDefaults.standard.set(settings.richTextEnabled, forKey: Keys.richTextEnabled)
+        UserDefaults.standard.set(settings.cloudBackupEnabled, forKey: Keys.cloudBackupEnabled)
+        UserDefaults.standard.set(settings.cloudBackupBookmark, forKey: Keys.cloudBackupBookmark)
+        UserDefaults.standard.set(settings.cloudBackupFolderName, forKey: Keys.cloudBackupFolderName)
         UserDefaults.standard.set(settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Keys.deviceName)
         KeychainStore.set(settings.serverToken, for: Keys.serverToken)
         KeychainStore.set(settings.historyPassword, for: Keys.historyPassword)

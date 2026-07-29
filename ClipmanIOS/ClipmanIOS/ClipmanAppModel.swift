@@ -321,14 +321,21 @@ final class ClipmanAppModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await historyRepository.saveLocal(database, password: newSettings.historyPassword)
+                let backupError = try await historyRepository.saveLocal(
+                    database,
+                    password: newSettings.historyPassword,
+                    backupSettings: newSettings
+                )
+                guard generation == storageGeneration else { return }
+                startPolling()
+                _ = await refresh(showStatus: true)
+                if let backupError {
+                    status = "Settings saved, but the history backup could not be updated: \(backupError)"
+                }
             } catch {
                 status = "Could not save local history: \(error.localizedDescription)"
                 return
             }
-            guard generation == storageGeneration else { return }
-            startPolling()
-            _ = await refresh(showStatus: true)
         }
     }
 
@@ -373,8 +380,15 @@ final class ClipmanAppModel: ObservableObject {
                         database = local
                     }
                 } else {
-                    try await historyRepository.saveLocal(database, password: settingsSnapshot.historyPassword)
+                    let backupError = try await historyRepository.saveLocal(
+                        database,
+                        password: settingsSnapshot.historyPassword,
+                        backupSettings: settingsSnapshot
+                    )
                     guard generation == storageGeneration else { return false }
+                    if let backupError {
+                        status = "Local history loaded, but the history backup could not be updated: \(backupError)"
+                    }
                 }
                 revision = ""
                 hasPendingLocalChanges = false
@@ -441,7 +455,11 @@ final class ClipmanAppModel: ObservableObject {
                 soundService.play("remote", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             }
             if showStatus {
-                status = loadedStatusText()
+                status = sync.backupError.map {
+                    "\(loadedStatusText()) History backup could not be updated: \($0)"
+                } ?? loadedStatusText()
+            } else if let backupError = sync.backupError {
+                status = "History saved, but the history backup could not be updated: \(backupError)"
             }
             return true
         } catch {
@@ -543,12 +561,20 @@ final class ClipmanAppModel: ObservableObject {
 
     private func persistAndSynchronize(_ snapshot: ClipDatabase, settings settingsSnapshot: ClipmanSettings, generation: Int, successMessage: String?) async {
         do {
-            try await historyRepository.saveLocal(snapshot, password: settingsSnapshot.historyPassword)
+            let localBackupError = try await historyRepository.saveLocal(
+                snapshot,
+                password: settingsSnapshot.historyPassword,
+                backupSettings: settingsSnapshot
+            )
             try Task.checkCancellation()
             guard generation == storageGeneration else { return }
             if settingsSnapshot.storageMode == .local {
                 hasPendingLocalChanges = false
-                if let successMessage { status = "\(successMessage) Saved in local history." }
+                if let localBackupError {
+                    status = "\(successMessage.map { "\($0) " } ?? "")Saved locally, but the history backup could not be updated: \(localBackupError)"
+                } else if let successMessage {
+                    status = "\(successMessage) Saved in local history."
+                }
                 return
             }
             let sync = try await historyRepository.synchronize(settings: settingsSnapshot, current: snapshot)
@@ -559,7 +585,11 @@ final class ClipmanAppModel: ObservableObject {
             if !SyncConflictResolver.hasSameContent(sync.database, database) {
                 database = sync.database
             }
-            if let successMessage { status = successMessage }
+            if let backupError = sync.backupError ?? localBackupError {
+                status = "\(successMessage.map { "\($0) " } ?? "")History backup could not be updated: \(backupError)"
+            } else if let successMessage {
+                status = successMessage
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -569,6 +599,20 @@ final class ClipmanAppModel: ObservableObject {
                 : "Could not save local history: \(error.localizedDescription)"
             soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
         }
+    }
+
+    func mergeHistoryBackup(_ data: Data) async throws {
+        guard !settings.historyPassword.isEmpty else {
+            throw CloudHistoryBackupError.unencryptedBackup
+        }
+        let imported = try await DatabaseWorker.load(data: data, password: settings.historyPassword)
+        let merged = SyncConflictResolver.merge(target: database, source: imported)
+        guard !SyncConflictResolver.hasSameContent(merged, database) else {
+            status = "History backup contained no newer changes."
+            return
+        }
+        database = merged
+        queueUpload(successMessage: "History backup merged.")
     }
 
     private func markUsed(_ entry: ClipEntry) -> ClipDatabase {

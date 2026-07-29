@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -51,8 +53,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -269,7 +275,10 @@ private data class MobileSettingsSnapshot(
     val requireAuthentication: Boolean,
     val checkForUpdatesAutomatically: Boolean,
     val playSounds: Boolean,
-    val useHaptics: Boolean
+    val useHaptics: Boolean,
+    val cloudBackupEnabled: Boolean,
+    val cloudBackupTreeUri: String,
+    val cloudBackupLocationName: String
 )
 
 private data class ExternalServerConnectionImport(
@@ -310,6 +319,9 @@ private fun ClipmanApp(
     var checkForUpdatesAutomatically by remember { mutableStateOf(settings.checkForUpdatesAutomatically) }
     var playSounds by remember { mutableStateOf(settings.playSounds) }
     var useHaptics by remember { mutableStateOf(settings.useHaptics) }
+    var cloudBackupEnabled by remember { mutableStateOf(settings.cloudBackupEnabled) }
+    var cloudBackupTreeUri by remember { mutableStateOf(settings.cloudBackupTreeUri) }
+    var cloudBackupLocationName by remember { mutableStateOf(settings.cloudBackupLocationName) }
     var status by remember { mutableStateOf("Not loaded.") }
     var search by remember { mutableStateOf("") }
     var section by remember { mutableStateOf(HistorySection.Text) }
@@ -342,6 +354,7 @@ private fun ClipmanApp(
     var pendingUpdateApk by remember { mutableStateOf<File?>(null) }
     var pendingConnectionExport by remember { mutableStateOf<String?>(null) }
     var showConnectionExportWarning by remember { mutableStateOf(false) }
+    var enableBackupAfterFolderChoice by remember { mutableStateOf(false) }
     val unknownSourcesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val apk = pendingUpdateApk
         if (apk != null && AndroidUpdateService.canInstallPackages(context)) {
@@ -389,7 +402,26 @@ private fun ClipmanApp(
             }
         }
     }
-
+    val chooseBackupFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        val shouldEnable = enableBackupAfterFolderChoice
+        enableBackupAfterFolderChoice = false
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                cloudBackupTreeUri = uri.toString()
+                cloudBackupLocationName = CloudHistoryBackup.locationName(context, uri)
+                if (shouldEnable) cloudBackupEnabled = true
+                status = "History backup folder selected. Choose Save to apply it."
+                announce(view, status)
+            }.onFailure { error ->
+                status = "Could not use the selected backup folder: ${error.message ?: error::class.java.simpleName}"
+                announce(view, status)
+            }
+        }
+    }
     LaunchedEffect(externalConnectionImport?.id) {
         val request = externalConnectionImport ?: return@LaunchedEffect
         val details = request.details
@@ -406,7 +438,20 @@ private fun ClipmanApp(
         onExternalConnectionImportConsumed(request.id)
     }
 
+    fun releaseBackupFolderPermission(uriValue: String) {
+        if (uriValue.isBlank()) return
+        runCatching {
+            context.contentResolver.releasePersistableUriPermission(
+                Uri.parse(uriValue),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        }
+    }
+
     fun discardSettingsChanges() {
+        if (cloudBackupTreeUri.isNotBlank() && cloudBackupTreeUri != settings.cloudBackupTreeUri) {
+            releaseBackupFolderPermission(cloudBackupTreeUri)
+        }
         serverUrl = settings.serverUrl
         storageMode = settings.storageMode
         token = settings.serverToken
@@ -419,6 +464,9 @@ private fun ClipmanApp(
         checkForUpdatesAutomatically = settings.checkForUpdatesAutomatically
         playSounds = settings.playSounds
         useHaptics = settings.useHaptics
+        cloudBackupEnabled = settings.cloudBackupEnabled
+        cloudBackupTreeUri = settings.cloudBackupTreeUri
+        cloudBackupLocationName = settings.cloudBackupLocationName
         showConnectionSettings = false
     }
 
@@ -439,7 +487,13 @@ private fun ClipmanApp(
         settings.checkForUpdatesAutomatically = snapshot.checkForUpdatesAutomatically
         settings.playSounds = snapshot.playSounds
         settings.useHaptics = snapshot.useHaptics
+        settings.cloudBackupEnabled = snapshot.cloudBackupEnabled
+        settings.cloudBackupTreeUri = snapshot.cloudBackupTreeUri
+        settings.cloudBackupLocationName = snapshot.cloudBackupLocationName
     }
+
+    fun backupOptions(enabled: Boolean = cloudBackupEnabled, treeUri: String = cloudBackupTreeUri) =
+        CloudBackupOptions(enabled = enabled, treeUri = treeUri)
 
     fun loadHistory(
         announceResult: Boolean = true,
@@ -461,6 +515,7 @@ private fun ClipmanApp(
         val databaseSnapshot = database
         val requestedRevision = currentRevision
         val requestedPendingChanges = hasPendingLocalChanges
+        val requestedBackup = backupOptions()
         isLoadingHistory = true
         if (announceResult) {
             status = "Loading history..."
@@ -498,7 +553,13 @@ private fun ClipmanApp(
                                         return@runCatching MobileSyncResult(databaseSnapshot, requestedRevision, false)
                                     }
                                 }
-                                historyRepository.synchronize(requestedServerUrl, requestedToken, requestedPassword, databaseSnapshot)
+                                historyRepository.synchronize(
+                                    requestedServerUrl,
+                                    requestedToken,
+                                    requestedPassword,
+                                    databaseSnapshot,
+                                    requestedBackup
+                                )
                             } catch (error: Throwable) {
                                 val cached = historyRepository.loadLocalOrNull(requestedPassword) ?: throw error
                                 MobileSyncResult(
@@ -551,6 +612,9 @@ private fun ClipmanApp(
                 } else if (updateStatusWhenUnchanged) {
                     status = "History is already up to date."
                 }
+                if (sync.backupError != null) {
+                    status = "History loaded, but cloud backup failed: ${sync.backupError}"
+                }
                 if (announceResult) announce(view, "History refreshed")
                 if (!launchClipboardHandled) {
                     launchClipboardHandled = true
@@ -574,6 +638,7 @@ private fun ClipmanApp(
         val requestedServerUrl = serverUrl
         val requestedToken = token
         val requestedPassword = password
+        val requestedBackup = backupOptions()
         status = "$actionText..."
         val updatedLocal = mutation(database)
         database = updatedLocal
@@ -584,11 +649,18 @@ private fun ClipmanApp(
             val result = withContext(Dispatchers.IO) {
                 storageMutex.withLock {
                     runCatching {
-                        historyRepository.saveLocal(updatedLocal, requestedPassword)
+                        val backupError = historyRepository.saveLocal(updatedLocal, requestedPassword, requestedBackup)
                         if (requestedMode == MobileStorageMode.Local) {
-                            MobileSyncResult(updatedLocal, "", false)
+                            MobileSyncResult(updatedLocal, "", false, backupError = backupError)
                         } else {
-                            historyRepository.synchronize(requestedServerUrl, requestedToken, requestedPassword, updatedLocal)
+                            val sync = historyRepository.synchronize(
+                                requestedServerUrl,
+                                requestedToken,
+                                requestedPassword,
+                                updatedLocal,
+                                requestedBackup
+                            )
+                            if (sync.backupError == null && backupError != null) sync.copy(backupError = backupError) else sync
                         }
                     }
                 }
@@ -600,7 +672,11 @@ private fun ClipmanApp(
                 currentRevision = sync.revision
                 hasPendingLocalChanges = false
                 pollingFailureCount = 0
-                status = if (requestedMode == MobileStorageMode.Local) "$actionText complete in local history." else "$actionText complete."
+                status = when {
+                    sync.backupError != null -> "$actionText complete, but cloud backup failed: ${sync.backupError}"
+                    requestedMode == MobileStorageMode.Local -> "$actionText complete in local history."
+                    else -> "$actionText complete."
+                }
                 if (actionText == "Adding Android clipboard text") {
                     playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
                 }
@@ -611,6 +687,31 @@ private fun ClipmanApp(
                     "$actionText saved locally; server sync is pending: ${error.message ?: error::class.java.simpleName}"
                 } else {
                     "$actionText failed: ${error.message ?: error::class.java.simpleName}"
+                }
+            }
+        }
+    }
+
+    val restoreHistoryBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            if (password.isBlank()) {
+                status = "Set and save a history password before restoring a cloud backup."
+                announce(view, status)
+            } else {
+                status = "Reading encrypted history backup..."
+                announce(view, status)
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching { CloudHistoryBackup.read(context, uri, password) }
+                    }
+                    result.onSuccess { imported ->
+                        saveDatabaseChange("Restoring history backup") { current ->
+                            SyncConflictResolver.merge(target = current, source = imported)
+                        }
+                    }.onFailure { error ->
+                        status = "Could not restore history backup: ${error.message ?: error::class.java.simpleName}"
+                        announce(view, status)
+                    }
                 }
             }
         }
@@ -924,6 +1025,29 @@ private fun ClipmanApp(
                 onPlaySoundsChanged = { playSounds = it },
                 useHaptics = useHaptics,
                 onUseHapticsChanged = { useHaptics = it },
+                cloudBackupEnabled = cloudBackupEnabled,
+                onCloudBackupEnabledChanged = { enabled ->
+                    when {
+                        !enabled -> cloudBackupEnabled = false
+                        password.isBlank() -> {
+                            status = "Set and save a nonblank history password before enabling cloud backup."
+                            announce(view, status)
+                        }
+                        cloudBackupTreeUri.isBlank() -> {
+                            enableBackupAfterFolderChoice = true
+                            chooseBackupFolder.launch(null)
+                        }
+                        else -> cloudBackupEnabled = true
+                    }
+                },
+                cloudBackupLocationName = cloudBackupLocationName,
+                onChooseBackupFolder = {
+                    enableBackupAfterFolderChoice = false
+                    chooseBackupFolder.launch(null)
+                },
+                onRestoreHistoryBackup = {
+                    restoreHistoryBackup.launch(arrayOf("application/octet-stream", "application/gzip", "*/*"))
+                },
                 onOpenTipJar = {
                     runCatching {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://onj.me/donate")))
@@ -940,6 +1064,11 @@ private fun ClipmanApp(
                         announce(view, status)
                         return@saveSettings
                     }
+                    if (cloudBackupEnabled && (password.isBlank() || cloudBackupTreeUri.isBlank())) {
+                        status = "Cloud backup requires a nonblank history password and a selected backup folder."
+                        announce(view, status)
+                        return@saveSettings
+                    }
                     val savedSettings = MobileSettingsSnapshot(
                         storageMode = storageMode,
                         serverUrl = serverUrl,
@@ -952,13 +1081,17 @@ private fun ClipmanApp(
                         requireAuthentication = requireAuthentication,
                         checkForUpdatesAutomatically = checkForUpdatesAutomatically,
                         playSounds = playSounds,
-                        useHaptics = useHaptics
+                        useHaptics = useHaptics,
+                        cloudBackupEnabled = cloudBackupEnabled,
+                        cloudBackupTreeUri = cloudBackupTreeUri,
+                        cloudBackupLocationName = cloudBackupLocationName
                     )
                     isSavingSettings = true
                     loadGeneration += 1
                     changeGeneration += 1
                     isLoadingHistory = false
                     val oldPassword = settings.historyPassword
+                    val oldBackupTreeUri = settings.cloudBackupTreeUri
                     val newPassword = savedSettings.password
                     val databaseSnapshot = database
                     val historyWasLoaded = hasLoadedHistory
@@ -971,11 +1104,17 @@ private fun ClipmanApp(
                                     } else {
                                         historyRepository.loadLocalOrNull(oldPassword)
                                     }
-                                    if (toSave != null) historyRepository.saveLocal(toSave, newPassword)
+                                    if (toSave != null) {
+                                        historyRepository.saveLocal(
+                                            toSave,
+                                            newPassword,
+                                            backupOptions(savedSettings.cloudBackupEnabled, savedSettings.cloudBackupTreeUri)
+                                        )
+                                    } else null
                                 }
                             }
                         }
-                        cacheResult.onSuccess {
+                        cacheResult.onSuccess { backupError ->
                             storageMode = savedSettings.storageMode
                             serverUrl = savedSettings.serverUrl
                             token = savedSettings.token
@@ -988,11 +1127,21 @@ private fun ClipmanApp(
                             checkForUpdatesAutomatically = savedSettings.checkForUpdatesAutomatically
                             playSounds = savedSettings.playSounds
                             useHaptics = savedSettings.useHaptics
+                            cloudBackupEnabled = savedSettings.cloudBackupEnabled
+                            cloudBackupTreeUri = savedSettings.cloudBackupTreeUri
+                            cloudBackupLocationName = savedSettings.cloudBackupLocationName
                             saveSettings(savedSettings)
+                            if (oldBackupTreeUri.isNotBlank() && oldBackupTreeUri != savedSettings.cloudBackupTreeUri) {
+                                releaseBackupFolderPermission(oldBackupTreeUri)
+                            }
                             isSavingSettings = false
                             showConnectionSettings = false
                             currentRevision = ""
                             loadHistory()
+                            if (backupError != null) {
+                                status = "Settings saved, but cloud backup failed: $backupError"
+                                announce(view, status)
+                            }
                         }
                         cacheResult.onFailure { error ->
                             isSavingSettings = false
@@ -1313,6 +1462,11 @@ private fun ConnectionSettingsScreen(
     onPlaySoundsChanged: (Boolean) -> Unit,
     useHaptics: Boolean,
     onUseHapticsChanged: (Boolean) -> Unit,
+    cloudBackupEnabled: Boolean,
+    onCloudBackupEnabledChanged: (Boolean) -> Unit,
+    cloudBackupLocationName: String,
+    onChooseBackupFolder: () -> Unit,
+    onRestoreHistoryBackup: () -> Unit,
     onOpenTipJar: () -> Unit,
     onCancel: () -> Unit,
     onSave: () -> Unit
@@ -1327,21 +1481,7 @@ private fun ConnectionSettingsScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = onCancel, enabled = !isSaving) { Text("Cancel") }
-            Text(
-                text = "Settings",
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .weight(1f)
-                    .semantics { heading() }
-            )
-            TextButton(onClick = onSave, enabled = !isSaving) { Text(if (isSaving) "Saving" else "Save") }
-        }
+        SettingsHeader(isSaving = isSaving, onCancel = onCancel, onSave = onSave)
         Text(
             text = "Device",
             style = MaterialTheme.typography.titleMedium,
@@ -1360,27 +1500,46 @@ private fun ConnectionSettingsScreen(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.semantics { heading() }
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            MobileStorageMode.entries.forEach { mode ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(
-                        selected = storageMode == mode,
-                        onClick = { onStorageModeChanged(mode) },
-                        enabled = !isSaving
-                    )
-                    Text(mode.label)
-                }
-            }
-        }
+        StorageModeSelector(
+            storageMode = storageMode,
+            enabled = !isSaving,
+            onStorageModeChanged = onStorageModeChanged,
+        )
         Text(
             text = if (storageMode == MobileStorageMode.Local) {
                 "History is stored privately on this phone. Your server details remain saved for later."
             } else {
                 "History is cached on this phone and merged with Clipman Server. Offline changes retry automatically."
             },
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(
+            text = "History backup",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        SettingCheckboxRow(
+            checked = cloudBackupEnabled,
+            onCheckedChange = onCloudBackupEnabledChanged,
+            label = "Back up encrypted history automatically",
+            enabled = !isSaving
+        )
+        Text(
+            text = if (cloudBackupLocationName.isBlank()) {
+                "Backup folder: Not selected"
+            } else {
+                "Backup folder: $cloudBackupLocationName"
+            },
+            style = MaterialTheme.typography.bodySmall
+        )
+        TextButton(onClick = onChooseBackupFolder, enabled = !isSaving) {
+            Text(if (cloudBackupLocationName.isBlank()) "Choose backup folder" else "Change backup folder")
+        }
+        TextButton(onClick = onRestoreHistoryBackup, enabled = !isSaving) {
+            Text("Restore and merge history backup")
+        }
+        Text(
+            text = "Clipman writes Clipman History.clipdb through Android's folder picker. A nonblank history password is required, and restore merges entries instead of replacing your current history. Server tokens and passwords are never included.",
             style = MaterialTheme.typography.bodySmall
         )
         SettingCheckboxRow(
@@ -1523,6 +1682,39 @@ private fun ConnectionSettingsScreen(
         )
         TextButton(onClick = onOpenTipJar, enabled = !isSaving) { Text("Open Tip Jar") }
         Text("Tips are optional and do not unlock features.", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+internal fun StorageModeSelector(
+    storageMode: MobileStorageMode,
+    enabled: Boolean,
+    onStorageModeChanged: (MobileStorageMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        MobileStorageMode.entries.forEach { mode ->
+            Row(
+                modifier = Modifier.selectable(
+                    selected = storageMode == mode,
+                    enabled = enabled,
+                    role = Role.RadioButton,
+                    onClick = { onStorageModeChanged(mode) },
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(
+                    selected = storageMode == mode,
+                    onClick = null,
+                    enabled = enabled,
+                )
+                Text(mode.label)
+            }
+        }
     }
 }
 
@@ -1742,6 +1934,64 @@ private fun ClipEntry.isLinkEntry(): Boolean {
         return true
     }
     return Patterns.WEB_URL.matcher(text).matches()
+}
+
+@Composable
+internal fun SettingsHeader(
+    isSaving: Boolean,
+    onCancel: () -> Unit,
+    onSave: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(
+            onClick = onCancel,
+            enabled = !isSaving,
+            modifier = Modifier.clearAndSetSemantics {
+                contentDescription = "Cancel settings"
+                role = Role.Button
+                if (isSaving) {
+                    disabled()
+                } else {
+                    onClick(label = "Cancel settings") {
+                        onCancel()
+                        true
+                    }
+                }
+            }
+        ) {
+            Text("Cancel", modifier = Modifier.clearAndSetSemantics { })
+        }
+        Text(
+            text = "Settings",
+            style = MaterialTheme.typography.titleLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .weight(1f)
+                .semantics { heading() }
+        )
+        val saveLabel = if (isSaving) "Saving settings" else "Save settings"
+        TextButton(
+            onClick = onSave,
+            enabled = !isSaving,
+            modifier = Modifier.clearAndSetSemantics {
+                contentDescription = saveLabel
+                role = Role.Button
+                if (isSaving) {
+                    disabled()
+                } else {
+                    onClick(label = "Save settings") {
+                        onSave()
+                        true
+                    }
+                }
+            }
+        ) {
+            Text(if (isSaving) "Saving" else "Save", modifier = Modifier.clearAndSetSemantics { })
+        }
+    }
 }
 
 private fun visibleHistorySections(richTextEnabled: Boolean): List<HistorySection> =

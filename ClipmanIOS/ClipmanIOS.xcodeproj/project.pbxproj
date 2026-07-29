@@ -25,6 +25,7 @@
 		5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98DD96F176CD3DE6A07D271 /* SoundService.swift */; };
 		60B3DA13369B6F9C5E9EEAAF /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */; };
 		63230AB36E74FDD29076CE5A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D4195FBB5149532BA117A9B8 /* Assets.xcassets */; };
+		6A857283F950DB08ABE7CB53 /* CloudHistoryBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */; };
 		7E92FC7E32A65B8890DAA492 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 3EE36547BC3684AF103A3821 /* libz.tbd */; };
 		80DF3940EAE12616EAA0047D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642C84289DC631AC184C2C31 /* Models.swift */; };
 		9C4809F93BC5717D1C1645DD /* SyncConflictResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */; };
@@ -57,6 +58,7 @@
 		1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStorageClient.swift; sourceTree = "<group>"; };
 		283C9770D01F5E67699D4EAC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2B73540DCE1C118E33B75CAF /* copy.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = copy.wav; sourceTree = "<group>"; };
+		2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudHistoryBackup.swift; sourceTree = "<group>"; };
 		32D231A3045AB33B818FACE0 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationService.swift; sourceTree = "<group>"; };
 		3757E95599655BFEB3101654 /* DatabaseWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseWorker.swift; sourceTree = "<group>"; };
@@ -194,6 +196,7 @@
 			isa = PBXGroup;
 			children = (
 				73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */,
+				2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */,
 				3757E95599655BFEB3101654 /* DatabaseWorker.swift */,
 				93D166EC7141EE64B5371FD2 /* Gzip.swift */,
 				98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */,
@@ -311,6 +314,7 @@
 				06F7ECFE0C7AC99C48782BD3 /* ClipmanIOSApp.swift in Sources */,
 				DAEF726015B46A423C800015 /* ClipmanQuickActions.swift in Sources */,
 				B361AA587CED2A97ABD2F636 /* ClipmanSettings.swift in Sources */,
+				6A857283F950DB08ABE7CB53 /* CloudHistoryBackup.swift in Sources */,
 				AD65480F3E929702A805262F /* DatabaseWorker.swift in Sources */,
 				B66FC9F132546C30E3E29127 /* EntryEditView.swift in Sources */,
 				C676E48CA1A7CDAA51D4C9B5 /* EntryView.swift in Sources */,
@@ -341,7 +345,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 23200;
+				CURRENT_PROJECT_VERSION = 24000;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -351,7 +355,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.3.2;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -424,7 +428,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 23200;
+				CURRENT_PROJECT_VERSION = 24000;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -434,7 +438,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.3.2;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;

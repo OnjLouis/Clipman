@@ -13,7 +13,10 @@ class LocalHistoryStore(context: Context) {
     }
 
     fun save(database: ClipDatabase, password: String) {
-        val bytes = ClipDatabaseFile.save(database, password)
+        saveBytes(ClipDatabaseFile.save(database, password))
+    }
+
+    fun saveBytes(bytes: ByteArray) {
         val output = atomicFile.startWrite()
         try {
             output.write(bytes)
@@ -30,10 +33,12 @@ data class MobileSyncResult(
     val database: ClipDatabase,
     val revision: String,
     val uploaded: Boolean,
-    val pendingError: String? = null
+    val pendingError: String? = null,
+    val backupError: String? = null
 )
 
 class MobileHistoryRepository(context: Context) {
+    private val appContext = context.applicationContext
     private val localStore = LocalHistoryStore(context)
 
     fun loadLocal(password: String): ClipDatabase {
@@ -46,13 +51,24 @@ class MobileHistoryRepository(context: Context) {
 
     fun loadLocalOrNull(password: String): ClipDatabase? = localStore.load(password)
 
-    fun saveLocal(database: ClipDatabase, password: String) = localStore.save(database, password)
+    fun saveLocal(
+        database: ClipDatabase,
+        password: String,
+        backupOptions: CloudBackupOptions = CloudBackupOptions(false, "")
+    ): String? {
+        val bytes = ClipDatabaseFile.save(database, password)
+        localStore.saveBytes(bytes)
+        if (!backupOptions.enabled) return null
+        if (password.isEmpty()) return "Set a nonblank history password before enabling cloud backup."
+        return CloudHistoryBackup.write(appContext, bytes, backupOptions)
+    }
 
     fun synchronize(
         serverUrl: String,
         token: String,
         password: String,
-        current: ClipDatabase
+        current: ClipDatabase,
+        backupOptions: CloudBackupOptions = CloudBackupOptions(false, "")
     ): MobileSyncResult {
         val cached = localStore.load(password)
         val local = cached?.let {
@@ -64,10 +80,10 @@ class MobileHistoryRepository(context: Context) {
         } catch (_: ServerDatabaseNotFoundException) {
             val encoded = ClipDatabaseFile.save(local, password)
             val uploaded = client.upload(encoded, "")
-            if (cached == null || !SyncConflictResolver.hasSameContent(local, cached)) {
-                localStore.save(local, password)
-            }
-            return MobileSyncResult(local, uploaded.revision, true)
+            val backupError = if (cached == null || !SyncConflictResolver.hasSameContent(local, cached)) {
+                saveLocal(local, password, backupOptions)
+            } else null
+            return MobileSyncResult(local, uploaded.revision, true, backupError = backupError)
         }
 
         repeat(3) { attempt ->
@@ -75,17 +91,17 @@ class MobileHistoryRepository(context: Context) {
             val merged = SyncConflictResolver.merge(target = local, source = remote)
             val needsUpload = !SyncConflictResolver.hasSameContent(merged, remote)
             if (!needsUpload) {
-                if (cached == null || !SyncConflictResolver.hasSameContent(merged, cached)) {
-                    localStore.save(merged, password)
-                }
-                return MobileSyncResult(merged, remoteDownload.revision, false)
+                val backupError = if (cached == null || !SyncConflictResolver.hasSameContent(merged, cached)) {
+                    saveLocal(merged, password, backupOptions)
+                } else null
+                return MobileSyncResult(merged, remoteDownload.revision, false, backupError = backupError)
             }
             try {
                 val uploaded = client.upload(ClipDatabaseFile.save(merged, password), remoteDownload.revision)
-                if (cached == null || !SyncConflictResolver.hasSameContent(merged, cached)) {
-                    localStore.save(merged, password)
-                }
-                return MobileSyncResult(merged, uploaded.revision, true)
+                val backupError = if (cached == null || !SyncConflictResolver.hasSameContent(merged, cached)) {
+                    saveLocal(merged, password, backupOptions)
+                } else null
+                return MobileSyncResult(merged, uploaded.revision, true, backupError = backupError)
             } catch (error: ServerConflictException) {
                 if (attempt == 2) throw error
                 remoteDownload = client.download()
