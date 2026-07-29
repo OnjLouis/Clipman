@@ -40,6 +40,7 @@ CLIPMAN_AGENT_SYNC.md
 CLIPMAN_SHARED_CONTRACT.md
 GITHUB-RELEASE-RULES.md
 SmokeTest.ps1
+SmokeTest-CLI.ps1
 Test-ReleasePrivacy.ps1
 CommunitySearch.ps1
 CommunitySearch.md

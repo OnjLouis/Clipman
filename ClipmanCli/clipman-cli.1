@@ -1,0 +1,213 @@
+.TH CLIPMAN-CLI 1 "July 29, 2026" "Clipman CLI 0.2.0-dev" "User Commands"
+.SH NAME
+clipman-cli \- access Clipman text history from a terminal
+.SH SYNOPSIS
+.B clipman-cli
+.RI [ global-options ]
+.I command
+.RI [ command-options ]
+.br
+.B clipman-cli
+.RI [ global-options ]
+.SH DESCRIPTION
+Clipman CLI is an additional command-line client for Clipman text history.
+It does not replace the Windows, macOS, Android, or iOS applications.
+This development preview is intended for practical testing and feedback;
+commands and configuration may change before the first stable CLI release.
+It connects to Clipman Server and reads and writes the same encrypted
+text-history database as the other clients. Clipman Server requires a
+nonblank, preferably unique history password.
+.PP
+Running without a command opens the accessible line menu when a controlling
+terminal is available. Run
+.B clipman-cli --help
+or
+.B clipman-cli COMMAND --help
+for the complete current syntax.
+.SH COMMANDS
+.TP
+.B init
+Configure and test a server profile. A Clipman Server connection-details file
+can supply the server address and token without manually extracting JSON.
+Run on a controlling terminal without
+.BR --connection-file ,
+.BR --token ,
+.BR --token-file ,
+or
+.BR --server ,
+it first asks
+.RB \(dq "Do you have a Clipman Server connection file (.clpconf)?" \(dq
+before prompting for that file's path or, on
+.BR n ,
+falling back to the address and token prompts.
+.B --non-interactive
+skips this question.
+.IP
+If the server presents an HTTPS authority that is not already trusted and
+neither
+.B --ca-cert
+nor
+.B --insecure
+was given, it shows the server certificate details and authority SHA-256
+fingerprint and asks
+.RB \(dq "Trust this certificate for this server?" \(dq \.
+This is trust-on-first-use, the same model as an SSH host-key prompt; compare
+the authority fingerprint against the one Clipman Server provides before
+answering
+.BR y .
+Trusting it saves the certificate to the configuration file.
+Hostname mismatches, expired certificates, and other invalid certificates are
+still rejected.
+.B --non-interactive
+skips this prompt and reports the original error.
+.IP
+After the history password is entered, if
+.B --save-password
+was not given it asks
+.RB \(dq "Save the history password in the configuration file so it is not requested again?" \(dq \.
+Answering
+.B y
+behaves like
+.BR "--save-password config" .
+See
+.B SECURITY
+below: on Linux and macOS this stores the password in plain text, protected
+only by file permissions, not encryption.
+.TP
+.B status
+Check the configured server and selected history. Use
+.B --refresh
+to download and decrypt the database.
+.TP
+.B list
+List entries, optionally filtered by group, search text, or kind.
+.TP
+.B get
+Write one selected entry to standard output. Template entries resolve unless
+.B --raw
+is used.
+.TP
+.B put
+Add UTF-8 text from standard input,
+.BR --file ,
+or
+.BR --text .
+Standard input is preferred for sensitive text because command arguments can
+be visible in the process list.
+.TP
+.B rm
+Delete exactly one entry and add a synchronization tombstone.
+.TP
+.B pick
+Display a numbered list on the controlling terminal and write the selected
+entry only to standard output.
+.TP
+.B menu
+Open the line-based history manager. Enter a number to view, "o NUMBER" to
+output, "d NUMBER" to delete after confirmation, "r" to refresh, or "q" to
+quit.
+.TP
+.B sync
+Download and validate the current server history. This stateless edition has
+no offline write queue.
+.SH GLOBAL OPTIONS
+.TP
+.BI --config " PATH"
+Use a particular configuration file.
+.TP
+.BI --server " URL"
+Override the configured server for this command.
+.TP
+.BI --password " VALUE"
+Supply the history password. Prefer the no-echo prompt where practical because
+command arguments may be visible to other software.
+.TP
+.BI --ca-cert " FILE"
+Trust an additional PEM-encoded public authority or self-signed certificate
+while retaining the operating system's normal certificate authorities. During
+.B init
+the public certificate is copied into the profile.
+.TP
+.B --insecure
+Disable HTTPS certificate and hostname verification for the selected server.
+This is an explicitly warned last resort for a trusted private network. It is
+mutually exclusive with
+.BR --ca-cert .
+.TP
+.B --json
+Produce structured JSON where supported.
+.TP
+.BR --quiet , " -q"
+Suppress nonessential status messages. Security warnings remain visible.
+.TP
+.B --version
+Show the CLI version.
+.SH CONFIGURATION
+The default configuration is
+.I ~/.clipman/config.toml
+on Linux and macOS, and
+.I %LOCALAPPDATA%\eClipman CLI\econfig.toml
+on Windows.
+.B CLIPMAN_HOME
+changes the data directory.
+.B CLIPMAN_CONFIG
+or
+.B --config
+selects another configuration file.
+.PP
+The history password is resolved from
+.BR --password ,
+.BR CLIPMAN_PASSWORD ,
+saved configuration when explicitly enabled, or a no-echo prompt on the
+controlling terminal.
+.SH SECURITY
+Encrypted CLIPDB2 data is authenticated before decryption or decompression.
+The client enforces database, JSON, nesting, entry-count, tombstone-count, and
+text-size limits. It does not print server tokens, passwords, full database
+identifiers, or clip text in diagnostics.
+.PP
+On Windows, saved tokens and passwords are encrypted with DPAPI for the
+current user. On Linux and macOS there is no equivalent encryption yet: an
+explicitly saved history password (or token) on those systems is written in
+plain text into the owner-only configuration file (directory mode 0700, file
+mode 0600), protected only by file permissions.
+.PP
+The clipman scheme is a convenient name for plain HTTP. Use it only on
+loopback, a trusted private network, or a VPN. Use HTTPS across an untrusted
+network.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Local input or output failure.
+.TP
+.B 2
+Usage, selection, or confirmation error.
+.TP
+.B 3
+Configuration, permission, or server-authentication error.
+.TP
+.B 4
+Network, server, or synchronization failure.
+.TP
+.B 5
+History password required or incorrect, or database authentication failed.
+.TP
+.B 6
+Requested entry or database not found.
+.SH FILES
+.TP
+.I Manual.html
+Accessible full manual supplied with the binaries.
+.TP
+.I SHA256SUMS
+SHA-256 checksums for all supplied platform binaries.
+.TP
+.I LICENSE.txt
+MIT License terms.
+.SH PROJECT
+https://github.com/OnjLouis/Clipman
+.SH LICENSE
+MIT License.

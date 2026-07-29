@@ -10,9 +10,9 @@ Windows, macOS, Linux, and Android downloads are attached to releases in this re
 
 iPhone and iPad users can [join the Clipman public beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
 
-## Archived command-line preview
+## Clipman CLI
 
-An [archived Clipman CLI development preview](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.1.1-dev) is available for terminal and headless use. It is no longer actively maintained and is not part of the supported Clipman client range.
+The actively maintained [Clipman CLI development preview](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.2.0-dev) provides terminal and headless access to shared Clipman text history on Windows, macOS, and Linux. It connects to Clipman Server, uses the same encrypted history format and synchronization rules as the graphical clients, and includes its own accessible HTML manual and Unix man page.
 
 ## Features
 
