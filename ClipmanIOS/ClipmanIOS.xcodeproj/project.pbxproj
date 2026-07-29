@@ -18,6 +18,7 @@
 		3B2AEA8F73EDC017F8F34FAC /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */; };
 		40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */; };
 		49026C38259E970B438B4E54 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CD05FE0E19C7744ACFD87B4 /* Security.framework */; };
+		4D1D99193BC8BC0F167B79A8 /* BackupFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE24A8535EA9BC2E20E5A203 /* BackupFolderPicker.swift */; };
 		55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */; };
 		5750CF7FAE9FBA004D4FD2FB /* MobileRichTextClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */; };
 		5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C5029F5D137A6D4490F765 /* HistoryView.swift */; };
@@ -89,6 +90,7 @@
 		D4195FBB5149532BA117A9B8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanAppIntents.swift; sourceTree = "<group>"; };
 		E794D8E5ABCF25641147F7F3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EE24A8535EA9BC2E20E5A203 /* BackupFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFolderPicker.swift; sourceTree = "<group>"; };
 		F5920DDD96B393F506A33F30 /* ClipmanIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanIOSApp.swift; sourceTree = "<group>"; };
 		FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkExtractor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -142,6 +144,7 @@
 		723A466E9097D9B3C314A8D1 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				EE24A8535EA9BC2E20E5A203 /* BackupFolderPicker.swift */,
 				15C075089BD6891E606C98F3 /* EntryEditView.swift */,
 				70E9160FA444DB6E3A61314E /* EntryView.swift */,
 				89C5029F5D137A6D4490F765 /* HistoryView.swift */,
@@ -307,6 +310,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				60B3DA13369B6F9C5E9EEAAF /* AuthenticationService.swift in Sources */,
+				4D1D99193BC8BC0F167B79A8 /* BackupFolderPicker.swift in Sources */,
 				CA66F823CB2FBC5F09963CC6 /* ClipDatabaseFile.swift in Sources */,
 				5BCCD59ECA20D5B968EE56DB /* ClipboardShortcutService.swift in Sources */,
 				33522F9AEA675F6478D6ED15 /* ClipmanAppIntents.swift in Sources */,
@@ -345,7 +349,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 24000;
+				CURRENT_PROJECT_VERSION = 24100;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -355,7 +359,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.4.0;
+				MARKETING_VERSION = 2.4.1;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -428,7 +432,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 24000;
+				CURRENT_PROJECT_VERSION = 24100;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -438,7 +442,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.4.0;
+				MARKETING_VERSION = 2.4.1;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;

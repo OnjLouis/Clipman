@@ -3,7 +3,9 @@ package me.onj.clipman
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsToggleable
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -30,6 +32,10 @@ class SettingsHeaderAccessibilityTest {
             .assertHasClickAction()
         composeRule.onNodeWithText("Server")
             .assertIsNotSelected()
+            .assertHasClickAction()
+        composeRule.onNodeWithText("Play sounds")
+            .assertIsToggleable()
+            .assertIsOn()
             .assertHasClickAction()
     }
 }

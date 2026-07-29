@@ -61,6 +61,7 @@ namespace Clipman
         private string databasePassword = string.Empty;
         private IntPtr previousForegroundWindow = IntPtr.Zero;
         private string lastReceivedHistoryTab = HistoryTabs.Text;
+        private bool receivedHistoryTabPending;
 
         public ClipmanApplicationContext()
         {
@@ -165,9 +166,10 @@ namespace Clipman
             {
                 historyForm.WindowState = FormWindowState.Normal;
             }
-            if (settings.DynamicHistoryMode)
+            if (settings.DynamicHistoryMode && receivedHistoryTabPending)
             {
                 historyForm.SelectHistoryTabForOpen(lastReceivedHistoryTab);
+                receivedHistoryTabPending = false;
             }
             var handle = historyForm.Handle;
             historyForm.Show();
@@ -638,7 +640,7 @@ namespace Clipman
             var recordedFileEvent = RecordClipboardEvent(sourceProcessName);
             if (recordedFileEvent)
             {
-                lastReceivedHistoryTab = HistoryTabs.Files;
+                RememberReceivedHistoryTab(HistoryTabs.Files);
             }
 
             if (!Clipboard.ContainsText(TextDataFormat.UnicodeText))
@@ -706,10 +708,17 @@ namespace Clipman
 
             if (!recordedFileEvent)
             {
-                lastReceivedHistoryTab = richText != null ? HistoryTabs.RichText : LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text;
+                RememberReceivedHistoryTab(richText != null ? HistoryTabs.RichText : LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text);
             }
 
             sounds.Copy(settings.SoundsEnabled);
+        }
+
+        private void RememberReceivedHistoryTab(string tabId)
+        {
+            if (!settings.DynamicHistoryMode) return;
+            lastReceivedHistoryTab = tabId;
+            receivedHistoryTabPending = true;
         }
 
         private bool RecordClipboardEvent(string sourceProcessName)

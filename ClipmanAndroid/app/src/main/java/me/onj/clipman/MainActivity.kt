@@ -31,6 +31,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -86,6 +87,7 @@ class MainActivity : FragmentActivity() {
     private var appIsForeground by mutableStateOf(false)
     private var unlockMessage by mutableStateOf("Clipman is locked.")
     private var unlockPromptShowing = false
+    private var trustedExternalActivityPending = false
     private var externalConnectionImport by mutableStateOf<ExternalServerConnectionImport?>(null)
     private var nextExternalConnectionImportId = 0L
 
@@ -116,6 +118,13 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         appIsForeground = true
+        if (trustedExternalActivityPending) {
+            trustedExternalActivityPending = false
+            unlockPromptShowing = false
+            isUnlocked = true
+            unlockMessage = "Clipman is unlocked."
+            return
+        }
         if (AndroidSettings(this).requireAuthentication) {
             requestUnlock()
         } else {
@@ -128,10 +137,18 @@ class MainActivity : FragmentActivity() {
     override fun onStop() {
         appIsForeground = false
         super.onStop()
-        if (!isChangingConfigurations && AndroidSettings(this).requireAuthentication) {
+        if (!trustedExternalActivityPending && !isChangingConfigurations && AndroidSettings(this).requireAuthentication) {
             isUnlocked = false
             unlockMessage = "Clipman is locked."
         }
+    }
+
+    fun beginTrustedExternalActivity() {
+        trustedExternalActivityPending = true
+    }
+
+    fun cancelTrustedExternalActivity() {
+        trustedExternalActivityPending = false
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -295,6 +312,7 @@ private fun ClipmanApp(
     onExternalConnectionImportConsumed: (Long) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val activity = context as? MainActivity
     val view = androidx.compose.ui.platform.LocalView.current
     val settings = remember { AndroidSettings(context) }
     val historyRepository = remember { MobileHistoryRepository(context) }
@@ -355,6 +373,17 @@ private fun ClipmanApp(
     var pendingConnectionExport by remember { mutableStateOf<String?>(null) }
     var showConnectionExportWarning by remember { mutableStateOf(false) }
     var enableBackupAfterFolderChoice by remember { mutableStateOf(false) }
+
+    fun launchTrustedExternalActivity(action: () -> Unit) {
+        activity?.beginTrustedExternalActivity()
+        try {
+            action()
+        } catch (error: Throwable) {
+            activity?.cancelTrustedExternalActivity()
+            throw error
+        }
+    }
+
     val unknownSourcesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val apk = pendingUpdateApk
         if (apk != null && AndroidUpdateService.canInstallPackages(context)) {
@@ -741,7 +770,9 @@ private fun ClipmanApp(
         } else {
             pendingUpdateApk = apk
             updateStatus = "Allow Clipman to install updates, then return to continue."
-            unknownSourcesLauncher.launch(AndroidUpdateService.unknownSourcesSettingsIntent(context))
+            launchTrustedExternalActivity {
+                unknownSourcesLauncher.launch(AndroidUpdateService.unknownSourcesSettingsIntent(context))
+            }
         }
     }
 
@@ -958,7 +989,9 @@ private fun ClipmanApp(
                     runCatching { ServerConnectionConfig.create(serverUrl, token) }
                         .onSuccess { content ->
                             pendingConnectionExport = content
-                            exportServerConnection.launch("Clipman Server.clpconf")
+                            launchTrustedExternalActivity {
+                                exportServerConnection.launch("Clipman Server.clpconf")
+                            }
                         }
                         .onFailure { error ->
                             status = error.message ?: "Could not prepare the server connection file."
@@ -999,7 +1032,9 @@ private fun ClipmanApp(
                     }
                 },
                 onImportServerFile = {
-                    importServerConnection.launch(arrayOf("*/*"))
+                    launchTrustedExternalActivity {
+                        importServerConnection.launch(arrayOf("*/*"))
+                    }
                 },
                 onExportServerFile = { showConnectionExportWarning = true },
                 password = password,
@@ -1035,7 +1070,9 @@ private fun ClipmanApp(
                         }
                         cloudBackupTreeUri.isBlank() -> {
                             enableBackupAfterFolderChoice = true
-                            chooseBackupFolder.launch(null)
+                            launchTrustedExternalActivity {
+                                chooseBackupFolder.launch(null)
+                            }
                         }
                         else -> cloudBackupEnabled = true
                     }
@@ -1043,14 +1080,20 @@ private fun ClipmanApp(
                 cloudBackupLocationName = cloudBackupLocationName,
                 onChooseBackupFolder = {
                     enableBackupAfterFolderChoice = false
-                    chooseBackupFolder.launch(null)
+                    launchTrustedExternalActivity {
+                        chooseBackupFolder.launch(null)
+                    }
                 },
                 onRestoreHistoryBackup = {
-                    restoreHistoryBackup.launch(arrayOf("application/octet-stream", "application/gzip", "*/*"))
+                    launchTrustedExternalActivity {
+                        restoreHistoryBackup.launch(arrayOf("application/octet-stream", "application/gzip", "*/*"))
+                    }
                 },
                 onOpenTipJar = {
                     runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://onj.me/donate")))
+                        launchTrustedExternalActivity {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://onj.me/donate")))
+                        }
                     }.onFailure {
                         status = "Could not open the tip jar."
                         announce(view, status)
@@ -1655,15 +1698,12 @@ private fun ConnectionSettingsScreen(
                         visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Checkbox(
-                            checked = showPassword,
-                            onCheckedChange = onShowPasswordChanged,
-                            enabled = !isSaving,
-                            modifier = Modifier
-                        )
-                        Text("Show password")
-                    }
+                    SettingCheckboxRow(
+                        checked = showPassword,
+                        onCheckedChange = onShowPasswordChanged,
+                        label = "Show password",
+                        enabled = !isSaving
+                    )
                 }
             }
         }
@@ -1726,17 +1766,31 @@ private fun formatBuildStamp(value: String): String {
 }
 
 @Composable
-private fun SettingCheckboxRow(
+internal fun SettingCheckboxRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     label: String,
     enabled: Boolean = true
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {}
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Checkbox,
+                onValueChange = onCheckedChange
+            )
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Checkbox(
             checked = checked,
-            onCheckedChange = onCheckedChange,
-            enabled = enabled
+            onCheckedChange = null,
+            enabled = enabled,
+            modifier = Modifier.clearAndSetSemantics {}
         )
         Text(label)
     }
@@ -1774,14 +1828,16 @@ private fun EntryPropertiesDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Checkbox(checked = pinned, onCheckedChange = { pinned = it })
-                    Text("Pinned")
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Checkbox(checked = isTemplate, onCheckedChange = { isTemplate = it })
-                    Text("Template")
-                }
+                SettingCheckboxRow(
+                    checked = pinned,
+                    onCheckedChange = { pinned = it },
+                    label = "Pinned"
+                )
+                SettingCheckboxRow(
+                    checked = isTemplate,
+                    onCheckedChange = { isTemplate = it },
+                    label = "Template"
+                )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },

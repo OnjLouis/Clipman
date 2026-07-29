@@ -21,9 +21,20 @@ android {
         minSdk = 26
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 14
-        versionName = "2.4.0"
+        versionCode = 16
+        versionName = "2.4.1"
         buildConfigField("String", "CLIPMAN_BUILD_STAMP_UTC_MS", "\"$sharedBuildStamp\"")
+    }
+
+    buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
+        getByName("release") {
+            // Preserve the certificate used by existing direct-download installs.
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     buildFeatures {
@@ -53,6 +64,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")

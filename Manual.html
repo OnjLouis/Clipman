@@ -172,7 +172,7 @@
 
   <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text, Links, or Rich Text history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. On Mac, macOS asks for permission before Clipman can send that command; allow Clipman to control the computer when prompted, then quit and reopen Clipman if the first paste is blocked. Clipman only sends the paste command when the destination has an editable text control in focus. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
 
-  <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, Clipman opens Text, Links, or Files according to the most recent clipboard event it successfully accepted during the current run. Ignored, excluded, or failed captures do not change the destination. If Links history is disabled, a recently copied link opens in Text history instead.</p>
+  <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, a newly accepted clipboard event selects Text, Links, Rich Text, or Files the next time history opens. That automatic selection is used once; afterward, a section you choose manually remains selected until another new clipboard event arrives. Ignored, excluded, or failed captures do not change the destination. If an optional history view is disabled, its entries open through their plain-text fallback in Text history.</p>
 
   <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
 
@@ -589,6 +589,14 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.4.1</h3>
+  <ul>
+    <li>Fixed Dynamic Mode on Windows, Mac and Linux so a newly accepted clipboard type selects the next history opening once. Manual section changes then remain selected until another new clipboard event arrives.</li>
+    <li>Fixed Android Settings losing unsaved changes when authentication was enabled and a folder picker or another deliberate Settings destination was opened.</li>
+    <li>Combined Android checkbox labels, states and controls into one TalkBack stop in Settings and Entry Properties.</li>
+    <li>Fixed the iOS encrypted-backup folder button so it reliably opens the Files folder picker.</li>
+  </ul>
+
   <h3>2.4.0</h3>
   <ul>
     <li>Added optional encrypted mobile history backup on Android and iOS. Choose a cloud or document-provider folder in Settings; Clipman writes history only and never includes server tokens, settings, or passwords. Restore merges entries and deletions instead of replacing newer history. Closes <a href="https://github.com/OnjLouis/Clipman/issues/34">issue #34</a>.</li>

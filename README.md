@@ -93,7 +93,7 @@ Hotkeys can be changed from Options > Preferences. In hotkey fields, press a val
 
 Preferences remembers the tab you used last. The File history tab controls file-event cleanup and diagnostics detail. The storage tab is named Storage and Password because it contains both the shared data folder and the history password controls.
 
-Two optional General preferences can streamline opening and choosing history. **After Enter, paste into the previous application** makes Enter on a Text, Links, or Rich Text entry copy it, close history, return to the previously active application, and send the normal paste command; the selected entry remains on the clipboard. On Mac, macOS asks for permission before Clipman can send that command; quit and reopen Clipman if the first paste is blocked after approval. Clipman only sends the command when an editable text control is focused. **Open history to the most recent clipboard type** dynamically opens Text, Links, Rich Text, or Files according to the latest clipboard event Clipman successfully accepted during the current run. If an optional history view is disabled, its entries open through their plain-text fallback in Text history. Both preferences are off by default.
+Two optional General preferences can streamline opening and choosing history. **After Enter, paste into the previous application** makes Enter on a Text, Links, or Rich Text entry copy it, close history, return to the previously active application, and send the normal paste command; the selected entry remains on the clipboard. On Mac, macOS asks for permission before Clipman can send that command; quit and reopen Clipman if the first paste is blocked after approval. Clipman only sends the command when an editable text control is focused. **Open history to the most recent clipboard type** makes a newly accepted clipboard event select Text, Links, Rich Text, or Files the next time history opens. That automatic selection is used once; afterward, a section you choose manually remains selected until another new clipboard event arrives. If an optional history view is disabled, its entries open through their plain-text fallback in Text history. Both preferences are off by default.
 
 Links history is optional and off by default. When enabled, it adds a separate view for entries where the whole clipboard text is one absolute `http`, `https`, or `clipman` URL. Prose containing links, multiline text, `mailto:`, `file:`, and other custom schemes remain in Text history. Desktop history tabs can be reordered per device; disabled optional tabs retain their saved position for the next time they are enabled.
 
@@ -194,6 +194,13 @@ Clients poll the server by checking the database revision. If the server, networ
 Read the server package's `Manual.html` for setup, security, service-path, TLS, logging, and backup details.
 
 ## Changelog
+
+### 2.4.1
+
+- Fixed Dynamic Mode on Windows, Mac and Linux so a newly accepted clipboard type selects the next history opening once. Manual section changes then remain selected until another new clipboard event arrives.
+- Fixed Android Settings losing unsaved changes when authentication was enabled and a folder picker or another deliberate Settings destination was opened.
+- Combined Android checkbox labels, states and controls into one TalkBack stop in Settings and Entry Properties.
+- Fixed the iOS encrypted-backup folder button so it reliably opens the Files folder picker.
 
 ### 2.4.0
 

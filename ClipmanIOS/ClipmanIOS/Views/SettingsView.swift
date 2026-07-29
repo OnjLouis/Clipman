@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var pendingConnection: ServerConnectionDetails?
     @State private var connectionImportError = ""
     @State private var connectionExportError = ""
-    @State private var showBackupFolderImporter = false
+    @State private var showBackupFolderPicker = false
     @State private var showBackupRestoreImporter = false
     @State private var backupError = ""
     @State private var backupMessage = ""
@@ -115,20 +115,22 @@ struct SettingsView: View {
                     connectionImportError = error.localizedDescription
                 }
             }
-            .fileImporter(
-                isPresented: $showBackupFolderImporter,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
-            ) { result in
-                do {
-                    guard let url = try result.get().first else { return }
-                    draft.cloudBackupBookmark = try CloudHistoryBackup.bookmark(for: url)
-                    draft.cloudBackupFolderName = url.lastPathComponent.isEmpty ? "Selected folder" : url.lastPathComponent
-                    draft.cloudBackupEnabled = true
-                    backupMessage = "Backup folder selected. Choose Save to apply it."
-                } catch {
-                    backupError = error.localizedDescription
-                }
+            .sheet(isPresented: $showBackupFolderPicker) {
+                BackupFolderPicker(
+                    onSelect: { url in
+                        showBackupFolderPicker = false
+                        do {
+                            draft.cloudBackupBookmark = try CloudHistoryBackup.bookmark(for: url)
+                            draft.cloudBackupFolderName = url.lastPathComponent.isEmpty ? "Selected folder" : url.lastPathComponent
+                            draft.cloudBackupEnabled = true
+                            backupMessage = "Backup folder selected. Choose Save to apply it."
+                        } catch {
+                            backupError = error.localizedDescription
+                        }
+                    },
+                    onCancel: { showBackupFolderPicker = false }
+                )
+                .ignoresSafeArea()
             }
             .fileImporter(
                 isPresented: $showBackupRestoreImporter,
@@ -245,7 +247,7 @@ struct SettingsView: View {
                         settingsValidationError = "Set and save a nonblank history password before enabling encrypted history backup."
                         showServerConnection = true
                     } else if draft.cloudBackupBookmark.isEmpty {
-                        showBackupFolderImporter = true
+                        showBackupFolderPicker = true
                     } else {
                         draft.cloudBackupEnabled = true
                     }
@@ -256,7 +258,7 @@ struct SettingsView: View {
                 : "Backup folder: \(draft.cloudBackupFolderName)")
                 .font(.footnote)
             Button(draft.cloudBackupBookmark.isEmpty ? "Choose backup folder" : "Change backup folder") {
-                showBackupFolderImporter = true
+                showBackupFolderPicker = true
             }
             Button("Restore and merge history backup") {
                 showBackupRestoreImporter = true

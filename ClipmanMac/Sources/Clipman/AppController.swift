@@ -32,6 +32,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var pasteAfterHistoryHide = false
     private var lastPasteTargetInspection = "Not checked"
     private var lastReceivedHistoryTab = HistoryTabID.text
+    private var receivedHistoryTabPending = false
     private var sessionDatabasePassword = ""
     private var sessionPasswordDatabasePath = ""
     private var cancelledPasswordPaths = Set<String>()
@@ -288,8 +289,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     @objc private func showHistory(_ sender: Any?) {
         rememberPreviousFrontmostApplication()
         refreshHistoryWindow()
-        if settings.dynamicHistoryMode {
+        if settings.dynamicHistoryMode, receivedHistoryTabPending {
             historyWindow.showHistoryTab(lastReceivedHistoryTab)
+            receivedHistoryTabPending = false
         }
         historyWindow.showWindow(nil)
         historyWindow.focusHistoryWindow(nil)
@@ -710,7 +712,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         store.addText(text, group: sourceApplication, richText: capturedRichText) { [weak self] saved in
             guard let self else { return }
             if saved {
-                self.lastReceivedHistoryTab = capturedRichText != nil ? HistoryTabID.richText : LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text
+                self.rememberReceivedHistoryTab(capturedRichText != nil ? HistoryTabID.richText : LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text)
                 self.sounds.play(.copy)
             } else if self.storageUnavailableReason.isEmpty {
                 self.sounds.play(.skip)
@@ -726,7 +728,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         fileStore.add(files: files, formats: formats, containsText: containsText) { [weak self] saved in
             guard let self else { return }
             if saved {
-                self.lastReceivedHistoryTab = HistoryTabID.files
+                self.rememberReceivedHistoryTab(HistoryTabID.files)
                 self.sounds.play(.copy)
             } else if self.storageUnavailableReason.isEmpty {
                 self.sounds.play(.skip)
@@ -736,6 +738,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor) {
         sounds.play(.skip)
+    }
+
+    private func rememberReceivedHistoryTab(_ tabID: String) {
+        guard settings.dynamicHistoryMode else { return }
+        lastReceivedHistoryTab = tabID
+        receivedHistoryTabPending = true
     }
 
     func clipStoreDidChange() {

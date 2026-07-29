@@ -18,6 +18,11 @@ class SettingsHeaderTestActivity : ComponentActivity() {
                         enabled = true,
                         onStorageModeChanged = {},
                     )
+                    SettingCheckboxRow(
+                        checked = true,
+                        onCheckedChange = {},
+                        label = "Play sounds"
+                    )
                 }
             }
         }

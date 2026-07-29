@@ -1,5 +1,5 @@
 param(
-    [string]$Configuration = "Debug",
+    [string]$Configuration = "Release",
     [string]$OutputDirectory = "",
     [string]$GradlePath = "",
     [ValidateRange(30, 900)]

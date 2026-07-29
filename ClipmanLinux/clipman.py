@@ -856,6 +856,7 @@ class ClipmanApplication(Gtk.Application):
         self.previous_window_id = ""
         self.type_buffer = ""
         self.type_deadline = 0.0
+        self.received_history_section_pending = False
         self.hotkeys = GlobalHotkeys(self)
 
     def do_startup(self):
@@ -1557,8 +1558,7 @@ class ClipmanApplication(Gtk.Application):
             if announce: self.show_error(message.get("error"))
             return
         self._history_response(message, False)
-        self.preferences.values["last_received_section"] = "files"
-        self.preferences.save()
+        self._remember_received_section("files")
         if self.preferences.values["auto_remove_unavailable_file_history"]:
             self.backend.call("file_remove_unavailable", {}, self._history_response)
         self.sounds.play("copy")
@@ -2388,9 +2388,14 @@ class ClipmanApplication(Gtk.Application):
             if not quiet: self.show_error(message.get("error"))
             return
         self._history_response(message)
-        self.preferences.values["last_received_section"] = "rich" if rich_text else "links" if is_standalone_link(text) else "text"
-        self.preferences.save()
+        self._remember_received_section("rich" if rich_text else "links" if is_standalone_link(text) else "text")
         if not quiet: self.sounds.play("copy"); self.set_status("Clipboard text added to history.", True)
+
+    def _remember_received_section(self, section):
+        if not self.preferences.values["dynamic_history_mode"]:
+            return
+        self.preferences.values["last_received_section"] = section
+        self.received_history_section_pending = True
 
     def new_entry(self, *_args): self.show_entry_dialog(None)
     def edit_selected(self, *_args):
@@ -3029,7 +3034,7 @@ class ClipmanApplication(Gtk.Application):
         if self.window.get_visible():
             self.window.set_visible(False)
             return
-        if self.preferences.values["dynamic_history_mode"]:
+        if self.preferences.values["dynamic_history_mode"] and self.received_history_section_pending:
             target = self.preferences.values["last_received_section"]
             if target == "links" and not self.preferences.values["links_history_enabled"]:
                 target = "text"
@@ -3040,6 +3045,7 @@ class ClipmanApplication(Gtk.Application):
                 self.preferences.values["last_section"] = target
                 self.preferences.save()
                 self.rebuild_list()
+            self.received_history_section_pending = False
         _application, self.previous_window_id = active_application_info()
         if not self.preferences.values["save_list_position"]:
             self.select_first_normal()
