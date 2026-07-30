@@ -39,6 +39,19 @@ func TestPutAfterDeleteClearsMatchingTextTombstone(t *testing.T) {
 	}
 }
 
+func TestPutReusesCanonicalGroupSpelling(t *testing.T) {
+	database := model.NewDatabase(1)
+	database.Entries = []model.Entry{
+		{ID: "old", Text: "one", Group: "Kobo", ModifiedUnixMs: 10},
+		{ID: "newer", Text: "two", Group: "kobo", ModifiedUnixMs: 20},
+		{ID: "common", Text: "three", Group: "Kobo", ModifiedUnixMs: 5},
+	}
+	entry, outcome := Put(&database, "four", "", "KObO", "test", "keep", "created", false, false, 30)
+	if outcome != "created" || entry.Group != "Kobo" {
+		t.Fatalf("outcome=%q group=%q", outcome, entry.Group)
+	}
+}
+
 func TestViewIndexesAfterKindFilter(t *testing.T) {
 	database := model.NewDatabase(1)
 	database.Entries = []model.Entry{{ID: "history", Text: "h", LastUsedUnixMs: 10}, {ID: "template", Text: "t", IsTemplate: true, LastUsedUnixMs: 20}}

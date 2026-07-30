@@ -2,19 +2,27 @@ package me.onj.clipman
 
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.KeyStore
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 
 class ServerStorageClient(
     serverUrl: String,
     token: String,
-    databasePassword: String
+    databasePassword: String,
+    caCertPem: String = "",
+    caHost: String = ""
 ) {
     private val baseUrl = normalizeBaseUrl(serverUrl)
     private val token = cleanToken(token)
     private val databaseId = ServerDatabaseIdentity.fromTokenAndPassword(token, databasePassword)
     private val hasDatabasePassword = databasePassword.isNotEmpty()
+    private val privateAuthority = runCatching { ServerConnectionConfig.parseAuthority(caCertPem, serverUrl) }.getOrNull()
+    private val authorityValid = caCertPem.isBlank() || (privateAuthority != null && (caHost.isBlank() || privateAuthority.host.equals(caHost.trim(), ignoreCase = true)))
 
     val isConfigured: Boolean
-        get() = baseUrl.isNotBlank() && token.trim().isNotBlank() && hasDatabasePassword && databaseId.isNotBlank()
+        get() = baseUrl.isNotBlank() && token.trim().isNotBlank() && hasDatabasePassword && databaseId.isNotBlank() && authorityValid
 
     fun download(): ServerDatabaseDownload {
         val connection = openConnection("GET")
@@ -72,9 +80,22 @@ class ServerStorageClient(
         connection.requestMethod = method
         connection.connectTimeout = 8000
         connection.readTimeout = 8000
+        connection.instanceFollowRedirects = false
+        if (connection is HttpsURLConnection && privateAuthority != null) {
+            connection.sslSocketFactory = sslSocketFactory(privateAuthority)
+        }
         connection.setRequestProperty("Authorization", "Bearer ${token.trim()}")
         connection.setRequestProperty("User-Agent", "ClipmanAndroid/${BuildConfig.VERSION_NAME}")
         return connection
+    }
+
+    private fun sslSocketFactory(authority: ServerCertificateAuthority): javax.net.ssl.SSLSocketFactory {
+        val store = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+            load(null, null)
+            setCertificateEntry("clipman-private-authority", authority.certificate)
+        }
+        val managers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(store) }
+        return SSLContext.getInstance("TLS").apply { init(null, managers.trustManagers, null) }.socketFactory
     }
 
     private fun normalizeBaseUrl(value: String): String {

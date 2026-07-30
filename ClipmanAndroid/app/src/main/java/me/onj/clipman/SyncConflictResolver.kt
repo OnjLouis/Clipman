@@ -69,10 +69,12 @@ object SyncConflictResolver {
     fun updateEntry(database: ClipDatabase, entry: ClipEntry): ClipDatabase {
         if (entry.Id.isBlank()) return database
         val now = TimeUtil.nowUnixMs()
+        val requestedGroup = entry.Group.trim()
+        val normalizedGroup = canonicalGroup(database.Entries, requestedGroup)
         val updated = entry.copy(
             Text = entry.Text.trim(),
             Name = entry.Name.trim(),
-            Group = entry.Group.trim(),
+            Group = normalizedGroup,
             SourceMachine = entry.SourceMachine.trim(),
             LastUsedUnixMs = now,
             ModifiedUnixMs = now,
@@ -84,6 +86,26 @@ object SyncConflictResolver {
             Entries = database.Entries.map { if (it.Id == entry.Id) updated else it },
             UpdatedUnixMs = now
         ))
+    }
+
+    private fun canonicalGroup(entries: List<ClipEntry>, requested: String): String {
+        if (requested.isBlank()) return ""
+        return entries
+            .filter { it.Group.trim().equals(requested, ignoreCase = true) }
+            .groupBy { it.Group.trim() }
+            .map { (label, spelling) ->
+                Triple(
+                    label,
+                    spelling.size,
+                    spelling.maxOf { maxOf(it.ModifiedUnixMs, it.LastUsedUnixMs, it.CreatedUnixMs) }
+                )
+            }
+            .sortedWith(
+                compareByDescending<Triple<String, Int, Long>> { it.second }
+                    .thenByDescending { it.third }
+                    .thenBy { it.first }
+            )
+            .firstOrNull()?.first ?: requested
     }
 
     fun togglePinned(database: ClipDatabase, entryId: String): ClipDatabase {

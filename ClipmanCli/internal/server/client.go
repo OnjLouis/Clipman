@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -40,6 +42,7 @@ type Option func(*tlsSettings)
 type tlsSettings struct {
 	insecureSkipVerify bool
 	caCertPEM          []byte
+	exclusiveCACertPEM []byte
 }
 
 // WithInsecureSkipVerify disables TLS certificate verification entirely.
@@ -53,6 +56,68 @@ func WithInsecureSkipVerify() Option {
 // certificate to be used without disabling verification altogether.
 func WithCACertPEM(pem []byte) Option {
 	return func(s *tlsSettings) { s.caCertPEM = pem }
+}
+
+// WithExclusiveCACertPEM trusts only the supplied private authority for the
+// configured server host. It is used for CA-bearing Clipman connection files.
+func WithExclusiveCACertPEM(pem []byte) Option {
+	return func(s *tlsSettings) { s.exclusiveCACertPEM = append([]byte(nil), pem...) }
+}
+
+type AuthorityDetails struct {
+	PEM, Host, Subject, Fingerprint string
+	Expires                         time.Time
+}
+
+func ParsePrivateAuthority(value []byte, rawURL string) (AuthorityDetails, error) {
+	if len(bytes.TrimSpace(value)) == 0 {
+		return AuthorityDetails{}, nil
+	}
+	if len(value) > 32*1024 {
+		return AuthorityDetails{}, errors.New("private certificate authority exceeds the 32 KiB limit")
+	}
+	if bytes.Contains(bytes.ToUpper(value), []byte("PRIVATE KEY")) {
+		return AuthorityDetails{}, errors.New("private certificate authority must not contain private key material")
+	}
+	block, rest := pem.Decode(value)
+	if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(rest)) != 0 {
+		return AuthorityDetails{}, errors.New("private certificate authority must contain exactly one PEM CERTIFICATE block")
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return AuthorityDetails{}, fmt.Errorf("invalid private certificate authority: %w", err)
+	}
+	if !certificate.IsCA {
+		return AuthorityDetails{}, errors.New("configured certificate is not marked as a certificate authority")
+	}
+	if certificate.KeyUsage != 0 && certificate.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return AuthorityDetails{}, errors.New("configured certificate authority cannot sign certificates")
+	}
+	now := time.Now()
+	if now.Before(certificate.NotBefore) {
+		return AuthorityDetails{}, errors.New("configured certificate authority is not valid yet")
+	}
+	if now.After(certificate.NotAfter) {
+		return AuthorityDetails{}, errors.New("configured certificate authority has expired")
+	}
+	normalized, err := NormalizeURL(rawURL)
+	if err != nil {
+		return AuthorityDetails{}, err
+	}
+	parsed, _ := url.Parse(normalized)
+	if parsed == nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+		return AuthorityDetails{}, errors.New("a private certificate authority can be used only with an HTTPS server address")
+	}
+	digest := sha256.Sum256(certificate.Raw)
+	parts := make([]string, len(digest))
+	for index, item := range digest {
+		parts[index] = fmt.Sprintf("%02X", item)
+	}
+	return AuthorityDetails{
+		PEM:  string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})),
+		Host: parsed.Hostname(), Subject: certificate.Subject.String(), Expires: certificate.NotAfter,
+		Fingerprint: strings.Join(parts, ":"),
+	}, nil
 }
 
 func certPoolWithAdditionalPEM(data []byte) (*x509.CertPool, error) {
@@ -75,6 +140,9 @@ func New(rawURL, token, databaseID, version string, opts ...Option) (*Client, er
 	for _, opt := range opts {
 		opt(&settings)
 	}
+	if len(settings.caCertPEM) > 0 && len(settings.exclusiveCACertPEM) > 0 {
+		return nil, errors.New("additional and exclusive certificate authority options cannot be combined")
+	}
 	transport := &http.Transport{DialContext: (&net.Dialer{Timeout: 8 * time.Second, KeepAlive: 30 * time.Second}).DialContext, ResponseHeaderTimeout: 8 * time.Second, TLSHandshakeTimeout: 8 * time.Second}
 	if settings.insecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
@@ -82,6 +150,16 @@ func New(rawURL, token, databaseID, version string, opts ...Option) (*Client, er
 		pool, poolErr := certPoolWithAdditionalPEM(settings.caCertPEM)
 		if poolErr != nil {
 			return nil, poolErr
+		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	} else if len(settings.exclusiveCACertPEM) > 0 {
+		authority, parseErr := ParsePrivateAuthority(settings.exclusiveCACertPEM, normalized)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(authority.PEM)) {
+			return nil, errors.New("could not load private certificate authority")
 		}
 		transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	}
@@ -140,14 +218,22 @@ func CleanToken(value string) string {
 }
 
 func ConnectionDetails(value string) (serverURL, token string) {
+	serverURL, token, _, _ = ConnectionProfile(value)
+	return serverURL, token
+}
+
+func ConnectionProfile(value string) (serverURL, token, caCertPEM string, err error) {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "{") {
 		var raw map[string]any
 		if json.Unmarshal([]byte(value), &raw) == nil {
 			if marker, present := raw["clipman"]; present {
 				if marker != "server-connection" || jsonNumber(raw, "version") != "1" {
-					return "", ""
+					return "", "", "", errors.New("unsupported Clipman Server connection-file version")
 				}
+			}
+			if item, ok := raw["ca_cert_pem"].(string); ok {
+				caCertPEM = strings.TrimSpace(item)
 			}
 			for _, key := range []string{"address", "ServerAddress", "serverAddress", "ServerUrl", "serverUrl", "ServerURL", "serverURL", "ListenPrefix", "listenPrefix"} {
 				if item, ok := raw[key].(string); ok && strings.TrimSpace(item) != "" {
@@ -192,7 +278,14 @@ func ConnectionDetails(value string) (serverURL, token string) {
 			}
 		}
 	}
-	return serverURL, token
+	if caCertPEM != "" {
+		authority, parseErr := ParsePrivateAuthority([]byte(caCertPEM), serverURL)
+		if parseErr != nil {
+			return "", "", "", parseErr
+		}
+		caCertPEM = authority.PEM
+	}
+	return serverURL, token, caCertPEM, nil
 }
 
 func jsonString(raw map[string]any, keys ...string) string {

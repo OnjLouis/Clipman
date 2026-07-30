@@ -25,6 +25,39 @@ final class ClipmanQuickActionCenter {
 final class ClipmanAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        if let shortcutItem = options.shortcutItem,
+           let action = ClipmanQuickAction(rawValue: shortcutItem.type) {
+            Task { @MainActor in
+                ClipmanQuickActionCenter.shared.request(action)
+            }
+        }
+        let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = ClipmanSceneDelegate.self
+        return configuration
+    }
+
+    func application(
+        _ application: UIApplication,
+        performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        guard let action = ClipmanQuickAction(rawValue: shortcutItem.type) else {
+            completionHandler(false)
+            return
+        }
+        Task { @MainActor in
+            ClipmanQuickActionCenter.shared.request(action)
+            completionHandler(true)
+        }
+    }
+}
+
+final class ClipmanSceneDelegate: NSObject, UIWindowSceneDelegate {
+    func windowScene(
+        _ windowScene: UIWindowScene,
         performActionFor shortcutItem: UIApplicationShortcutItem,
         completionHandler: @escaping (Bool) -> Void
     ) {

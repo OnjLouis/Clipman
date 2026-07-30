@@ -11,13 +11,15 @@ import (
 	"strings"
 
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/platform"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/server"
 )
 
 type Limits struct{ MaxBlobBytes, MaxJSONBytes, MaxEntries, MaxTextBytes int64 }
 type Config struct {
 	Server, Token, TokenProtected, Machine, Renderer, DefaultKind, PasswordMode, Password, PasswordProtected string
 	CACertPEM                                                                                                string
-	PinnedFirst, TLSInsecure                                                                                 bool
+	CAHost                                                                                                   string
+	PinnedFirst, TLSInsecure, CAExclusive                                                                    bool
 	Limits                                                                                                   Limits
 }
 
@@ -86,6 +88,12 @@ func Save(path string, value Config) error {
 	}
 	if value.CACertPEM != "" {
 		writeString("ca_cert_pem", value.CACertPEM)
+		if value.CAHost != "" {
+			writeString("ca_host", value.CAHost)
+		}
+		if value.CAExclusive {
+			fmt.Fprintln(&out, "ca_exclusive = true")
+		}
 	}
 	writeString("default_kind", value.DefaultKind)
 	writeString("password_mode", strings.ToLower(strings.TrimSpace(value.PasswordMode)))
@@ -132,9 +140,19 @@ func Validate(value Config) error {
 		return errors.New("configuration cannot set both tls_insecure and ca_cert_pem")
 	}
 	if value.CACertPEM != "" {
-		if !x509.NewCertPool().AppendCertsFromPEM([]byte(value.CACertPEM)) {
+		if value.CAExclusive {
+			authority, err := server.ParsePrivateAuthority([]byte(value.CACertPEM), value.Server)
+			if err != nil {
+				return err
+			}
+			if value.CAHost != "" && !strings.EqualFold(strings.TrimSpace(value.CAHost), authority.Host) {
+				return errors.New("private certificate authority is configured for a different server host")
+			}
+		} else if !x509.NewCertPool().AppendCertsFromPEM([]byte(value.CACertPEM)) {
 			return errors.New("ca_cert_pem does not contain a valid certificate")
 		}
+	} else if value.CAHost != "" || value.CAExclusive {
+		return errors.New("ca_host and ca_exclusive require ca_cert_pem")
 	}
 	if !strings.EqualFold(value.PasswordMode, "config") && (value.Password != "" || value.PasswordProtected != "") {
 		return errors.New("saved password values require password_mode config")
@@ -232,6 +250,14 @@ func assign(c *Config, section, key, raw string) error {
 		return setString(&c.PasswordProtected)
 	case "ca_cert_pem":
 		return setString(&c.CACertPEM)
+	case "ca_host":
+		return setString(&c.CAHost)
+	case "ca_exclusive":
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return err
+		}
+		c.CAExclusive = value
 	case "pinned_first":
 		value, err := strconv.ParseBool(raw)
 		if err != nil {

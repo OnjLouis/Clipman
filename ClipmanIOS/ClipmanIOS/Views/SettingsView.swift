@@ -7,10 +7,12 @@ struct SettingsView: View {
     @State private var draft = ClipmanSettings.empty
     @State private var showServerConnection = false
     @State private var showConnectionImporter = false
+    @State private var showAuthorityImporter = false
     @State private var showConnectionExportWarning = false
     @State private var showConnectionExporter = false
     @State private var connectionDocument: ServerConnectionDocument?
     @State private var pendingConnection: ServerConnectionDetails?
+    @State private var pendingAuthority: ServerCertificateAuthority?
     @State private var connectionImportError = ""
     @State private var connectionExportError = ""
     @State private var showBackupFolderPicker = false
@@ -20,7 +22,7 @@ struct SettingsView: View {
     @State private var settingsValidationError = ""
     @StateObject private var tipJar = TipJarStore()
 
-    var body: some View {
+    private var baseForm: some View {
         NavigationStack {
             Form {
                 Section("History storage") {
@@ -46,6 +48,7 @@ struct SettingsView: View {
                     Toggle("Use haptics", isOn: $draft.hapticsEnabled)
                     Toggle("Enable links history", isOn: $draft.linksEnabled)
                     Toggle("Preserve copied formatting and show Rich Text history", isOn: $draft.richTextEnabled)
+                    Toggle("Confirm before deleting entries", isOn: $draft.confirmDeletions)
                     Toggle("Copy latest remote item to iOS clipboard", isOn: $draft.autoCopyRemote)
                     Toggle("Offer to add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
                     Toggle("Require biometric or device authentication", isOn: $draft.requireAuthentication)
@@ -73,6 +76,19 @@ struct SettingsView: View {
                     Button("Save") {
                         draft.serverURL = ServerSettingsSanitizer.cleanDisplayURL(draft.serverURL)
                         draft.serverToken = ServerSettingsSanitizer.cleanToken(draft.serverToken)
+                        if !draft.serverCaCertPEM.isEmpty {
+                            do {
+                                guard let authority = try ServerSettingsSanitizer.parseCertificateAuthority(draft.serverCaCertPEM, address: draft.serverURL),
+                                      draft.serverCaHost.isEmpty || authority.host.caseInsensitiveCompare(draft.serverCaHost) == .orderedSame
+                                else { throw ConnectionConfigError.authorityHostMismatch }
+                                draft.serverCaCertPEM = authority.pem
+                                draft.serverCaHost = authority.host
+                            } catch {
+                                settingsValidationError = "The server host or connection scheme no longer matches the private certificate authority. Remove the authority or restore the matching HTTPS server address before saving."
+                                showServerConnection = true
+                                return
+                            }
+                        }
                         guard draft.storageMode != .server || !draft.historyPassword.isEmpty else {
                             settingsValidationError = "Clipman Server requires a unique history password. Enter one before saving this connection."
                             showServerConnection = true
@@ -88,6 +104,11 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    var body: some View {
+        AnyView(baseForm)
             .onAppear {
                 draft = app.settings
                 showServerConnection = !serverIsConfigured
@@ -111,6 +132,26 @@ struct SettingsView: View {
                     let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                     guard fileSize <= 65_536 else { throw ConnectionConfigError.fileTooLarge }
                     pendingConnection = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
+                } catch {
+                    connectionImportError = error.localizedDescription
+                }
+            }
+            .fileImporter(
+                isPresented: $showAuthorityImporter,
+                allowedContentTypes: [.x509Certificate, .data],
+                allowsMultipleSelection: false
+            ) { result in
+                do {
+                    guard let url = try result.get().first else { return }
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    guard fileSize <= 32 * 1024 else { throw ConnectionConfigError.authorityTooLarge }
+                    let pem = try String(contentsOf: url, encoding: .utf8)
+                    guard let authority = try ServerSettingsSanitizer.parseCertificateAuthority(pem, address: draft.serverURL) else {
+                        throw ConnectionConfigError.invalidAuthority
+                    }
+                    pendingAuthority = authority
                 } catch {
                     connectionImportError = error.localizedDescription
                 }
@@ -186,12 +227,33 @@ struct SettingsView: View {
                     draft.storageMode = .server
                     draft.serverURL = details.address
                     draft.serverToken = details.token
+                    if let authority = details.authority {
+                        draft.serverCaCertPEM = authority.pem
+                        draft.serverCaHost = authority.host
+                    } else if (try? ServerSettingsSanitizer.parseCertificateAuthority(draft.serverCaCertPEM, address: details.address)) == nil {
+                        draft.serverCaCertPEM = ""
+                        draft.serverCaHost = ""
+                    }
                     showServerConnection = true
                     pendingConnection = nil
                 }
                 Button("Cancel", role: .cancel) { pendingConnection = nil }
             } message: {
-                Text("Server: \(pendingConnection?.address ?? "")\n\nThe token will remain hidden. Choose Save to apply this connection.")
+                Text("Server: \(pendingConnection?.address ?? "")\(authoritySummary(pendingConnection?.authority))\n\nThe token will remain hidden. Choose Save to apply this connection.")
+            }
+            .alert("Import private authority for this server?", isPresented: Binding(
+                get: { pendingAuthority != nil },
+                set: { if !$0 { pendingAuthority = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { pendingAuthority = nil }
+                Button("Import") {
+                    guard let authority = pendingAuthority else { return }
+                    draft.serverCaCertPEM = authority.pem
+                    draft.serverCaHost = authority.host
+                    pendingAuthority = nil
+                }
+            } message: {
+                Text(authorityImportSummary(pendingAuthority))
             }
             .alert("Could not import server connection", isPresented: Binding(
                 get: { !connectionImportError.isEmpty },
@@ -225,7 +287,6 @@ struct SettingsView: View {
             } message: {
                 Text(settingsValidationError)
             }
-        }
         .accessibilityAction(.escape) {
             dismiss()
         }
@@ -287,7 +348,9 @@ struct SettingsView: View {
                 do {
                     connectionDocument = ServerConnectionDocument(data: try ServerSettingsSanitizer.connectionConfigData(
                         address: draft.serverURL,
-                        token: draft.serverToken
+                        token: draft.serverToken,
+                        caCertPEM: draft.serverCaCertPEM,
+                        caHost: draft.serverCaHost
                     ))
                     showConnectionExportWarning = true
                 } catch {
@@ -295,10 +358,47 @@ struct SettingsView: View {
                 }
             }
             .accessibilityHint("Save the current server address and private access token to a Clipman Server connection file.")
+            Button("Import private authority") {
+                showAuthorityImporter = true
+            }
+            .accessibilityHint("Choose a public certificate authority for the current HTTPS server host.")
+            if !draft.serverCaCertPEM.isEmpty {
+                Button("Remove private authority", role: .destructive) {
+                    draft.serverCaCertPEM = ""
+                    draft.serverCaHost = ""
+                }
+            }
+            authorityStatus
             if showServerConnection {
                 serverConnectionFields
             }
         }
+    }
+
+    @ViewBuilder
+    private var authorityStatus: some View {
+        if draft.serverCaCertPEM.isEmpty {
+            Text("Private certificate authority: Not configured")
+                .font(.footnote)
+        } else if let authority = try? ServerSettingsSanitizer.parseCertificateAuthority(draft.serverCaCertPEM, address: draft.serverURL) {
+            Text("Private certificate authority for \(authority.host). Subject: \(authority.subject). Expires: \(authority.expires.formatted(date: .long, time: .omitted)).")
+                .font(.footnote)
+            LabeledContent("Authority SHA-256 fingerprint", value: authority.fingerprint)
+                .font(.footnote)
+        } else {
+            Text("Private certificate authority does not match the current server address.")
+                .font(.footnote)
+        }
+    }
+
+    private func authoritySummary(_ authority: ServerCertificateAuthority?) -> String {
+        guard let authority else { return "" }
+        return "\n\nPrivate authority host: \(authority.host)\nSubject: \(authority.subject)\nExpires: \(authority.expires.formatted(date: .long, time: .omitted))\nSHA-256 fingerprint: \(authority.fingerprint)"
+    }
+
+    private func authorityImportSummary(_ authority: ServerCertificateAuthority?) -> String {
+        guard let authority else { return "" }
+        return "Host: \(authority.host)\nSubject: \(authority.subject)\nExpires: \(authority.expires.formatted(date: .long, time: .omitted))\nSHA-256 fingerprint: \(authority.fingerprint)\n\nClipman will trust this authority only for the displayed server host."
     }
 
     private var serverConnectionFields: some View {

@@ -1,4 +1,4 @@
-.TH CLIPMAN-CLI 1 "July 29, 2026" "Clipman CLI 0.2.0-dev" "User Commands"
+.TH CLIPMAN-CLI 1 "July 30, 2026" "Clipman CLI 0.3.0-dev" "User Commands"
 .SH NAME
 clipman-cli \- access Clipman text history from a terminal
 .SH SYNOPSIS
@@ -28,7 +28,10 @@ for the complete current syntax.
 .TP
 .B init
 Configure and test a server profile. A Clipman Server connection-details file
-can supply the server address and token without manually extracting JSON.
+can supply the server address and token without manually extracting JSON. For
+direct private-CA HTTPS, a current connection file also supplies the public
+authority. The CLI validates it, binds it to the HTTPS host, and uses it as the
+exclusive trust anchor for that profile.
 Run on a controlling terminal without
 .BR --connection-file ,
 .BR --token ,
@@ -175,6 +178,12 @@ mode 0600), protected only by file permissions.
 The clipman scheme is a convenient name for plain HTTP. Use it only on
 loopback, a trusted private network, or a VPN. Use HTTPS across an untrusted
 network.
+.PP
+A private authority imported from a current connection file is host-bound and
+exclusive to that server profile. The manual
+.B --ca-cert
+option remains additive for older setups. Treat every connection file as a
+credential because it contains the server token.
 .SH EXIT STATUS
 .TP
 .B 0

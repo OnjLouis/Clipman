@@ -40,6 +40,24 @@ func TestExportEntryUsesNameThenFirstLine(t *testing.T) {
 	}
 }
 
+func TestCanonicalLabelsCollapseCaseVariants(t *testing.T) {
+	entries := []model.Entry{
+		{Group: "Kobo", ModifiedUnixMs: 10},
+		{Group: "Kobo", ModifiedUnixMs: 20},
+		{Group: "KObo", ModifiedUnixMs: 30},
+		{Group: "GitHub", ModifiedUnixMs: 40},
+		{Group: "Github", ModifiedUnixMs: 50},
+	}
+
+	got := canonicalLabels(entries, func(entry model.Entry) string { return entry.Group })
+	if len(got) != 2 || got[0] != "Github" || got[1] != "Kobo" {
+		t.Fatalf("canonical labels = %#v, want [Github Kobo]", got)
+	}
+	if normalized := canonicalLabelFor(entries, func(entry model.Entry) string { return entry.Group }, "kObO"); normalized != "Kobo" {
+		t.Fatalf("canonical label = %q, want Kobo", normalized)
+	}
+}
+
 func TestRichTextExportBoundsAndClear(t *testing.T) {
 	value := normalizeRichText(&richTextJSON{
 		HTMLFragment:    "<b>formatted</b>",

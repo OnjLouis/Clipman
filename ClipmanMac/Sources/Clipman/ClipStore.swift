@@ -39,7 +39,7 @@ final class ClipStore: @unchecked Sendable {
     private var fileDescriptor: CInt = -1
     private var password = ""
     private(set) var databaseURL: URL
-    private let machineName: String
+    private var machineName: String
     private var serverClient: ServerStorageClient?
     private var serverRevision = ""
     private var serverPollTimer: DispatchSourceTimer?
@@ -59,6 +59,15 @@ final class ClipStore: @unchecked Sendable {
         self.machineName = machineName
     }
 
+    func setMachineName(_ value: String) {
+        queue.sync {
+            let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                self.machineName = name
+            }
+        }
+    }
+
     deinit {
         serverPollTimer?.cancel()
     }
@@ -75,7 +84,13 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    func configureServerStorage(enabled: Bool, serverURL: String, serverToken: String) {
+    func configureServerStorage(
+        enabled: Bool,
+        serverURL: String,
+        serverToken: String,
+        serverCaCertPEM: String,
+        serverCaHost: String
+    ) {
         queue.async {
             self.serverPollTimer?.cancel()
             self.serverPollTimer = nil
@@ -83,7 +98,13 @@ final class ClipStore: @unchecked Sendable {
             self.serverPollInProgress = false
             self.serverRevision = ""
             self.resetServerStatusLocked()
-            self.serverClient = enabled ? ServerStorageClient(serverURL: serverURL, token: serverToken, databasePassword: self.password) : nil
+            self.serverClient = enabled ? ServerStorageClient(
+                serverURL: serverURL,
+                token: serverToken,
+                databasePassword: self.password,
+                caCertPEM: serverCaCertPEM,
+                caHost: serverCaHost
+            ) : nil
             guard let client = self.serverClient, client.isConfigured else {
                 self.serverClient = nil
                 if self.serverFailureReported {
@@ -195,6 +216,7 @@ final class ClipStore: @unchecked Sendable {
                 return
             }
             let now = TimeUtil.nowUnixMs()
+            let normalizedGroup = self.canonicalGroupLocked(trimmedGroup)
             if let index = self.database.Entries.firstIndex(where: { $0.Text == text }) {
                 self.database.Entries[index].LastUsedUnixMs = now
                 self.database.Entries[index].SourceMachine = self.machineName
@@ -202,15 +224,15 @@ final class ClipStore: @unchecked Sendable {
                     self.database.Entries[index].RichText = richText
                     self.database.Entries[index].RichTextUpdatedUnixMs = now
                 }
-                if !trimmedGroup.isEmpty {
-                    self.database.Entries[index].Group = trimmedGroup
+                if !normalizedGroup.isEmpty {
+                    self.database.Entries[index].Group = normalizedGroup
                     self.database.Entries[index].ModifiedUnixMs = now
                 }
             } else {
                 let normalizedRichText = RichTextData.normalize(richText)
                 self.database.Entries.append(ClipEntry(
                     Text: text,
-                    Group: trimmedGroup,
+                    Group: normalizedGroup,
                     SourceMachine: self.machineName,
                     CreatedUnixMs: now,
                     LastUsedUnixMs: now,
@@ -324,10 +346,11 @@ final class ClipStore: @unchecked Sendable {
         guard !idSet.isEmpty else { return }
         queue.async {
             guard self.mergeLatestBeforeWriteLocked() else { return }
+            let normalizedGroup = self.canonicalGroupLocked(trimmed)
             var changed = false
             let now = TimeUtil.nowUnixMs()
             for index in self.database.Entries.indices where idSet.contains(self.database.Entries[index].Id) {
-                self.database.Entries[index].Group = trimmed
+                self.database.Entries[index].Group = normalizedGroup
                 self.database.Entries[index].LastUsedUnixMs = now
                 self.database.Entries[index].ModifiedUnixMs = now
                 changed = true
@@ -336,6 +359,29 @@ final class ClipStore: @unchecked Sendable {
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
         }
+    }
+
+    private func canonicalGroupLocked(_ requested: String) -> String {
+        guard !requested.isEmpty else { return "" }
+        let matching = database.Entries.filter {
+            $0.Group.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(requested) == .orderedSame
+        }
+        let spellings = Dictionary(grouping: matching) {
+            $0.Group.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return spellings.values.map { entries in
+            (
+                label: entries[0].Group.trimmingCharacters(in: .whitespacesAndNewlines),
+                count: entries.count,
+                latest: entries.map { max($0.ModifiedUnixMs, $0.LastUsedUnixMs, $0.CreatedUnixMs) }.max() ?? 0
+            )
+        }
+        .sorted {
+            if $0.count != $1.count { return $0.count > $1.count }
+            if $0.latest != $1.latest { return $0.latest > $1.latest }
+            return $0.label < $1.label
+        }
+        .first?.label ?? requested
     }
 
     func moveEntries(ids: [String], direction: Int) {

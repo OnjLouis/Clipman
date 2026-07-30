@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 struct ServerDatabaseDownload {
     var revision: String
@@ -38,6 +39,8 @@ final class ServerStorageClient {
     private let token: String
     private let databaseID: String
     private let displayEndpoint: String
+    private let session: URLSession
+    private let sessionDelegate: ServerSessionDelegate
     private let userAgent = "ClipmanIOS/" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
 
     init(settings: ClipmanSettings) {
@@ -47,6 +50,14 @@ final class ServerStorageClient {
         self.baseURL = URL(string: cleanedURL)
         self.token = cleanedToken
         self.databaseID = ServerDatabaseIdentity.fromTokenAndPassword(token: cleanedToken, password: settings.historyPassword)
+        let authority = try? ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPEM, address: settings.serverURL)
+        let normalizedAuthority = authority ?? nil
+        let authorityMatches = normalizedAuthority == nil || settings.serverCaHost.isEmpty || normalizedAuthority?.host.caseInsensitiveCompare(settings.serverCaHost) == .orderedSame
+        self.sessionDelegate = ServerSessionDelegate(authority: normalizedAuthority)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 8
+        configuration.timeoutIntervalForResource = 10
+        self.session = URLSession(configuration: configuration, delegate: sessionDelegate, delegateQueue: nil)
         if let url = URL(string: displayURL) {
             let host = url.host ?? "unknown host"
             let port = url.port.map { ":\($0)" } ?? ""
@@ -54,7 +65,7 @@ final class ServerStorageClient {
         } else {
             self.displayEndpoint = "invalid server address"
         }
-        self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty && !settings.historyPassword.isEmpty
+        self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty && !settings.historyPassword.isEmpty && authorityMatches && (settings.serverCaCertPEM.isEmpty || normalizedAuthority != nil)
     }
 
     func metadata() async throws -> ServerDatabaseMetadata {
@@ -91,7 +102,7 @@ final class ServerStorageClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw ServerStorageError.requestFailed(displayEndpoint, friendlyNetworkMessage(for: error))
         }
@@ -135,5 +146,55 @@ final class ServerStorageClient {
         default:
             return error.localizedDescription
         }
+    }
+}
+
+private final class ServerSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private let authority: ServerCertificateAuthority?
+
+    init(authority: ServerCertificateAuthority?) {
+        self.authority = authority
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let authority,
+              challenge.protectionSpace.host.caseInsensitiveCompare(authority.host) == .orderedSame,
+              let trust = challenge.protectionSpace.serverTrust,
+              let anchor = SecCertificateCreateWithData(nil, authority.der as CFData)
+        else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        guard SecTrustSetAnchorCertificates(trust, [anchor] as CFArray) == errSecSuccess,
+              SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess
+        else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        var error: CFError?
+        guard SecTrustEvaluateWithError(trust, &error),
+              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let root = chain.last,
+              SecCertificateCopyData(root) as Data == authority.der
+        else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

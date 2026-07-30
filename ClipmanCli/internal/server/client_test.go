@@ -2,11 +2,19 @@ package server
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestConnectionDetailsText(t *testing.T) {
@@ -133,4 +141,81 @@ func TestAdditionalCertificateTrustRejectsInvalidPEM(t *testing.T) {
 	if _, err := New("https://example.test", "token", "database", "test", WithCACertPEM([]byte("not a certificate"))); err == nil {
 		t.Fatal("expected invalid CA certificate data to be rejected")
 	}
+}
+
+func TestExclusivePrivateAuthorityTrust(t *testing.T) {
+	testServer, authorityPEM := privateAuthorityServer(t)
+	defer testServer.Close()
+	client, err := New(testServer.URL, "token", "database", "test", WithExclusiveCACertPEM(authorityPEM))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Health(context.Background()); err != nil {
+		t.Fatalf("private authority was not trusted: %v", err)
+	}
+	defaultClient, err := New(testServer.URL, "token", "database", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = defaultClient.Health(context.Background()); err == nil {
+		t.Fatal("private server unexpectedly passed normal system trust")
+	}
+}
+
+func privateAuthorityServer(t *testing.T) (*httptest.Server, []byte) {
+	t.Helper()
+	now := time.Now()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Clipman Test Authority"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "127.0.0.1"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, ca, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKeyDER, err := x509.MarshalPKCS8PrivateKey(leafKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificateChain := append(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})...,
+	)
+	serverCertificate, err := tls.X509KeyPair(
+		certificateChain,
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: leafKeyDER}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	testServer.TLS = &tls.Config{Certificates: []tls.Certificate{serverCertificate}, MinVersion: tls.VersionTLS12}
+	testServer.StartTLS()
+	return testServer, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
 }

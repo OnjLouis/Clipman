@@ -3,7 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -32,12 +36,92 @@ type Metadata struct {
 	Length   int64
 }
 
-func New(rawURL, token, databaseID, version string) (*Client, error) {
+type Option func(*clientOptions)
+type clientOptions struct{ caCertPEM []byte }
+
+func WithExclusiveCACertPEM(value []byte) Option {
+	return func(options *clientOptions) { options.caCertPEM = append([]byte(nil), value...) }
+}
+
+type AuthorityDetails struct {
+	PEM, Host, Subject, Fingerprint string
+	Expires                         time.Time
+}
+
+func ParsePrivateAuthority(value []byte, rawURL string) (AuthorityDetails, error) {
+	if len(bytes.TrimSpace(value)) == 0 {
+		return AuthorityDetails{}, nil
+	}
+	if len(value) > 32*1024 {
+		return AuthorityDetails{}, errors.New("private certificate authority exceeds the 32 KiB limit")
+	}
+	if bytes.Contains(bytes.ToUpper(value), []byte("PRIVATE KEY")) {
+		return AuthorityDetails{}, errors.New("private certificate authority must not contain private key material")
+	}
+	block, rest := pem.Decode(value)
+	if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(rest)) != 0 {
+		return AuthorityDetails{}, errors.New("private certificate authority must contain exactly one PEM CERTIFICATE block")
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return AuthorityDetails{}, fmt.Errorf("invalid private certificate authority: %w", err)
+	}
+	if !certificate.IsCA {
+		return AuthorityDetails{}, errors.New("configured certificate is not marked as a certificate authority")
+	}
+	if certificate.KeyUsage != 0 && certificate.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return AuthorityDetails{}, errors.New("configured certificate authority cannot sign certificates")
+	}
+	now := time.Now()
+	if now.Before(certificate.NotBefore) {
+		return AuthorityDetails{}, errors.New("configured certificate authority is not valid yet")
+	}
+	if now.After(certificate.NotAfter) {
+		return AuthorityDetails{}, errors.New("configured certificate authority has expired")
+	}
+	normalized, err := NormalizeURL(rawURL)
+	if err != nil {
+		return AuthorityDetails{}, err
+	}
+	parsed, _ := url.Parse(normalized)
+	if parsed == nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+		return AuthorityDetails{}, errors.New("a private certificate authority can be used only with an HTTPS server address")
+	}
+	digest := sha256.Sum256(certificate.Raw)
+	fingerprintParts := make([]string, len(digest))
+	for index, item := range digest {
+		fingerprintParts[index] = fmt.Sprintf("%02X", item)
+	}
+	return AuthorityDetails{
+		PEM:         string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})),
+		Host:        parsed.Hostname(),
+		Subject:     certificate.Subject.String(),
+		Expires:     certificate.NotAfter,
+		Fingerprint: strings.Join(fingerprintParts, ":"),
+	}, nil
+}
+
+func New(rawURL, token, databaseID, version string, suppliedOptions ...Option) (*Client, error) {
 	normalized, err := NormalizeURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
+	var options clientOptions
+	for _, option := range suppliedOptions {
+		option(&options)
+	}
 	transport := &http.Transport{DialContext: (&net.Dialer{Timeout: 8 * time.Second, KeepAlive: 30 * time.Second}).DialContext, ResponseHeaderTimeout: 8 * time.Second, TLSHandshakeTimeout: 8 * time.Second}
+	if len(options.caCertPEM) > 0 {
+		authority, parseErr := ParsePrivateAuthority(options.caCertPEM, normalized)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(authority.PEM)) {
+			return nil, errors.New("could not load private certificate authority")
+		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	}
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) > 0 && (req.URL.Host != via[0].URL.Host || req.URL.Scheme != via[0].URL.Scheme) {
@@ -93,14 +177,22 @@ func CleanToken(value string) string {
 }
 
 func ConnectionDetails(value string) (serverURL, token string) {
+	serverURL, token, _, _ = ConnectionProfile(value)
+	return serverURL, token
+}
+
+func ConnectionProfile(value string) (serverURL, token, caCertPEM string, err error) {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "{") {
 		var raw map[string]any
 		if json.Unmarshal([]byte(value), &raw) == nil {
 			if marker, present := raw["clipman"]; present {
 				if marker != "server-connection" || jsonNumber(raw, "version") != "1" {
-					return "", ""
+					return "", "", "", errors.New("unsupported Clipman Server connection-file version")
 				}
+			}
+			if item, ok := raw["ca_cert_pem"].(string); ok {
+				caCertPEM = strings.TrimSpace(item)
 			}
 			for _, key := range []string{"address", "ServerAddress", "serverAddress", "ServerUrl", "serverUrl", "ServerURL", "serverURL", "ListenPrefix", "listenPrefix"} {
 				if item, ok := raw[key].(string); ok && strings.TrimSpace(item) != "" {
@@ -145,7 +237,14 @@ func ConnectionDetails(value string) (serverURL, token string) {
 			}
 		}
 	}
-	return serverURL, token
+	if caCertPEM != "" {
+		authority, parseErr := ParsePrivateAuthority([]byte(caCertPEM), serverURL)
+		if parseErr != nil {
+			return "", "", "", parseErr
+		}
+		caCertPEM = authority.PEM
+	}
+	return serverURL, token, caCertPEM, nil
 }
 
 func jsonString(raw map[string]any, keys ...string) string {

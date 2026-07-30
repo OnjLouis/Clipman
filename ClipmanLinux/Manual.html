@@ -36,8 +36,8 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <p><kbd>F4</kbd> safely presents common HTML formatting without running scripts, loading remote content or opening a browser view. RTF-only entries remain readable through their plain-text fallback and identify the stored format in Details. Editing or transforming an entry's text clears its previous formatting so stale rich content cannot be pasted later.</p>
 
 <h2 id="groups">Groups</h2>
-<p>The labelled Group control filters Text, Links and Rich Text; press <kbd>Alt+G</kbd> to focus it. The Groups menu presents All, Pinned, Normal, Ungrouped and every named group. The first ten choices use <kbd>Alt+1</kbd> through <kbd>Alt+0</kbd>. Choose <strong>Group Entry</strong> or press <kbd>Ctrl+G</kbd> to assign one or several selected entries to a new or existing group.</p>
-<p>Groups are stored in the shared database, so group names and assignments travel with entries. File History is machine-local and does not use groups.</p>
+<p>The labelled Filter control filters Text, Links and Rich Text; press <kbd>Alt+G</kbd> to focus it. It can show All, Pinned, Normal, Ungrouped, one named group, or entries attributed to one device. The Groups menu presents the same choices, with device names separated from groups. The first ten group choices use <kbd>Alt+1</kbd> through <kbd>Alt+0</kbd>. Choose <strong>Group Entry</strong> or press <kbd>Ctrl+G</kbd> to assign one or several selected entries to a new or existing group.</p>
+<p>Group names are case-insensitive, so spellings such as <strong>GitHub</strong>, <strong>Github</strong>, and <strong>github</strong> remain one group. If existing entries use several capitalizations, Clipman displays the spelling used most often and uses the newest spelling to resolve a tie. Groups are stored in the shared database, so group names and assignments travel with entries. File History is machine-local and does not use groups.</p>
 
 <h2 id="entries">Entries and templates</h2>
 <p><strong>Entry Properties</strong> changes the name, group, text, pinned state and template state. The editor includes template samples, individual fields and a resolved preview. Insertions occur at the text cursor and automatically mark the entry as a template. Stored template text remains literal; fields resolve only when copied.</p>
@@ -82,6 +82,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <tr><td>Sensitive Data</td><td>Opt-in automatic-capture exclusions and their individual presets.</td></tr>
 </tbody></table>
 <p>Automatic remote clipboard receipt, dynamic history and automatic tracking removal are opt-in. Dynamic history makes a newly accepted item select its matching section the next time history opens. That automatic selection is used once, so a section you choose manually remains selected until another new item arrives. Missing custom sounds fall back to factory sounds.</p>
+<p>Entry deletion asks for confirmation by default. The confirmation can remember <strong>Do not ask again</strong>; re-enable it from General preferences. Clearing an entire history area keeps its separate confirmation.</p>
 
 <h2 id="shortcuts">Keyboard shortcuts</h2>
 <table><thead><tr><th>Action</th><th>Shortcut</th></tr></thead><tbody>
@@ -147,6 +148,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 
 <h2 id="security">Security</h2>
 <p>Clipman Server stores encrypted database blobs and does not know the history password. Public servers must use HTTPS. Plain HTTP is accepted only for loopback, private-network and VPN addresses. Remembered credentials and local databases are restricted to their Linux user account.</p>
+<p>A current private-CA server can include its public authority in the <code>.clpconf</code> file. Clipman validates it and uses it as the exclusive authority only for that saved HTTPS host. It does not install the certificate in the Linux system trust store. Public HTTPS profiles without an embedded authority continue to use normal operating-system trust.</p>
 <p>Treat a <code>.clpconf</code> file as a credential because it contains a server token. Exporting with no history password creates an unencrypted clipboard history file; use that option only when the destination is appropriate.</p>
 
 <h2 id="project">Project and license</h2>

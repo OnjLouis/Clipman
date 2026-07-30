@@ -89,7 +89,12 @@ assert 'populate_safe_rich_buffer(text.get_buffer(), rich_text, entry["text"])' 
 assert "self.move_tab_focus(-1 if keyval == Gdk.KEY_ISO_Left_Tab" in source
 assert "Gtk.PopoverMenuBar.new_from_model(self._menu_model())" in source
 assert "Gtk.SelectionMode.MULTIPLE" in source
-assert 'Gtk.Label(label="_Group:", use_underline=True)' in source
+assert 'Gtk.Label(label="_Filter:", use_underline=True)' in source
+assert 'self.group_picker.set_enable_search(True)' in source
+assert 'updated_filters.append(("divider", "", "Devices"))' in source
+assert '("group", value, "Group: " + value)' not in source
+assert '("device", value, "Device: " + value)' not in source
+assert 'entry.get("group", "").casefold() != filter_value.casefold()' in source
 assert 'menu.append_submenu("Grou_ps", self.groups_menu)' in source
 assert '"app.diagnostics": ["<Alt>F1"]' in source
 

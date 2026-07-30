@@ -441,6 +441,8 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didChangeSortMode sortMode: String, fileHistory: Bool)
     func historyWindowDidToggleSortDirection(_ controller: HistoryWindowController, fileHistory: Bool)
     func historyWindow(_ controller: HistoryWindowController, didChangeGroupFilter groupFilter: String)
+    func historyWindow(_ controller: HistoryWindowController, didChangeDeviceFilter deviceFilter: String)
+    func historyWindowDidDisableDeletionConfirmation(_ controller: HistoryWindowController)
     func historyWindowDidRequestPreferences(_ controller: HistoryWindowController)
     func historyWindowDidRequestManual(_ controller: HistoryWindowController)
     func historyWindowDidRequestUpdateCheck(_ controller: HistoryWindowController)
@@ -782,6 +784,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var fileSortMode = "Manual"
     private var fileSortDescending = false
     private var groupFilter = "All"
+    private var historyFilterType = "Group"
+    private var deviceFilter = "All"
+    private var confirmDeletions = true
     private var allEntries: [ClipEntry] = []
     private var filteredEntries: [ClipEntry] = []
     private var allFileEvents: [FileClipboardEvent] = []
@@ -910,12 +915,21 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         setMode(modeForTabID(tabID), notify: false)
     }
 
-    func configureSort(textSortMode: String, textDescending: Bool, fileSortMode: String, fileDescending: Bool, selectedTab: Int, selectedHistoryTab: String, historyTabOrder: [String], linksHistoryEnabled: Bool, richTextHistoryEnabled: Bool, groupFilter: String) {
+    func configureSort(textSortMode: String, textDescending: Bool, fileSortMode: String, fileDescending: Bool, selectedTab: Int, selectedHistoryTab: String, historyTabOrder: [String], linksHistoryEnabled: Bool, richTextHistoryEnabled: Bool, groupFilter: String, historyFilterType: String? = nil, deviceFilter: String? = nil, confirmDeletions: Bool? = nil) {
         self.textSortMode = textSortMode
         self.textSortDescending = textDescending
         self.fileSortMode = fileSortMode
         self.fileSortDescending = fileDescending
         self.groupFilter = groupFilter.isEmpty ? "All" : groupFilter
+        if let historyFilterType {
+            self.historyFilterType = historyFilterType.caseInsensitiveCompare("Device") == .orderedSame ? "Device" : "Group"
+        }
+        if let deviceFilter {
+            self.deviceFilter = deviceFilter.isEmpty ? "All" : deviceFilter
+        }
+        if let confirmDeletions {
+            self.confirmDeletions = confirmDeletions
+        }
         self.linksHistoryEnabled = linksHistoryEnabled
         self.richTextHistoryEnabled = richTextHistoryEnabled
         self.historyTabOrder = HistoryTabID.normalizeOrder(historyTabOrder)
@@ -1181,13 +1195,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private func updateToolbarState() {
         let textMode = mode != .files
         groupButton.isHidden = !textMode
-        setToFilterButton.isHidden = !textMode || isReservedGroupFilter(groupFilter)
+        setToFilterButton.isHidden = !textMode || isDeviceFilterActive || isReservedGroupFilter(groupFilter)
         groupFilterButton.isHidden = !textMode
         selectedGroupLabel.isHidden = !textMode
         setToFilterButton.title = "Set to \(groupFilter)"
         setToFilterButton.setAccessibilityLabel("Set selected entries to \(groupFilter)")
-        groupFilterButton.title = "Filter: \(groupFilter.isEmpty ? "All" : groupFilter)"
-        groupFilterButton.setAccessibilityLabel("Filter by group, Option+G, current filter \(groupFilter.isEmpty ? "All" : groupFilter)")
+        let filterLabel = isDeviceFilterActive ? "Device: \(deviceFilter)" : groupFilter
+        groupFilterButton.title = "Filter: \(filterLabel.isEmpty ? "All" : filterLabel)"
+        groupFilterButton.setAccessibilityLabel("Filter by group or device, Option+G, current filter \(filterLabel.isEmpty ? "All" : filterLabel)")
         updateSelectedGroupStatus()
 
         let selectedSort = sortOptions().first {
@@ -1314,7 +1329,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                     ? withoutRich.filter { LinkClassifier.isLinkOnlyText($0.Text) == linkMode }
                     : withoutRich
             }
-            let grouped = filterEntriesByGroup(tabEntries)
+            let grouped = filterEntries(tabEntries)
             if query.isEmpty {
                 filteredEntries = grouped
             } else {
@@ -1402,7 +1417,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         statusLabel.setAccessibilityValue(text)
     }
 
-    private func filterEntriesByGroup(_ entries: [ClipEntry]) -> [ClipEntry] {
+    private func filterEntries(_ entries: [ClipEntry]) -> [ClipEntry] {
+        if isDeviceFilterActive {
+            let filter = deviceFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !filter.isEmpty && filter.caseInsensitiveCompare("All") != .orderedSame else { return entries }
+            return entries.filter { $0.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(filter) == .orderedSame }
+        }
         let filter = groupFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !filter.isEmpty && filter.caseInsensitiveCompare("All") != .orderedSame else { return entries }
         if filter.caseInsensitiveCompare("Pinned") == .orderedSame {
@@ -1527,7 +1547,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             addLineEndingItems(to: menu)
             menu.addItem(.separator())
             addMenuItem("Group Selected...", action: #selector(menuGroupSelected), to: menu, shortcut: "Command+G")
-            if !isReservedGroupFilter(groupFilter) {
+            if !isDeviceFilterActive && !isReservedGroupFilter(groupFilter) {
                 addMenuItem("Set Selected to \(groupFilter)", action: #selector(menuGroupSelectedToCurrentFilter), to: menu)
             }
             addGroupFilterItems(to: menu)
@@ -1585,7 +1605,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             setMode(.text, notify: true)
             return
         }
-        let menu = NSMenu(title: "Group Filter")
+        let menu = NSMenu(title: "History Filter")
         for (index, group) in groupFilterItems().enumerated() {
             if index == reservedGroupFilterItems().count {
                 menu.addItem(.separator())
@@ -1593,8 +1613,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             let shortcut = groupShortcutLabel(index: index)
             let item = addMenuItem(group, action: #selector(menuGroupFilterChanged(_:)), to: menu, shortcut: shortcut)
             item.representedObject = group
-            item.state = group.caseInsensitiveCompare(groupFilter) == .orderedSame ? .on : .off
+            item.state = !isDeviceFilterActive && group.caseInsensitiveCompare(groupFilter) == .orderedSame ? .on : .off
         }
+        addDeviceFilterSection(to: menu)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: actionsButton.bounds.height + 2), in: actionsButton)
     }
 
@@ -1607,9 +1628,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             let shortcut = groupShortcutLabel(index: index)
             let item = addMenuItem(group, action: #selector(menuGroupFilterChanged(_:)), to: groupMenu, shortcut: shortcut)
             item.representedObject = group
-            item.state = group.caseInsensitiveCompare(groupFilter) == .orderedSame ? .on : .off
+            item.state = !isDeviceFilterActive && group.caseInsensitiveCompare(groupFilter) == .orderedSame ? .on : .off
         }
-        let root = NSMenuItem(title: "Group Filter\tOption+G", action: nil, keyEquivalent: "")
+        addDeviceFilterSection(to: groupMenu)
+        let root = NSMenuItem(title: "History Filter\tOption+G", action: nil, keyEquivalent: "")
         root.submenu = groupMenu
         menu.addItem(root)
     }
@@ -1800,6 +1822,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         setGroupFilter(group)
     }
 
+    @objc private func menuDeviceFilterChanged(_ sender: NSMenuItem) {
+        guard let device = sender.representedObject as? String else { return }
+        setDeviceFilter(device)
+    }
+
     private func applyGroupFilter(at index: Int) {
         guard mode != .files else {
             setMode(.text, notify: true)
@@ -1814,9 +1841,18 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func setGroupFilter(_ group: String) {
+        historyFilterType = "Group"
         groupFilter = group
         updateToolbarState()
         historyDelegate?.historyWindow(self, didChangeGroupFilter: group)
+        applyFilter(preferredSelectedID: nil)
+    }
+
+    private func setDeviceFilter(_ device: String) {
+        historyFilterType = "Device"
+        deviceFilter = device
+        updateToolbarState()
+        historyDelegate?.historyWindow(self, didChangeDeviceFilter: device)
         applyFilter(preferredSelectedID: nil)
     }
 
@@ -1896,6 +1932,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 NSSound.beep()
                 return
             }
+            guard confirmDeletion(count: entries.count, itemName: "clipboard entry") else { return }
             preferredRowAfterReload = tableView.selectedRowIndexes.min()
             for entry in entries {
                 historyDelegate?.historyWindow(self, didDelete: entry)
@@ -1907,11 +1944,30 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 NSSound.beep()
                 return
             }
+            guard confirmDeletion(count: events.count, itemName: "file-history event") else { return }
             preferredRowAfterReload = tableView.selectedRowIndexes.min()
             for event in events {
                 historyDelegate?.historyWindow(self, didDeleteFileEvent: event)
             }
         }
+    }
+
+    private func confirmDeletion(count: Int, itemName: String) -> Bool {
+        guard confirmDeletions else { return true }
+        let alert = NSAlert()
+        alert.messageText = count == 1 ? "Delete selected \(itemName)?" : "Delete \(count) selected \(itemName)s?"
+        alert.informativeText = "This removes the selection from synchronized history."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Delete")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Do not ask again"
+        guard alert.runModal() == .alertSecondButtonReturn else { return false }
+        if alert.suppressionButton?.state == .on {
+            confirmDeletions = false
+            historyDelegate?.historyWindowDidDisableDeletionConfirmation(self)
+        }
+        return true
     }
 
     private func editSelectedEntry() {
@@ -2276,6 +2332,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         let entries = selectedEntries()
         guard !entries.isEmpty else { return }
+        guard confirmDeletion(count: entries.count, itemName: "clipboard entry") else { return }
         preferredRowAfterReload = tableView.selectedRowIndexes.min()
         historyDelegate?.historyWindow(self, didCut: entries)
     }
@@ -2302,9 +2359,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let entries = selectedEntries()
         guard !entries.isEmpty else { return }
         let groups = existingGroups()
-        let activeGroup = isReservedGroupFilter(groupFilter) ? "" : groupFilter
-        let selectedGroups = Set(entries.map { $0.Group.trimmingCharacters(in: .whitespacesAndNewlines) })
-        let initial = !activeGroup.isEmpty ? activeGroup : (selectedGroups.count == 1 ? entries[0].Group : "")
+        let activeGroup = isDeviceFilterActive || isReservedGroupFilter(groupFilter) ? "" : groupFilter
+        let selectedGroups = Set(entries.map {
+            $0.Group.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+        let selectedGroup = entries[0].Group.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canonicalSelectedGroup = groups.first {
+            $0.caseInsensitiveCompare(selectedGroup) == .orderedSame
+        } ?? selectedGroup
+        let initial = !activeGroup.isEmpty ? activeGroup : (selectedGroups.count == 1 ? canonicalSelectedGroup : "")
         let alert = NSAlert()
         alert.messageText = "Group Clipboard Entries"
         alert.informativeText = "Enter a group name, or leave it blank to remove the selected entries from a group."
@@ -2329,7 +2392,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func groupSelectedEntriesToCurrentFilter() {
-        guard mode != .files, !isReservedGroupFilter(groupFilter) else {
+        guard mode != .files, !isDeviceFilterActive, !isReservedGroupFilter(groupFilter) else {
             NSSound.beep()
             return
         }
@@ -2583,9 +2646,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if entries.isEmpty {
             label = "Selected group: None"
         } else {
-            let groups = Set(entries.map { $0.Group.trimmingCharacters(in: .whitespacesAndNewlines) })
+            let groups = Set(entries.map {
+                $0.Group.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            })
             if groups.count == 1 {
-                let group = groups.first ?? ""
+                let storedGroup = entries[0].Group.trimmingCharacters(in: .whitespacesAndNewlines)
+                let group = existingGroups().first {
+                    $0.caseInsensitiveCompare(storedGroup) == .orderedSame
+                } ?? storedGroup
                 label = group.isEmpty ? "Selected group: Ungrouped" : "Selected group: \(group)"
             } else {
                 label = "Selected group: Mixed"
@@ -2597,15 +2665,55 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func existingGroups() -> [String] {
         let reserved = Set(["all", "pinned", "named", "ungrouped"])
-        return allEntries
-            .map { $0.Group.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !reserved.contains($0.lowercased()) }
-            .reduce(into: [String]()) { result, group in
-                if !result.contains(where: { $0.caseInsensitiveCompare(group) == .orderedSame }) {
-                    result.append(group)
+        return canonicalLabels { $0.Group }
+            .filter { !reserved.contains($0.lowercased()) }
+    }
+
+    private var isDeviceFilterActive: Bool {
+        historyFilterType.caseInsensitiveCompare("Device") == .orderedSame
+    }
+
+    private func existingDevices() -> [String] {
+        canonicalLabels { $0.SourceMachine }
+    }
+
+    private func canonicalLabels(_ selector: (ClipEntry) -> String) -> [String] {
+        let candidates = allEntries.compactMap { entry -> (String, ClipEntry)? in
+            let label = selector(entry).trimmingCharacters(in: .whitespacesAndNewlines)
+            return label.isEmpty ? nil : (label, entry)
+        }
+        let clusters = Dictionary(grouping: candidates) { $0.0.lowercased() }
+        return clusters.values.compactMap { cluster in
+            Dictionary(grouping: cluster) { $0.0 }.values
+                .map { spelling in
+                    (
+                        label: spelling[0].0,
+                        count: spelling.count,
+                        latest: spelling.map { max($0.1.ModifiedUnixMs, $0.1.LastUsedUnixMs, $0.1.CreatedUnixMs) }.max() ?? 0
+                    )
                 }
-            }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                .sorted {
+                    if $0.count != $1.count { return $0.count > $1.count }
+                    if $0.latest != $1.latest { return $0.latest > $1.latest }
+                    return $0.label < $1.label
+                }
+                .first?.label
+        }
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func addDeviceFilterSection(to menu: NSMenu) {
+        let devices = existingDevices()
+        guard !devices.isEmpty else { return }
+        menu.addItem(.separator())
+        let heading = NSMenuItem(title: "Devices", action: nil, keyEquivalent: "")
+        heading.isEnabled = false
+        menu.addItem(heading)
+        for device in devices {
+            let item = addMenuItem(device, action: #selector(menuDeviceFilterChanged(_:)), to: menu)
+            item.representedObject = device
+            item.state = isDeviceFilterActive && device.caseInsensitiveCompare(deviceFilter) == .orderedSame ? .on : .off
+        }
     }
 
     private func metadataText(for entry: ClipEntry) -> String {
@@ -2665,7 +2773,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if !rows.contains(where: {
             if case .entry(let entry) = $0 { return entry.Id == id }
             return false
-        }), groupFilter.caseInsensitiveCompare("All") != .orderedSame {
+        }), isDeviceFilterActive || groupFilter.caseInsensitiveCompare("All") != .orderedSame {
             setGroupFilter("All")
         }
         applyFilter(preferredSelectedID: id)

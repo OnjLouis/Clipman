@@ -35,7 +35,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/template"
 )
 
-var version = "0.2.0-dev"
+var version = "0.3.0-dev"
 
 type appError struct {
 	code int
@@ -256,6 +256,9 @@ func tlsOptionsForGlobals(g globals, cfg config.Config) ([]server.Option, error)
 		return []server.Option{server.WithInsecureSkipVerify()}, nil
 	}
 	if cfg.CACertPEM != "" {
+		if cfg.CAExclusive {
+			return []server.Option{server.WithExclusiveCACertPEM([]byte(cfg.CACertPEM))}, nil
+		}
 		return []server.Option{server.WithCACertPEM([]byte(cfg.CACertPEM))}, nil
 	}
 	return nil, nil
@@ -454,6 +457,7 @@ func runInit(g globals, args []string) error {
 		return fail(2, "configuration already exists at %s; use --force to replace it", path)
 	}
 	serverURL := g.server
+	var connectionCACertPEM []byte
 	if *connectionFile == "" && *tokenValue == "" && *tokenFile == "" && serverURL == "" && !*nonInteractive {
 		useFile, promptErr := promptYesNo("Do you have a Clipman Server connection file (.clpconf)?", false)
 		if promptErr != nil {
@@ -482,11 +486,15 @@ func runInit(g globals, args []string) error {
 		if readErr != nil {
 			return fail(3, "cannot read connection file: %v", readErr)
 		}
-		extractedServer, extractedToken := server.ConnectionDetails(string(connectionData))
+		extractedServer, extractedToken, extractedCA, profileErr := server.ConnectionProfile(string(connectionData))
+		if profileErr != nil {
+			return fail(2, "invalid connection file: %v", profileErr)
+		}
 		if serverURL == "" {
 			serverURL = extractedServer
 		}
 		*tokenValue = extractedToken
+		connectionCACertPEM = []byte(extractedCA)
 	}
 	if serverURL == "" {
 		if *nonInteractive {
@@ -566,9 +574,15 @@ func runInit(g globals, args []string) error {
 	if g.insecure && g.caCertFile != "" {
 		return fail(2, "--insecure and --ca-cert cannot be used together")
 	}
+	if len(connectionCACertPEM) > 0 && (g.insecure || g.caCertFile != "") {
+		return fail(2, "a CA-bearing --connection-file cannot be combined with --insecure or --ca-cert")
+	}
 	var caCertPEM []byte
 	var tlsOptions []server.Option
 	switch {
+	case len(connectionCACertPEM) > 0:
+		caCertPEM = connectionCACertPEM
+		tlsOptions = append(tlsOptions, server.WithExclusiveCACertPEM(caCertPEM))
 	case g.insecure:
 		fmt.Fprintln(os.Stderr, "Warning: --insecure disables TLS certificate verification. Use only on a trusted private network.")
 		tlsOptions = append(tlsOptions, server.WithInsecureSkipVerify())
@@ -631,6 +645,14 @@ func runInit(g globals, args []string) error {
 	cfg.Server = normalized
 	cfg.TLSInsecure = g.insecure
 	cfg.CACertPEM = string(caCertPEM)
+	if len(connectionCACertPEM) > 0 {
+		authority, authorityErr := server.ParsePrivateAuthority(connectionCACertPEM, normalized)
+		if authorityErr != nil {
+			return fail(2, "invalid connection-file authority: %v", authorityErr)
+		}
+		cfg.CAExclusive = true
+		cfg.CAHost = authority.Host
+	}
 	cfg.Machine = strings.TrimSpace(*machine)
 	if cfg.Machine == "" {
 		cfg.Machine = hostname()

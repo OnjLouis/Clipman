@@ -73,8 +73,8 @@ struct ClipboardImportView: View {
                 .accessibilityAction(.escape) {
                     app.cancelClipboardImport()
                 }
-                PasteButton(payloadType: MobileClipboardPayload.self) { values in
-                    app.addPastedClipboardPayload(values.first)
+                Button("Paste") {
+                    app.addPastedClipboardPayload(MobileRichTextClipboard.readCurrent())
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityAction(.escape) {
@@ -96,15 +96,20 @@ struct LockedView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
-                Text("Clipman Locked")
+                Text(app.settings.requireAuthentication ? "Clipman Locked" : "Opening Clipman")
                     .font(.largeTitle)
                     .bold()
-                Text("Unlock to access clipboard history.")
+                Text(app.settings.requireAuthentication ? "Unlock to access clipboard history." : "Loading clipboard history.")
                     .font(.body)
-                Button("Unlock") {
-                    app.unlock()
+                if app.settings.requireAuthentication {
+                    Button("Unlock") {
+                        app.unlock()
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    ProgressView()
+                        .accessibilityLabel("Loading clipboard history")
                 }
-                .buttonStyle(.borderedProminent)
                 Text(app.status)
                     .font(.callout)
             }

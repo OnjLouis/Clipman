@@ -5,6 +5,8 @@ struct HistoryView: View {
     @EnvironmentObject private var app: ClipmanAppModel
     @State private var viewingEntry: ClipEntry?
     @State private var editingEntry: ClipEntry?
+    @State private var pendingDeleteEntry: ClipEntry?
+    @State private var showingHistoryFilter = false
 
     var body: some View {
         NavigationStack {
@@ -15,6 +17,7 @@ struct HistoryView: View {
                         ForEach(app.visibleSections) { section in
                             entryList(for: section)
                                 .tag(section)
+                                .accessibilityLabel("\(section.rawValue) clipboard history")
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
@@ -51,18 +54,33 @@ struct HistoryView: View {
             .sheet(item: $editingEntry) { entry in
                 EntryEditView(entry: entry)
             }
+            .sheet(isPresented: $showingHistoryFilter) {
+                HistoryFilterChooser()
+                    .environmentObject(app)
+            }
+            .alert("Delete clipboard entry?", isPresented: Binding(
+                get: { pendingDeleteEntry != nil },
+                set: { if !$0 { pendingDeleteEntry = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { pendingDeleteEntry = nil }
+                Button("Delete", role: .destructive) {
+                    guard let entry = pendingDeleteEntry else { return }
+                    pendingDeleteEntry = nil
+                    app.delete(entry)
+                }
+            } message: {
+                Text("This removes the entry from synchronized history.")
+            }
         }
     }
 
     private var controls: some View {
         VStack(spacing: 8) {
             HStack {
-                Picker("Group", selection: $app.groupFilter) {
-                    ForEach(app.groups, id: \.self) { group in
-                        Text(group).tag(group)
-                    }
+                Button("Filter: \(app.historyFilter.value.isEmpty ? "All" : app.historyFilter.value)") {
+                    showingHistoryFilter = true
                 }
-                .pickerStyle(.menu)
+                .accessibilityHint("Shows groups and devices.")
 
                 Spacer()
 
@@ -100,7 +118,7 @@ struct HistoryView: View {
                         copy: { app.copyText(item.url.absoluteString) },
                         open: { UIApplication.shared.open(item.url) },
                         view: { viewingEntry = item.entry },
-                        delete: { app.delete(item.entry) }
+                        delete: { requestDelete(item.entry) }
                     )
                     .id(item.id)
                 }
@@ -116,13 +134,21 @@ struct HistoryView: View {
                         view: { viewingEntry = entry },
                         edit: { editingEntry = entry },
                         togglePinned: { app.togglePinned(entry) },
-                        delete: { app.delete(entry) }
+                        delete: { requestDelete(entry) }
                     )
                     .id(entry.Id)
                 }
             }
         }
         .listStyle(.plain)
+    }
+
+    private func requestDelete(_ entry: ClipEntry) {
+        if app.settings.confirmDeletions {
+            pendingDeleteEntry = entry
+        } else {
+            app.delete(entry)
+        }
     }
 
     private var currentListIsEmpty: Bool {
@@ -165,6 +191,11 @@ private struct HistoryEntryRow: View {
     let togglePinned: () -> Void
     let delete: () -> Void
 
+    private var singleLink: URL? {
+        let links = LinkExtractor.links(in: entry.Text)
+        return links.count == 1 ? links[0] : nil
+    }
+
     var body: some View {
         EntryRow(entry: entry)
             .contentShape(Rectangle())
@@ -173,16 +204,26 @@ private struct HistoryEntryRow: View {
                 Button(role: .destructive, action: delete) {
                     Label("Delete", systemImage: "trash")
                 }
-                Button(action: view) {
-                    Label("View", systemImage: "doc.text.magnifyingglass")
-                }
-            }
-            .swipeActions(edge: .leading) {
+                .accessibilityLabel("Delete entry")
                 Button(action: togglePinned) {
                     Label(entry.Pinned ? "Unpin" : "Pin", systemImage: entry.Pinned ? "pin.slash" : "pin")
                 }
+                .accessibilityLabel(entry.Pinned ? "Unpin entry" : "Pin entry")
                 Button(action: edit) {
                     Label("Edit", systemImage: "pencil")
+                }
+                .accessibilityLabel("Edit entry")
+                Button(action: view) {
+                    Label("View", systemImage: "doc.text.magnifyingglass")
+                }
+                .accessibilityLabel("View entry")
+                if let url = singleLink {
+                    Button {
+                        UIApplication.shared.open(url)
+                    } label: {
+                        Label("Open", systemImage: "safari")
+                    }
+                    .accessibilityLabel("Open link")
                 }
             }
             .accessibilityElement(children: .ignore)
@@ -195,7 +236,7 @@ private struct HistoryEntryRow: View {
                 Button("Edit", action: edit)
                 Button(entry.Pinned ? "Unpin" : "Pin", action: togglePinned)
                 Button("Delete", role: .destructive, action: delete)
-                if LinkExtractor.links(in: entry.Text).count == 1, let url = LinkExtractor.links(in: entry.Text).first {
+                if let url = singleLink {
                     Button("Open Link") { UIApplication.shared.open(url) }
                 }
             }
@@ -230,8 +271,6 @@ private struct LinkHistoryRow: View {
             Button(action: view) {
                 Label("View Source Entry", systemImage: "doc.text.magnifyingglass")
             }
-        }
-        .swipeActions(edge: .leading) {
             Button(action: open) {
                 Label("Open", systemImage: "safari")
             }
@@ -271,6 +310,86 @@ private struct EntryRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct HistoryFilterChooser: View {
+    @EnvironmentObject private var app: ClipmanAppModel
+    @Environment(\.dismiss) private var dismiss
+    @AccessibilityFocusState private var focusedFilterID: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                List {
+                    filterButton(.all)
+                    if !app.groups.isEmpty {
+                        Section("Groups") {
+                            ForEach(app.groups, id: \.self) { group in
+                                filterButton(.init(kind: .group, value: group))
+                            }
+                        }
+                    }
+                    if !app.devices.isEmpty {
+                        Section("Devices") {
+                            ForEach(app.devices, id: \.self) { device in
+                                filterButton(.init(kind: .device, value: device))
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("History Filter")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+                .onAppear {
+                    let selectedID = normalizedCurrentFilter.id
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(selectedID, anchor: .center)
+                        focusedFilterID = selectedID
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func filterButton(_ filter: ClipmanAppModel.HistoryFilter) -> some View {
+        Button {
+            app.historyFilter = filter
+            dismiss()
+        } label: {
+            HStack {
+                Text(filter.value.isEmpty ? "All" : filter.value)
+                Spacer()
+                if isSelected(filter) {
+                    Image(systemName: "checkmark")
+                }
+            }
+        }
+        .id(filter.id)
+        .accessibilityValue(isSelected(filter) ? "Selected" : "")
+        .accessibilityFocused($focusedFilterID, equals: filter.id)
+    }
+
+    private var normalizedCurrentFilter: ClipmanAppModel.HistoryFilter {
+        switch app.historyFilter.kind {
+        case .all:
+            return .all
+        case .group:
+            let value = app.groups.first { $0.caseInsensitiveCompare(app.historyFilter.value) == .orderedSame }
+            return value.map { .init(kind: .group, value: $0) } ?? .all
+        case .device:
+            let value = app.devices.first { $0.caseInsensitiveCompare(app.historyFilter.value) == .orderedSame }
+            return value.map { .init(kind: .device, value: $0) } ?? .all
+        }
+    }
+
+    private func isSelected(_ filter: ClipmanAppModel.HistoryFilter) -> Bool {
+        filter.kind == app.historyFilter.kind &&
+            filter.value.caseInsensitiveCompare(app.historyFilter.value) == .orderedSame
     }
 }
 

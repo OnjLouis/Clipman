@@ -27,6 +27,7 @@ namespace Clipman
         private long serverNextPollUnixMs;
         private int serverConsecutiveFailures;
         private bool lastChangeWasExternal;
+        private string machineName;
 
         public event EventHandler Changed;
 
@@ -66,16 +67,34 @@ namespace Clipman
         {
         }
 
-        public ClipStore(string databasePath, string password)
+        public ClipStore(string databasePath, string password) : this(databasePath, password, Environment.MachineName)
         {
+        }
+
+        public ClipStore(string databasePath, string password, string machineName)
+        {
+            this.machineName = NormalizeMachineName(machineName);
             passwordProvider = () => password ?? string.Empty;
             SetDatabasePath(databasePath);
         }
 
-        public ClipStore(string databasePath, Func<string> passwordProvider)
+        public ClipStore(string databasePath, Func<string> passwordProvider) : this(databasePath, passwordProvider, Environment.MachineName)
         {
+        }
+
+        public ClipStore(string databasePath, Func<string> passwordProvider, string machineName)
+        {
+            this.machineName = NormalizeMachineName(machineName);
             this.passwordProvider = passwordProvider ?? (() => string.Empty);
             SetDatabasePath(databasePath);
+        }
+
+        public void SetMachineName(string value)
+        {
+            lock (sync)
+            {
+                machineName = NormalizeMachineName(value);
+            }
         }
 
         public void SetDatabasePath(string databasePath)
@@ -106,7 +125,12 @@ namespace Clipman
             OnChanged();
         }
 
-        public void ConfigureServerStorage(bool enabled, string serverUrl, string serverToken)
+        public void ConfigureServerStorage(
+            bool enabled,
+            string serverUrl,
+            string serverToken,
+            string serverCaCertPem,
+            string serverCaHost)
         {
             var queueInitialSync = false;
             lock (sync)
@@ -117,7 +141,14 @@ namespace Clipman
                     serverPollTimer = null;
                 }
 
-                serverClient = enabled ? new ServerStorageClient(serverUrl, serverToken, CurrentPassword()) : null;
+                serverClient = enabled
+                    ? new ServerStorageClient(
+                        serverUrl,
+                        serverToken,
+                        CurrentPassword(),
+                        serverCaCertPem,
+                        serverCaHost)
+                    : null;
                 serverRevision = string.Empty;
                 ResetServerStatusLocked();
                 if (serverClient == null || !serverClient.IsConfigured)
@@ -595,10 +626,14 @@ namespace Clipman
             if (idSet.Count == 0) return;
             lock (sync)
             {
+                var requestedGroup = (groupName ?? string.Empty).Trim();
+                var canonicalGroup = CanonicalLabels(database.Entries, e => e.Group)
+                    .FirstOrDefault(group => string.Equals(group, requestedGroup, StringComparison.CurrentCultureIgnoreCase))
+                    ?? requestedGroup;
                 var now = TimeUtil.NowUnixMs();
                 foreach (var entry in database.Entries.Where(e => idSet.Contains(e.Id)))
                 {
-                    entry.Group = (groupName ?? string.Empty).Trim();
+                    entry.Group = canonicalGroup;
                     entry.ModifiedUnixMs = now;
                 }
                 SaveLocked();
@@ -610,12 +645,7 @@ namespace Clipman
         {
             lock (sync)
             {
-                return database.Entries
-                    .Select(e => (e.Group ?? string.Empty).Trim())
-                    .Where(g => g.Length > 0)
-                    .Distinct(StringComparer.CurrentCultureIgnoreCase)
-                    .OrderBy(g => g, StringComparer.CurrentCultureIgnoreCase)
-                    .ToList();
+                return CanonicalLabels(database.Entries, e => e.Group);
             }
         }
 
@@ -829,12 +859,12 @@ namespace Clipman
             }
         }
 
-        public static List<ClipEntry> LoadEntriesFromFile(string path)
+        public List<ClipEntry> LoadEntriesFromFile(string path)
         {
             return LoadEntriesFromFile(path, string.Empty);
         }
 
-        public static List<ClipEntry> LoadEntriesFromFile(string path, string password)
+        public List<ClipEntry> LoadEntriesFromFile(string path, string password)
         {
             var extension = Path.GetExtension(path).ToLowerInvariant();
             if (extension == ".txt")
@@ -1339,6 +1369,41 @@ namespace Clipman
             return changed;
         }
 
+        public List<string> GetDevices()
+        {
+            lock (sync)
+            {
+                return CanonicalLabels(database.Entries, e => e.SourceMachine);
+            }
+        }
+
+        private static List<string> CanonicalLabels(IEnumerable<ClipEntry> entries, Func<ClipEntry, string> selector)
+        {
+            return entries
+                .Select(entry => new
+                {
+                    Entry = entry,
+                    Label = (selector(entry) ?? string.Empty).Trim()
+                })
+                .Where(item => item.Label.Length > 0)
+                .GroupBy(item => item.Label, StringComparer.CurrentCultureIgnoreCase)
+                .Select(group => group
+                    .GroupBy(item => item.Label, StringComparer.Ordinal)
+                    .Select(spelling => new
+                    {
+                        Label = spelling.Key,
+                        Count = spelling.Count(),
+                        Latest = spelling.Max(item => Math.Max(item.Entry.ModifiedUnixMs,
+                            Math.Max(item.Entry.LastUsedUnixMs, item.Entry.CreatedUnixMs)))
+                    })
+                    .OrderByDescending(item => item.Count)
+                    .ThenByDescending(item => item.Latest)
+                    .ThenBy(item => item.Label, StringComparer.Ordinal)
+                    .First().Label)
+                .OrderBy(label => label, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+
         private static bool HasLocalStateMissingFromServer(ClipDatabase target, ClipDatabase source)
         {
             if (target == null || source == null || source.Entries == null) return false;
@@ -1622,9 +1687,15 @@ namespace Clipman
                    ex is System.Security.SecurityException;
         }
 
-        private static string CurrentMachineName()
+        private string CurrentMachineName()
         {
-            return (Environment.MachineName ?? string.Empty).Trim();
+            return machineName;
+        }
+
+        private static string NormalizeMachineName(string value)
+        {
+            var normalized = (value ?? string.Empty).Trim();
+            return normalized.Length == 0 ? (Environment.MachineName ?? string.Empty).Trim() : normalized;
         }
 
         private void OnChanged()

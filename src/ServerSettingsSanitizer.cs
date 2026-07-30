@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 
@@ -119,7 +123,13 @@ namespace Clipman
                     return false;
                 }
 
-                details = new ServerConnectionDetails(address, token);
+                ServerCertificateAuthority authority;
+                if (!TryParseCertificateAuthority(GetString(parsed, "ca_cert_pem"), address, out authority, out error))
+                {
+                    return false;
+                }
+
+                details = new ServerConnectionDetails(address, token, authority);
                 return true;
             }
             catch (Exception ex)
@@ -130,6 +140,17 @@ namespace Clipman
         }
 
         public static bool TryCreateConnectionConfig(string addressValue, string tokenValue, out string json, out string error)
+        {
+            return TryCreateConnectionConfig(addressValue, tokenValue, string.Empty, string.Empty, out json, out error);
+        }
+
+        public static bool TryCreateConnectionConfig(
+            string addressValue,
+            string tokenValue,
+            string caCertPem,
+            string caHost,
+            out string json,
+            out string error)
         {
             json = string.Empty;
             error = string.Empty;
@@ -149,6 +170,19 @@ namespace Clipman
                 return false;
             }
 
+            ServerCertificateAuthority authority;
+            if (!TryParseCertificateAuthority(caCertPem, address, out authority, out error))
+            {
+                return false;
+            }
+            if (authority != null &&
+                !string.IsNullOrWhiteSpace(caHost) &&
+                !string.Equals(authority.Host, caHost.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                error = "The private certificate authority is configured for a different server host.";
+                return false;
+            }
+
             var values = new Dictionary<string, object>
             {
                 { "clipman", "server-connection" },
@@ -158,8 +192,125 @@ namespace Clipman
                 { "port", uri.IsDefaultPort ? (string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80) : uri.Port },
                 { "token", token }
             };
+            if (authority != null)
+            {
+                values["ca_cert_pem"] = authority.Pem;
+            }
             json = new JavaScriptSerializer().Serialize(values);
             return true;
+        }
+
+        public static bool TryParseCertificateAuthority(
+            string pemValue,
+            string addressValue,
+            out ServerCertificateAuthority authority,
+            out string error)
+        {
+            authority = null;
+            error = string.Empty;
+            var pem = (pemValue ?? string.Empty).Trim();
+            if (pem.Length == 0) return true;
+            if (Encoding.UTF8.GetByteCount(pem) > 32 * 1024)
+            {
+                error = "The private certificate authority exceeds the 32 KiB limit.";
+                return false;
+            }
+            if (pem.IndexOf("PRIVATE KEY", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                error = "The private certificate authority must not contain private key material.";
+                return false;
+            }
+
+            var match = Regex.Match(
+                pem,
+                @"\A\s*-----BEGIN CERTIFICATE-----\s*(?<data>[A-Za-z0-9+/=\r\n]+?)\s*-----END CERTIFICATE-----\s*\z",
+                RegexOptions.CultureInvariant);
+            if (!match.Success)
+            {
+                error = "The private certificate authority must contain exactly one PEM CERTIFICATE block.";
+                return false;
+            }
+
+            byte[] raw;
+            X509Certificate2 certificate;
+            try
+            {
+                raw = Convert.FromBase64String(Regex.Replace(match.Groups["data"].Value, @"\s+", string.Empty));
+                certificate = new X509Certificate2(raw);
+            }
+            catch (Exception ex)
+            {
+                error = "Clipman could not parse the private certificate authority: " + ex.Message;
+                return false;
+            }
+
+            var isAuthority = false;
+            var canSign = true;
+            foreach (X509Extension extension in certificate.Extensions)
+            {
+                if (extension.Oid != null && extension.Oid.Value == "2.5.29.19")
+                {
+                    var constraints = new X509BasicConstraintsExtension(extension, extension.Critical);
+                    isAuthority = constraints.CertificateAuthority;
+                }
+                else if (extension.Oid != null && extension.Oid.Value == "2.5.29.15")
+                {
+                    var usage = new X509KeyUsageExtension(extension, extension.Critical);
+                    canSign = (usage.KeyUsages & X509KeyUsageFlags.KeyCertSign) != 0;
+                }
+            }
+            if (!isAuthority)
+            {
+                error = "The configured certificate is not marked as a certificate authority.";
+                return false;
+            }
+            if (!canSign)
+            {
+                error = "The configured certificate authority cannot sign certificates.";
+                return false;
+            }
+            var now = DateTime.Now;
+            if (now < certificate.NotBefore)
+            {
+                error = "The configured certificate authority is not valid yet.";
+                return false;
+            }
+            if (now > certificate.NotAfter)
+            {
+                error = "The configured certificate authority has expired.";
+                return false;
+            }
+
+            Uri uri;
+            var displayAddress = CleanUrl(addressValue);
+            var transportAddress = CleanTransportUrl(displayAddress);
+            if (!Uri.TryCreate(transportAddress, UriKind.Absolute, out uri) ||
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(uri.Host))
+            {
+                error = "A private certificate authority can be used only with an HTTPS server address.";
+                return false;
+            }
+
+            var canonicalPem = "-----BEGIN CERTIFICATE-----\n" +
+                Convert.ToBase64String(raw, Base64FormattingOptions.InsertLineBreaks).Replace("\r\n", "\n") +
+                "\n-----END CERTIFICATE-----\n";
+            authority = new ServerCertificateAuthority(
+                canonicalPem,
+                uri.Host,
+                raw,
+                certificate.Subject,
+                certificate.NotAfter,
+                Sha256Fingerprint(raw));
+            return true;
+        }
+
+        private static string Sha256Fingerprint(byte[] raw)
+        {
+            using (var sha = SHA256.Create())
+            {
+                return BitConverter.ToString(sha.ComputeHash(raw)).Replace("-", ":");
+            }
         }
 
         private static string GetString(Dictionary<string, object> values, string key)
@@ -199,13 +350,41 @@ namespace Clipman
 
     internal sealed class ServerConnectionDetails
     {
-        public ServerConnectionDetails(string address, string token)
+        public ServerConnectionDetails(string address, string token, ServerCertificateAuthority authority)
         {
             Address = address;
             Token = token;
+            Authority = authority;
         }
 
         public string Address { get; private set; }
         public string Token { get; private set; }
+        public ServerCertificateAuthority Authority { get; private set; }
+    }
+
+    internal sealed class ServerCertificateAuthority
+    {
+        public ServerCertificateAuthority(
+            string pem,
+            string host,
+            byte[] rawData,
+            string subject,
+            DateTime expires,
+            string fingerprint)
+        {
+            Pem = pem ?? string.Empty;
+            Host = host ?? string.Empty;
+            RawData = rawData ?? new byte[0];
+            Subject = subject ?? string.Empty;
+            Expires = expires;
+            Fingerprint = fingerprint ?? string.Empty;
+        }
+
+        public string Pem { get; private set; }
+        public string Host { get; private set; }
+        public byte[] RawData { get; private set; }
+        public string Subject { get; private set; }
+        public DateTime Expires { get; private set; }
+        public string Fingerprint { get; private set; }
     }
 }

@@ -12,6 +12,8 @@ struct ClipmanSettings: Equatable, Sendable {
     var storageMode: MobileStorageMode
     var serverURL: String
     var serverToken: String
+    var serverCaCertPEM: String
+    var serverCaHost: String
     var historyPassword: String
     var deviceName: String
     var soundsEnabled: Bool
@@ -21,6 +23,7 @@ struct ClipmanSettings: Equatable, Sendable {
     var requireAuthentication: Bool
     var linksEnabled: Bool
     var richTextEnabled: Bool
+    var confirmDeletions: Bool
     var cloudBackupEnabled: Bool
     var cloudBackupBookmark: Data
     var cloudBackupFolderName: String
@@ -31,6 +34,8 @@ struct ClipmanSettings: Equatable, Sendable {
             storageMode: .server,
             serverURL: "",
             serverToken: "",
+            serverCaCertPEM: "",
+            serverCaHost: "",
             historyPassword: "",
             deviceName: UIDeviceMachine.name,
             soundsEnabled: true,
@@ -40,6 +45,7 @@ struct ClipmanSettings: Equatable, Sendable {
             requireAuthentication: false,
             linksEnabled: true,
             richTextEnabled: false,
+            confirmDeletions: true,
             cloudBackupEnabled: false,
             cloudBackupBookmark: Data(),
             cloudBackupFolderName: ""
@@ -58,7 +64,10 @@ enum SettingsStore {
         static let requireAuthentication = "requireAuthentication"
         static let linksEnabled = "linksEnabled"
         static let richTextEnabled = "richTextEnabled"
+        static let confirmDeletions = "confirmDeletions"
         static let serverToken = "serverToken"
+        static let serverCaCertPEM = "serverCaCertPEM"
+        static let serverCaHost = "serverCaHost"
         static let historyPassword = "historyPassword"
         static let deviceName = "deviceName"
         static let cloudBackupEnabled = "cloudBackupEnabled"
@@ -78,6 +87,7 @@ enum SettingsStore {
         settings.requireAuthentication = UserDefaults.standard.object(forKey: Keys.requireAuthentication) as? Bool ?? false
         settings.linksEnabled = UserDefaults.standard.object(forKey: Keys.linksEnabled) as? Bool ?? true
         settings.richTextEnabled = UserDefaults.standard.object(forKey: Keys.richTextEnabled) as? Bool ?? false
+        settings.confirmDeletions = UserDefaults.standard.object(forKey: Keys.confirmDeletions) as? Bool ?? true
         settings.cloudBackupEnabled = UserDefaults.standard.object(forKey: Keys.cloudBackupEnabled) as? Bool ?? false
         settings.cloudBackupBookmark = UserDefaults.standard.data(forKey: Keys.cloudBackupBookmark) ?? Data()
         settings.cloudBackupFolderName = UserDefaults.standard.string(forKey: Keys.cloudBackupFolderName) ?? ""
@@ -90,6 +100,20 @@ enum SettingsStore {
             settings.deviceName = UIDeviceMachine.name
         }
         settings.serverToken = KeychainStore.string(for: Keys.serverToken)
+        settings.serverCaCertPEM = UserDefaults.standard.string(forKey: Keys.serverCaCertPEM) ?? ""
+        settings.serverCaHost = UserDefaults.standard.string(forKey: Keys.serverCaHost) ?? ""
+        if let authority = try? ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPEM, address: settings.serverURL) {
+            if settings.serverCaHost.isEmpty || settings.serverCaHost.caseInsensitiveCompare(authority.host) == .orderedSame {
+                settings.serverCaCertPEM = authority.pem
+                settings.serverCaHost = authority.host
+            } else {
+                settings.serverCaCertPEM = ""
+                settings.serverCaHost = ""
+            }
+        } else if !settings.serverCaCertPEM.isEmpty {
+            settings.serverCaCertPEM = ""
+            settings.serverCaHost = ""
+        }
         settings.historyPassword = KeychainStore.string(for: Keys.historyPassword)
         return settings
     }
@@ -97,6 +121,8 @@ enum SettingsStore {
     static func save(_ settings: ClipmanSettings) {
         UserDefaults.standard.set(settings.storageMode.rawValue, forKey: Keys.storageMode)
         UserDefaults.standard.set(settings.serverURL, forKey: Keys.serverURL)
+        UserDefaults.standard.set(settings.serverCaCertPEM, forKey: Keys.serverCaCertPEM)
+        UserDefaults.standard.set(settings.serverCaHost, forKey: Keys.serverCaHost)
         UserDefaults.standard.set(settings.soundsEnabled, forKey: Keys.soundsEnabled)
         UserDefaults.standard.set(settings.hapticsEnabled, forKey: Keys.hapticsEnabled)
         UserDefaults.standard.set(settings.autoCopyRemote, forKey: Keys.autoCopyRemote)
@@ -104,6 +130,7 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.requireAuthentication, forKey: Keys.requireAuthentication)
         UserDefaults.standard.set(settings.linksEnabled, forKey: Keys.linksEnabled)
         UserDefaults.standard.set(settings.richTextEnabled, forKey: Keys.richTextEnabled)
+        UserDefaults.standard.set(settings.confirmDeletions, forKey: Keys.confirmDeletions)
         UserDefaults.standard.set(settings.cloudBackupEnabled, forKey: Keys.cloudBackupEnabled)
         UserDefaults.standard.set(settings.cloudBackupBookmark, forKey: Keys.cloudBackupBookmark)
         UserDefaults.standard.set(settings.cloudBackupFolderName, forKey: Keys.cloudBackupFolderName)

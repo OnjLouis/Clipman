@@ -77,11 +77,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         migrateLegacyKeychainPasswordIfNeeded()
         let initialPassword = initialDatabasePassword()
         seedServerCacheFromConfiguredDatabase()
-        store = ClipStore(databaseURL: textHistoryURL(for: settings), machineName: settings.machineName)
+        store = ClipStore(databaseURL: textHistoryURL(for: settings), machineName: settings.deviceName)
         store.delegate = self
         store.setDatabaseURL(textHistoryURL(for: settings), password: initialPassword)
         configureTextHistoryServerStorage()
-        fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.machineName, password: initialPassword)
+        fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.deviceName, password: initialPassword)
         fileStore.delegate = self
         fileStore.load()
         secretStore = SecretStore(databaseURL: secretsURL(for: settings), passwordProvider: { [weak self] in
@@ -100,7 +100,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
             richTextHistoryEnabled: settings.richTextHistoryEnabled,
-            groupFilter: settings.groupFilter
+            groupFilter: settings.groupFilter,
+            historyFilterType: settings.historyFilterType,
+            deviceFilter: settings.deviceFilter,
+            confirmDeletions: settings.confirmDeletions
         )
         configureHistoryQuickCopyState()
         sounds.isEnabled = settings.soundsEnabled
@@ -600,7 +603,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             "Version: \(version)",
             "Build: \(build)",
             "Build stamp: \(buildStamp)",
-            "Device: \(settings.machineName)",
+            "Device: \(settings.deviceName)",
             "Monitoring: \(settings.monitoringEnabled ? "On" : "Off")",
             "Data folder: \(dataFolder)",
             "Storage mode: \(settings.storageMode)",
@@ -701,7 +704,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             sounds.play(.skip)
             return
         }
-        if store.hasRecentlyTouchedRemoteText(text, excluding: settings.machineName) {
+        if store.hasRecentlyTouchedRemoteText(text, excluding: settings.deviceName) {
             return
         }
         if SensitiveDataExclusion.matchName(in: text, mode: settings.sensitiveDataMode, presetIds: settings.sensitiveDataPresetIds) != nil {
@@ -1047,7 +1050,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             .components(separatedBy: "\n---\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .map { ClipEntry(Text: $0, SourceMachine: settings.machineName) }
+            .map { ClipEntry(Text: $0, SourceMachine: settings.deviceName) }
         store.insertTextsAfterSelected(pasted, afterID: entry?.Id)
     }
 
@@ -1395,9 +1398,22 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindow(_ controller: HistoryWindowController, didChangeGroupFilter groupFilter: String) {
+        settings.historyFilterType = "Group"
         settings.groupFilter = groupFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All" : groupFilter
         try? settingsStore.save(settings)
         refreshHistoryWindow()
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didChangeDeviceFilter deviceFilter: String) {
+        settings.historyFilterType = "Device"
+        settings.deviceFilter = deviceFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "All" : deviceFilter
+        try? settingsStore.save(settings)
+        refreshHistoryWindow()
+    }
+
+    func historyWindowDidDisableDeletionConfirmation(_ controller: HistoryWindowController) {
+        settings.confirmDeletions = false
+        try? settingsStore.save(settings)
     }
 
     func historyWindowDidRequestPreferences(_ controller: HistoryWindowController) {
@@ -1527,9 +1543,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         seedServerCacheFromConfiguredDatabase()
         let password = currentDatabasePassword(for: settings.databasePath)
+        store.setMachineName(settings.deviceName)
         store.setDatabaseURL(textHistoryURL(for: settings), password: password)
         configureTextHistoryServerStorage()
-        fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.machineName, password: password)
+        fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.deviceName, password: password)
         fileStore.delegate = self
         fileStore.load()
         secretStore.setDatabaseURL(secretsURL(for: settings))
@@ -1544,7 +1561,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             historyTabOrder: settings.historyTabOrder,
             linksHistoryEnabled: settings.linksHistoryEnabled,
             richTextHistoryEnabled: settings.richTextHistoryEnabled,
-            groupFilter: settings.groupFilter
+            groupFilter: settings.groupFilter,
+            historyFilterType: settings.historyFilterType,
+            deviceFilter: settings.deviceFilter,
+            confirmDeletions: settings.confirmDeletions
         )
         refreshHistoryWindow()
         rebuildMenu()
@@ -1612,7 +1632,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     private func copyLatestRemoteTextIfNeeded() {
         guard settings.autoCopyLatestRemoteText,
-              let entry = store.newestRemoteCreatedEntry(excluding: settings.machineName)
+              let entry = store.newestRemoteCreatedEntry(excluding: settings.deviceName)
         else {
             remoteClipboardBaseline = nil
             return
@@ -1635,7 +1655,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     private func resetRemoteClipboardBaseline() {
         guard settings.autoCopyLatestRemoteText,
-              let entry = store?.newestRemoteCreatedEntry(excluding: settings.machineName)
+              let entry = store?.newestRemoteCreatedEntry(excluding: settings.deviceName)
         else {
             remoteClipboardBaseline = nil
             return
@@ -1783,7 +1803,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         store.configureServerStorage(
             enabled: isServerStorageEnabled(settings),
             serverURL: settings.serverUrl,
-            serverToken: settings.serverToken
+            serverToken: settings.serverToken,
+            serverCaCertPEM: settings.serverCaCertPem,
+            serverCaHost: settings.serverCaHost
         )
     }
 

@@ -53,13 +53,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -280,15 +283,20 @@ private enum class HistorySection(val label: String) {
     Links("Links")
 }
 
+private enum class HistoryFilterKind { Group, Device }
+
 private data class MobileSettingsSnapshot(
     val storageMode: MobileStorageMode,
     val serverUrl: String,
     val token: String,
+    val serverCaCertPem: String,
+    val serverCaHost: String,
     val password: String,
     val deviceName: String,
     val copyRemoteToClipboard: Boolean,
     val addClipboardOnLaunch: Boolean,
     val richTextEnabled: Boolean,
+    val confirmDeletions: Boolean,
     val requireAuthentication: Boolean,
     val checkForUpdatesAutomatically: Boolean,
     val playSounds: Boolean,
@@ -324,6 +332,8 @@ private fun ClipmanApp(
     var serverUrl by remember { mutableStateOf(settings.serverUrl) }
     var storageMode by remember { mutableStateOf(settings.storageMode) }
     var token by remember { mutableStateOf(settings.serverToken) }
+    var serverCaCertPem by remember { mutableStateOf(settings.serverCaCertPem) }
+    var serverCaHost by remember { mutableStateOf(settings.serverCaHost) }
     var password by remember { mutableStateOf(settings.historyPassword) }
     var deviceName by remember { mutableStateOf(settings.deviceName) }
     var showPassword by remember { mutableStateOf(false) }
@@ -333,6 +343,7 @@ private fun ClipmanApp(
     var copyRemoteToClipboard by remember { mutableStateOf(settings.copyRemoteToClipboard) }
     var addClipboardOnLaunch by remember { mutableStateOf(settings.addClipboardOnLaunch) }
     var richTextEnabled by remember { mutableStateOf(settings.richTextEnabled) }
+    var confirmDeletions by remember { mutableStateOf(settings.confirmDeletions) }
     var requireAuthentication by remember { mutableStateOf(settings.requireAuthentication) }
     var checkForUpdatesAutomatically by remember { mutableStateOf(settings.checkForUpdatesAutomatically) }
     var playSounds by remember { mutableStateOf(settings.playSounds) }
@@ -341,12 +352,17 @@ private fun ClipmanApp(
     var cloudBackupTreeUri by remember { mutableStateOf(settings.cloudBackupTreeUri) }
     var cloudBackupLocationName by remember { mutableStateOf(settings.cloudBackupLocationName) }
     var status by remember { mutableStateOf("Not loaded.") }
+    var steadyStatus by remember { mutableStateOf("Ready.") }
+    var transientStatusActive by remember { mutableStateOf(false) }
+    var statusSequence by remember { mutableStateOf(0L) }
     var search by remember { mutableStateOf("") }
     var section by remember { mutableStateOf(HistorySection.Text) }
     val visibleSections = remember(richTextEnabled) { visibleHistorySections(richTextEnabled) }
     val pagerState = rememberPagerState(pageCount = { visibleSections.size })
     var sortMode by remember { mutableStateOf(HistorySort.Manual) }
     var groupFilter by remember { mutableStateOf("") }
+    var deviceFilter by remember { mutableStateOf("") }
+    var historyFilterKind by remember { mutableStateOf(HistoryFilterKind.Group) }
     var entries by remember { mutableStateOf<List<ClipEntry>>(emptyList()) }
     var database by remember { mutableStateOf(ClipDatabase()) }
     var viewingEntry by remember { mutableStateOf<ClipEntry?>(null) }
@@ -372,7 +388,31 @@ private fun ClipmanApp(
     var pendingUpdateApk by remember { mutableStateOf<File?>(null) }
     var pendingConnectionExport by remember { mutableStateOf<String?>(null) }
     var showConnectionExportWarning by remember { mutableStateOf(false) }
+    var pendingServerAuthority by remember { mutableStateOf<ServerCertificateAuthority?>(null) }
     var enableBackupAfterFolderChoice by remember { mutableStateOf(false) }
+
+    fun setTransientStatus(message: String) {
+        statusSequence += 1
+        val sequence = statusSequence
+        transientStatusActive = true
+        status = message
+        scope.launch {
+            delay(10_000)
+            if (statusSequence == sequence) {
+                transientStatusActive = false
+                status = steadyStatus
+            }
+        }
+    }
+
+    fun setSteadyStatus(message: String, revealImmediately: Boolean = true) {
+        steadyStatus = message
+        if (revealImmediately || !transientStatusActive) {
+            statusSequence += 1
+            transientStatusActive = false
+            status = message
+        }
+    }
 
     fun launchTrustedExternalActivity(action: () -> Unit) {
         activity?.beginTrustedExternalActivity()
@@ -404,6 +444,13 @@ private fun ClipmanApp(
                     storageMode = MobileStorageMode.Server
                     serverUrl = details.address
                     token = details.token
+                    if (details.authority != null) {
+                        serverCaCertPem = details.authority.pem
+                        serverCaHost = details.authority.host
+                    } else if (runCatching { ServerConnectionConfig.parseAuthority(serverCaCertPem, details.address) }.getOrNull() == null) {
+                        serverCaCertPem = ""
+                        serverCaHost = ""
+                    }
                     status = "Server connection imported. Review it, then choose Save."
                     announce(view, status)
                 }
@@ -411,6 +458,21 @@ private fun ClipmanApp(
                     status = "Could not import server connection: ${error.message ?: error::class.java.simpleName}"
                     announce(view, status)
                 }
+        }
+    }
+    val importServerAuthority = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val pem = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readLimitedText(32 * 1024) }
+                    ?: error("The selected certificate could not be read.")
+                ServerConnectionConfig.parseAuthority(pem, serverUrl)
+                    ?: error("The selected file does not contain a certificate authority.")
+            }.onSuccess { authority ->
+                pendingServerAuthority = authority
+            }.onFailure { error ->
+                status = "Could not import private authority: ${error.message ?: error::class.java.simpleName}"
+                announce(view, status)
+            }
         }
     }
     val exportServerConnection = rememberLauncherForActivityResult(
@@ -458,6 +520,13 @@ private fun ClipmanApp(
             storageMode = MobileStorageMode.Server
             serverUrl = details.address
             token = details.token
+            if (details.authority != null) {
+                serverCaCertPem = details.authority.pem
+                serverCaHost = details.authority.host
+            } else if (runCatching { ServerConnectionConfig.parseAuthority(serverCaCertPem, details.address) }.getOrNull() == null) {
+                serverCaCertPem = ""
+                serverCaHost = ""
+            }
             showConnectionSettings = true
             status = "Server connection imported. Review it, then choose Save."
         } else {
@@ -484,11 +553,14 @@ private fun ClipmanApp(
         serverUrl = settings.serverUrl
         storageMode = settings.storageMode
         token = settings.serverToken
+        serverCaCertPem = settings.serverCaCertPem
+        serverCaHost = settings.serverCaHost
         password = settings.historyPassword
         deviceName = settings.deviceName
         copyRemoteToClipboard = settings.copyRemoteToClipboard
         addClipboardOnLaunch = settings.addClipboardOnLaunch
         richTextEnabled = settings.richTextEnabled
+        confirmDeletions = settings.confirmDeletions
         requireAuthentication = settings.requireAuthentication
         checkForUpdatesAutomatically = settings.checkForUpdatesAutomatically
         playSounds = settings.playSounds
@@ -507,11 +579,14 @@ private fun ClipmanApp(
         settings.serverUrl = snapshot.serverUrl
         settings.storageMode = snapshot.storageMode
         settings.serverToken = snapshot.token
+        settings.serverCaCertPem = snapshot.serverCaCertPem
+        settings.serverCaHost = snapshot.serverCaHost
         settings.historyPassword = snapshot.password
         settings.deviceName = snapshot.deviceName
         settings.copyRemoteToClipboard = snapshot.copyRemoteToClipboard
         settings.addClipboardOnLaunch = snapshot.addClipboardOnLaunch
         settings.richTextEnabled = snapshot.richTextEnabled
+        settings.confirmDeletions = snapshot.confirmDeletions
         settings.requireAuthentication = snapshot.requireAuthentication
         settings.checkForUpdatesAutomatically = snapshot.checkForUpdatesAutomatically
         settings.playSounds = snapshot.playSounds
@@ -526,7 +601,6 @@ private fun ClipmanApp(
 
     fun loadHistory(
         announceResult: Boolean = true,
-        updateStatusWhenUnchanged: Boolean = true,
         checkRevisionFirst: Boolean = false
     ) {
         if (storageMode == MobileStorageMode.Server && (serverUrl.isBlank() || token.isBlank())) {
@@ -540,6 +614,8 @@ private fun ClipmanApp(
         val requestedMode = storageMode
         val requestedServerUrl = serverUrl
         val requestedToken = token
+        val requestedCaCertPem = serverCaCertPem
+        val requestedCaHost = serverCaHost
         val requestedPassword = password
         val databaseSnapshot = database
         val requestedRevision = currentRevision
@@ -552,6 +628,8 @@ private fun ClipmanApp(
         }
         scope.launch {
             val oldEntries = entries
+            var currentForSync = databaseSnapshot
+            var localCacheIsCurrent = false
             if (requestedMode == MobileStorageMode.Server && !hasLoadedHistory) {
                 val cachedPreview = withContext(Dispatchers.IO) {
                     storageMutex.withLock {
@@ -563,6 +641,8 @@ private fun ClipmanApp(
                     return@launch
                 }
                 if (cachedPreview != null) {
+                    currentForSync = cachedPreview
+                    localCacheIsCurrent = true
                     database = cachedPreview
                     entries = cachedPreview.Entries
                     hasLoadedHistory = true
@@ -577,7 +657,7 @@ private fun ClipmanApp(
                         } else {
                             try {
                                 if (checkRevisionFirst && requestedRevision.isNotBlank() && !requestedPendingChanges) {
-                                    val metadata = ServerStorageClient(requestedServerUrl, requestedToken, requestedPassword).metadata()
+                                    val metadata = ServerStorageClient(requestedServerUrl, requestedToken, requestedPassword, requestedCaCertPem, requestedCaHost).metadata()
                                     if (metadata == requestedRevision) {
                                         return@runCatching MobileSyncResult(databaseSnapshot, requestedRevision, false)
                                     }
@@ -586,8 +666,11 @@ private fun ClipmanApp(
                                     requestedServerUrl,
                                     requestedToken,
                                     requestedPassword,
-                                    databaseSnapshot,
-                                    requestedBackup
+                                    requestedCaCertPem,
+                                    requestedCaHost,
+                                    currentForSync,
+                                    requestedBackup,
+                                    localAlreadySaved = localCacheIsCurrent
                                 )
                             } catch (error: Throwable) {
                                 val cached = historyRepository.loadLocalOrNull(requestedPassword) ?: throw error
@@ -608,9 +691,14 @@ private fun ClipmanApp(
                 if (sync.pendingError == null) {
                     pollingFailureCount = 0
                     hasPendingLocalChanges = false
+                    setSteadyStatus(
+                        if (storageMode == MobileStorageMode.Local) "Ready. Using local history."
+                        else "Ready. Server sync connected.",
+                        revealImmediately = false
+                    )
                 } else {
                     pollingFailureCount = minOf(pollingFailureCount + 1, 4)
-                    status = "Using local history; server sync is pending: ${sync.pendingError}"
+                    setSteadyStatus("Using local history; server sync is pending: ${sync.pendingError}")
                 }
                 val loadedDatabase = sync.database
                 if (storageMode == MobileStorageMode.Local || sync.revision != currentRevision || entries.isEmpty() || !SyncConflictResolver.hasSameContent(database, loadedDatabase)) {
@@ -629,20 +717,12 @@ private fun ClipmanApp(
                         playSounds = playSounds,
                         useHaptics = useHaptics
                     )
-                    status = if (sync.pendingError != null) {
-                        "Using local history; server sync is pending: ${sync.pendingError}"
-                    } else if (remoteSource != null) {
-                        "Clipboard updated by $remoteSource."
-                    } else if (storageMode == MobileStorageMode.Local) {
-                        "Local history loaded. ${loadedStatusText(entries, richTextEnabled)}"
-                    } else {
-                        loadedStatusText(entries, richTextEnabled)
+                    if (remoteSource != null) {
+                        setTransientStatus("Clipboard updated by $remoteSource.")
                     }
-                } else if (updateStatusWhenUnchanged) {
-                    status = "History is already up to date."
                 }
                 if (sync.backupError != null) {
-                    status = "History loaded, but cloud backup failed: ${sync.backupError}"
+                    setSteadyStatus("History loaded, but cloud backup failed: ${sync.backupError}")
                 }
                 if (announceResult) announce(view, "History refreshed")
                 if (!launchClipboardHandled) {
@@ -651,7 +731,7 @@ private fun ClipmanApp(
                 }
             }.onFailure { error ->
                 pollingFailureCount = minOf(pollingFailureCount + 1, 4)
-                status = "Could not load history: ${error.message ?: error::class.java.simpleName}"
+                setSteadyStatus("Could not load history: ${error.message ?: error::class.java.simpleName}")
                 if (announceResult && storageMode == MobileStorageMode.Server && !hasLoadedHistory) showConnectionSettings = true
                 if (announceResult) announce(view, "Could not load history")
             }
@@ -666,14 +746,19 @@ private fun ClipmanApp(
         val requestedMode = storageMode
         val requestedServerUrl = serverUrl
         val requestedToken = token
+        val requestedCaCertPem = serverCaCertPem
+        val requestedCaHost = serverCaHost
         val requestedPassword = password
         val requestedBackup = backupOptions()
-        status = "$actionText..."
         val updatedLocal = mutation(database)
         database = updatedLocal
         entries = updatedLocal.Entries
         hasLoadedHistory = true
         if (requestedMode == MobileStorageMode.Server) hasPendingLocalChanges = true
+        setTransientStatus("$actionText complete.")
+        if (actionText == "Adding Android clipboard text") {
+            playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
+        }
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 storageMutex.withLock {
@@ -686,8 +771,11 @@ private fun ClipmanApp(
                                 requestedServerUrl,
                                 requestedToken,
                                 requestedPassword,
+                                requestedCaCertPem,
+                                requestedCaHost,
                                 updatedLocal,
-                                requestedBackup
+                                requestedBackup,
+                                localAlreadySaved = true
                             )
                             if (sync.backupError == null && backupError != null) sync.copy(backupError = backupError) else sync
                         }
@@ -701,22 +789,17 @@ private fun ClipmanApp(
                 currentRevision = sync.revision
                 hasPendingLocalChanges = false
                 pollingFailureCount = 0
-                status = when {
-                    sync.backupError != null -> "$actionText complete, but cloud backup failed: ${sync.backupError}"
-                    requestedMode == MobileStorageMode.Local -> "$actionText complete in local history."
-                    else -> "$actionText complete."
+                if (sync.backupError != null) {
+                    setSteadyStatus("$actionText complete, but cloud backup failed: ${sync.backupError}")
                 }
-                if (actionText == "Adding Android clipboard text") {
-                    playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
-                }
-                announce(view, "$actionText complete")
             }.onFailure { error ->
                 pollingFailureCount = minOf(pollingFailureCount + 1, 4)
-                status = if (requestedMode == MobileStorageMode.Server) {
+                val failure = if (requestedMode == MobileStorageMode.Server) {
                     "$actionText saved locally; server sync is pending: ${error.message ?: error::class.java.simpleName}"
                 } else {
                     "$actionText failed: ${error.message ?: error::class.java.simpleName}"
                 }
+                setSteadyStatus(failure)
             }
         }
     }
@@ -750,7 +833,7 @@ private fun ClipmanApp(
         val clipboardContent = RichTextClipboard.read(context, richTextEnabled)
         val clipboardText = clipboardContent.text.trim()
         if (clipboardText.isEmpty()) {
-            status = "The Android clipboard does not contain text to add."
+            setTransientStatus("The Android clipboard does not contain text to add.")
             return
         }
         saveDatabaseChange("Adding Android clipboard text") { database ->
@@ -844,7 +927,7 @@ private fun ClipmanApp(
                 attemptedInitialLoad = true
                 loadHistory()
             } else {
-                loadHistory(announceResult = false, updateStatusWhenUnchanged = false, checkRevisionFirst = true)
+                loadHistory(announceResult = false, checkRevisionFirst = true)
             }
         }
     }
@@ -853,21 +936,21 @@ private fun ClipmanApp(
         while (appIsForeground && storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
             val delaySeconds = minOf(60L, 15L * (1L shl pollingFailureCount.coerceIn(0, 2)))
             delay(delaySeconds * 1_000L)
-            loadHistory(announceResult = false, updateStatusWhenUnchanged = false, checkRevisionFirst = true)
+            loadHistory(announceResult = false, checkRevisionFirst = true)
         }
     }
 
     val sectionEntries = remember(entries, section, richTextEnabled) {
         entries.filter { entryBelongsToSection(it, section, richTextEnabled) }
     }
-    val groups = remember(sectionEntries) {
-        sectionEntries.map { it.Group.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+    val groups = remember(entries) {
+        canonicalLabels(entries) { it.Group }
     }
-    val visibleEntries = remember(sectionEntries, search, sortMode, groupFilter) {
-        filteredAndSortedEntries(sectionEntries, search, sortMode, groupFilter)
+    val devices = remember(entries) {
+        canonicalLabels(entries) { it.SourceMachine }
+    }
+    val visibleEntries = remember(sectionEntries, search, sortMode, historyFilterKind, groupFilter, deviceFilter) {
+        filteredAndSortedEntries(sectionEntries, search, sortMode, historyFilterKind, groupFilter, deviceFilter)
     }
     val selectedListState = when (section) {
         HistorySection.Text -> textListState
@@ -875,7 +958,7 @@ private fun ClipmanApp(
         HistorySection.Links -> linksListState
     }
 
-    LaunchedEffect(section, groupFilter, search, sortMode) {
+    LaunchedEffect(section, historyFilterKind, groupFilter, deviceFilter, search, sortMode) {
         if (visibleEntries.isNotEmpty()) selectedListState.scrollToItem(0)
     }
 
@@ -894,9 +977,10 @@ private fun ClipmanApp(
         val newSection = visibleSections.getOrNull(pagerState.currentPage) ?: HistorySection.Text
         if (section != newSection) {
             section = newSection
-            groupFilter = ""
             if (announcedFirstPage) {
-                announce(view, "${newSection.label} history")
+                setTransientStatus(
+                    "${newSection.label} clipboard history. Page ${pagerState.currentPage + 1} of ${visibleSections.size}."
+                )
             }
         } else {
             announcedFirstPage = true
@@ -915,8 +999,12 @@ private fun ClipmanApp(
             },
             onDelete = {
                 editingEntry = null
-                saveDatabaseChange("Deleting entry") { database ->
-                    SyncConflictResolver.deleteEntry(database, entry.Id)
+                if (confirmDeletions) {
+                    deleteCandidate = entry
+                } else {
+                    saveDatabaseChange("Deleting entry") { database ->
+                        SyncConflictResolver.deleteEntry(database, entry.Id)
+                    }
                 }
             }
         )
@@ -930,8 +1018,7 @@ private fun ClipmanApp(
             onCopy = {
                 RichTextClipboard.write(context, entry, richTextEnabled)
                 playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
-                announce(view, "Copied to clipboard")
-                status = "Copied selected entry to Android clipboard."
+                setTransientStatus("Copied selected entry to Android clipboard.")
             },
             onOpenLink = { link ->
                 openLink(context, link)
@@ -970,10 +1057,18 @@ private fun ClipmanApp(
     if (showGroupPicker) {
         GroupPickerDialog(
             groups = groups,
+            devices = devices,
+            selectedKind = historyFilterKind,
             selectedGroup = groupFilter,
+            selectedDevice = deviceFilter,
             onDismiss = { showGroupPicker = false },
-            onSelect = {
-                groupFilter = it
+            onSelect = { kind, value ->
+                historyFilterKind = kind
+                if (kind == HistoryFilterKind.Device) {
+                    deviceFilter = value
+                } else {
+                    groupFilter = value
+                }
                 showGroupPicker = false
             }
         )
@@ -986,7 +1081,7 @@ private fun ClipmanApp(
             confirmButton = {
                 TextButton(onClick = {
                     showConnectionExportWarning = false
-                    runCatching { ServerConnectionConfig.create(serverUrl, token) }
+                    runCatching { ServerConnectionConfig.create(serverUrl, token, serverCaCertPem, serverCaHost) }
                         .onSuccess { content ->
                             pendingConnectionExport = content
                             launchTrustedExternalActivity {
@@ -1001,6 +1096,33 @@ private fun ClipmanApp(
             },
             dismissButton = {
                 TextButton(onClick = { showConnectionExportWarning = false }) { Text("Cancel") }
+            }
+        )
+    }
+    pendingServerAuthority?.let { authority ->
+        AlertDialog(
+            onDismissRequest = { pendingServerAuthority = null },
+            title = { Text("Import private authority for this server?") },
+            text = {
+                Text(
+                    "Host: ${authority.host}\n" +
+                        "Subject: ${authority.subject}\n" +
+                        "Expires: ${DateFormat.getDateInstance(DateFormat.LONG).format(java.util.Date(authority.expiresUnixMs))}\n" +
+                        "SHA-256 fingerprint: ${authority.fingerprint}\n\n" +
+                        "Clipman will trust this authority only for the displayed server host."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    serverCaCertPem = authority.pem
+                    serverCaHost = authority.host
+                    pendingServerAuthority = null
+                    status = "Private certificate authority imported for ${authority.host}. Choose Save to apply it."
+                    announce(view, status)
+                }) { Text("Import") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingServerAuthority = null }) { Text("Cancel") }
             }
         )
     }
@@ -1020,6 +1142,12 @@ private fun ClipmanApp(
                 onServerUrlChanged = { serverUrl = it },
                 token = token,
                 onTokenChanged = { token = it },
+                serverCaCertPem = serverCaCertPem,
+                serverCaHost = serverCaHost,
+                onRemoveServerAuthority = {
+                    serverCaCertPem = ""
+                    serverCaHost = ""
+                },
                 onPasteToken = {
                     val pasted = cleanServerToken(readClipboardText(context))
                     if (pasted.isNotBlank()) {
@@ -1037,6 +1165,9 @@ private fun ClipmanApp(
                     }
                 },
                 onExportServerFile = { showConnectionExportWarning = true },
+                onImportServerAuthority = {
+                    launchTrustedExternalActivity { importServerAuthority.launch(arrayOf("application/x-x509-ca-cert", "application/pkix-cert", "*/*")) }
+                },
                 password = password,
                 onPasswordChanged = { password = it },
                 deviceName = deviceName,
@@ -1049,6 +1180,8 @@ private fun ClipmanApp(
                 onAddClipboardOnLaunchChanged = { addClipboardOnLaunch = it },
                 richTextEnabled = richTextEnabled,
                 onRichTextEnabledChanged = { richTextEnabled = it },
+                confirmDeletions = confirmDeletions,
+                onConfirmDeletionsChanged = { confirmDeletions = it },
                 requireAuthentication = requireAuthentication,
                 onRequireAuthenticationChanged = { requireAuthentication = it },
                 checkForUpdatesAutomatically = checkForUpdatesAutomatically,
@@ -1107,6 +1240,20 @@ private fun ClipmanApp(
                         announce(view, status)
                         return@saveSettings
                     }
+                    if (serverCaCertPem.isNotBlank()) {
+                        val authority = runCatching { ServerConnectionConfig.parseAuthority(serverCaCertPem, serverUrl) }.getOrElse { error ->
+                            status = "The server address does not match the private certificate authority: ${error.message ?: error::class.java.simpleName}"
+                            announce(view, status)
+                            return@saveSettings
+                        }
+                        if (authority == null || (serverCaHost.isNotBlank() && !authority.host.equals(serverCaHost, ignoreCase = true))) {
+                            status = "The server address does not match the private certificate authority. Remove the authority or restore the matching HTTPS address before saving."
+                            announce(view, status)
+                            return@saveSettings
+                        }
+                        serverCaCertPem = authority.pem
+                        serverCaHost = authority.host
+                    }
                     if (cloudBackupEnabled && (password.isBlank() || cloudBackupTreeUri.isBlank())) {
                         status = "Cloud backup requires a nonblank history password and a selected backup folder."
                         announce(view, status)
@@ -1116,11 +1263,14 @@ private fun ClipmanApp(
                         storageMode = storageMode,
                         serverUrl = serverUrl,
                         token = token,
+                        serverCaCertPem = serverCaCertPem,
+                        serverCaHost = serverCaHost,
                         password = password,
                         deviceName = deviceName,
                         copyRemoteToClipboard = copyRemoteToClipboard,
                         addClipboardOnLaunch = addClipboardOnLaunch,
                         richTextEnabled = richTextEnabled,
+                        confirmDeletions = confirmDeletions,
                         requireAuthentication = requireAuthentication,
                         checkForUpdatesAutomatically = checkForUpdatesAutomatically,
                         playSounds = playSounds,
@@ -1161,6 +1311,8 @@ private fun ClipmanApp(
                             storageMode = savedSettings.storageMode
                             serverUrl = savedSettings.serverUrl
                             token = savedSettings.token
+                            serverCaCertPem = savedSettings.serverCaCertPem
+                            serverCaHost = savedSettings.serverCaHost
                             password = savedSettings.password
                             deviceName = savedSettings.deviceName
                             copyRemoteToClipboard = savedSettings.copyRemoteToClipboard
@@ -1227,7 +1379,7 @@ private fun ClipmanApp(
             modifier = Modifier.fillMaxWidth()
         )
         Text(
-            text = "${visibleEntries.size} ${section.label.lowercase()} entries shown. Sort: ${sortMode.label}. Group: ${groupFilter.ifBlank { "All" }}.",
+            text = "${visibleEntries.size} ${section.label.lowercase()} entries shown. Sort: ${sortMode.label}. Filter: ${if (historyFilterKind == HistoryFilterKind.Device) "Device " + deviceFilter else groupFilter.ifBlank { "All" }}.",
             style = MaterialTheme.typography.bodySmall
         )
         HorizontalPager(
@@ -1239,7 +1391,9 @@ private fun ClipmanApp(
                 entries = entries.filter { entryBelongsToSection(it, pageSection, richTextEnabled) },
                 search = search,
                 sortMode = sortMode,
-                groupFilter = if (pageSection == section) groupFilter else ""
+                filterKind = historyFilterKind,
+                groupFilter = groupFilter,
+                deviceFilter = deviceFilter
             )
             LazyColumn(
                 state = when (pageSection) {
@@ -1248,7 +1402,11 @@ private fun ClipmanApp(
                     HistorySection.Links -> linksListState
                 },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .semantics {
+                        paneTitle = "${pageSection.label} clipboard history"
+                    }
             ) {
                 items(
                     count = pageEntries.size,
@@ -1262,8 +1420,7 @@ private fun ClipmanApp(
                         onCopy = {
                             RichTextClipboard.write(context, entry, richTextEnabled)
                             playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
-                            announce(view, "Copied to clipboard")
-                            status = "Copied selected entry to Android clipboard."
+                            setTransientStatus("Copied selected entry to Android clipboard.")
                         },
                         onView = { viewingEntry = entry },
                         onOpenLink = { link -> openLink(context, link) },
@@ -1273,7 +1430,15 @@ private fun ClipmanApp(
                                 SyncConflictResolver.togglePinned(database, entry.Id)
                             }
                         },
-                        onDelete = { deleteCandidate = entry }
+                        onDelete = {
+                            if (confirmDeletions) {
+                                deleteCandidate = entry
+                            } else {
+                                saveDatabaseChange("Deleting entry") { database ->
+                                    SyncConflictResolver.deleteEntry(database, entry.Id)
+                                }
+                            }
+                        }
                     )
                 }
             }
@@ -1293,7 +1458,9 @@ private fun ClipmanApp(
                 text = status,
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Start,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Polite }
             )
         }
     }
@@ -1395,29 +1562,46 @@ private fun ConfirmDeleteDialog(
 @Composable
 private fun GroupPickerDialog(
     groups: List<String>,
+    devices: List<String>,
+    selectedKind: HistoryFilterKind,
     selectedGroup: String,
+    selectedDevice: String,
     onDismiss: () -> Unit,
-    onSelect: (String) -> Unit
+    onSelect: (HistoryFilterKind, String) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose Group") },
+        title = { Text("Filter History") },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Button(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { onSelect("") }
+                        onClick = { onSelect(HistoryFilterKind.Group, "") }
                     ) {
-                        Text(if (selectedGroup.isBlank()) "All groups, selected" else "All groups")
+                        Text(if (selectedKind == HistoryFilterKind.Group && selectedGroup.isBlank()) "All entries, selected" else "All entries")
                     }
+                }
+                if (groups.isNotEmpty()) {
+                    item { Text("Groups", style = MaterialTheme.typography.titleSmall) }
                 }
                 items(groups) { group ->
                     Button(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { onSelect(group) }
+                        onClick = { onSelect(HistoryFilterKind.Group, group) }
                     ) {
-                        Text(if (group.equals(selectedGroup, ignoreCase = true)) "$group, selected" else group)
+                        Text(if (selectedKind == HistoryFilterKind.Group && group.equals(selectedGroup, ignoreCase = true)) "$group, selected" else group)
+                    }
+                }
+                if (devices.isNotEmpty()) {
+                    item { Text("Devices", style = MaterialTheme.typography.titleSmall) }
+                }
+                items(devices) { device ->
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onSelect(HistoryFilterKind.Device, device) }
+                    ) {
+                        Text(if (selectedKind == HistoryFilterKind.Device && device.equals(selectedDevice, ignoreCase = true)) "$device, selected" else device)
                     }
                 }
             }
@@ -1461,8 +1645,8 @@ private fun HistoryToolbar(
             Text("Switch to ${sections[(current + 1) % sections.size].label}")
         }
         TextButton(onClick = onAddClipboard) { Text("Paste") }
-        TextButton(onClick = onGroup, enabled = groups.isNotEmpty()) {
-            Text("Group")
+        TextButton(onClick = onGroup) {
+            Text("Filter")
         }
         TextButton(onClick = onOpenSettings) { Text("Settings") }
         TextButton(onClick = onTop, enabled = entriesShown > 0) { Text("Top") }
@@ -1479,9 +1663,13 @@ private fun ConnectionSettingsScreen(
     onServerUrlChanged: (String) -> Unit,
     token: String,
     onTokenChanged: (String) -> Unit,
+    serverCaCertPem: String,
+    serverCaHost: String,
+    onRemoveServerAuthority: () -> Unit,
     onPasteToken: () -> Unit,
     onImportServerFile: () -> Unit,
     onExportServerFile: () -> Unit,
+    onImportServerAuthority: () -> Unit,
     password: String,
     onPasswordChanged: (String) -> Unit,
     deviceName: String,
@@ -1494,6 +1682,8 @@ private fun ConnectionSettingsScreen(
     onAddClipboardOnLaunchChanged: (Boolean) -> Unit,
     richTextEnabled: Boolean,
     onRichTextEnabledChanged: (Boolean) -> Unit,
+    confirmDeletions: Boolean,
+    onConfirmDeletionsChanged: (Boolean) -> Unit,
     requireAuthentication: Boolean,
     onRequireAuthenticationChanged: (Boolean) -> Unit,
     checkForUpdatesAutomatically: Boolean,
@@ -1616,6 +1806,12 @@ private fun ConnectionSettingsScreen(
             enabled = !isSaving
         )
         SettingCheckboxRow(
+            checked = confirmDeletions,
+            onCheckedChange = onConfirmDeletionsChanged,
+            label = "Confirm before deleting entries",
+            enabled = !isSaving
+        )
+        SettingCheckboxRow(
             checked = requireAuthentication,
             onCheckedChange = onRequireAuthenticationChanged,
             label = "Require biometric or device authentication",
@@ -1664,6 +1860,24 @@ private fun ConnectionSettingsScreen(
                 }
                 TextButton(onClick = onExportServerFile, enabled = !isSaving) {
                     Text("Export server connection file")
+                }
+                TextButton(onClick = onImportServerAuthority, enabled = !isSaving) {
+                    Text("Import private authority")
+                }
+                val authority = remember(serverCaCertPem, serverUrl) {
+                    runCatching { ServerConnectionConfig.parseAuthority(serverCaCertPem, serverUrl) }.getOrNull()
+                }
+                if (authority == null) {
+                    Text("Private certificate authority: Not configured", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text(
+                        "Private certificate authority for ${authority.host}. Subject: ${authority.subject}. Expires: ${java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG).format(java.util.Date(authority.expiresUnixMs))}.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text("Authority SHA-256 fingerprint: ${authority.fingerprint}", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onRemoveServerAuthority, enabled = !isSaving) {
+                        Text("Remove private authority")
+                    }
                 }
                 if (showServerConnection) {
                     OutlinedTextField(
@@ -1893,23 +2107,9 @@ private fun ClipEntryCard(
     }
     val links = remember(entry.Text) { extractLinks(entry.Text) }
     val actions = buildList {
-        if (links.size == 1) {
-            add(
-                CustomAccessibilityAction("Open link") {
-                    onOpenLink(links.single())
-                    true
-                }
-            )
-        }
         add(
-            CustomAccessibilityAction("View entry") {
-                onView()
-                true
-            }
-        )
-        add(
-            CustomAccessibilityAction("Edit entry") {
-                onEdit()
+            CustomAccessibilityAction("Delete entry") {
+                onDelete()
                 true
             }
         )
@@ -1920,11 +2120,25 @@ private fun ClipEntryCard(
             }
         )
         add(
-            CustomAccessibilityAction("Delete entry") {
-                onDelete()
+            CustomAccessibilityAction("Edit entry") {
+                onEdit()
                 true
             }
         )
+        add(
+            CustomAccessibilityAction("View entry") {
+                onView()
+                true
+            }
+        )
+        if (links.size == 1) {
+            add(
+                CustomAccessibilityAction("Open link") {
+                    onOpenLink(links.single())
+                    true
+                }
+            )
+        }
     }
     Card(
         modifier = Modifier
@@ -1956,11 +2170,16 @@ private fun filteredAndSortedEntries(
     entries: List<ClipEntry>,
     search: String,
     sortMode: HistorySort,
-    groupFilter: String
+    filterKind: HistoryFilterKind,
+    groupFilter: String,
+    deviceFilter: String
 ): List<ClipEntry> {
     val query = search.trim()
     val filtered = entries.filter { entry ->
-        (groupFilter.isBlank() || entry.Group.equals(groupFilter, ignoreCase = true)) &&
+        (when (filterKind) {
+            HistoryFilterKind.Group -> groupFilter.isBlank() || entry.Group.equals(groupFilter, ignoreCase = true)
+            HistoryFilterKind.Device -> deviceFilter.isBlank() || entry.SourceMachine.equals(deviceFilter, ignoreCase = true)
+        }) &&
             (query.isBlank() ||
                 entry.Text.contains(query, ignoreCase = true) ||
                 entry.Name.contains(query, ignoreCase = true) ||
@@ -1979,6 +2198,34 @@ private fun filteredAndSortedEntries(
     }
     return pinned + normal
 }
+
+private fun canonicalLabels(entries: List<ClipEntry>, selector: (ClipEntry) -> String): List<String> =
+    entries
+        .mapNotNull { entry ->
+            selector(entry).trim().takeIf { it.isNotBlank() }?.let { label -> label to entry }
+        }
+        .groupBy { it.first.lowercase() }
+        .values
+        .mapNotNull { cluster ->
+            cluster
+                .groupBy { it.first }
+                .map { (label, spelling) ->
+                    Triple(
+                        label,
+                        spelling.size,
+                        spelling.maxOf { (_, entry) ->
+                            maxOf(entry.ModifiedUnixMs, entry.LastUsedUnixMs, entry.CreatedUnixMs)
+                        }
+                    )
+                }
+                .sortedWith(
+                    compareByDescending<Triple<String, Int, Long>> { it.second }
+                        .thenByDescending { it.third }
+                        .thenBy { it.first }
+                )
+                .firstOrNull()?.first
+        }
+        .sortedWith(String.CASE_INSENSITIVE_ORDER)
 
 private fun ClipEntry.isLinkEntry(): Boolean {
     val text = Text.trim()

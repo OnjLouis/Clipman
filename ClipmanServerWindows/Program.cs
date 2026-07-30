@@ -107,6 +107,7 @@ namespace ClipmanServerWrapper
                 menu.Items.Add("Copy connection details", null, delegate { CopyConnectionDetails(); });
                 menu.Items.Add("Change listening port...", null, delegate { ChangeListeningPort(); });
                 menu.Items.Add("Create or renew HTTPS certificate", null, delegate { CreateHttpsCertificate(); });
+                menu.Items.Add("Copy authority fingerprint", null, delegate { CopyAuthorityFingerprint(); });
                 menu.Items.Add("Share certificate authority", null, delegate { ShareCertificateAuthority(); });
                 menu.Items.Add("Open settings folder", null, delegate { OpenFolder(settingsDirectory); });
                 menu.Items.Add("Open logs folder", null, delegate { OpenFolder(logDirectory); });
@@ -349,10 +350,28 @@ namespace ClipmanServerWrapper
                     RestartServer();
                     MessageBox.Show(
                         result.Output + Environment.NewLine + Environment.NewLine +
-                        "Install and trust the public certificate authority on each client. Use Share certificate authority from the tray menu to transfer it safely.",
+                        "Import the refreshed .clpconf file in current Clipman clients. It carries the public authority for app-specific trust. Older clients may still require Share certificate authority and operating-system trust.",
                         "Clipman Server HTTPS",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
+                }, null);
+            });
+        }
+
+        private void CopyAuthorityFingerprint()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = RunPythonUtility("--show-ca-fingerprint", 10000);
+                uiContext.Post(delegate
+                {
+                    if (!result.Succeeded || string.IsNullOrWhiteSpace(result.Output))
+                    {
+                        MessageBox.Show(result.Output, "Authority Fingerprint", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    Clipboard.SetText(result.Output.Trim());
+                    tray.ShowBalloonTip(3000, "Clipman Server", "Authority SHA-256 fingerprint copied.", ToolTipIcon.Info);
                 }, null);
             });
         }

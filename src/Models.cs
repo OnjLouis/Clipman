@@ -188,6 +188,7 @@ namespace Clipman
 
     public sealed class AppSettings
     {
+        public string DeviceName { get; set; }
         public string ShowHistoryHotkey { get; set; }
         public string ToggleActiveHotkey { get; set; }
         public List<QuickCopyBinding> QuickCopyHotkeys { get; set; }
@@ -204,6 +205,8 @@ namespace Clipman
         public bool UseDefaultDatabasePath { get; set; }
         public string StorageMode { get; set; }
         public string ServerUrl { get; set; }
+        public string ServerCaCertPem { get; set; }
+        public string ServerCaHost { get; set; }
         [ScriptIgnore]
         public string ServerToken { get; set; }
         public string ProtectedServerToken { get; set; }
@@ -222,6 +225,9 @@ namespace Clipman
         public bool SendToEnabled { get; set; }
         public bool ShowHistoryAfterSendTo { get; set; }
         public string GroupFilter { get; set; }
+        public string HistoryFilterType { get; set; }
+        public string DeviceFilter { get; set; }
+        public bool ConfirmDeletions { get; set; }
         public string DuplicateMode { get; set; }
         public bool AutoGroupByApp { get; set; }
         public bool AutoRemoveUrlTracking { get; set; }
@@ -243,6 +249,7 @@ namespace Clipman
 
         public AppSettings()
         {
+            DeviceName = Environment.MachineName ?? string.Empty;
             ShowHistoryHotkey = "Ctrl+Alt+\\";
             ToggleActiveHotkey = "Ctrl+Alt+`";
             QuickCopyHotkeys = new List<QuickCopyBinding>();
@@ -259,6 +266,8 @@ namespace Clipman
             UseDefaultDatabasePath = true;
             StorageMode = "File";
             ServerUrl = string.Empty;
+            ServerCaCertPem = string.Empty;
+            ServerCaHost = string.Empty;
             ServerToken = string.Empty;
             ProtectedServerToken = string.Empty;
             LastSelectedIndex = -1;
@@ -276,6 +285,9 @@ namespace Clipman
             SendToEnabled = false;
             ShowHistoryAfterSendTo = true;
             GroupFilter = "All";
+            HistoryFilterType = "Group";
+            DeviceFilter = "All";
+            ConfirmDeletions = true;
             DuplicateMode = "MoveToTop";
             AutoGroupByApp = true;
             AutoRemoveUrlTracking = false;

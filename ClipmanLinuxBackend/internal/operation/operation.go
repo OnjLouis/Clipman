@@ -136,10 +136,57 @@ func Put(database *model.Database, text, name, group, machine, duplicate, newID 
 	if newID == "" {
 		newID = merge.NewID()
 	}
-	entry := model.Entry{ID: newID, Text: text, Name: strings.TrimSpace(name), Group: strings.TrimSpace(group), SourceMachine: machine, CreatedUnixMs: now, LastUsedUnixMs: now, ModifiedUnixMs: now, Pinned: pinned, IsTemplate: isTemplate, ManualOrder: maxOrder + 1, Extra: map[string]json.RawMessage{}}
+	entry := model.Entry{ID: newID, Text: text, Name: strings.TrimSpace(name), Group: canonicalGroup(database.Entries, group), SourceMachine: machine, CreatedUnixMs: now, LastUsedUnixMs: now, ModifiedUnixMs: now, Pinned: pinned, IsTemplate: isTemplate, ManualOrder: maxOrder + 1, Extra: map[string]json.RawMessage{}}
 	database.Entries = append(database.Entries, entry)
 	database.UpdatedUnixMs = now
 	return entry, "created"
+}
+
+func canonicalGroup(entries []model.Entry, requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return ""
+	}
+	type stats struct {
+		label  string
+		count  int
+		latest int64
+	}
+	spellings := map[string]*stats{}
+	for _, entry := range entries {
+		label := strings.TrimSpace(entry.Group)
+		if !strings.EqualFold(label, requested) {
+			continue
+		}
+		item := spellings[label]
+		if item == nil {
+			item = &stats{label: label}
+			spellings[label] = item
+		}
+		item.count++
+		latest := entry.ModifiedUnixMs
+		if entry.LastUsedUnixMs > latest {
+			latest = entry.LastUsedUnixMs
+		}
+		if entry.CreatedUnixMs > latest {
+			latest = entry.CreatedUnixMs
+		}
+		if latest > item.latest {
+			item.latest = latest
+		}
+	}
+	var winner *stats
+	for _, candidate := range spellings {
+		if winner == nil || candidate.count > winner.count ||
+			(candidate.count == winner.count && candidate.latest > winner.latest) ||
+			(candidate.count == winner.count && candidate.latest == winner.latest && candidate.label < winner.label) {
+			winner = candidate
+		}
+	}
+	if winner != nil {
+		return winner.label
+	}
+	return requested
 }
 
 func Delete(database *model.Database, id, machine string, now int64) (model.Entry, error) {

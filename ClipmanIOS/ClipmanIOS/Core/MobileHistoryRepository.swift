@@ -40,9 +40,20 @@ actor MobileHistoryRepository {
         }
     }
 
-    func synchronize(settings: ClipmanSettings, current: ClipDatabase) async throws -> MobileSyncResult {
-        let cached = try await loadLocal(password: settings.historyPassword)
-        let local = if let cached {
+    func synchronize(
+        settings: ClipmanSettings,
+        current: ClipDatabase,
+        localAlreadySaved: Bool = false
+    ) async throws -> MobileSyncResult {
+        let cached: ClipDatabase?
+        if localAlreadySaved {
+            cached = current
+        } else {
+            cached = try await loadLocal(password: settings.historyPassword)
+        }
+        let local = if localAlreadySaved {
+            current
+        } else if let cached {
             SyncConflictResolver.merge(target: current, source: cached)
         } else {
             current

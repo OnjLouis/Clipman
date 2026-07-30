@@ -67,6 +67,7 @@ Commands:
   connection  Write and print the connection details file path
   port        Change the listening port and restart the server
   cert        Create or renew a private-CA HTTPS certificate
+  fingerprint Show the private authority SHA-256 fingerprint
   share-ca    Temporarily share the public certificate authority
   version     Show the installed server version
   check-update Check whether a newer server package is available
@@ -80,6 +81,7 @@ Certificate examples:
   clipmanserver cert
   clipmanserver cert --cert-host server.example
   clipmanserver cert --cert-ip 192.168.1.50
+  clipmanserver fingerprint
   clipmanserver share-ca
 USAGE
 }
@@ -191,6 +193,9 @@ PY
     echo
     echo "Restarting Clipman Server to use HTTPS."
     "\$0" restart
+    ;;
+  fingerprint)
+    "\$LAUNCHER" --show-ca-fingerprint
     ;;
   share-ca)
     shift 2>/dev/null || true

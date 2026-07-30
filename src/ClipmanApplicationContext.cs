@@ -35,10 +35,12 @@ namespace Clipman
         private readonly Thread pauseThread;
         private readonly Thread resumeThread;
         private readonly Thread toggleThread;
+        private readonly ClipboardFloodGuardRegistry clipboardFloodGuards = new ClipboardFloodGuardRegistry();
         private FileSystemWatcher sharedStateWatcher;
         private FileSystemWatcher executableWatcher;
         private System.Threading.Timer sharedStateTimer;
         private System.Threading.Timer updateCheckTimer;
+        private readonly System.Windows.Forms.Timer clipboardFloodRecoveryTimer;
         private AppSettings settings;
         private ClipStore store;
         private FileClipboardEventStore fileEventStore;
@@ -73,7 +75,7 @@ namespace Clipman
             SeedServerCacheFromConfiguredDatabase();
             SharedUpdateStateStore.PublishCurrentBuild(settingsStore.SettingsDirectory);
             sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
-            store = new ClipStore(EffectiveTextHistoryDatabasePath(), CurrentDatabasePassword);
+            store = new ClipStore(EffectiveTextHistoryDatabasePath(), CurrentDatabasePassword, CurrentDeviceName());
             store.Changed += StoreChanged;
             ConfigureTextHistoryServerStorage();
             ResetRemoteAutoCopyBaseline();
@@ -83,6 +85,12 @@ namespace Clipman
 
             invoker = new Control();
             invoker.CreateControl();
+
+            clipboardFloodRecoveryTimer = new System.Windows.Forms.Timer
+            {
+                Interval = ClipboardFloodGuard.DefaultQuietMilliseconds
+            };
+            clipboardFloodRecoveryTimer.Tick += ClipboardFloodRecoveryTimerTick;
 
             messageWindow = new MessageWindow(this);
             NativeMethods.AddClipboardFormatListener(messageWindow.Handle);
@@ -347,7 +355,9 @@ namespace Clipman
                 !string.Equals(settings.DatabasePath, updated.DatabasePath, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(settings.StorageMode, updated.StorageMode, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(settings.ServerUrl, updated.ServerUrl, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(settings.ServerToken, updated.ServerToken, StringComparison.Ordinal);
+                !string.Equals(settings.ServerToken, updated.ServerToken, StringComparison.Ordinal) ||
+                !string.Equals(settings.ServerCaCertPem, updated.ServerCaCertPem, StringComparison.Ordinal) ||
+                !string.Equals(settings.ServerCaHost, updated.ServerCaHost, StringComparison.OrdinalIgnoreCase);
             var wasServerStorageEnabled = IsServerStorageEnabled();
             var serverCacheBeforeStorageChange = wasServerStorageEnabled ? ServerCacheDatabasePath() : string.Empty;
             var activeChanged = settings.Active != updated.Active;
@@ -386,6 +396,8 @@ namespace Clipman
             settings.StorageMode = updated.StorageMode;
             settings.ServerUrl = updated.ServerUrl;
             settings.ServerToken = updated.ServerToken;
+            settings.ServerCaCertPem = updated.ServerCaCertPem;
+            settings.ServerCaHost = updated.ServerCaHost;
             settings.MaxHistoryEntries = updated.MaxHistoryEntries;
             settings.MaxHistoryDays = updated.MaxHistoryDays;
             settings.IgnoredProcesses = updated.IgnoredProcesses;
@@ -394,6 +406,10 @@ namespace Clipman
             settings.SendToEnabled = updated.SendToEnabled;
             settings.ShowHistoryAfterSendTo = updated.ShowHistoryAfterSendTo;
             settings.GroupFilter = updated.GroupFilter;
+            settings.HistoryFilterType = updated.HistoryFilterType;
+            settings.DeviceFilter = updated.DeviceFilter;
+            settings.DeviceName = updated.DeviceName;
+            settings.ConfirmDeletions = updated.ConfirmDeletions;
             settings.DuplicateMode = updated.DuplicateMode;
             settings.AutoGroupByApp = updated.AutoGroupByApp;
             settings.AutoRemoveUrlTracking = updated.AutoRemoveUrlTracking;
@@ -413,6 +429,7 @@ namespace Clipman
             settings.RememberDatabasePassword = updated.RememberDatabasePassword;
             settings.ProtectedDatabasePassword = updated.ProtectedDatabasePassword;
             settings.LastPreferencesTab = updated.LastPreferencesTab;
+            store.SetMachineName(CurrentDeviceName());
             if (saveListPositionTurnedOff)
             {
                 settings.LastSelectedIndex = -1;
@@ -604,12 +621,6 @@ namespace Clipman
                 return;
             }
 
-            if (!settings.Active)
-            {
-                sounds.Skip(settings.SoundsEnabled);
-                return;
-            }
-
             var sourceProcessName = ClipboardOwnerProcessName();
             if (string.IsNullOrWhiteSpace(sourceProcessName))
             {
@@ -618,6 +629,23 @@ namespace Clipman
 
             if (IsClipmanProcess(sourceProcessName))
             {
+                return;
+            }
+
+            var floodDecision = clipboardFloodGuards.Observe(
+                NormalizeProcessName(sourceProcessName),
+                ClipboardFloodGuard.MonotonicMilliseconds());
+            if (floodDecision != ClipboardFloodDecision.Allow)
+            {
+                clipboardFloodRecoveryTimer.Stop();
+                clipboardFloodRecoveryTimer.Start();
+                return;
+            }
+            clipboardFloodRecoveryTimer.Stop();
+
+            if (!settings.Active)
+            {
+                sounds.Skip(settings.SoundsEnabled);
                 return;
             }
 
@@ -645,7 +673,14 @@ namespace Clipman
 
             if (!Clipboard.ContainsText(TextDataFormat.UnicodeText))
             {
-                sounds.Skip(settings.SoundsEnabled);
+                if (recordedFileEvent)
+                {
+                    sounds.Copy(settings.SoundsEnabled);
+                }
+                else
+                {
+                    sounds.Skip(settings.SoundsEnabled);
+                }
                 return;
             }
 
@@ -666,7 +701,7 @@ namespace Clipman
 
             var richText = settings.RichTextHistoryEnabled ? RichTextData.CaptureFromClipboard() : null;
 
-            if (store.HasRecentlyTouchedRemoteText(text, Environment.MachineName, 90000))
+            if (store.HasRecentlyTouchedRemoteText(text, CurrentDeviceName(), 90000))
             {
                 return;
             }
@@ -712,6 +747,12 @@ namespace Clipman
             }
 
             sounds.Copy(settings.SoundsEnabled);
+        }
+
+        private void ClipboardFloodRecoveryTimerTick(object sender, EventArgs e)
+        {
+            clipboardFloodRecoveryTimer.Stop();
+            HandleClipboardUpdate();
         }
 
         private void RememberReceivedHistoryTab(string tabId)
@@ -850,7 +891,7 @@ namespace Clipman
             {
                 CapturedAt = DateTime.Now,
                 Source = FriendlyProcessName(sourceProcessName),
-                SourceMachine = Environment.MachineName ?? string.Empty,
+                SourceMachine = CurrentDeviceName(),
                 ContainsText = hasText,
                 Formats = formats.ToList(),
                 Operation = ClipboardDropEffect(data)
@@ -1191,6 +1232,18 @@ namespace Clipman
             return normalized.Substring(0, 1).ToUpperInvariant() + (normalized.Length > 1 ? normalized.Substring(1) : string.Empty);
         }
 
+        private string ClipboardFloodProtectionStatus(long nowMilliseconds)
+        {
+            var activeSources = clipboardFloodGuards.ActiveSources(nowMilliseconds)
+                .Select(FriendlyProcessName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return activeSources.Count == 0
+                ? "ready"
+                : "suppressing rapid updates from " + string.Join(", ", activeSources);
+        }
+
         private static string FormatDiagnosticTime(long unixMs)
         {
             if (unixMs <= 0) return "Never";
@@ -1199,6 +1252,7 @@ namespace Clipman
 
         private string BuildDiagnosticsText()
         {
+            var diagnosticNowMilliseconds = ClipboardFloodGuard.MonotonicMilliseconds();
             var sharedState = SharedUpdateStateStore.Load(settingsStore.SettingsDirectory);
             var serverStatus = store.GetServerSyncStatus();
             var entries = store.GetEntries();
@@ -1253,6 +1307,9 @@ namespace Clipman
                 "Sensitive data mode: " + SensitiveDataExclusion.NormalizeMode(settings.SensitiveDataMode) + "\r\n" +
                 "Sensitive data presets: " + SensitiveDataPresetSummary() + "\r\n" +
                 "Last clipboard privacy signal: " + lastClipboardPrivacySignal + "\r\n" +
+                "Clipboard flood protection: " + ClipboardFloodProtectionStatus(diagnosticNowMilliseconds) + "\r\n" +
+                "Clipboard flood protection activations: " + clipboardFloodGuards.SuppressionCount + "\r\n" +
+                "Clipboard flood events suppressed: " + clipboardFloodGuards.SuppressedEventCount + "\r\n" +
                 "Run at startup: " + settings.RunAtStartup + "\r\n" +
                 "Add clipboard item on startup: " + settings.CaptureClipboardOnStartup + "\r\n" +
                 "Startup registration present: " + StartupRegistration.IsEnabled() + "\r\n" +
@@ -1731,7 +1788,7 @@ namespace Clipman
 
         private void ResetRemoteAutoCopyBaseline()
         {
-            var entry = store == null ? null : store.GetNewestRemoteEntry(Environment.MachineName);
+            var entry = store == null ? null : store.GetNewestRemoteEntry(CurrentDeviceName());
             if (entry == null)
             {
                 lastAutoCopiedRemoteEntryId = string.Empty;
@@ -1747,7 +1804,7 @@ namespace Clipman
         {
             if (!settings.AutoCopyLatestRemoteText) return;
 
-            var entry = store.GetNewestRemoteEntry(Environment.MachineName);
+            var entry = store.GetNewestRemoteEntry(CurrentDeviceName());
             if (entry == null || string.IsNullOrEmpty(entry.Text)) return;
 
             var stamp = entry.CreatedUnixMs;
@@ -1854,6 +1911,7 @@ namespace Clipman
                 if (executableWatcher != null) executableWatcher.Dispose();
                 if (sharedStateTimer != null) sharedStateTimer.Dispose();
                 if (updateCheckTimer != null) updateCheckTimer.Dispose();
+                if (clipboardFloodRecoveryTimer != null) clipboardFloodRecoveryTimer.Dispose();
                 NativeMethods.RemoveClipboardFormatListener(messageWindow.Handle);
                 NativeMethods.UnregisterHotKey(messageWindow.Handle, ShowHotkeyId);
                 NativeMethods.UnregisterHotKey(messageWindow.Handle, ToggleHotkeyId);
@@ -2318,6 +2376,12 @@ namespace Clipman
             return databasePassword ?? string.Empty;
         }
 
+        private string CurrentDeviceName()
+        {
+            var name = settings == null ? string.Empty : (settings.DeviceName ?? string.Empty).Trim();
+            return name.Length == 0 ? (Environment.MachineName ?? string.Empty).Trim() : name;
+        }
+
         private string DefaultSecretsDatabasePath()
         {
             return settingsStore.DefaultSecretsDatabasePath();
@@ -2349,7 +2413,12 @@ namespace Clipman
         private void ConfigureTextHistoryServerStorage()
         {
             if (store == null) return;
-            store.ConfigureServerStorage(IsServerStorageEnabled(), settings.ServerUrl, settings.ServerToken);
+            store.ConfigureServerStorage(
+                IsServerStorageEnabled(),
+                settings.ServerUrl,
+                settings.ServerToken,
+                settings.ServerCaCertPem,
+                settings.ServerCaHost);
         }
 
         private IWin32Window UpdateWindowOwner()

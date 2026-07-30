@@ -64,9 +64,12 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private var rememberedPasswordExists: Bool
     private var databasePasswordAvailable: Bool
     private let databasePathField = NSTextField()
+    private let machineNameField = NSTextField()
     private let storageModePopup = NSPopUpButton()
     private let serverUrlField = NSTextField()
     private let serverTokenField = NSSecureTextField()
+    private let serverAuthorityStatus = NSTextField(wrappingLabelWithString: "")
+    private let serverAuthorityFingerprint = NSTextField()
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds", target: nil, action: nil)
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
@@ -77,6 +80,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let dynamicHistoryModeCheckbox = NSButton(checkboxWithTitle: "Open history to the most recent clipboard type", target: nil, action: nil)
     private let linksHistoryCheckbox = NSButton(checkboxWithTitle: "Show Links history tab", target: nil, action: nil)
     private let richTextHistoryCheckbox = NSButton(checkboxWithTitle: "Preserve copied formatting and show Rich Text history", target: nil, action: nil)
+    private let confirmDeletionsCheckbox = NSButton(checkboxWithTitle: "Confirm before deleting entries", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
     private let updateFrequencyPopup = NSPopUpButton()
     private let sensitiveDataModePopup = NSPopUpButton()
@@ -130,6 +134,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             grid.topAnchor.constraint(equalTo: content.topAnchor, constant: 16)
         ])
 
+        machineNameField.setAccessibilityHelp("Name recorded on new clipboard entries created by this Mac. Existing entries keep their original device name.")
+        addRow("Device name", machineNameField)
         addRow("Settings folder", databasePathField, button(title: "Choose...", action: #selector(chooseSettingsFolder)))
         databasePathField.setAccessibilityHelp("Choose the Clipman data/settings folder. Clipman will use clipman-history.clipdb inside that folder.")
         storageModePopup.addItems(withTitles: ["Local or shared folder", "Clipman Server"])
@@ -143,10 +149,22 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         importServerButton.setAccessibilityHelp("Import a Clipman Server connection file, review its address, then save preferences.")
         let exportServerButton = button(title: "Export Server File...", action: #selector(exportServerConnection))
         exportServerButton.setAccessibilityHelp("Export the current Clipman Server address and private token to a connection file.")
-        let serverFileButtons = NSStackView(views: [importServerButton, exportServerButton])
+        let importAuthorityButton = button(title: "Import Authority...", action: #selector(importServerAuthority))
+        importAuthorityButton.setAccessibilityHelp("Import a public private-authority certificate for the current HTTPS server host.")
+        let removeAuthorityButton = button(title: "Remove Authority", action: #selector(removeServerAuthority))
+        removeAuthorityButton.setAccessibilityHelp("Remove the app-specific private certificate authority without changing the server address or token.")
+        let serverFileButtons = NSStackView(views: [importServerButton, exportServerButton, importAuthorityButton, removeAuthorityButton])
         serverFileButtons.orientation = .horizontal
         serverFileButtons.spacing = 8
         addRow("Server token", serverTokenField, serverFileButtons)
+        serverAuthorityStatus.setAccessibilityLabel("Private certificate authority status")
+        grid.addRow(with: [NSGridCell.emptyContentView, serverAuthorityStatus])
+        serverAuthorityFingerprint.isEditable = false
+        serverAuthorityFingerprint.isSelectable = true
+        serverAuthorityFingerprint.isBezeled = true
+        serverAuthorityFingerprint.drawsBackground = true
+        serverAuthorityFingerprint.setAccessibilityLabel("Private certificate authority SHA-256 fingerprint")
+        addRow("Authority fingerprint", serverAuthorityFingerprint)
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("History password", passwordField)
@@ -209,6 +227,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         richTextHistoryCheckbox.setAccessibilityHelp("When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows the Rich Text history tab. Enable this before copying formatted content. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, richTextHistoryCheckbox])
 
+        confirmDeletionsCheckbox.target = nil
+        confirmDeletionsCheckbox.action = nil
+        confirmDeletionsCheckbox.setAccessibilityLabel("Confirm before deleting entries")
+        grid.addRow(with: [NSGridCell.emptyContentView, confirmDeletionsCheckbox])
+
         updateFrequencyPopup.addItems(withTitles: ["Never", "At startup", "Hourly", "Daily"])
         updateFrequencyPopup.setAccessibilityLabel("Check for updates")
         addRow("Check for updates", updateFrequencyPopup)
@@ -260,10 +283,12 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     }
 
     private func loadFields() {
+        machineNameField.stringValue = settings.deviceName
         databasePathField.stringValue = settingsFolderPath(fromDatabasePath: settings.databasePath)
         storageModePopup.selectItem(withTitle: displayStorageMode(settings.storageMode))
         serverUrlField.stringValue = settings.serverUrl
         serverTokenField.stringValue = settings.serverToken
+        updateServerAuthorityStatus()
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
         soundsCheckbox.state = settings.soundsEnabled ? .on : .off
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
@@ -274,6 +299,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         dynamicHistoryModeCheckbox.state = settings.dynamicHistoryMode ? .on : .off
         linksHistoryCheckbox.state = settings.linksHistoryEnabled ? .on : .off
         richTextHistoryCheckbox.state = settings.richTextHistoryEnabled ? .on : .off
+        confirmDeletionsCheckbox.state = settings.confirmDeletions ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
         updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
         sensitiveDataModePopup.selectItem(withTitle: displaySensitiveDataMode(settings.sensitiveDataMode))
@@ -314,13 +340,21 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             let details = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
             let alert = NSAlert()
             alert.messageText = "Import Clipman Server connection?"
-            alert.informativeText = "Server: \(details.address)\n\nThe token will remain hidden in preferences. Clipman Server requires a unique history password. Choose Save and Close to apply this connection."
+            alert.informativeText = "Server: \(details.address)\(authoritySummary(details.authority))\n\nThe token will remain hidden in preferences. Clipman Server requires a unique history password. Choose Save and Close to apply this connection."
             alert.addButton(withTitle: "Import")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             storageModePopup.selectItem(withTitle: "Clipman Server")
             serverUrlField.stringValue = details.address
             serverTokenField.stringValue = details.token
+            if let authority = details.authority {
+                settings.serverCaCertPem = authority.pem
+                settings.serverCaHost = authority.host
+            } else if (try? ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPem, address: details.address)) == nil {
+                settings.serverCaCertPem = ""
+                settings.serverCaHost = ""
+            }
+            updateServerAuthorityStatus()
             statusLabel.stringValue = "Server connection imported. Enter a history password if needed, then choose Save and Close to apply it."
             serverUrlField.window?.makeFirstResponder(databasePasswordAvailable ? serverUrlField : passwordField)
         } catch {
@@ -335,7 +369,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         do {
             let data = try ServerSettingsSanitizer.connectionConfigData(
                 address: serverUrlField.stringValue,
-                token: serverTokenField.stringValue
+                token: serverTokenField.stringValue,
+                caCertPEM: settings.serverCaCertPem,
+                caHost: settings.serverCaHost
             )
             let alert = NSAlert()
             alert.messageText = "Export Clipman Server connection?"
@@ -361,6 +397,77 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         }
     }
 
+    @objc private func importServerAuthority() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.data]
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard fileSize <= 32 * 1024 else { throw ConnectionConfigError.authorityTooLarge }
+            let pem = try String(contentsOf: url, encoding: .utf8)
+            guard let authority = try ServerSettingsSanitizer.parseCertificateAuthority(pem, address: serverUrlField.stringValue) else {
+                throw ConnectionConfigError.invalidAuthority
+            }
+            let alert = NSAlert()
+            alert.messageText = "Import private authority for this server?"
+            alert.informativeText = "Host: \(authority.host)\nSubject: \(authority.subject)\nExpires: \(authority.expires.formatted(date: .long, time: .omitted))\nSHA-256 fingerprint: \(authority.fingerprint)\n\nClipman will trust this authority only for the displayed server host."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Import")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            settings.serverCaCertPem = authority.pem
+            settings.serverCaHost = authority.host
+            updateServerAuthorityStatus()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not import private authority"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    @objc private func removeServerAuthority() {
+        guard !settings.serverCaCertPem.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = "Remove private certificate authority?"
+        alert.informativeText = "A private-CA server will stop synchronizing unless its authority is trusted by macOS or a new CA-bearing connection file is imported."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        settings.serverCaCertPem = ""
+        settings.serverCaHost = ""
+        updateServerAuthorityStatus()
+    }
+
+    private func updateServerAuthorityStatus() {
+        guard !settings.serverCaCertPem.isEmpty else {
+            serverAuthorityStatus.stringValue = "Private certificate authority: Not configured"
+            serverAuthorityFingerprint.stringValue = ""
+            return
+        }
+        do {
+            guard let authority = try ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPem, address: serverUrlField.stringValue) else {
+                throw ConnectionConfigError.invalidAuthority
+            }
+            let state = authority.expires <= Date().addingTimeInterval(30 * 24 * 60 * 60) ? "Expires soon" : "Configured for \(authority.host)"
+            serverAuthorityStatus.stringValue = "Private certificate authority: \(state); subject: \(authority.subject); expires: \(authority.expires.formatted(date: .long, time: .omitted))"
+            serverAuthorityFingerprint.stringValue = authority.fingerprint
+        } catch {
+            serverAuthorityStatus.stringValue = "Private certificate authority: \(error.localizedDescription)"
+            serverAuthorityFingerprint.stringValue = ""
+        }
+    }
+
+    private func authoritySummary(_ authority: ServerCertificateAuthority?) -> String {
+        guard let authority else { return "" }
+        return "\n\nThis file configures a private certificate authority only for \(authority.host).\nSubject: \(authority.subject)\nAuthority expires: \(authority.expires.formatted(date: .long, time: .omitted))\nSHA-256 fingerprint: \(authority.fingerprint)"
+    }
+
     @objc private func saveClicked() {
         guard let show = showHotkeyField.descriptor ?? HotkeyDescriptor.parse(showHotkeyField.stringValue), show.isValid else {
             statusLabel.stringValue = "Show history hotkey must use two modifiers, or one modifier with F1-F12, Grave, Backslash, or ISO section. Escape, Tab, Backspace, Return, Space, and Command+Grave are not available."
@@ -384,9 +491,36 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             passwordField.window?.makeFirstResponder(passwordField)
             return
         }
+        let normalizedServerURL = ServerSettingsSanitizer.cleanURL(serverUrlField.stringValue)
+        if !settings.serverCaCertPem.isEmpty {
+            do {
+                guard let authority = try ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPem, address: normalizedServerURL),
+                      settings.serverCaHost.isEmpty || authority.host.caseInsensitiveCompare(settings.serverCaHost) == .orderedSame
+                else { throw ConnectionConfigError.authorityHostMismatch }
+                settings.serverCaCertPem = authority.pem
+                settings.serverCaHost = authority.host
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Remove private authority and save changed server?"
+                alert.informativeText = "The server host or connection scheme no longer matches the configured private authority. Remove that authority and save the new server address?"
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Remove and Save")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                settings.serverCaCertPem = ""
+                settings.serverCaHost = ""
+            }
+        }
         settings.databasePath = normalizedDatabasePath(databasePathField.stringValue)
+        let requestedMachineName = machineNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !requestedMachineName.isEmpty else {
+            statusLabel.stringValue = "Device name cannot be blank."
+            machineNameField.window?.makeFirstResponder(machineNameField)
+            return
+        }
+        settings.deviceName = requestedMachineName
         settings.storageMode = selectedStorageMode
-        settings.serverUrl = ServerSettingsSanitizer.cleanURL(serverUrlField.stringValue)
+        settings.serverUrl = normalizedServerURL
         settings.serverToken = ServerSettingsSanitizer.cleanToken(serverTokenField.stringValue)
         serverUrlField.stringValue = settings.serverUrl
         serverTokenField.stringValue = settings.serverToken
@@ -400,6 +534,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.dynamicHistoryMode = dynamicHistoryModeCheckbox.state == .on
         settings.linksHistoryEnabled = linksHistoryCheckbox.state == .on
         settings.richTextHistoryEnabled = richTextHistoryCheckbox.state == .on
+        settings.confirmDeletions = confirmDeletionsCheckbox.state == .on
         settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled, richTextEnabled: settings.richTextHistoryEnabled)
         settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on
         settings.updateCheckFrequency = storedUpdateFrequency(updateFrequencyPopup.titleOfSelectedItem ?? "Never")

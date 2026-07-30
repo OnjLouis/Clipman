@@ -163,9 +163,41 @@ class CertificateTests(unittest.TestCase):
         self.assertIsInstance(clipman_server.create_tls_context(self.settings), clipman_server.ssl.SSLContext)
         self.settings["_TlsCertificateExpires"] = clipman_server.tls_certificate_expiry(self.settings)
         self.assertTrue(clipman_server.status(self.settings)["TlsCertificateExpires"])
+        authority_details = clipman_server.inspect_private_ca(self.settings)
+        self.assertIsNotNone(authority_details)
+        self.assertEqual("localhost", authority_details["host"])
+        self.assertEqual(result["fingerprint"], authority_details["fingerprint"])
+        connection_document = json.loads(
+            clipman_server.default_connection_config_path(self.config_path).read_text(encoding="utf-8")
+        )
+        self.assertEqual(authority.read_text(encoding="ascii"), connection_document["ca_cert_pem"])
+        connection_text = clipman_server.default_connection_info_path(self.config_path).read_text(encoding="utf-8")
+        self.assertIn("Private CA host: localhost", connection_text)
+        self.assertIn("Private CA SHA-256 fingerprint: " + result["fingerprint"], connection_text)
         first_authority = authority.read_bytes()
         clipman_server.create_tls_certificate(self.config_path, self.settings, [], [], False)
         self.assertEqual(first_authority, authority.read_bytes())
+
+    def test_invalid_authority_preserves_existing_connection_file(self) -> None:
+        try:
+            clipman_server.find_openssl()
+        except RuntimeError:
+            self.skipTest("OpenSSL is not installed")
+        result = clipman_server.create_tls_certificate(self.config_path, self.settings, [], [], False)
+        target = clipman_server.default_connection_config_path(self.config_path)
+        original = target.read_bytes()
+        authority = Path(result["authority"])
+        authority.write_bytes(authority.read_bytes() + authority.read_bytes())
+
+        with self.assertLogs(level="WARNING"):
+            refreshed = clipman_server.maybe_write_connection_config(
+                self.config_path, self.settings, False, False
+            )
+
+        self.assertIsNone(refreshed)
+        self.assertEqual(original, target.read_bytes())
+        with self.assertRaisesRegex(RuntimeError, "exactly one PEM CERTIFICATE"):
+            clipman_server.write_connection_config(self.config_path, self.settings)
 
     def test_expiry_warning_is_non_blocking_and_uses_active_certificate(self) -> None:
         try:
@@ -299,7 +331,7 @@ class ConditionalCreateTests(unittest.TestCase):
 
         self.assertEqual(200, response.status)
         self.assertTrue(response.getheader("X-Clipman-Revision", ""))
-        self.assertIn(b'"Version": "2.3.0"', data)
+        self.assertIn(b'"Version": "2.4.0"', data)
         database = clipman_server.database_path(self.settings, database_id)
         self.assertEqual(b"expect-continue", database.read_bytes())
 

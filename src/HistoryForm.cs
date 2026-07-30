@@ -39,7 +39,7 @@ namespace Clipman
         private readonly TabPage fileTab;
         private readonly ListView list;
         private readonly ListView fileEventsList;
-        private readonly ComboBox groupFilter;
+        private readonly AnnouncingComboBox groupFilter;
         private readonly FlowLayoutPanel filterPanel;
         private MenuStrip menuStrip;
         private readonly StatusStrip status;
@@ -66,6 +66,8 @@ namespace Clipman
         private DateTime lastTypeSearchUtc = DateTime.MinValue;
         private string fileTypeSearchBuffer = string.Empty;
         private DateTime lastFileTypeSearchUtc = DateTime.MinValue;
+        private string filterTypeSearchBuffer = string.Empty;
+        private DateTime lastFilterTypeSearchUtc = DateTime.MinValue;
         private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
         private bool listPositionSaveFailureLogged;
@@ -122,17 +124,17 @@ namespace Clipman
             };
             var groupLabel = new Label
             {
-                Text = "&Group:",
+                Text = "&Filter:",
                 Width = 52,
                 Height = 24,
                 TextAlign = ContentAlignment.MiddleLeft
             };
-            groupFilter = new ComboBox
+            groupFilter = new AnnouncingComboBox
             {
                 Width = 260,
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                AccessibleName = "Group filter",
-                AccessibleDescription = "Choose which clipboard group to show.",
+                AccessibleName = "History filter",
+                AccessibleDescription = "Choose a clipboard group or device to show.",
                 TabIndex = 0
             };
             groupFilter.KeyDown += (s, e) =>
@@ -141,6 +143,7 @@ namespace Clipman
                 e.Handled = true;
                 ApplyGroupFilter();
             };
+            groupFilter.KeyPress += GroupFilterKeyPress;
             groupFilter.Leave += (s, e) => ApplyGroupFilter();
             filterPanel.Controls.Add(groupLabel);
             filterPanel.Controls.Add(groupFilter);
@@ -335,7 +338,14 @@ namespace Clipman
             var selectedId = !string.IsNullOrEmpty(preferredSelectedId)
                 ? preferredSelectedId
                 : selectedEntry == null ? null : selectedEntry.Id;
-            entries = TextEntriesForActiveTab(store.GetEntries(settings.SortMode, settings.GroupFilter, settings.SortDescending));
+            var activeGroupFilter = IsDeviceFilterActive() ? "All" : settings.GroupFilter;
+            entries = TextEntriesForActiveTab(store.GetEntries(settings.SortMode, activeGroupFilter, settings.SortDescending));
+            if (IsDeviceFilterActive() && !string.Equals(settings.DeviceFilter, "All", StringComparison.CurrentCultureIgnoreCase))
+            {
+                entries = entries
+                    .Where(e => string.Equals((e.SourceMachine ?? string.Empty).Trim(), settings.DeviceFilter, StringComparison.CurrentCultureIgnoreCase))
+                    .ToList();
+            }
             list.BeginUpdate();
             list.Items.Clear();
             var insertedSeparator = false;
@@ -615,6 +625,25 @@ namespace Clipman
                 };
                 groupMenuItem.DropDownItems.Add(item);
             }
+            var devices = store.GetDevices();
+            if (devices.Count > 0)
+            {
+                groupMenuItem.DropDownItems.Add("-");
+                var devicesMenu = new ToolStripMenuItem("&Devices");
+                foreach (var device in devices)
+                {
+                    var item = new ToolStripMenuItem(device, null, (s, e) =>
+                    {
+                        SetDeviceFilter(Convert.ToString(((ToolStripMenuItem)s).Tag));
+                    })
+                    {
+                        Tag = device,
+                        Checked = IsDeviceFilterActive() && string.Equals(settings.DeviceFilter, device, StringComparison.CurrentCultureIgnoreCase)
+                    };
+                    devicesMenu.DropDownItems.Add(item);
+                }
+                groupMenuItem.DropDownItems.Add(devicesMenu);
+            }
         }
 
         private static string GroupFilterMenuText(string group, int index)
@@ -665,9 +694,11 @@ namespace Clipman
             {
                 SelectMainTab();
             }
-            if (FindListIndexByEntryId(entry.Id) < 0 && !string.Equals(CurrentGroupFilter(), "All", StringComparison.CurrentCultureIgnoreCase))
+            if (FindListIndexByEntryId(entry.Id) < 0 && !IsAllHistoryFilter())
             {
+                settings.HistoryFilterType = "Group";
                 settings.GroupFilter = "All";
+                settings.DeviceFilter = "All";
                 saveSettings();
                 RefreshGroupFilterItems();
             }
@@ -1566,12 +1597,14 @@ namespace Clipman
         private void RefreshGroupFilterItems()
         {
             if (groupFilter == null) return;
-            var current = CurrentGroupFilter();
-            var groups = GroupFilterItems();
+            var choices = HistoryFilterItems();
+            var current = choices.FindIndex(IsCurrentHistoryFilter);
+            if (current < 0) current = 0;
 
             var existing = groupFilter.Items.Cast<object>().Select(Convert.ToString).ToList();
-            if (existing.SequenceEqual(groups))
+            if (existing.SequenceEqual(choices.Select(c => c.ToString())))
             {
+                groupFilter.SelectedIndex = current;
                 return;
             }
 
@@ -1580,13 +1613,11 @@ namespace Clipman
             try
             {
                 groupFilter.Items.Clear();
-                foreach (var group in groups)
+                foreach (var choice in choices)
                 {
-                    groupFilter.Items.Add(group);
+                    groupFilter.Items.Add(choice);
                 }
-                var index = groups.FindIndex(g => string.Equals(g, current, StringComparison.CurrentCultureIgnoreCase));
-                if (index < 0) index = 0;
-                groupFilter.SelectedIndex = index;
+                groupFilter.SelectedIndex = current;
             }
             finally
             {
@@ -1600,6 +1631,91 @@ namespace Clipman
             var groups = new List<string> { "All", "Pinned", "Named", "Ungrouped" };
             groups.AddRange(store.GetGroups().Where(g => !groups.Contains(g, StringComparer.CurrentCultureIgnoreCase)));
             return groups;
+        }
+
+        private List<HistoryFilterChoice> HistoryFilterItems()
+        {
+            var choices = new List<HistoryFilterChoice>();
+            foreach (var group in GroupFilterItems())
+            {
+                choices.Add(new HistoryFilterChoice("Group", group, group));
+            }
+            var devices = store.GetDevices();
+            if (devices.Count > 0)
+            {
+                choices.Add(new HistoryFilterChoice("Divider", string.Empty, "Devices"));
+                choices.AddRange(devices.Select(device => new HistoryFilterChoice("Device", device, device)));
+            }
+            return choices;
+        }
+
+        private void GroupFilterKeyPress(object sender, KeyPressEventArgs e)
+        {
+            if (char.IsControl(e.KeyChar)) return;
+            e.Handled = true;
+
+            var now = DateTime.UtcNow;
+            if ((now - lastFilterTypeSearchUtc).TotalMilliseconds > 1200)
+            {
+                filterTypeSearchBuffer = string.Empty;
+            }
+            lastFilterTypeSearchUtc = now;
+            filterTypeSearchBuffer += e.KeyChar;
+
+            var index = FindHistoryFilterPrefix(filterTypeSearchBuffer);
+            if (index < 0 && filterTypeSearchBuffer.Length > 1)
+            {
+                filterTypeSearchBuffer = e.KeyChar.ToString();
+                index = FindHistoryFilterPrefix(filterTypeSearchBuffer);
+            }
+            if (index >= 0)
+            {
+                groupFilter.SelectedIndex = index;
+                BeginInvoke(new Action(() =>
+                {
+                    if (!groupFilter.IsDisposed && groupFilter.Focused)
+                    {
+                        groupFilter.AnnounceValueChange();
+                    }
+                }));
+            }
+        }
+
+        private int FindHistoryFilterPrefix(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix)) return -1;
+            for (var index = 0; index < groupFilter.Items.Count; index++)
+            {
+                var choice = groupFilter.Items[index] as HistoryFilterChoice;
+                if (choice == null || string.Equals(choice.Type, "Divider", StringComparison.OrdinalIgnoreCase)) continue;
+                if (choice.Display.StartsWith(prefix, true, CultureInfo.CurrentCulture)) return index;
+            }
+            return -1;
+        }
+
+        private bool IsCurrentHistoryFilter(HistoryFilterChoice choice)
+        {
+            if (choice == null) return false;
+            if (string.Equals(choice.Type, "Device", StringComparison.OrdinalIgnoreCase))
+            {
+                return IsDeviceFilterActive() && string.Equals(settings.DeviceFilter, choice.Value, StringComparison.CurrentCultureIgnoreCase);
+            }
+            return !IsDeviceFilterActive() && string.Equals(CurrentGroupFilter(), choice.Value, StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        private bool IsDeviceFilterActive()
+        {
+            return string.Equals(settings.HistoryFilterType, "Device", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsAllHistoryFilter()
+        {
+            return !IsDeviceFilterActive() && string.Equals(CurrentGroupFilter(), "All", StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        private static bool IsReservedGroupFilter(string group)
+        {
+            return new[] { "All", "Pinned", "Named", "Ungrouped" }.Contains(group, StringComparer.CurrentCultureIgnoreCase);
         }
 
         private string CurrentGroupFilter()
@@ -1899,6 +2015,11 @@ namespace Clipman
                 statusText.Text = "Pinned file-history events are protected. Unpin before deleting.";
                 return;
             }
+            if (!ConfirmDeletion(ids.Count == 1 ? "Delete the selected file-history event?" : "Delete " + ids.Count + " selected file-history events?"))
+            {
+                statusText.Text = "Deletion cancelled.";
+                return;
+            }
             var removed = deleteRecentClipboardEvents == null ? 0 : deleteRecentClipboardEvents(ids);
             RefreshFileClipboardEvents(preferredIndex);
             if (removed == 0 && requested.Count > 0)
@@ -2122,19 +2243,55 @@ namespace Clipman
         private void ApplyGroupFilter()
         {
             if (updatingGroupFilter || groupFilter == null || groupFilter.SelectedItem == null) return;
-            var selected = Convert.ToString(groupFilter.SelectedItem);
-            SetGroupFilter(selected);
+            var selected = groupFilter.SelectedItem as HistoryFilterChoice;
+            if (selected == null || string.Equals(selected.Type, "Divider", StringComparison.OrdinalIgnoreCase)) return;
+            if (string.Equals(selected.Type, "Device", StringComparison.OrdinalIgnoreCase))
+            {
+                SetDeviceFilter(selected.Value);
+            }
+            else
+            {
+                SetGroupFilter(selected.Value);
+            }
         }
 
         private void SetGroupFilter(string selected)
         {
             selected = string.IsNullOrWhiteSpace(selected) ? "All" : selected;
-            if (string.Equals(CurrentGroupFilter(), selected, StringComparison.CurrentCultureIgnoreCase)) return;
+            if (!IsDeviceFilterActive() && string.Equals(CurrentGroupFilter(), selected, StringComparison.CurrentCultureIgnoreCase)) return;
+            settings.HistoryFilterType = "Group";
             settings.GroupFilter = selected;
             saveSettings();
             RefreshGroupFilterItems();
             Reload(null, 0);
             statusText.Text = "Showing group filter " + selected + ".";
+        }
+
+        private void SetDeviceFilter(string selected)
+        {
+            selected = string.IsNullOrWhiteSpace(selected) ? "All" : selected.Trim();
+            if (IsDeviceFilterActive() && string.Equals(settings.DeviceFilter, selected, StringComparison.CurrentCultureIgnoreCase)) return;
+            settings.HistoryFilterType = "Device";
+            settings.DeviceFilter = selected;
+            saveSettings();
+            RefreshGroupFilterItems();
+            Reload(null, 0);
+            statusText.Text = "Showing entries from device " + selected + ".";
+        }
+
+        private sealed class HistoryFilterChoice
+        {
+            public HistoryFilterChoice(string type, string value, string display)
+            {
+                Type = type;
+                Value = value;
+                Display = display;
+            }
+
+            public string Type { get; private set; }
+            public string Value { get; private set; }
+            public string Display { get; private set; }
+            public override string ToString() { return Display; }
         }
 
         private bool IsSortMode(string sortMode)
@@ -2328,6 +2485,11 @@ namespace Clipman
                 statusText.Text = "Pinned entries are protected. Unpin before deleting.";
                 return;
             }
+            if (!ConfirmDeletion(ids.Count == 1 ? "Delete the selected clipboard entry?" : "Delete " + ids.Count + " selected clipboard entries?"))
+            {
+                statusText.Text = "Deletion cancelled.";
+                return;
+            }
             SaveListPositionIndex(preferredIndex);
             store.DeleteMany(ids);
             Reload(null, preferredIndex);
@@ -2348,10 +2510,28 @@ namespace Clipman
                 .Where(e => !e.Pinned)
                 .Select(e => e.Id)
                 .ToList();
+            if (ids.Count > 0 && !ConfirmDeletion(ids.Count == 1 ? "Cut and remove the selected clipboard entry from history?" : "Cut and remove " + ids.Count + " selected clipboard entries from history?"))
+            {
+                statusText.Text = "Cut cancelled.";
+                return;
+            }
             SaveListPositionIndex(preferredIndex);
             store.DeleteMany(ids);
             Reload(null, preferredIndex);
             statusText.Text = "Cut " + ids.Count + " unpinned clipboard entry or entries.";
+        }
+
+        private bool ConfirmDeletion(string message)
+        {
+            if (!settings.ConfirmDeletions) return true;
+            bool doNotAskAgain;
+            if (!DeletionConfirmationForm.Ask(this, message, out doNotAskAgain)) return false;
+            if (doNotAskAgain)
+            {
+                settings.ConfirmDeletions = false;
+                saveSettings();
+            }
+            return true;
         }
 
         private void PasteAfterSelected()
@@ -2491,6 +2671,11 @@ namespace Clipman
                 {
                     if (!entry.Pinned)
                     {
+                        if (!ConfirmDeletion("Delete the selected clipboard entry?"))
+                        {
+                            statusText.Text = "Delete cancelled.";
+                            return;
+                        }
                         store.Delete(entry.Id);
                         Reload(null, preferredIndex);
                         statusText.Text = "Deleted selected clipboard entry.";
@@ -3670,6 +3855,14 @@ namespace Clipman
         private static string UrlEncode(string text)
         {
             return Uri.EscapeDataString(text ?? string.Empty);
+        }
+
+        private sealed class AnnouncingComboBox : ComboBox
+        {
+            public void AnnounceValueChange()
+            {
+                AccessibilityNotifyClients(AccessibleEvents.ValueChange, -1);
+            }
         }
     }
 }

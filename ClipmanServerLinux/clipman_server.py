@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from datetime import datetime, timezone
 import http.server
 import ipaddress
 import json
@@ -29,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"
@@ -37,6 +38,10 @@ METADATA_TOUCH_INTERVAL_MS = 5 * 60 * 1000
 SERVER_PORT_MIN = 20000
 SERVER_PORT_MAX = 49151
 BIND_ERROR_EXIT_CODE = 20
+MAX_CA_CERTIFICATE_BYTES = 32 * 1024
+PEM_CERTIFICATE_PATTERN = re.compile(
+    rb"\A\s*(-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----)\s*\Z"
+)
 
 
 def now_ms() -> int:
@@ -281,6 +286,105 @@ def run_openssl(openssl: str, arguments: List[str]) -> str:
         detail = (completed.stderr or completed.stdout).strip()
         raise RuntimeError(f"OpenSSL failed: {detail or 'unknown error'}")
     return completed.stdout.strip()
+
+
+def _single_certificate_pem(data: bytes, description: str) -> bytes:
+    if len(data) > MAX_CA_CERTIFICATE_BYTES:
+        raise RuntimeError(f"The {description} exceeds the {MAX_CA_CERTIFICATE_BYTES}-byte limit.")
+    if b"PRIVATE KEY" in data:
+        raise RuntimeError(f"The {description} must not contain private key material.")
+    match = PEM_CERTIFICATE_PATTERN.fullmatch(data)
+    if match is None:
+        raise RuntimeError(f"The {description} must contain exactly one PEM CERTIFICATE block.")
+    return match.group(1) + b"\n"
+
+
+def _first_certificate_pem(data: bytes, description: str) -> bytes:
+    begin = data.find(b"-----BEGIN CERTIFICATE-----")
+    end_marker = b"-----END CERTIFICATE-----"
+    end = data.find(end_marker, begin)
+    if begin < 0 or end < 0:
+        raise RuntimeError(f"The {description} does not contain a PEM certificate.")
+    end += len(end_marker)
+    return data[begin:end] + b"\n"
+
+
+def _openssl_certificate_time(value: str) -> datetime:
+    try:
+        return datetime.strptime(value.strip(), "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+    except ValueError as error:
+        raise RuntimeError(f"OpenSSL returned an unrecognized certificate date: {value}") from error
+
+
+def inspect_private_ca(settings: Dict[str, Any]) -> Dict[str, str] | None:
+    configured = str(settings.get("CaFile", "")).strip()
+    if not configured:
+        return None
+    if not has_tls(settings):
+        raise RuntimeError("A private certificate authority can be exported only for an HTTPS server.")
+
+    host = advertised_host(settings).strip().strip("[]")
+    if not host or host in {"0.0.0.0", "::"}:
+        raise RuntimeError("Set AdvertiseHost to the DNS name or IP address clients use before exporting a private authority.")
+
+    ca_path = Path(configured).expanduser()
+    cert_path = Path(str(settings.get("CertFile", ""))).expanduser()
+    if not ca_path.is_file():
+        raise RuntimeError("The configured private certificate authority file was not found.")
+    if not cert_path.is_file():
+        raise RuntimeError("The configured HTTPS certificate file was not found.")
+
+    ca_pem = _single_certificate_pem(ca_path.read_bytes(), "private certificate authority")
+    leaf_pem = _first_certificate_pem(cert_path.read_bytes(), "HTTPS certificate file")
+    openssl = find_openssl()
+    with tempfile.TemporaryDirectory(prefix="clipman-ca-check-") as staging_text:
+        staging = Path(staging_text)
+        staged_ca = staging / "authority.crt"
+        staged_leaf = staging / "server.crt"
+        staged_ca.write_bytes(ca_pem)
+        staged_leaf.write_bytes(leaf_pem)
+
+        details = run_openssl(openssl, ["x509", "-in", str(staged_ca), "-noout", "-text"])
+        if "CA:TRUE" not in details:
+            raise RuntimeError("The configured authority certificate is not marked as a certificate authority.")
+        if "X509v3 Key Usage" in details and "Certificate Sign" not in details:
+            raise RuntimeError("The configured authority certificate cannot sign certificates.")
+
+        date_text = run_openssl(openssl, ["x509", "-in", str(staged_ca), "-noout", "-dates"])
+        date_values = dict(line.split("=", 1) for line in date_text.splitlines() if "=" in line)
+        if "notBefore" not in date_values or "notAfter" not in date_values:
+            raise RuntimeError("The configured authority certificate does not expose valid dates.")
+        now = datetime.now(timezone.utc)
+        if now < _openssl_certificate_time(date_values["notBefore"]):
+            raise RuntimeError("The configured authority certificate is not valid yet.")
+        if now > _openssl_certificate_time(date_values["notAfter"]):
+            raise RuntimeError("The configured authority certificate has expired.")
+
+        run_openssl(openssl, ["verify", "-CAfile", str(staged_ca), str(staged_leaf)])
+        try:
+            ipaddress.ip_address(host)
+            host_arguments = ["-checkip", host]
+        except ValueError:
+            host_arguments = ["-checkhost", host]
+        run_openssl(openssl, ["x509", "-in", str(staged_leaf), "-noout"] + host_arguments)
+
+        canonical_pem = run_openssl(openssl, ["x509", "-in", str(staged_ca), "-outform", "PEM"]) + "\n"
+        fingerprint = run_openssl(
+            openssl,
+            ["x509", "-in", str(staged_ca), "-noout", "-fingerprint", "-sha256"],
+        ).partition("=")[2]
+        subject = run_openssl(
+            openssl,
+            ["x509", "-in", str(staged_ca), "-noout", "-subject", "-nameopt", "RFC2253"],
+        ).partition("=")[2]
+
+    return {
+        "pem": canonical_pem,
+        "host": host,
+        "fingerprint": fingerprint,
+        "subject": subject,
+        "expires": date_values["notAfter"],
+    }
 
 
 def warn_if_tls_certificate_expiring(settings: Dict[str, Any], days: int = 30) -> None:
@@ -560,22 +664,35 @@ def default_connection_config_path(config_path: Path) -> Path:
 
 def client_server_address(settings: Dict[str, Any]) -> str:
     scheme = "https" if has_tls(settings) else "clipman"
-    return f"{scheme}://{advertised_host(settings)}:{settings['Port']}"
+    host = advertised_host(settings)
+    host_for_url = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"{scheme}://{host_for_url}:{settings['Port']}"
 
 
 def write_connection_info(config_path: Path, settings: Dict[str, Any]) -> Path:
     target = default_connection_info_path(config_path)
     make_private_dir(target.parent)
+    authority = inspect_private_ca(settings)
     lines = [
         "Clipman Server connection details",
         "",
         f"Server address: {client_server_address(settings)}",
         f"Port: {settings['Port']}",
         f"Token: {settings['AuthToken']}",
+    ]
+    if authority is not None:
+        lines.extend([
+            "",
+            f"Private CA host: {authority['host']}",
+            f"Private CA subject: {authority['subject']}",
+            f"Private CA expires: {authority['expires']}",
+            f"Private CA SHA-256 fingerprint: {authority['fingerprint']}",
+        ])
+    lines.extend([
         "",
         "Keep this file private. After every Clipman client has been configured,",
         "delete this file or move the details to your password manager.",
-    ]
+    ])
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     make_private_file(tmp)
@@ -587,6 +704,7 @@ def write_connection_info(config_path: Path, settings: Dict[str, Any]) -> Path:
 def write_connection_config(config_path: Path, settings: Dict[str, Any]) -> Path:
     target = default_connection_config_path(config_path)
     make_private_dir(target.parent)
+    authority = inspect_private_ca(settings)
     document = {
         "clipman": "server-connection",
         "version": 1,
@@ -595,6 +713,8 @@ def write_connection_config(config_path: Path, settings: Dict[str, Any]) -> Path
         "port": int(settings["Port"]),
         "token": str(settings["AuthToken"]),
     }
+    if authority is not None:
+        document["ca_cert_pem"] = authority["pem"]
     tmp = target.with_suffix(target.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(document, f, indent=2, sort_keys=True)
@@ -608,7 +728,12 @@ def write_connection_config(config_path: Path, settings: Dict[str, Any]) -> Path
 def maybe_write_connection_info(config_path: Path, settings: Dict[str, Any], settings_created: bool, force: bool) -> Path | None:
     target = default_connection_info_path(config_path)
     if force or settings_created or target.exists():
-        return write_connection_info(config_path, settings)
+        try:
+            return write_connection_info(config_path, settings)
+        except RuntimeError:
+            if force:
+                raise
+            logging.warning("The existing connection information was preserved because the configured private authority could not be validated.", exc_info=True)
     return None
 
 
@@ -616,7 +741,12 @@ def maybe_write_connection_config(config_path: Path, settings: Dict[str, Any], s
     target = default_connection_config_path(config_path)
     legacy = default_connection_info_path(config_path)
     if force or settings_created or target.exists() or legacy.exists():
-        return write_connection_config(config_path, settings)
+        try:
+            return write_connection_config(config_path, settings)
+        except RuntimeError:
+            if force:
+                raise
+            logging.warning("The existing connection file was preserved because the configured private authority could not be validated.", exc_info=True)
     return None
 
 
@@ -1262,6 +1392,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cert-host", action="append", default=[], help="Add a DNS name to a generated HTTPS certificate. May be repeated.")
     parser.add_argument("--cert-ip", action="append", default=[], help="Add an IP address to a generated HTTPS certificate. May be repeated.")
     parser.add_argument("--new-ca", action="store_true", help="Replace the private certificate authority when generating HTTPS. Existing clients must trust the new authority.")
+    parser.add_argument("--show-ca-fingerprint", action="store_true", help="Print the configured private authority SHA-256 fingerprint and exit.")
     parser.add_argument("--share-ca", action="store_true", help="Temporarily share only the public certificate authority over HTTP and exit after one download or the time limit.")
     parser.add_argument("--share-minutes", type=int, default=10, help="Minutes to share the public authority with --share-ca (1 to 60; default 10).")
     parser.add_argument("--share-host", help="Override the listen host used by --share-ca.")
@@ -1307,8 +1438,12 @@ def main() -> int:
     if args.allow_insecure_remote:
         settings["AllowInsecureRemote"] = True
     save_settings(config_path, settings)
-    connection_info = maybe_write_connection_info(config_path, settings, settings_created, args.write_connection_info)
-    connection_config = maybe_write_connection_config(config_path, settings, settings_created, args.write_connection_info)
+    try:
+        connection_info = maybe_write_connection_info(config_path, settings, settings_created, args.write_connection_info)
+        connection_config = maybe_write_connection_config(config_path, settings, settings_created, args.write_connection_info)
+    except RuntimeError as error:
+        print(f"Could not write the Clipman Server connection files: {error}", file=sys.stderr)
+        return 1
     configure_logging(settings)
 
     if args.create_tls_certificate:
@@ -1321,7 +1456,19 @@ def main() -> int:
         print(f"Server certificate: {result['certificate']}")
         print(f"Server certificate expires: {result['expires']}")
         print(f"Authority SHA-256 fingerprint: {result['fingerprint']}")
-        print("Install and trust the authority on each client, then restart Clipman Server.")
+        print("Import the refreshed .clpconf file in current Clipman clients, then restart Clipman Server.")
+        print("Older clients may still require the public authority to be installed in the operating system trust store.")
+        return 0
+    if args.show_ca_fingerprint:
+        try:
+            authority = inspect_private_ca(settings)
+        except RuntimeError as error:
+            print(f"Could not inspect the private certificate authority: {error}", file=sys.stderr)
+            return 1
+        if authority is None:
+            print("No private certificate authority is configured.", file=sys.stderr)
+            return 1
+        print(authority["fingerprint"])
         return 0
     if args.share_ca:
         if args.share_minutes < 1 or args.share_minutes > 60:

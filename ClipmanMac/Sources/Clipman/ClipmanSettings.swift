@@ -3,10 +3,13 @@ import Carbon
 
 struct ClipmanSettings: Codable, Equatable {
     var machineName: String
+    var deviceName: String
     var databasePath: String
     var storageMode: String
     var serverUrl: String
     var serverToken: String
+    var serverCaCertPem: String
+    var serverCaHost: String
     var monitoringEnabled: Bool
     var soundsEnabled: Bool
     var showHistoryHotkey: HotkeyDescriptor
@@ -22,6 +25,9 @@ struct ClipmanSettings: Codable, Equatable {
     var linksHistoryEnabled: Bool
     var richTextHistoryEnabled: Bool
     var groupFilter: String
+    var historyFilterType: String
+    var deviceFilter: String
+    var confirmDeletions: Bool
     var runAtStartup: Bool
     var captureClipboardOnStartup: Bool
     var rememberDatabasePassword: Bool
@@ -38,8 +44,8 @@ struct ClipmanSettings: Codable, Equatable {
     var sensitiveDataPresetIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case machineName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
-        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, groupFilter, runAtStartup
+        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
+        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, groupFilter, historyFilterType, deviceFilter, confirmDeletions, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
         case autoCopyLatestRemoteText, pasteAfterEnter, dynamicHistoryMode, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
@@ -53,10 +59,13 @@ struct ClipmanSettings: Codable, Equatable {
 
     init(
         machineName: String,
+        deviceName: String,
         databasePath: String,
         storageMode: String,
         serverUrl: String,
         serverToken: String,
+        serverCaCertPem: String,
+        serverCaHost: String,
         monitoringEnabled: Bool,
         soundsEnabled: Bool,
         showHistoryHotkey: HotkeyDescriptor,
@@ -72,6 +81,9 @@ struct ClipmanSettings: Codable, Equatable {
         linksHistoryEnabled: Bool,
         richTextHistoryEnabled: Bool,
         groupFilter: String,
+        historyFilterType: String,
+        deviceFilter: String,
+        confirmDeletions: Bool,
         runAtStartup: Bool,
         captureClipboardOnStartup: Bool,
         rememberDatabasePassword: Bool,
@@ -88,10 +100,13 @@ struct ClipmanSettings: Codable, Equatable {
         sensitiveDataPresetIds: [String]
     ) {
         self.machineName = machineName
+        self.deviceName = deviceName
         self.databasePath = databasePath
         self.storageMode = storageMode
         self.serverUrl = serverUrl
         self.serverToken = serverToken
+        self.serverCaCertPem = serverCaCertPem
+        self.serverCaHost = serverCaHost
         self.monitoringEnabled = monitoringEnabled
         self.soundsEnabled = soundsEnabled
         self.showHistoryHotkey = showHistoryHotkey
@@ -107,6 +122,9 @@ struct ClipmanSettings: Codable, Equatable {
         self.linksHistoryEnabled = linksHistoryEnabled
         self.richTextHistoryEnabled = richTextHistoryEnabled
         self.groupFilter = groupFilter
+        self.historyFilterType = historyFilterType
+        self.deviceFilter = deviceFilter
+        self.confirmDeletions = confirmDeletions
         self.runAtStartup = runAtStartup
         self.captureClipboardOnStartup = captureClipboardOnStartup
         self.rememberDatabasePassword = rememberDatabasePassword
@@ -127,10 +145,13 @@ struct ClipmanSettings: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = ClipmanSettings.defaults(applicationSupport: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Clipman", isDirectory: true))
         machineName = try container.decodeIfPresent(String.self, forKey: .machineName) ?? fallback.machineName
+        deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName) ?? machineName
         databasePath = try container.decodeIfPresent(String.self, forKey: .databasePath) ?? fallback.databasePath
         storageMode = ClipmanSettings.normalizeStorageMode(try container.decodeIfPresent(String.self, forKey: .storageMode))
         serverUrl = ServerSettingsSanitizer.cleanURL(try container.decodeIfPresent(String.self, forKey: .serverUrl) ?? "")
         serverToken = ServerSettingsSanitizer.cleanToken(try container.decodeIfPresent(String.self, forKey: .serverToken) ?? "")
+        serverCaCertPem = try container.decodeIfPresent(String.self, forKey: .serverCaCertPem) ?? ""
+        serverCaHost = try container.decodeIfPresent(String.self, forKey: .serverCaHost) ?? ""
         monitoringEnabled = try container.decodeIfPresent(Bool.self, forKey: .monitoringEnabled) ?? fallback.monitoringEnabled
         soundsEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundsEnabled) ?? true
         showHistoryHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .showHistoryHotkey) ?? fallback.showHistoryHotkey
@@ -146,6 +167,9 @@ struct ClipmanSettings: Codable, Equatable {
         lastSelectedHistoryTab = try container.decodeIfPresent(String.self, forKey: .lastSelectedHistoryTab) ?? (lastSelectedTab == 1 ? HistoryTabID.files : HistoryTabID.text)
         historyTabOrder = HistoryTabID.normalizeOrder(try container.decodeIfPresent([String].self, forKey: .historyTabOrder))
         groupFilter = try container.decodeIfPresent(String.self, forKey: .groupFilter) ?? "All"
+        historyFilterType = (try container.decodeIfPresent(String.self, forKey: .historyFilterType) ?? "Group").caseInsensitiveCompare("Device") == .orderedSame ? "Device" : "Group"
+        deviceFilter = try container.decodeIfPresent(String.self, forKey: .deviceFilter) ?? "All"
+        confirmDeletions = try container.decodeIfPresent(Bool.self, forKey: .confirmDeletions) ?? true
         runAtStartup = try container.decodeIfPresent(Bool.self, forKey: .runAtStartup) ?? false
         captureClipboardOnStartup = try container.decodeIfPresent(Bool.self, forKey: .captureClipboardOnStartup) ?? false
         rememberDatabasePassword = try container.decodeIfPresent(Bool.self, forKey: .rememberDatabasePassword) ?? false
@@ -180,9 +204,12 @@ struct ClipmanSettings: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(machineName, forKey: .machineName)
+        try container.encode(deviceName, forKey: .deviceName)
         try container.encode(databasePath, forKey: .databasePath)
         try container.encode(storageMode, forKey: .storageMode)
         try container.encode(serverUrl, forKey: .serverUrl)
+        try container.encode(serverCaCertPem, forKey: .serverCaCertPem)
+        try container.encode(serverCaHost, forKey: .serverCaHost)
         try container.encode(monitoringEnabled, forKey: .monitoringEnabled)
         try container.encode(soundsEnabled, forKey: .soundsEnabled)
         try container.encode(showHistoryHotkey, forKey: .showHistoryHotkey)
@@ -198,6 +225,9 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(linksHistoryEnabled, forKey: .linksHistoryEnabled)
         try container.encode(richTextHistoryEnabled, forKey: .richTextHistoryEnabled)
         try container.encode(groupFilter, forKey: .groupFilter)
+        try container.encode(historyFilterType, forKey: .historyFilterType)
+        try container.encode(deviceFilter, forKey: .deviceFilter)
+        try container.encode(confirmDeletions, forKey: .confirmDeletions)
         try container.encode(runAtStartup, forKey: .runAtStartup)
         try container.encode(captureClipboardOnStartup, forKey: .captureClipboardOnStartup)
         try container.encode(rememberDatabasePassword, forKey: .rememberDatabasePassword)
@@ -215,12 +245,16 @@ struct ClipmanSettings: Codable, Equatable {
     }
 
     static func defaults(applicationSupport: URL) -> ClipmanSettings {
-        ClipmanSettings(
-            machineName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+        let machineName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        return ClipmanSettings(
+            machineName: machineName,
+            deviceName: machineName,
             databasePath: applicationSupport.appendingPathComponent("clipman-history.clipdb").path,
             storageMode: "File",
             serverUrl: "",
             serverToken: "",
+            serverCaCertPem: "",
+            serverCaHost: "",
             monitoringEnabled: true,
             soundsEnabled: true,
             showHistoryHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ANSI_Grave), modifiers: [.option, .shift]),
@@ -236,6 +270,9 @@ struct ClipmanSettings: Codable, Equatable {
             linksHistoryEnabled: false,
             richTextHistoryEnabled: false,
             groupFilter: "All",
+            historyFilterType: "Group",
+            deviceFilter: "All",
+            confirmDeletions: true,
             runAtStartup: false,
             captureClipboardOnStartup: false,
             rememberDatabasePassword: false,

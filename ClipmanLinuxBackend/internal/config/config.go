@@ -10,11 +10,13 @@ import (
 	"strings"
 
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/platform"
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/server"
 )
 
 type Limits struct{ MaxBlobBytes, MaxJSONBytes, MaxEntries, MaxTextBytes int64 }
 type Config struct {
 	Server, Token, TokenProtected, Machine, Renderer, DefaultKind, PasswordMode, Password, PasswordProtected string
+	CACertPEM, CAHost                                                                                        string
 	PinnedFirst                                                                                              bool
 	Limits                                                                                                   Limits
 }
@@ -77,6 +79,10 @@ func Save(path string, value Config) error {
 		writeString("token", value.Token)
 	}
 	writeString("machine", value.Machine)
+	if value.CACertPEM != "" {
+		writeString("ca_cert_pem", value.CACertPEM)
+		writeString("ca_host", value.CAHost)
+	}
 	writeString("renderer", value.Renderer)
 	fmt.Fprintf(&out, "pinned_first = %t\n", value.PinnedFirst)
 	writeString("default_kind", value.DefaultKind)
@@ -119,6 +125,17 @@ func Validate(value Config) error {
 	}
 	if value.Password != "" && value.PasswordProtected != "" {
 		return errors.New("configuration contains both password and password_protected")
+	}
+	if value.CACertPEM != "" {
+		authority, err := server.ParsePrivateAuthority([]byte(value.CACertPEM), value.Server)
+		if err != nil {
+			return err
+		}
+		if value.CAHost != "" && !strings.EqualFold(strings.TrimSpace(value.CAHost), authority.Host) {
+			return errors.New("private certificate authority is configured for a different server host")
+		}
+	} else if value.CAHost != "" {
+		return errors.New("ca_host requires ca_cert_pem")
 	}
 	if !strings.EqualFold(value.PasswordMode, "config") && (value.Password != "" || value.PasswordProtected != "") {
 		return errors.New("saved password values require password_mode config")
@@ -204,6 +221,10 @@ func assign(c *Config, section, key, raw string) error {
 		return setString(&c.TokenProtected)
 	case "machine":
 		return setString(&c.Machine)
+	case "ca_cert_pem":
+		return setString(&c.CACertPEM)
+	case "ca_host":
+		return setString(&c.CAHost)
 	case "renderer":
 		return setString(&c.Renderer)
 	case "default_kind":

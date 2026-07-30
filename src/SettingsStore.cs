@@ -123,6 +123,7 @@ namespace Clipman
             }
             settings.StorageMode = NormalizeStorageMode(settings.StorageMode);
             settings.ServerUrl = ServerSettingsSanitizer.CleanUrl(settings.ServerUrl);
+            NormalizeServerCertificateAuthority(settings);
             var plainServerToken = ServerSettingsSanitizer.CleanToken(settings.ServerToken);
             if (plainServerToken.Length == 0 && !string.IsNullOrWhiteSpace(settings.ProtectedServerToken))
             {
@@ -173,6 +174,14 @@ namespace Clipman
             {
                 settings.IgnoredProcesses = new List<string>();
             }
+            if (string.IsNullOrWhiteSpace(settings.DeviceName))
+            {
+                settings.DeviceName = Environment.MachineName ?? string.Empty;
+            }
+            else
+            {
+                settings.DeviceName = settings.DeviceName.Trim();
+            }
             if (string.IsNullOrWhiteSpace(settings.SortMode))
             {
                 settings.SortMode = "LastUsed";
@@ -185,6 +194,13 @@ namespace Clipman
             if (string.IsNullOrWhiteSpace(settings.GroupFilter))
             {
                 settings.GroupFilter = "All";
+            }
+            settings.HistoryFilterType = string.Equals(settings.HistoryFilterType, "Device", StringComparison.OrdinalIgnoreCase)
+                ? "Device"
+                : "Group";
+            if (string.IsNullOrWhiteSpace(settings.DeviceFilter))
+            {
+                settings.DeviceFilter = "All";
             }
             if (string.IsNullOrWhiteSpace(settings.DuplicateMode))
             {
@@ -266,6 +282,42 @@ namespace Clipman
             return string.Equals((mode ?? string.Empty).Trim(), "Server", StringComparison.OrdinalIgnoreCase)
                 ? "Server"
                 : "File";
+        }
+
+        private void NormalizeServerCertificateAuthority(AppSettings settings)
+        {
+            if (string.IsNullOrWhiteSpace(settings.ServerCaCertPem))
+            {
+                settings.ServerCaCertPem = string.Empty;
+                settings.ServerCaHost = string.Empty;
+                return;
+            }
+
+            ServerCertificateAuthority authority;
+            string error;
+            if (!ServerSettingsSanitizer.TryParseCertificateAuthority(
+                settings.ServerCaCertPem,
+                settings.ServerUrl,
+                out authority,
+                out error))
+            {
+                throw new InvalidDataException("Clipman could not use the configured private certificate authority: " + error);
+            }
+            if (!string.IsNullOrWhiteSpace(settings.ServerCaHost) &&
+                !string.Equals(settings.ServerCaHost.Trim(), authority.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                settings.ServerCaCertPem = string.Empty;
+                settings.ServerCaHost = string.Empty;
+                if (warningLogger != null)
+                {
+                    warningLogger(
+                        "Clipman removed the private certificate authority because the configured server host changed.",
+                        null);
+                }
+                return;
+            }
+            settings.ServerCaCertPem = authority.Pem;
+            settings.ServerCaHost = authority.Host;
         }
 
         private LoadedSettings LoadBestSettings(string pointerFolder)

@@ -408,23 +408,34 @@ clipmanserver update-status</code></pre>
 
   <pre><code>clipmanserver cert --cert-host server-name --cert-ip 100.64.0.10</code></pre>
 
-  <p>Repeat <code>--cert-host</code> and <code>--cert-ip</code> for every DNS name or address clients use. The server reuses its existing private authority during normal renewal, creates a new server certificate valid for 397 days, updates its HTTPS settings, and rewrites the connection files with an <code>https://</code> address. Creating a new authority is an explicit recovery operation because every client must trust the replacement authority again.</p>
+  <p>Repeat <code>--cert-host</code> and <code>--cert-ip</code> for every DNS name or address clients use. The server reuses its existing private authority during normal renewal, creates a new server certificate valid for 397 days, updates its HTTPS settings, and rewrites the connection files with an <code>https://</code> address. Creating a new authority with <code>--new-ca</code> is an explicit recovery operation because every connected client must import the replacement authority.</p>
 
-  <p>To transfer only the public authority, use <strong>Share certificate authority</strong> in the Windows or macOS server menu, or run:</p>
+  <h3>Connect Current Clients</h3>
+  <ol>
+    <li>Transfer <code>clipman-server-connection.clpconf</code> from the server settings folder through a channel you trust. The file contains the private server token as well as the public authority.</li>
+    <li>Open or import the file in Clipman. Review the displayed HTTPS host, authority subject, expiry date, and SHA-256 fingerprint.</li>
+    <li>Enter the history password separately, then choose Save or Apply. Importing alone does not change the active connection.</li>
+    <li>Confirm that synchronization succeeds before removing any older operating-system trust entry.</li>
+  </ol>
+
+  <p>Current clients validate the embedded authority and use it only inside Clipman, only for the reviewed HTTPS host. Hostname, validity, signing usage, and server-certificate purpose checks still apply. When an embedded authority is configured, Clipman does not fall back to a public system authority for that profile. Exporting the connection again preserves the authority when it still matches the saved host.</p>
+
+  <p>Windows and macOS server menus can copy the authority fingerprint. On an installed Linux server, run:</p>
+
+  <pre><code>clipmanserver fingerprint</code></pre>
+
+  <h3>Older Clients and Recovery</h3>
+  <p>Older clients do not understand the embedded authority. For those clients, or for manual recovery, use <strong>Share certificate authority</strong> in the Windows or macOS server menu, or run:</p>
 
   <pre><code>clipmanserver share-ca</code></pre>
 
-  <p>This temporarily serves the public <code>clipman-server-ca.crt</code> at a random high port and unguessable path. It stops after the first successful download or ten minutes. Use it only over a trusted LAN or VPN. Compare the SHA-256 fingerprint shown by the server before trusting the certificate. The sharing command never serves either private key.</p>
+  <p>This temporarily serves the public <code>clipman-server-ca.crt</code> at a random high port and unguessable path. It stops after the first successful download or ten minutes. Use it only over a trusted LAN or VPN, and compare the SHA-256 fingerprint through a separate trusted channel. The sharing command never serves either private key.</p>
 
-  <h3>Trust the Authority on Clients</h3>
-  <ul>
-    <li><strong>Windows:</strong> open the downloaded <code>.crt</code>, choose <strong>Install Certificate</strong>, and place it in <strong>Trusted Root Certification Authorities</strong> for the current user. Restart Clipman afterward.</li>
-    <li><strong>macOS:</strong> add the authority to Keychain Access, open the certificate, set <strong>Secure Sockets Layer</strong> to <strong>Always Trust</strong>, then restart Clipman.</li>
-    <li><strong>Android:</strong> install it as a CA certificate through Android security settings. Menu names vary by Android version. Clipman permits user-installed authorities for its server connection; this opt-in affects trust decisions made by Clipman, so remove an authority you no longer control.</li>
-    <li><strong>iPhone or iPad:</strong> download the certificate, install the downloaded profile in Settings, then open <strong>Settings &gt; General &gt; About &gt; Certificate Trust Settings</strong> and enable full trust for the Clipman Server authority. Installing the profile without enabling full trust is not sufficient.</li>
-  </ul>
+  <p>Legacy operating-system installation locations are Current User Trusted Root Certification Authorities on Windows, Keychain Access trust settings on macOS, user CA settings on Android, and configuration profiles plus Certificate Trust Settings on iPhone or iPad. After upgrading, import the refreshed <code>.clpconf</code>, verify synchronization, remove the old operating-system authority, restart Clipman, and verify synchronization again. Until the old authority is removed, it remains trusted outside Clipman.</p>
 
-  <p>Once the authority is trusted, import the regenerated <code>.clpconf</code> file or change the client address to the HTTPS name or IP included in the certificate. A different address will fail hostname validation even when the authority is trusted. Clipman Server writes a warning to its log when the active certificate has fewer than 30 days remaining, and its health response includes the certificate expiry date. If either the certificate or key is missing, unreadable, or mismatched, the server refuses to open a listener and reports the exact configuration problem instead of falling back to HTTP.</p>
+  <p>A different address will fail hostname validation even when the authority is correct. Changing the saved host clears app-specific authority trust and requires review or re-import. Removing the authority does not remove the server address, token, or history password, but a private-CA server will stop synchronizing unless the authority is imported again or remains trusted by the operating system. Clipman Server writes a warning to its log when the active certificate has fewer than 30 days remaining, and its health response includes the certificate expiry date. If either the certificate or key is missing, unreadable, or mismatched, the server refuses to open a listener and reports the exact configuration problem instead of falling back to HTTP.</p>
+
+  <p>The embedded-authority flow applies directly when Clipman Server terminates TLS itself. A reverse proxy with a publicly trusted certificate needs no embedded authority. A reverse proxy using a private authority requires that authority to be imported separately and bound to the public HTTPS host.</p>
 
   <h3>Docker</h3>
   <p>Set <code>CLIPMAN_SELF_SIGNED_CERT=true</code> to create and reuse a private authority in the mounted <code>/data</code> volume. Optional comma-separated <code>CLIPMAN_CERT_HOSTS</code> and <code>CLIPMAN_CERT_IPS</code> values add names and addresses to the server certificate. Keep the volume persistent: deleting it also deletes the private authority needed for renewal.</p>

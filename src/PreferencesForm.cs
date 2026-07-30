@@ -25,6 +25,8 @@ namespace Clipman
         private readonly CheckBox richTextHistoryEnabled;
         private readonly CheckBox saveListPosition;
         private readonly CheckBox active;
+        private readonly TextBox deviceName;
+        private readonly CheckBox confirmDeletions;
         private readonly CheckBox runAtStartup;
         private readonly CheckBox captureClipboardOnStartup;
         private readonly ComboBox updateCheckFrequency;
@@ -34,6 +36,8 @@ namespace Clipman
         private readonly ComboBox storageMode;
         private readonly TextBox serverUrl;
         private readonly TextBox serverToken;
+        private readonly Label serverCaStatus;
+        private readonly TextBox serverCaFingerprint;
         private readonly TextBox databasePassword;
         private readonly TextBox databasePasswordConfirm;
         private readonly CheckBox showDatabasePassword;
@@ -96,6 +100,10 @@ namespace Clipman
             sensitiveData.AccessibleDescription = "Sensitive data preferences. Shortcut Ctrl+6.";
 
             active = NewCheckBox("Clipboard monitoring &active", settings.Active);
+            deviceName = NewTextBox(settings.DeviceName);
+            deviceName.AccessibleName = "Device name";
+            deviceName.AccessibleDescription = "Name recorded on new clipboard entries created by this device. Existing entries keep their original device name.";
+            confirmDeletions = NewCheckBox("Confirm before deleting entr&ies", settings.ConfirmDeletions);
             soundsEnabled = NewCheckBox("Play &sounds", settings.SoundsEnabled);
             autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
             autoCopyLatestRemoteText = NewCheckBox("Put new text received from another devi&ce on the clipboard", settings.AutoCopyLatestRemoteText);
@@ -118,6 +126,8 @@ namespace Clipman
 
             var generalLayout = NewRows();
             AddFullRow(generalLayout, active);
+            AddRow(generalLayout, "Device la&bel:", deviceName);
+            AddFullRow(generalLayout, confirmDeletions);
             AddFullRow(generalLayout, soundsEnabled);
             AddFullRow(generalLayout, autoGroupByApp);
             AddFullRow(generalLayout, autoCopyLatestRemoteText);
@@ -159,6 +169,11 @@ namespace Clipman
             serverToken.UseSystemPasswordChar = true;
             serverToken.AccessibleName = "Clipman Server token";
             serverToken.AccessibleDescription = "Server authentication token. The token is hidden on screen and saved with Windows user protection.";
+            serverCaStatus = NewNote(string.Empty);
+            serverCaStatus.AccessibleName = "Private certificate authority status";
+            serverCaFingerprint = NewTextBox(string.Empty);
+            serverCaFingerprint.ReadOnly = true;
+            serverCaFingerprint.AccessibleName = "Private certificate authority SHA-256 fingerprint";
             databasePassword = new TextBox
             {
                 Width = 260,
@@ -201,6 +216,12 @@ namespace Clipman
             var exportServerConnection = new Button { Text = "E&xport server file...", AutoSize = true };
             exportServerConnection.AccessibleDescription = "Export the current Clipman Server address and private token to a connection file.";
             exportServerConnection.Click += (s, e) => ExportServerConnection();
+            var importServerAuthority = new Button { Text = "Import a&uthority...", AutoSize = true };
+            importServerAuthority.AccessibleDescription = "Import a public private-authority certificate for the currently entered HTTPS server host.";
+            importServerAuthority.Click += (s, e) => ImportServerAuthority();
+            var removeServerAuthority = new Button { Text = "Remo&ve authority", AutoSize = true };
+            removeServerAuthority.AccessibleDescription = "Remove the app-specific private certificate authority without changing the server address or token.";
+            removeServerAuthority.Click += (s, e) => RemoveServerAuthority();
 
             var dbPanel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
             dbPanel.Controls.Add(databasePath);
@@ -226,7 +247,11 @@ namespace Clipman
             var serverFilePanel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
             serverFilePanel.Controls.Add(importServerConnection);
             serverFilePanel.Controls.Add(exportServerConnection);
+            serverFilePanel.Controls.Add(importServerAuthority);
+            serverFilePanel.Controls.Add(removeServerAuthority);
             AddFullRow(storageLayout, serverFilePanel);
+            AddFullRow(storageLayout, serverCaStatus);
+            AddRow(storageLayout, "Authority fingerprint chec&ksum:", serverCaFingerprint);
             AddFullRow(storageLayout, NewNote("Enter a host and port such as home-server:49152. Clipman will infer the local server protocol. Server mode stores the raw clipman-history.clipdb on a Clipman Server. The server never knows the history password; encryption still happens on this computer."));
             AddRow(storageLayout, "History &password:", passwordPanel);
             AddRow(storageLayout, "&Confirm password:", passwordConfirmPanel);
@@ -236,6 +261,7 @@ namespace Clipman
             AddRow(storageLayout, "Ignored &applications:", ignoredPanel);
             AddFullRow(storageLayout, NewNote("One process name per line, such as keepass, chrome, or passwordmanager.exe."));
             storage.Controls.Add(storageLayout);
+            UpdateServerAuthorityStatus();
 
             runAtStartup = NewCheckBox("Run Clipman at Windows &startup", settings.RunAtStartup);
             captureClipboardOnStartup = NewCheckBox("Add current &clipboard item to Clipman on start", settings.CaptureClipboardOnStartup);
@@ -363,6 +389,8 @@ namespace Clipman
             linksHistoryEnabled.CheckedChanged += (s, e) => ApplyNow();
             saveListPosition.CheckedChanged += (s, e) => ApplyNow();
             active.CheckedChanged += (s, e) => ApplyNow();
+            deviceName.Leave += (s, e) => ApplyNow();
+            confirmDeletions.CheckedChanged += (s, e) => ApplyNow();
             autoRemoveUnavailableFileHistoryEvents.CheckedChanged += (s, e) => ApplyNow();
             diagnosticsFileHistoryLimit.ValueChanged += (s, e) => ApplyNow();
             runAtStartup.CheckedChanged += (s, e) => ApplyNow();
@@ -408,6 +436,8 @@ namespace Clipman
             settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
             settings.SaveListPosition = saveListPosition.Checked;
             settings.Active = active.Checked;
+            settings.DeviceName = string.IsNullOrWhiteSpace(deviceName.Text) ? Environment.MachineName : deviceName.Text.Trim();
+            settings.ConfirmDeletions = confirmDeletions.Checked;
             settings.AutoRemoveUnavailableFileHistoryEvents = autoRemoveUnavailableFileHistoryEvents.Checked;
             settings.DiagnosticsFileHistoryLimit = (int)diagnosticsFileHistoryLimit.Value;
             settings.RunAtStartup = runAtStartup.Checked;
@@ -438,6 +468,7 @@ namespace Clipman
             settings.StorageMode = StoredStorageMode(Convert.ToString(storageMode.SelectedItem));
             settings.ServerUrl = ServerSettingsSanitizer.CleanUrl(serverUrl.Text);
             settings.ServerToken = ServerSettingsSanitizer.CleanToken(serverToken.Text);
+            NormalizePendingServerAuthority(!loading);
             if (!loading)
             {
                 UpdateTextIfChanged(serverUrl, settings.ServerUrl);
@@ -588,6 +619,7 @@ namespace Clipman
                 var result = MessageBox.Show(
                     this,
                     "Import this Clipman Server connection?\r\n\r\n" + details.Address +
+                    ConnectionAuthoritySummary(details.Authority) +
                     "\r\n\r\nThe token will remain hidden in preferences. Clipman Server requires a unique history password. Synchronization will not start until the connection is applied with a password.",
                     "Clipman Server connection",
                     MessageBoxButtons.YesNo,
@@ -597,6 +629,27 @@ namespace Clipman
                 storageMode.SelectedItem = "Clipman Server";
                 serverUrl.Text = details.Address;
                 serverToken.Text = details.Token;
+                if (details.Authority != null)
+                {
+                    settings.ServerCaCertPem = details.Authority.Pem;
+                    settings.ServerCaHost = details.Authority.Host;
+                }
+                else
+                {
+                    ServerCertificateAuthority existing;
+                    string existingError;
+                    if (!ServerSettingsSanitizer.TryParseCertificateAuthority(
+                        settings.ServerCaCertPem,
+                        details.Address,
+                        out existing,
+                        out existingError) ||
+                        (existing != null && !string.Equals(existing.Host, settings.ServerCaHost, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        settings.ServerCaCertPem = string.Empty;
+                        settings.ServerCaHost = string.Empty;
+                    }
+                }
+                UpdateServerAuthorityStatus();
                 if (HasEffectiveDatabasePassword())
                 {
                     serverUrl.Focus();
@@ -612,7 +665,13 @@ namespace Clipman
         {
             string json;
             string error;
-            if (!ServerSettingsSanitizer.TryCreateConnectionConfig(serverUrl.Text, serverToken.Text, out json, out error))
+            if (!ServerSettingsSanitizer.TryCreateConnectionConfig(
+                serverUrl.Text,
+                serverToken.Text,
+                settings.ServerCaCertPem,
+                settings.ServerCaHost,
+                out json,
+                out error))
             {
                 MessageBox.Show(this, error, "Clipman Server connection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -640,6 +699,144 @@ namespace Clipman
                 File.WriteAllText(dialog.FileName, json, new System.Text.UTF8Encoding(false));
                 MessageBox.Show(this, "The Clipman Server connection file was exported.", "Clipman Server connection", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        private void ImportServerAuthority()
+        {
+            using (var dialog = new OpenFileDialog
+            {
+                Title = "Import private certificate authority",
+                Filter = "Certificate files (*.crt;*.pem;*.cer)|*.crt;*.pem;*.cer|All files (*.*)|*.*",
+                CheckFileExists = true,
+                Multiselect = false
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                if (new FileInfo(dialog.FileName).Length > 32 * 1024)
+                {
+                    MessageBox.Show(this, "This certificate authority file is too large.", "Private certificate authority", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                ServerCertificateAuthority authority;
+                string error;
+                if (!ServerSettingsSanitizer.TryParseCertificateAuthority(
+                    File.ReadAllText(dialog.FileName),
+                    serverUrl.Text,
+                    out authority,
+                    out error) || authority == null)
+                {
+                    MessageBox.Show(this, error.Length == 0 ? "This file does not contain a certificate authority." : error, "Private certificate authority", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                var result = MessageBox.Show(
+                    this,
+                    "Import private authority for this server?\r\n\r\n" +
+                    "Host: " + authority.Host + "\r\n" +
+                    "Subject: " + authority.Subject + "\r\n" +
+                    "Expires: " + authority.Expires.ToString("D") + "\r\n" +
+                    "SHA-256 fingerprint: " + authority.Fingerprint +
+                    "\r\n\r\nClipman will trust this authority only for the displayed server host.",
+                    "Import private authority for this server?",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (result != DialogResult.Yes) return;
+                settings.ServerCaCertPem = authority.Pem;
+                settings.ServerCaHost = authority.Host;
+                UpdateServerAuthorityStatus();
+            }
+        }
+
+        private void RemoveServerAuthority()
+        {
+            if (string.IsNullOrWhiteSpace(settings.ServerCaCertPem)) return;
+            var result = MessageBox.Show(
+                this,
+                "Remove the private certificate authority?\r\n\r\nA private-CA server will stop synchronizing unless its authority is trusted by Windows or a new CA-bearing connection file is imported.",
+                "Remove private certificate authority?",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (result != DialogResult.Yes) return;
+            settings.ServerCaCertPem = string.Empty;
+            settings.ServerCaHost = string.Empty;
+            UpdateServerAuthorityStatus();
+        }
+
+        private void NormalizePendingServerAuthority(bool notify)
+        {
+            if (string.IsNullOrWhiteSpace(settings.ServerCaCertPem))
+            {
+                settings.ServerCaHost = string.Empty;
+                UpdateServerAuthorityStatus();
+                return;
+            }
+            ServerCertificateAuthority authority;
+            string error;
+            if (!ServerSettingsSanitizer.TryParseCertificateAuthority(
+                settings.ServerCaCertPem,
+                settings.ServerUrl,
+                out authority,
+                out error) ||
+                authority == null ||
+                (!string.IsNullOrWhiteSpace(settings.ServerCaHost) &&
+                 !string.Equals(settings.ServerCaHost, authority.Host, StringComparison.OrdinalIgnoreCase)))
+            {
+                settings.ServerCaCertPem = string.Empty;
+                settings.ServerCaHost = string.Empty;
+                if (notify)
+                {
+                    MessageBox.Show(
+                        this,
+                        "The private certificate authority was removed because the server host or connection scheme changed. Import the correct authority for the new HTTPS server if it uses a private certificate.",
+                        "Private certificate authority removed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+            }
+            else
+            {
+                settings.ServerCaCertPem = authority.Pem;
+                settings.ServerCaHost = authority.Host;
+            }
+            UpdateServerAuthorityStatus();
+        }
+
+        private void UpdateServerAuthorityStatus()
+        {
+            ServerCertificateAuthority authority;
+            string error;
+            if (string.IsNullOrWhiteSpace(settings.ServerCaCertPem))
+            {
+                serverCaStatus.Text = "Private certificate authority: Not configured";
+                serverCaFingerprint.Text = string.Empty;
+                return;
+            }
+            if (!ServerSettingsSanitizer.TryParseCertificateAuthority(
+                settings.ServerCaCertPem,
+                serverUrl.Text,
+                out authority,
+                out error) || authority == null)
+            {
+                serverCaStatus.Text = "Private certificate authority: " + error;
+                serverCaFingerprint.Text = string.Empty;
+                return;
+            }
+            var expiresSoon = authority.Expires <= DateTime.Now.AddDays(30);
+            serverCaStatus.Text = "Private certificate authority: " +
+                (expiresSoon ? "Expires soon" : "Configured for " + authority.Host) +
+                "; Subject: " + authority.Subject +
+                "; Authority expires: " + authority.Expires.ToString("D");
+            serverCaFingerprint.Text = authority.Fingerprint;
+        }
+
+        private static string ConnectionAuthoritySummary(ServerCertificateAuthority authority)
+        {
+            if (authority == null) return string.Empty;
+            return "\r\n\r\nThis file configures a private certificate authority only for " + authority.Host + "." +
+                "\r\nSubject: " + authority.Subject +
+                "\r\nAuthority expires: " + authority.Expires.ToString("D") +
+                "\r\nSHA-256 fingerprint: " + authority.Fingerprint;
         }
 
         private bool ConfirmSingleModifierHotkeys()
@@ -811,6 +1008,7 @@ namespace Clipman
         {
             return new AppSettings
             {
+                DeviceName = current.DeviceName,
                 ShowHistoryHotkey = current.ShowHistoryHotkey,
                 ToggleActiveHotkey = current.ToggleActiveHotkey,
                 QuickCopyHotkeys = current.QuickCopyHotkeys == null
@@ -826,6 +1024,8 @@ namespace Clipman
                 DatabasePath = current.DatabasePath,
                 StorageMode = current.StorageMode,
                 ServerUrl = current.ServerUrl,
+                ServerCaCertPem = current.ServerCaCertPem,
+                ServerCaHost = current.ServerCaHost,
                 ServerToken = current.ServerToken,
                 ProtectedServerToken = current.ProtectedServerToken,
                 LastSelectedIndex = current.LastSelectedIndex,
@@ -841,6 +1041,9 @@ namespace Clipman
                 SendToEnabled = current.SendToEnabled,
                 ShowHistoryAfterSendTo = current.ShowHistoryAfterSendTo,
                 GroupFilter = current.GroupFilter,
+                HistoryFilterType = current.HistoryFilterType,
+                DeviceFilter = current.DeviceFilter,
+                ConfirmDeletions = current.ConfirmDeletions,
                 DuplicateMode = current.DuplicateMode,
                 AutoGroupByApp = current.AutoGroupByApp,
                 AutoRemoveUrlTracking = current.AutoRemoveUrlTracking,

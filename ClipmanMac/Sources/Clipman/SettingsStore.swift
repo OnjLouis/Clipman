@@ -125,6 +125,10 @@ final class SettingsStore {
             settings.machineName = machine
             changed = true
         }
+        if settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            settings.deviceName = settings.machineName
+            changed = true
+        }
         if settings.databasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             settings.databasePath = applicationSupportURL.appendingPathComponent("clipman-history.clipdb").path
             changed = true
@@ -147,6 +151,28 @@ final class SettingsStore {
         let normalizedServerToken = ServerSettingsSanitizer.cleanToken(settings.serverToken)
         if normalizedServerToken != settings.serverToken {
             settings.serverToken = normalizedServerToken
+            changed = true
+        }
+        if settings.serverCaCertPem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !settings.serverCaCertPem.isEmpty || !settings.serverCaHost.isEmpty {
+                settings.serverCaCertPem = ""
+                settings.serverCaHost = ""
+                changed = true
+            }
+        } else if let authority = try? ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPem, address: settings.serverUrl) {
+            if !settings.serverCaHost.isEmpty,
+               settings.serverCaHost.caseInsensitiveCompare(authority.host) != .orderedSame {
+                settings.serverCaCertPem = ""
+                settings.serverCaHost = ""
+                changed = true
+            } else if settings.serverCaCertPem != authority.pem || settings.serverCaHost != authority.host {
+                settings.serverCaCertPem = authority.pem
+                settings.serverCaHost = authority.host
+                changed = true
+            }
+        } else {
+            settings.serverCaCertPem = ""
+            settings.serverCaHost = ""
             changed = true
         }
         let normalizedSort = normalizeTextSortMode(settings.sortMode)
@@ -180,6 +206,15 @@ final class SettingsStore {
         }
         if settings.groupFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             settings.groupFilter = "All"
+            changed = true
+        }
+        let normalizedFilterType = settings.historyFilterType.caseInsensitiveCompare("Device") == .orderedSame ? "Device" : "Group"
+        if normalizedFilterType != settings.historyFilterType {
+            settings.historyFilterType = normalizedFilterType
+            changed = true
+        }
+        if settings.deviceFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            settings.deviceFilter = "All"
             changed = true
         }
         let normalizedIgnored = normalizedIgnoredApplications(settings.ignoredApplications)

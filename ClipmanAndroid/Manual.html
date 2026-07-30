@@ -99,18 +99,19 @@
   <ul>
     <li><strong>Switch to Text</strong>, <strong>Switch to Rich Text</strong>, or <strong>Switch to Links</strong>: moves to the next enabled history section. Rich Text appears only when formatting preservation is enabled.</li>
     <li><strong>Paste</strong>: adds the current Android clipboard text and available HTML formatting to Clipman history when Rich Text history is enabled.</li>
-    <li><strong>Group</strong>: filters entries by group.</li>
+    <li><strong>Filter</strong>: shows All first, followed by named Groups and Devices in separate sections. Group and device names are not prefixed, so TalkBack can read them directly.</li>
     <li><strong>Settings</strong>: opens the full-screen Settings screen.</li>
     <li><strong>Top</strong>: returns to the beginning of the current history list.</li>
     <li><strong>Status</strong>: the status message at the bottom of the screen is also a button. Activate it to move to the end of the current history list.</li>
     <li><strong>Sort</strong>: cycles sort modes.</li>
-  </ul>
+</ul>
+<p>Group names are case-insensitive. Spellings such as <strong>GitHub</strong>, <strong>Github</strong>, and <strong>github</strong> remain one group. If existing entries use several capitalizations, Clipman displays the spelling used most often and uses the newest spelling to resolve a tie.</p>
 
   <p>Each history row is one accessibility focus target. TalkBack users can move from entry to entry with a single swipe.</p>
 
   <p>Double-tap an entry to copy it to the Android clipboard. Clipman announces <strong>Copied to clipboard</strong> and plays the copy sound when sounds are enabled.</p>
 
-  <p>Long-press, or use TalkBack actions, to open <strong>View entry</strong>. TalkBack actions also include <strong>Edit entry</strong>, <strong>Pin entry</strong> or <strong>Unpin entry</strong>, and <strong>Delete entry</strong>.</p>
+  <p>Long-press, or use TalkBack actions, to open <strong>View entry</strong>. The action order matches iPhone and iPad: <strong>Open link</strong> when the entry contains one link, <strong>View entry</strong>, <strong>Edit entry</strong>, <strong>Pin entry</strong> or <strong>Unpin entry</strong>, then <strong>Delete entry</strong>.</p>
 
   <h2 id="view-entry">View Entry</h2>
   <p><strong>View entry</strong> shows the clipboard text line by line so TalkBack can review it naturally.</p>
@@ -129,6 +130,7 @@
     <li><strong>Preserve copied formatting and show Rich Text history</strong>: captures and restores Android HTML clipboard formatting and adds Rich Text to the history-section switcher. This is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
     <li><strong>Use haptic feedback</strong>: vibrates for supported feedback events.</li>
+    <li><strong>Confirm before deleting entries</strong>: asks before removing one history entry. This is on by default and can be turned off.</li>
     <li><strong>Require biometric or device authentication</strong>: when enabled, locks Clipman whenever it leaves the foreground and requires Android authentication when you return. This is off by default.</li>
     <li><strong>Check for updates automatically</strong>: checks the Clipman GitHub release at most once per day while the app is open. Disable it to use only manual checks.</li>
     <li><strong>Check Now</strong>: checks immediately and reports whether this Android build is current.</li>
@@ -139,7 +141,7 @@
 
   <p>Choose <strong>Cancel</strong> at the top, or use Android Back, to discard changes and return to history. Choose <strong>Save</strong> to apply changes and return to history. A history refresh that finishes while Settings is open does not close the Settings screen.</p>
 
-  <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. Export creates a new connection file from the address and token currently shown in Settings. Every <code>.clpconf</code> file contains the private server token; store and share it securely, never keep it beside an exported clipboard history, and delete it or move it to a password manager after configuring your devices.</p>
+  <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a private-CA HTTPS server generated the file, it can also contain the public authority. Clipman validates that certificate and trusts it only for this server profile and reviewed HTTPS host; it does not install a device-wide Android CA. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. Export creates a new connection file from the address, token, and matching private authority currently shown in Settings. Every <code>.clpconf</code> file contains the private server token; store and share it securely, never keep it beside an exported clipboard history, and delete it or move it to a password manager after configuring your devices.</p>
 
   <p>When Clipman starts in Server mode, it displays the encrypted local cache before contacting the server. While Clipman is in the foreground and Settings is closed, it then checks the server revision every five seconds. It downloads history only when the revision changes, pauses checks in the background, and progressively slows retries during an outage. Returning to Clipman or closing Settings triggers an immediate refresh.</p>
 
@@ -162,7 +164,7 @@ https://host:port</code></pre>
   <h2 id="privacy">Privacy and Security Notes</h2>
   <ul>
     <li>Clipman can require Android biometric or device unlock before showing history after you return from another app. This protection is opt-in under Settings.</li>
-    <li>For private-CA HTTPS servers, Android must have the public authority installed as a CA certificate. Clipman allows user-installed authorities for its server connection.</li>
+    <li>Current private-CA HTTPS connection files can carry the public authority. Clipman uses it only for the matching server profile and still verifies the server host and certificate. Existing user-installed authorities remain a legacy option when a connection file does not contain one.</li>
     <li>Server address, server token, and history password are stored using Android protected app storage.</li>
     <li>Local history is stored in Android's private app data. It uses the configured history password when one is present.</li>
     <li>Clipman Android only syncs while the app is open.</li>

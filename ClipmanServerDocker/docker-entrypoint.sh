@@ -38,7 +38,8 @@ if [ "${CLIPMAN_SELF_SIGNED_CERT:-}" = "true" ] && [ -z "$CERT_FILE" ] && [ -z "
   fi
   CERT_FILE="$GENERATED_CERT"
   KEY_FILE="$GENERATED_KEY"
-  echo "Private-CA HTTPS is enabled. Install and trust $DATA_DIR/tls/clipman-server-ca.crt on each client."
+  echo "Private-CA HTTPS is enabled. Import $DATA_DIR/clipman-server-connection.clpconf in current Clipman clients; it includes the public authority."
+  echo "The public CA at $DATA_DIR/tls/clipman-server-ca.crt is retained for older clients and manual recovery."
 fi
 
 set -- "$SERVER_SCRIPT" \

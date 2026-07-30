@@ -26,6 +26,14 @@ class AndroidSettings(context: Context) {
         get() = getString("serverToken")
         set(value) = putString("serverToken", value)
 
+    var serverCaCertPem: String
+        get() = preferences.getString("serverCaCertPem", "") ?: ""
+        set(value) = preferences.edit().putString("serverCaCertPem", value).apply()
+
+    var serverCaHost: String
+        get() = preferences.getString("serverCaHost", "") ?: ""
+        set(value) = preferences.edit().putString("serverCaHost", value.trim()).apply()
+
     var historyPassword: String
         get() = getString("historyPassword")
         set(value) = putString("historyPassword", value)
@@ -54,6 +62,10 @@ class AndroidSettings(context: Context) {
     var richTextEnabled: Boolean
         get() = preferences.getBoolean("richTextEnabled", false)
         set(value) = preferences.edit().putBoolean("richTextEnabled", value).apply()
+
+    var confirmDeletions: Boolean
+        get() = preferences.getBoolean("confirmDeletions", true)
+        set(value) = preferences.edit().putBoolean("confirmDeletions", value).apply()
 
     var requireAuthentication: Boolean
         get() = preferences.getBoolean("requireAuthentication", false)

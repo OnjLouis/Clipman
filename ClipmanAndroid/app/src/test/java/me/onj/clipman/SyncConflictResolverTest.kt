@@ -7,6 +7,21 @@ import org.junit.Test
 
 class SyncConflictResolverTest {
     @Test
+    fun updateNormalizesGroupCaseToEstablishedSpelling() {
+        val target = entry("target", "Target", 1).copy(Group = "")
+        val history = database(
+            target,
+            entry("kobo-1", "One", 2).copy(Group = "Kobo", ModifiedUnixMs = 10),
+            entry("kobo-2", "Two", 3).copy(Group = "Kobo", ModifiedUnixMs = 20),
+            entry("typo", "Three", 4).copy(Group = "KObo", ModifiedUnixMs = 30)
+        )
+
+        val updated = SyncConflictResolver.updateEntry(history, target.copy(Group = "kObO"))
+
+        assertEquals("Kobo", updated.Entries.first { it.Id == "target" }.Group)
+    }
+
+    @Test
     fun mergeKeepsOfflineAdditionsFromBothSides() {
         val local = database(entry("local", "Local entry", 1))
         val server = database(entry("server", "Server entry", 2))

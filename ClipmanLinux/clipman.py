@@ -557,6 +557,7 @@ class Preferences:
             "auto_group_by_app": False,
             "auto_remove_url_tracking": False,
             "keep_duplicate_entries": False,
+            "confirm_deletions": True,
             "ignored_applications": [],
             "sensitive_data_mode": "off",
             "sensitive_data_presets": [],
@@ -578,7 +579,7 @@ class Preferences:
                         self.values[key] = loaded[key]
         except (OSError, ValueError):
             pass
-        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries"):
+        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries", "confirm_deletions"):
             if not isinstance(self.values[key], bool):
                 self.values[key] = defaults[key]
         if self.values["last_section"] not in ("text", "links", "rich", "files"):
@@ -825,6 +826,8 @@ class ClipmanApplication(Gtk.Application):
         self.entries = []
         self.file_events = []
         self.groups = []
+        self.history_filters = []
+        self.active_history_filter = ("group", "All")
         self.section = self.preferences.values["last_section"]
         self.current_revision = ""
         self.machine_name = ""
@@ -970,6 +973,9 @@ class ClipmanApplication(Gtk.Application):
         group_action = Gio.SimpleAction.new("group", GLib.VariantType.new("s"))
         group_action.connect("activate", self._select_group_action)
         self.add_action(group_action)
+        device_filter_action = Gio.SimpleAction.new("device-filter", GLib.VariantType.new("s"))
+        device_filter_action.connect("activate", self._select_device_filter_action)
+        self.add_action(device_filter_action)
         quick_target_action = Gio.SimpleAction.new("quick-target", GLib.VariantType.new("s"))
         quick_target_action.connect("activate", self._select_quick_paste_target)
         self.add_action(quick_target_action)
@@ -1059,10 +1065,11 @@ class ClipmanApplication(Gtk.Application):
         toolbar.append(self.search)
         self.group_model = Gtk.StringList.new(["All"])
         self.group_picker = Gtk.DropDown(model=self.group_model)
-        self.group_picker.set_tooltip_text("Filter by group")
-        self.group_picker.update_property([Gtk.AccessibleProperty.LABEL], ["Filter by group"])
-        self.group_picker.connect("notify::selected", lambda *_: self.rebuild_list())
-        self.group_label = Gtk.Label(label="_Group:", use_underline=True)
+        self.group_picker.set_enable_search(True)
+        self.group_picker.set_tooltip_text("Filter by group or device")
+        self.group_picker.update_property([Gtk.AccessibleProperty.LABEL], ["Filter by group or device"])
+        self.group_picker.connect("notify::selected", self._history_filter_changed)
+        self.group_label = Gtk.Label(label="_Filter:", use_underline=True)
         self.group_label.set_mnemonic_widget(self.group_picker)
         toolbar.append(self.group_label)
         toolbar.append(self.group_picker)
@@ -1280,7 +1287,10 @@ class ClipmanApplication(Gtk.Application):
             return True
         if state & Gdk.ModifierType.ALT_MASK and Gdk.KEY_0 <= keyval <= Gdk.KEY_9:
             position = 9 if keyval == Gdk.KEY_0 else keyval - Gdk.KEY_1
-            if 0 <= position < len(self.groups): self.group_picker.set_selected(position)
+            if 0 <= position < len(self.groups):
+                try: index = [(item[0], item[1]) for item in self.history_filters].index(("group", self.groups[position]))
+                except ValueError: return True
+                self.group_picker.set_selected(index)
             return True
         focus = self.window.get_focus()
         editable = isinstance(focus, (Gtk.Entry, Gtk.SearchEntry, Gtk.PasswordEntry, Gtk.TextView))
@@ -1642,14 +1652,22 @@ class ClipmanApplication(Gtk.Application):
         self.set_status("Clipboard updated by " + device + ".", True)
 
     def _set_groups(self, groups):
-        selected = self.selected_group()
+        selected = self.selected_history_filter()
         reserved = ["All", "Pinned", "Normal", "Ungrouped"]
-        updated = reserved + [group for group in groups if group not in reserved]
-        if updated == self.groups:
+        reserved_keys = {value.casefold() for value in reserved}
+        updated_groups = reserved + [group for group in groups if group.casefold() not in reserved_keys]
+        devices = self._canonical_entry_labels("device")
+        updated_filters = [("group", value, value) for value in reserved]
+        updated_filters.extend(("group", value, value) for value in updated_groups[4:])
+        if devices:
+            updated_filters.append(("divider", "", "Devices"))
+            updated_filters.extend(("device", value, value) for value in devices)
+        if updated_groups == self.groups and updated_filters == self.history_filters:
             return
-        self.groups = updated
-        self.group_model.splice(0, self.group_model.get_n_items(), self.groups)
-        try: index = self.groups.index(selected)
+        self.groups = updated_groups
+        self.history_filters = updated_filters
+        self.group_model.splice(0, self.group_model.get_n_items(), [item[2] for item in self.history_filters])
+        try: index = [(item[0], item[1]) for item in self.history_filters].index(selected)
         except ValueError: index = 0
         self.group_picker.set_selected(index)
         if hasattr(self, "groups_menu"):
@@ -1661,12 +1679,65 @@ class ClipmanApplication(Gtk.Application):
                 item = Gio.MenuItem.new(label, "app.group")
                 item.set_attribute_value("target", GLib.Variant("s", group))
                 self.groups_menu.append_item(item)
+            if devices:
+                self.groups_menu.append("Devices", None)
+                for device in devices:
+                    item = Gio.MenuItem.new(device.replace("_", "__"), "app.device-filter")
+                    item.set_attribute_value("target", GLib.Variant("s", device))
+                    self.groups_menu.append_item(item)
+
+    def _canonical_entry_labels(self, field):
+        clusters = {}
+        for entry in self.entries:
+            label = entry.get(field, "").strip()
+            if not label:
+                continue
+            spellings = clusters.setdefault(label.casefold(), {})
+            stats = spellings.setdefault(label, {"count": 0, "latest": 0})
+            stats["count"] += 1
+            stats["latest"] = max(
+                stats["latest"],
+                entry.get("modified_unix_ms", 0),
+                entry.get("last_used_unix_ms", 0),
+                entry.get("created_unix_ms", 0),
+            )
+        result = []
+        for spellings in clusters.values():
+            result.append(sorted(
+                spellings,
+                key=lambda label: (-spellings[label]["count"], -spellings[label]["latest"], label),
+            )[0])
+        return sorted(result, key=str.casefold)
+
+    def _history_filter_changed(self, *_args):
+        index = self.group_picker.get_selected()
+        if not self.history_filters or index >= len(self.history_filters):
+            return
+        item = self.history_filters[index]
+        if item[0] == "divider":
+            try:
+                previous = [(choice[0], choice[1]) for choice in self.history_filters].index(self.active_history_filter)
+            except ValueError:
+                previous = 0
+            self.group_picker.set_selected(previous)
+            return
+        self.active_history_filter = (item[0], item[1])
+        self.rebuild_list()
 
     def _select_group_action(self, _action, parameter):
         if self.section == "files":
             self.sounds.play("skip"); self.set_status("Groups do not apply to file history.", True); return
         group = parameter.get_string()
-        try: index = self.groups.index(group)
+        try: index = [(item[0], item[1]) for item in self.history_filters].index(("group", group))
+        except ValueError: return
+        self.group_picker.set_selected(index)
+        self.rebuild_list(); self.focus_history()
+
+    def _select_device_filter_action(self, _action, parameter):
+        if self.section == "files":
+            self.sounds.play("skip"); self.set_status("Device filters do not apply to file history.", True); return
+        device = parameter.get_string()
+        try: index = [(item[0], item[1]) for item in self.history_filters].index(("device", device))
         except ValueError: return
         self.group_picker.set_selected(index)
         self.rebuild_list(); self.focus_history()
@@ -1691,9 +1762,14 @@ class ClipmanApplication(Gtk.Application):
             self.set_status("Selected Quick Paste target. Press F2 to edit or remove its hotkey.", True)
             return
 
-    def selected_group(self):
+    def selected_history_filter(self):
         index = self.group_picker.get_selected() if hasattr(self, "group_picker") else 0
-        return self.groups[index] if self.groups and index < len(self.groups) else "All"
+        if self.history_filters and index < len(self.history_filters):
+            item = self.history_filters[index]
+            if item[0] == "divider":
+                return self.active_history_filter
+            return item[0], item[1]
+        return "group", "All"
 
     def visible_entries(self):
         query = self.search.get_text().casefold().strip()
@@ -1715,7 +1791,7 @@ class ClipmanApplication(Gtk.Application):
             elif mode == "source": normal.sort(key=lambda event: (event.get("source", "").casefold(), event.get("display", "").casefold()), reverse=descending)
             else: normal.sort(key=lambda event: (event.get("manual_order", 0), -event.get("captured_unix_ms", 0)), reverse=descending)
             return pinned + normal
-        group = self.selected_group()
+        filter_kind, filter_value = self.selected_history_filter()
         result = []
         for entry in self.entries:
             entry_section = entry["section"]
@@ -1729,10 +1805,13 @@ class ClipmanApplication(Gtk.Application):
             if entry_section == "links" and not self.preferences.values["links_history_enabled"]:
                 entry_section = "text"
             if entry_section != self.section: continue
-            if group == "Pinned" and not entry.get("pinned"): continue
-            if group == "Normal" and entry.get("pinned"): continue
-            if group == "Ungrouped" and entry.get("group"): continue
-            if group not in ("All", "Pinned", "Normal", "Ungrouped") and entry.get("group") != group: continue
+            if filter_kind == "device":
+                if entry.get("device", "").casefold() != filter_value.casefold(): continue
+            else:
+                if filter_value == "Pinned" and not entry.get("pinned"): continue
+                if filter_value == "Normal" and entry.get("pinned"): continue
+                if filter_value == "Ungrouped" and entry.get("group"): continue
+                if filter_value not in ("All", "Pinned", "Normal", "Ungrouped") and entry.get("group", "").casefold() != filter_value.casefold(): continue
             haystack = " ".join([entry.get("text", ""), entry.get("name", ""), entry.get("group", ""), entry.get("device", "")]).casefold()
             if query and query not in haystack: continue
             result.append(entry)
@@ -2226,6 +2305,12 @@ class ClipmanApplication(Gtk.Application):
         entries = self.selected_entries()
         if not entries or any(entry.get("pinned") for entry in entries):
             self.sounds.play("skip"); self.set_status("Pinned entries must be unpinned before cutting.", True); return
+        if self.preferences.values["confirm_deletions"]:
+            self._confirm_entry_removal(entries, self._cut_entries, "Cut")
+            return
+        self._cut_entries(entries)
+
+    def _cut_entries(self, entries):
         rich_text = entries[0].get("rich_text") if len(entries) == 1 else None
         self._set_clipboard("\n".join(entry.get("text", "") for entry in entries), rich_text)
         self.backend.call("delete_many", {"ids": [entry["id"] for entry in entries]}, self._cut_response)
@@ -2643,18 +2728,37 @@ class ClipmanApplication(Gtk.Application):
         entries = self.selected_entries()
         if not entries: return
         if any(entry.get("pinned") for entry in entries): self.sounds.play("skip"); self.set_status("Pinned entries must be unpinned before deletion.", True); return
-        noun = "file-history event" if self.section == "files" else "clipboard entry"
-        message = f"Delete this {noun}?" if len(entries) == 1 else f"Delete these {len(entries)} {noun}s?"
-        detail = entries[0]["display"] if len(entries) == 1 else "This cannot be undone."
-        dialog = Gtk.AlertDialog(message=message, detail=detail, buttons=["Cancel", "Delete"], cancel_button=0, default_button=0)
-        dialog.choose(self.window, None, lambda d, result: self._delete_choice(d, result, entries))
+        if self.preferences.values["confirm_deletions"]:
+            self._confirm_entry_removal(entries, self._delete_entries, "Delete")
+            return
+        self._delete_entries(entries)
 
-    def _delete_choice(self, dialog, result, entries):
-        try: choice = dialog.choose_finish(result)
-        except GLib.Error: return
-        if choice == 1:
-            action = "file_delete_many" if self.section == "files" else "delete_many"
-            self.backend.call(action, {"ids": [entry["id"] for entry in entries]}, self._history_response)
+    def _delete_entries(self, entries):
+        action = "file_delete_many" if self.section == "files" else "delete_many"
+        self.backend.call(action, {"ids": [entry["id"] for entry in entries]}, self._history_response)
+
+    def _confirm_entry_removal(self, entries, callback, verb):
+        noun = "file-history event" if self.section == "files" else "clipboard entry"
+        message = f"{verb} this {noun}?" if len(entries) == 1 else f"{verb} these {len(entries)} {noun}s?"
+        detail = entries[0]["display"] if len(entries) == 1 else "This cannot be undone."
+        dialog = Gtk.Dialog(title=message, transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button(verb, Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+        area = dialog.get_content_area()
+        area.set_spacing(10); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
+        area.append(Gtk.Label(label=detail, wrap=True, xalign=0, selectable=True))
+        do_not_ask = Gtk.CheckButton(label="Do not ask again before deleting entries")
+        area.append(do_not_ask)
+        def response(_dialog, code):
+            if code == Gtk.ResponseType.OK:
+                if do_not_ask.get_active():
+                    self.preferences.values["confirm_deletions"] = False
+                    self.preferences.save()
+                callback(entries)
+            dialog.destroy()
+        dialog.connect("response", response)
+        dialog.present()
 
     def toggle_pin(self, *_args):
         entries = self.selected_entries()
@@ -2880,26 +2984,108 @@ class ClipmanApplication(Gtk.Application):
                     label="Leave a protected field blank to keep its stored value.",
                     wrap=True, xalign=0,
                 ))
+        authority = {
+            "ca_cert_pem": (initial or {}).get("ca_cert_pem", ""),
+            "ca_host": (initial or {}).get("ca_host", ""),
+            "ca_subject": (initial or {}).get("ca_subject", ""),
+            "ca_expires": (initial or {}).get("ca_expires", ""),
+            "ca_fingerprint": (initial or {}).get("ca_fingerprint", ""),
+        }
+        authority_status = Gtk.Label(label=self._authority_status_text(authority), wrap=True, xalign=0, selectable=True)
+        authority_status.update_property([Gtk.AccessibleProperty.LABEL], ["Private certificate authority status"])
+        area.append(authority_status)
+        authority_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        import_authority = Gtk.Button(label="Import Private Authority")
+        import_authority.connect("clicked", lambda *_: self._choose_authority_file(fields, authority, authority_status))
+        remove_authority = Gtk.Button(label="Remove Private Authority")
+        def remove_private_authority(*_args):
+            authority.update({"ca_cert_pem": "", "ca_host": "", "ca_subject": "", "ca_expires": "", "ca_fingerprint": ""})
+            authority_status.set_text(self._authority_status_text(authority))
+        remove_authority.connect("clicked", remove_private_authority)
+        authority_buttons.append(import_authority); authority_buttons.append(remove_authority); area.append(authority_buttons)
         remember = Gtk.CheckButton(label="Remember history password on this device", active=(initial or {}).get("password_saved", True)); area.append(remember)
         import_button = Gtk.Button(label="Import Clipman Server Connection File")
-        import_button.connect("clicked", lambda *_: self._choose_connection_file(fields)); area.append(import_button)
+        import_button.connect("clicked", lambda *_: self._choose_connection_file(fields, authority, authority_status)); area.append(import_button)
         def response(_dialog, code):
             if code == Gtk.ResponseType.OK:
                 params = {key: widget.get_text() for key, widget in fields.items()}; params["remember"] = remember.get_active()
+                params["ca_cert_pem"] = authority["ca_cert_pem"]; params["ca_host"] = authority["ca_host"]
                 self.remote_baseline_ready = False; self.remote_entry_stamps = {}
                 self.backend.call("configure", params, self._setup_response)
             elif configuring: self.quit()
             dialog.destroy()
         dialog.connect("response", response); dialog.present()
 
-    def _choose_connection_file(self, fields):
+    def _choose_connection_file(self, fields, authority, authority_status):
         chooser = Gtk.FileDialog(title="Import Clipman Server Connection")
-        chooser.open(self.window, None, lambda d, r: self._connection_file_chosen(d, r, fields))
+        chooser.open(self.window, None, lambda d, r: self._connection_file_chosen(d, r, fields, authority, authority_status))
 
-    def _connection_file_chosen(self, dialog, result, fields):
+    def _connection_file_chosen(self, dialog, result, fields, authority, authority_status):
         try: file = dialog.open_finish(result); text = pathlib.Path(file.get_path()).read_text(encoding="utf-8")
         except (GLib.Error, OSError, UnicodeError) as error: self.show_error(f"Could not read connection file: {error}"); return
-        self.backend.call("connection_details", {"text": text}, lambda m: self._connection_details_response(m, fields))
+        self.backend.call("connection_details", {"text": text}, lambda m: self._connection_details_response(m, fields, authority, authority_status))
+
+    def _choose_authority_file(self, fields, authority, authority_status):
+        chooser = Gtk.FileDialog(title="Import Private Certificate Authority")
+        chooser.open(self.window, None, lambda d, r: self._authority_file_chosen(d, r, fields, authority, authority_status))
+
+    def _authority_file_chosen(self, dialog, result, fields, authority, authority_status):
+        try:
+            file = dialog.open_finish(result)
+            path = pathlib.Path(file.get_path())
+            if path.stat().st_size > 32 * 1024: raise ValueError("The certificate authority file exceeds the 32 KiB limit.")
+            text = path.read_text(encoding="utf-8")
+        except (GLib.Error, OSError, UnicodeError, ValueError) as error:
+            self.show_error(f"Could not read private authority: {error}"); return
+        self.backend.call(
+            "authority_details",
+            {"text": text, "server": fields["server"].get_text()},
+            lambda message: self._authority_details_response(message, authority, authority_status),
+        )
+
+    def _authority_details_response(self, message, authority, authority_status):
+        if not message.get("ok"): self.show_error(message.get("error")); return
+        details = message["result"]
+        dialog = Gtk.AlertDialog(
+            message="Import private authority for this server?",
+            detail=(
+                f"Host: {details.get('ca_host', '')}\n"
+                f"Subject: {details.get('ca_subject', '')}\n"
+                f"Expires: {details.get('ca_expires', '')}\n"
+                f"SHA-256 fingerprint: {details.get('ca_fingerprint', '')}\n\n"
+                "Clipman will trust this authority only for the displayed server host."
+            ),
+            buttons=["Cancel", "Import"],
+            cancel_button=0,
+            default_button=0,
+        )
+        dialog.choose(
+            self.window,
+            None,
+            lambda current, result: self._authority_import_choice(
+                current, result, details, authority, authority_status
+            ),
+        )
+
+    def _authority_import_choice(self, dialog, result, details, authority, authority_status):
+        try:
+            choice = dialog.choose_finish(result)
+        except GLib.Error:
+            return
+        if choice != 1:
+            return
+        authority.update(details)
+        authority_status.set_text(self._authority_status_text(authority))
+
+    @staticmethod
+    def _authority_status_text(authority):
+        if not authority.get("ca_cert_pem"):
+            return "Private certificate authority: Not configured"
+        return (
+            f"Private certificate authority for {authority.get('ca_host', '')}. "
+            f"Subject: {authority.get('ca_subject', '')}. Expires: {authority.get('ca_expires', '')}.\n"
+            f"SHA-256 fingerprint: {authority.get('ca_fingerprint', '')}"
+        )
 
     def _open_pending_connection(self, configuring=False):
         if not self.pending_open_file:
@@ -2922,9 +3108,15 @@ class ClipmanApplication(Gtk.Application):
             self.show_error(message.get("error")); return
         self._connection_dialog("Import Clipman Server Connection", configuring=configuring, initial=message["result"])
 
-    def _connection_details_response(self, message, fields):
+    def _connection_details_response(self, message, fields, authority, authority_status):
         if not message.get("ok"): self.show_error(message.get("error")); return
         fields["server"].set_text(message["result"]["server"]); fields["token"].set_text(message["result"]["token"])
+        imported = message["result"]
+        if imported.get("ca_cert_pem"):
+            authority.update(imported)
+        elif authority.get("ca_cert_pem") and authority.get("ca_host", "").casefold() != (urllib.parse.urlparse(imported["server"].replace("clipman://", "http://", 1)).hostname or "").casefold():
+            authority.update({"ca_cert_pem": "", "ca_host": "", "ca_subject": "", "ca_expires": "", "ca_fingerprint": ""})
+        authority_status.set_text(self._authority_status_text(authority))
 
     def _setup_response(self, message):
         if not message.get("ok"): self.show_error(message.get("error")); return
@@ -3108,7 +3300,8 @@ class ClipmanApplication(Gtk.Application):
         rich_enabled.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows a separate Rich Text history section. Enable this before copying formatted content. This is off by default."])
         save_position = Gtk.CheckButton(label="Save list position", active=self.preferences.values["save_list_position"])
         duplicates = Gtk.CheckButton(label="Keep duplicate text entries", active=self.preferences.values["keep_duplicate_entries"])
-        for control in (monitor, sounds, auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, save_position, duplicates):
+        confirm_deletions = Gtk.CheckButton(label="Confirm before deleting entries", active=self.preferences.values["confirm_deletions"])
+        for control in (monitor, sounds, auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, save_position, duplicates, confirm_deletions):
             general.append(control)
 
         startup_run = Gtk.CheckButton(label="Run Clipman when this desktop session starts", active=self.preferences.values["run_at_startup"])
@@ -3140,7 +3333,7 @@ class ClipmanApplication(Gtk.Application):
         update_frequency.connect("notify::selected", lambda *_: install_silently.set_sensitive(update_frequency.get_selected() != 0))
         startup_updates.append(update_label); startup_updates.append(update_frequency); startup_updates.append(install_silently)
 
-        connection = Gtk.Button(label="Change Server Connection")
+        connection = Gtk.Button(label="Change Server Connection and Device Name")
         connection.connect("clicked", lambda *_: self.show_connection_settings(dialog))
         storage.append(Gtk.Label(label="Clipman Server connection", xalign=0)); storage.append(connection)
         storage.append(Gtk.Label(label="The server token and remembered history password are protected for this Linux user. Clipman Server stores only encrypted clipboard database blobs and cannot read the history password.", wrap=True, xalign=0))
@@ -3189,6 +3382,7 @@ class ClipmanApplication(Gtk.Application):
                     "auto_group_by_app": auto_group.get_active(), "auto_copy_remote_text": auto_remote.get_active(),
                     "paste_after_enter": paste_enter.get_active(), "dynamic_history_mode": dynamic.get_active(),
                     "auto_remove_url_tracking": remove_tracking.get_active(), "keep_duplicate_entries": duplicates.get_active(),
+                    "confirm_deletions": confirm_deletions.get_active(),
                     "links_history_enabled": links_enabled.get_active(), "rich_text_history_enabled": rich_enabled.get_active(), "save_list_position": save_position.get_active(),
                     "run_at_startup": startup_run.get_active(), "show_history_hotkey": show_accelerator,
                     "toggle_monitoring_hotkey": toggle_accelerator,

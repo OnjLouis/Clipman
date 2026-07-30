@@ -29,12 +29,10 @@ enum ClipboardShortcutService {
                 machineName: deviceName(settings),
                 richText: settings.richTextEnabled ? payload.richText : nil
             )
-            let synchronized = try await persist(updated, settings: settings)
+            try await persist(updated, settings: settings)
             let message = alreadyExists
                 ? "The clipboard text already exists in Clipman history."
-                : synchronized
-                    ? "Clipboard text added to Clipman."
-                    : "Clipboard text saved locally; server sync is pending."
+                : "Clipboard text added to Clipman."
             postCompletion(message)
             return ClipboardShortcutOutcome(succeeded: true, message: message)
         } catch {
@@ -66,7 +64,7 @@ enum ClipboardShortcutService {
                 entry: latest,
                 machineName: deviceName(settings)
             )
-            _ = try await persist(updated, settings: settings)
+            try await persist(updated, settings: settings)
             SoundService().play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             let message = "Copied the latest Clipman entry."
             postCompletion(message)
@@ -77,30 +75,23 @@ enum ClipboardShortcutService {
     }
 
     private static func currentDatabase(settings: ClipmanSettings) async throws -> ClipDatabase {
-        let local = try await repository.loadLocal(password: settings.historyPassword) ?? ClipDatabase()
-        guard settings.storageMode == .server, ServerStorageClient(settings: settings).isConfigured else {
-            return local
-        }
-        if let synchronized = try? await repository.synchronize(settings: settings, current: local) {
-            return synchronized.database
-        }
-        return local
+        try await repository.loadLocal(password: settings.historyPassword) ?? ClipDatabase()
     }
 
-    private static func persist(_ database: ClipDatabase, settings: ClipmanSettings) async throws -> Bool {
+    private static func persist(_ database: ClipDatabase, settings: ClipmanSettings) async throws {
         _ = try await repository.saveLocal(
             database,
             password: settings.historyPassword,
             backupSettings: settings
         )
-        guard settings.storageMode == .server, ServerStorageClient(settings: settings).isConfigured else {
-            return true
-        }
-        do {
-            _ = try await repository.synchronize(settings: settings, current: database)
-            return true
-        } catch {
-            return false
+        guard settings.storageMode == .server,
+              ServerStorageClient(settings: settings).isConfigured else { return }
+        Task(priority: .utility) {
+            _ = try? await repository.synchronize(
+                settings: settings,
+                current: database,
+                localAlreadySaved: true
+            )
         }
     }
 

@@ -4,6 +4,20 @@ import UIKit
 
 @MainActor
 final class ClipmanAppModel: ObservableObject {
+    struct HistoryFilter: Hashable, Identifiable {
+        enum Kind: String { case all, group, device }
+        let kind: Kind
+        let value: String
+        var id: String { kind.rawValue + ":" + value }
+        var label: String {
+            switch kind {
+            case .all: return "All"
+            case .group: return "Group: \(value)"
+            case .device: return "Device: \(value)"
+            }
+        }
+        static let all = HistoryFilter(kind: .all, value: "")
+    }
     enum Section: String, CaseIterable, Identifiable {
         case text = "Text"
         case richText = "Rich Text"
@@ -21,8 +35,8 @@ final class ClipmanAppModel: ObservableObject {
     }
     @Published var selectedSection: Section = .text
     @Published var searchText = ""
-    @Published var groupFilter = "All"
-    @Published var status = "Ready"
+    @Published var historyFilter = HistoryFilter.all
+    @Published var status = "Ready."
     @Published var showingSettings = false
     @Published var showingClipboardImport = false
     @Published var isRefreshing = false
@@ -46,6 +60,9 @@ final class ClipmanAppModel: ObservableObject {
     private var foregroundGeneration = 0
     private var lastRemoteEntryID = ""
     private var pollingFailureCount = 0
+    private var steadyStatus = "Ready."
+    private var transientStatusActive = false
+    private var statusResetTask: Task<Void, Never>?
     private let pollingIntervalNanoseconds: UInt64 = 15_000_000_000
     private var skipNextSettingsClosedRefresh = false
     private var pureLinkEntryIDs = Set<String>()
@@ -63,8 +80,36 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     var groups: [String] {
-        let values = Set(database.Entries.map { $0.Group.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
-        return ["All"] + values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        canonicalLabels { $0.Group }
+    }
+
+    var devices: [String] {
+        canonicalLabels { $0.SourceMachine }
+    }
+
+    private func canonicalLabels(_ selector: (ClipEntry) -> String) -> [String] {
+        let candidates = database.Entries.compactMap { entry -> (String, ClipEntry)? in
+            let label = selector(entry).trimmingCharacters(in: .whitespacesAndNewlines)
+            return label.isEmpty ? nil : (label, entry)
+        }
+        let clusters = Dictionary(grouping: candidates) { $0.0.lowercased() }
+        return clusters.values.compactMap { cluster in
+            Dictionary(grouping: cluster) { $0.0 }.values
+                .map { spelling in
+                    (
+                        label: spelling[0].0,
+                        count: spelling.count,
+                        latest: spelling.map { max($0.1.ModifiedUnixMs, $0.1.LastUsedUnixMs, $0.1.CreatedUnixMs) }.max() ?? 0
+                    )
+                }
+                .sorted {
+                    if $0.count != $1.count { return $0.count > $1.count }
+                    if $0.latest != $1.latest { return $0.latest > $1.latest }
+                    return $0.label < $1.label
+                }
+                .first?.label
+        }
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     var visibleSections: [Section] {
@@ -90,9 +135,7 @@ final class ClipmanAppModel: ObservableObject {
         case .links:
             entries = []
         }
-        if groupFilter != "All" {
-            entries = entries.filter { $0.Group.caseInsensitiveCompare(groupFilter) == .orderedSame }
-        }
+        entries = entries.filter(matchesHistoryFilter)
         if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             entries = entries.filter {
@@ -120,9 +163,7 @@ final class ClipmanAppModel: ObservableObject {
         if settings.richTextEnabled {
             items = items.filter { $0.entry.RichText == nil }
         }
-        if groupFilter != "All" {
-            items = items.filter { $0.entry.Group.caseInsensitiveCompare(groupFilter) == .orderedSame }
-        }
+        items = items.filter { matchesHistoryFilter($0.entry) }
         if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             items = items.filter {
@@ -135,16 +176,59 @@ final class ClipmanAppModel: ObservableObject {
         return items
     }
 
+    private func matchesHistoryFilter(_ entry: ClipEntry) -> Bool {
+        switch historyFilter.kind {
+        case .all:
+            return true
+        case .group:
+            return entry.Group.caseInsensitiveCompare(historyFilter.value) == .orderedSame
+        case .device:
+            return entry.SourceMachine.caseInsensitiveCompare(historyFilter.value) == .orderedSame
+        }
+    }
+
     func announceStatus(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, UIAccessibility.isVoiceOverRunning else { return }
-        UIAccessibility.post(notification: .announcement, argument: trimmed)
+        let queued = NSAttributedString(
+            string: trimmed,
+            attributes: [.accessibilitySpeechQueueAnnouncement: true]
+        )
+        UIAccessibility.post(notification: .announcement, argument: queued)
+    }
+
+    private func setTransientStatus(_ message: String) {
+        statusResetTask?.cancel()
+        transientStatusActive = true
+        status = message
+        statusResetTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 10_000_000_000)
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            transientStatusActive = false
+            status = steadyStatus
+            statusResetTask = nil
+        }
+    }
+
+    private func setSteadyStatus(_ message: String, revealImmediately: Bool = true) {
+        steadyStatus = message
+        if revealImmediately || !transientStatusActive {
+            statusResetTask?.cancel()
+            statusResetTask = nil
+            transientStatusActive = false
+            status = message
+        }
     }
 
     func switchSection(_ section: Section) {
         guard visibleSections.contains(section), selectedSection != section else { return }
         selectedSection = section
-        status = "\(section.rawValue) clipboard history."
+        let page = visibleSections.firstIndex(of: section).map { $0 + 1 } ?? 1
+        setTransientStatus("\(section.rawValue) clipboard history. Page \(page) of \(visibleSections.count).")
     }
 
     func switchToAdjacentSection(_ offset: Int) {
@@ -177,30 +261,86 @@ final class ClipmanAppModel: ObservableObject {
             } else {
                 authenticated = true
             }
-            isUnlocking = false
             guard !Task.isCancelled, generation == foregroundGeneration, isSceneActive else {
+                isUnlocking = false
                 if isSceneActive {
                     unlock()
                 }
                 return
             }
             if authenticated {
+                let cacheLoaded = await loadCachedHistory()
+                guard !Task.isCancelled, generation == foregroundGeneration, isSceneActive else {
+                    isUnlocking = false
+                    return
+                }
+                isUnlocking = false
                 isUnlocked = true
-                let loaded = await refresh(showStatus: true)
-                guard !Task.isCancelled, generation == foregroundGeneration, isUnlocked else { return }
-                if ClipmanQuickActionCenter.shared.pendingAction != nil {
+                guard cacheLoaded else {
+                    showingSettings = true
+                    return
+                }
+                let hasQuickAction = ClipmanQuickActionCenter.shared.pendingAction != nil
+                var shouldRefreshServer = settings.storageMode == .server && !hasQuickAction
+                if hasQuickAction {
                     processPendingQuickAction()
                 } else if isImportingServerConnection {
                     // The import completion opens Settings once the file has finished loading.
+                    shouldRefreshServer = false
                 } else if pendingServerConnection != nil || !serverConnectionImportError.isEmpty {
                     showingSettings = true
-                } else if loaded, settings.addClipboardOnLaunch {
+                    shouldRefreshServer = false
+                } else if settings.addClipboardOnLaunch {
                     requestClipboardImport(announceUnavailable: false)
                 }
                 startPolling()
+                if shouldRefreshServer {
+                    _ = await refresh(showStatus: false, localCacheIsCurrent: true)
+                }
             } else {
+                isUnlocking = false
                 status = "Authentication cancelled."
             }
+        }
+    }
+
+    private func loadCachedHistory() async -> Bool {
+        let generation = storageGeneration
+        let password = settings.historyPassword
+        do {
+            if let cached = try await historyRepository.loadLocal(password: password) {
+                guard generation == storageGeneration else { return false }
+                if !SyncConflictResolver.hasSameContent(cached, database) {
+                    database = cached
+                }
+                if settings.storageMode == .server {
+                    status = "Cached history loaded; refreshing Clipman Server."
+                } else {
+                    setSteadyStatus("Ready. Using local history.")
+                }
+            } else if settings.storageMode == .local {
+                _ = try await historyRepository.saveLocal(
+                    database,
+                    password: password,
+                    backupSettings: settings
+                )
+                guard generation == storageGeneration else { return false }
+                setSteadyStatus("Ready. Using local history.")
+            } else {
+                _ = try await historyRepository.saveLocal(
+                    database,
+                    password: password,
+                    backupSettings: nil
+                )
+                guard generation == storageGeneration else { return false }
+                status = "Connecting to Clipman Server."
+            }
+            return true
+        } catch {
+            guard generation == storageGeneration else { return false }
+            setSteadyStatus("Could not load local history: \(error.localizedDescription)")
+            soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+            return false
         }
     }
 
@@ -263,7 +403,7 @@ final class ClipmanAppModel: ObservableObject {
         showingClipboardImport = false
         switch action {
         case .addClipboard:
-            addPastedClipboardPayload(MobileRichTextClipboard.readCurrent())
+            requestClipboardImport()
         case .copyLatest:
             guard let latest = database.Entries
                 .filter({ !$0.Text.isEmpty })
@@ -271,7 +411,7 @@ final class ClipmanAppModel: ObservableObject {
                     if $0.CreatedUnixMs == $1.CreatedUnixMs { return $0.Id < $1.Id }
                     return $0.CreatedUnixMs < $1.CreatedUnixMs
                 }) else {
-                status = "Clipman history is empty."
+                setTransientStatus("Clipman history is empty.")
                 soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
                 return
             }
@@ -280,7 +420,7 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func shortcutCompleted(_ message: String) {
-        status = message
+        setTransientStatus(message)
         guard isSceneActive, isUnlocked else { return }
         Task { [weak self] in
             _ = await self?.refresh(showStatus: false)
@@ -297,6 +437,9 @@ final class ClipmanAppModel: ObservableObject {
         showingSettings = false
         showingClipboardImport = false
         isUnlocked = false
+        statusResetTask?.cancel()
+        statusResetTask = nil
+        transientStatusActive = false
         status = "Clipman is locked."
     }
 
@@ -371,7 +514,7 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     @discardableResult
-    func refresh(showStatus: Bool) async -> Bool {
+    func refresh(showStatus: Bool, localCacheIsCurrent: Bool = false) async -> Bool {
         guard !refreshInProgress else { return false }
         let generation = storageGeneration
         let settingsSnapshot = settings
@@ -383,30 +526,32 @@ final class ClipmanAppModel: ObservableObject {
                 if showStatus { isRefreshing = false }
             }
             do {
+                var localBackupError: String?
                 if let local = try await historyRepository.loadLocal(password: settingsSnapshot.historyPassword) {
                     guard generation == storageGeneration else { return false }
                     if !SyncConflictResolver.hasSameContent(local, database) {
                         database = local
                     }
                 } else {
-                    let backupError = try await historyRepository.saveLocal(
+                    localBackupError = try await historyRepository.saveLocal(
                         database,
                         password: settingsSnapshot.historyPassword,
                         backupSettings: settingsSnapshot
                     )
                     guard generation == storageGeneration else { return false }
-                    if let backupError {
-                        status = "Local history loaded, but the history backup could not be updated: \(backupError)"
-                    }
                 }
                 revision = ""
                 hasPendingLocalChanges = false
                 pollingFailureCount = 0
-                if showStatus { status = "Local history loaded. \(loadedStatusText())" }
+                if let localBackupError {
+                    setSteadyStatus("Local history loaded, but the history backup could not be updated: \(localBackupError)")
+                } else {
+                    setSteadyStatus("Ready. Using local history.")
+                }
                 return true
             } catch {
                 guard generation == storageGeneration else { return false }
-                status = "Could not load local history: \(error.localizedDescription)"
+                setSteadyStatus("Could not load local history: \(error.localizedDescription)")
                 return false
             }
         }
@@ -415,9 +560,9 @@ final class ClipmanAppModel: ObservableObject {
             if !settingsSnapshot.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                !settingsSnapshot.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                settingsSnapshot.historyPassword.isEmpty {
-                status = "Clipman Server requires a unique history password. Your local cached history is unchanged."
+                setSteadyStatus("Clipman Server requires a unique history password. Your local cached history is unchanged.")
             } else {
-                status = "Open Settings to configure Clipman Server."
+                setSteadyStatus("Open Settings to configure Clipman Server.")
             }
             showingSettings = true
             return false
@@ -441,11 +586,16 @@ final class ClipmanAppModel: ObservableObject {
                 let metadata = try await client.metadata()
                 if metadata.revision == revision {
                     pollingFailureCount = 0
+                    setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
                     return true
                 }
             }
             let previousNewest = newestRemoteEntry(in: database)
-            let sync = try await historyRepository.synchronize(settings: settingsSnapshot, current: database)
+            let sync = try await historyRepository.synchronize(
+                settings: settingsSnapshot,
+                current: database,
+                localAlreadySaved: localCacheIsCurrent
+            )
             guard generation == storageGeneration else { return false }
             let merged = sync.database
             if merged != database {
@@ -454,21 +604,25 @@ final class ClipmanAppModel: ObservableObject {
             revision = sync.revision
             hasPendingLocalChanges = false
             pollingFailureCount = 0
+            setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
             if !showStatus, previousNewest != nil, let newest = newestRemoteEntry(in: merged), newest.Id != previousNewest?.Id, newest.Id != lastRemoteEntryID {
                 if settings.autoCopyRemote {
                     MobileRichTextClipboard.write(newest, includeRichText: settings.richTextEnabled)
                 }
                 lastRemoteEntryID = newest.Id
                 let source = newest.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
-                status = source.isEmpty ? "Clipboard updated by another device." : "Clipboard updated by \(source)."
+                setTransientStatus(source.isEmpty ? "Clipboard updated by another device." : "Clipboard updated by \(source).")
                 soundService.play("remote", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             }
             if showStatus {
-                status = sync.backupError.map {
+                let message = sync.backupError.map {
                     "\(loadedStatusText()) History backup could not be updated: \($0)"
                 } ?? loadedStatusText()
+                if sync.backupError != nil {
+                    setSteadyStatus(message)
+                }
             } else if let backupError = sync.backupError {
-                status = "History saved, but the history backup could not be updated: \(backupError)"
+                setSteadyStatus("History saved, but the history backup could not be updated: \(backupError)")
             }
             return true
         } catch {
@@ -480,15 +634,15 @@ final class ClipmanAppModel: ObservableObject {
                     if !SyncConflictResolver.hasSameContent(cached, database) {
                         database = cached
                     }
-                    status = "Using local history; server sync is pending: \(error.localizedDescription)"
+                    setSteadyStatus("Using local history; server sync is pending: \(error.localizedDescription)")
                     return true
                 }
             } catch {
                 guard generation == storageGeneration else { return false }
-                status = "Could not load local history: \(error.localizedDescription)"
+                setSteadyStatus("Could not load local history: \(error.localizedDescription)")
                 return false
             }
-            status = error.localizedDescription
+            setSteadyStatus(error.localizedDescription)
             return false
         }
     }
@@ -496,7 +650,7 @@ final class ClipmanAppModel: ObservableObject {
     func requestClipboardImport(announceUnavailable: Bool = true) {
         guard MobileRichTextClipboard.containsText() else {
             if announceUnavailable {
-                status = "Clipboard does not contain text."
+                setTransientStatus("Clipboard does not contain text.")
                 soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             }
             return
@@ -508,7 +662,7 @@ final class ClipmanAppModel: ObservableObject {
         showingClipboardImport = false
         guard let payload,
               !payload.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            status = "Clipboard does not contain text."
+            setTransientStatus("Clipboard does not contain text.")
             soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
             return
         }
@@ -520,26 +674,28 @@ final class ClipmanAppModel: ObservableObject {
             machineName: machineName,
             richText: settings.richTextEnabled ? payload.richText : nil
         )
-        queueUpload(successMessage: alreadyExists ? "Clipboard text already exists in history." : "Clipboard text added.")
+        setTransientStatus(alreadyExists ? "Clipboard text already exists in history." : "Clipboard text added.")
+        soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+        queueUpload(successMessage: nil)
     }
 
     func cancelClipboardImport() {
         showingClipboardImport = false
-        status = "Clipboard paste cancelled."
+        setTransientStatus("Clipboard paste cancelled.")
     }
 
     func copy(_ entry: ClipEntry) {
         MobileRichTextClipboard.write(entry, includeRichText: settings.richTextEnabled)
         database = markUsed(entry)
         soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
-        status = "Copied to clipboard."
+        setTransientStatus("Copied to clipboard.")
         queueUpload(successMessage: nil)
     }
 
     func copyText(_ text: String) {
         UIPasteboard.general.string = text
         soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
-        status = "Copied to clipboard."
+        setTransientStatus("Copied to clipboard.")
     }
 
     func togglePinned(_ entry: ClipEntry) {
@@ -553,12 +709,41 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func update(_ entry: ClipEntry) {
-        database = SyncConflictResolver.updateEntry(database: database, entry: entry, machineName: machineName)
+        var normalized = entry
+        normalized.Group = canonicalGroup(entry.Group)
+        database = SyncConflictResolver.updateEntry(database: database, entry: normalized, machineName: machineName)
         queueUpload(successMessage: "Entry updated.")
+    }
+
+    private func canonicalGroup(_ requestedValue: String) -> String {
+        let requested = requestedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !requested.isEmpty else { return "" }
+        let matching = database.Entries.filter {
+            $0.Group.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(requested) == .orderedSame
+        }
+        let spellings = Dictionary(grouping: matching) {
+            $0.Group.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return spellings.values.map { entries in
+            (
+                label: entries[0].Group.trimmingCharacters(in: .whitespacesAndNewlines),
+                count: entries.count,
+                latest: entries.map { max($0.ModifiedUnixMs, $0.LastUsedUnixMs, $0.CreatedUnixMs) }.max() ?? 0
+            )
+        }
+        .sorted {
+            if $0.count != $1.count { return $0.count > $1.count }
+            if $0.latest != $1.latest { return $0.latest > $1.latest }
+            return $0.label < $1.label
+        }
+        .first?.label ?? requested
     }
 
     private func queueUpload(successMessage: String?) {
         uploadTask?.cancel()
+        if let successMessage {
+            setTransientStatus(successMessage)
+        }
         let snapshot = database
         let generation = storageGeneration
         let settingsSnapshot = settings
@@ -579,33 +764,36 @@ final class ClipmanAppModel: ObservableObject {
             guard generation == storageGeneration else { return }
             if settingsSnapshot.storageMode == .local {
                 hasPendingLocalChanges = false
+                setSteadyStatus("Ready. Using local history.", revealImmediately: false)
                 if let localBackupError {
-                    status = "\(successMessage.map { "\($0) " } ?? "")Saved locally, but the history backup could not be updated: \(localBackupError)"
-                } else if let successMessage {
-                    status = "\(successMessage) Saved in local history."
+                    setSteadyStatus("Saved locally, but the history backup could not be updated: \(localBackupError)")
                 }
                 return
             }
-            let sync = try await historyRepository.synchronize(settings: settingsSnapshot, current: snapshot)
+            let sync = try await historyRepository.synchronize(
+                settings: settingsSnapshot,
+                current: snapshot,
+                localAlreadySaved: true
+            )
             try Task.checkCancellation()
             guard generation == storageGeneration else { return }
             revision = sync.revision
             hasPendingLocalChanges = false
+            setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
             if !SyncConflictResolver.hasSameContent(sync.database, database) {
                 database = sync.database
             }
             if let backupError = sync.backupError ?? localBackupError {
-                status = "\(successMessage.map { "\($0) " } ?? "")History backup could not be updated: \(backupError)"
-            } else if let successMessage {
-                status = successMessage
+                setSteadyStatus("History backup could not be updated: \(backupError)")
             }
         } catch is CancellationError {
             return
         } catch {
             hasPendingLocalChanges = settingsSnapshot.storageMode == .server
-            status = settingsSnapshot.storageMode == .server
+            let failure = settingsSnapshot.storageMode == .server
                 ? "Saved locally; server sync is pending: \(error.localizedDescription)"
                 : "Could not save local history: \(error.localizedDescription)"
+            setSteadyStatus(failure)
             soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
         }
     }

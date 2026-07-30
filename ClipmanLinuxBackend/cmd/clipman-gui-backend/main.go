@@ -83,6 +83,7 @@ type entryJSON struct {
 	Device                string        `json:"device"`
 	CreatedUnixMs         int64         `json:"created_unix_ms"`
 	LastUsedUnixMs        int64         `json:"last_used_unix_ms"`
+	ModifiedUnixMs        int64         `json:"modified_unix_ms"`
 	Pinned                bool          `json:"pinned"`
 	IsTemplate            bool          `json:"is_template"`
 	ManualOrder           int64         `json:"manual_order"`
@@ -163,11 +164,39 @@ func (s *session) handle(action string, raw json.RawMessage) (any, error) {
 		if err := decode(raw, &p); err != nil {
 			return nil, err
 		}
-		address, token := server.ConnectionDetails(p.Text)
+		address, token, caCertPEM, err := server.ConnectionProfile(p.Text)
+		if err != nil {
+			return nil, err
+		}
 		if address == "" || token == "" {
 			return nil, errors.New("the selected file does not contain Clipman Server connection details")
 		}
-		return map[string]string{"server": address, "token": token}, nil
+		result := map[string]string{"server": address, "token": token, "ca_cert_pem": caCertPEM}
+		if caCertPEM != "" {
+			authority, _ := server.ParsePrivateAuthority([]byte(caCertPEM), address)
+			result["ca_host"] = authority.Host
+			result["ca_subject"] = authority.Subject
+			result["ca_expires"] = authority.Expires.Format("2 January 2006")
+			result["ca_fingerprint"] = authority.Fingerprint
+		}
+		return result, nil
+	case "authority_details":
+		var p struct{ Text, Server string }
+		if err := decode(raw, &p); err != nil {
+			return nil, err
+		}
+		authority, err := server.ParsePrivateAuthority([]byte(p.Text), p.Server)
+		if err != nil {
+			return nil, err
+		}
+		if authority.PEM == "" {
+			return nil, errors.New("the selected file does not contain a certificate authority")
+		}
+		return map[string]string{
+			"ca_cert_pem": authority.PEM, "ca_host": authority.Host,
+			"ca_subject": authority.Subject, "ca_expires": authority.Expires.Format("2 January 2006"),
+			"ca_fingerprint": authority.Fingerprint,
+		}, nil
 	case "configure":
 		return s.configure(raw)
 	case "unlock":
@@ -314,18 +343,27 @@ func (s *session) loadConfiguration() {
 
 func (s *session) configurationResult() map[string]any {
 	token, _ := s.cfg.ResolvedToken()
-	return map[string]any{
+	result := map[string]any{
 		"configured": config.Exists(s.configPath), "server": s.cfg.Server,
 		"token_present": token != "", "machine": s.cfg.Machine,
 		"password_saved": strings.EqualFold(s.cfg.PasswordMode, "config") && s.cfg.PasswordProtected != "",
 		"unlocked":       s.engine != nil, "config_path": s.configPath,
+		"ca_cert_pem": s.cfg.CACertPEM, "ca_host": s.cfg.CAHost,
 	}
+	if s.cfg.CACertPEM != "" {
+		if authority, err := server.ParsePrivateAuthority([]byte(s.cfg.CACertPEM), s.cfg.Server); err == nil {
+			result["ca_subject"] = authority.Subject
+			result["ca_expires"] = authority.Expires.Format("2 January 2006")
+			result["ca_fingerprint"] = authority.Fingerprint
+		}
+	}
+	return result
 }
 
 func (s *session) configure(raw json.RawMessage) (any, error) {
 	var p struct {
-		Server, Token, Password, Machine string
-		Remember                         bool
+		Server, Token, Password, Machine, CACertPEM, CAHost string
+		Remember                                            bool
 	}
 	if err := decode(raw, &p); err != nil {
 		return nil, err
@@ -360,6 +398,16 @@ func (s *session) configure(raw json.RawMessage) (any, error) {
 	}
 	cfg := config.Default()
 	cfg.Server, cfg.Machine, cfg.PinnedFirst = normalized, p.Machine, true
+	if strings.TrimSpace(p.CACertPEM) != "" {
+		authority, authorityErr := server.ParsePrivateAuthority([]byte(p.CACertPEM), normalized)
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
+		if strings.TrimSpace(p.CAHost) != "" && !strings.EqualFold(strings.TrimSpace(p.CAHost), authority.Host) {
+			return nil, errors.New("private certificate authority is configured for a different server host")
+		}
+		cfg.CACertPEM, cfg.CAHost = authority.PEM, authority.Host
+	}
 	cfg.TokenProtected, err = config.ProtectForConfig(p.Token)
 	if err != nil {
 		return nil, err
@@ -393,7 +441,11 @@ func (s *session) activate(cfg config.Config, password string) error {
 		return errors.New("server token is missing")
 	}
 	databaseID := identity.DatabaseID(token, password)
-	client, err := server.New(cfg.Server, token, databaseID, "clipman-linux/"+version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")")
+	var options []server.Option
+	if cfg.CACertPEM != "" {
+		options = append(options, server.WithExclusiveCACertPEM([]byte(cfg.CACertPEM)))
+	}
+	client, err := server.New(cfg.Server, token, databaseID, "clipman-linux/"+version+" ("+runtime.GOOS+"/"+runtime.GOARCH+")", options...)
 	if err != nil {
 		return err
 	}
@@ -465,12 +517,8 @@ func (s *session) setState(state syncengine.State, offline bool) {
 
 func (s *session) historyResult(changed bool) map[string]any {
 	entries := make([]entryJSON, 0, len(s.database.Entries))
-	groups := map[string]bool{}
 	for _, entry := range s.database.Entries {
 		entries = append(entries, exportEntry(entry))
-		if strings.TrimSpace(entry.Group) != "" {
-			groups[entry.Group] = true
-		}
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].Pinned != entries[j].Pinned {
@@ -481,12 +529,77 @@ func (s *session) historyResult(changed bool) map[string]any {
 		}
 		return entries[i].CreatedUnixMs < entries[j].CreatedUnixMs
 	})
-	groupNames := make([]string, 0, len(groups))
-	for group := range groups {
-		groupNames = append(groupNames, group)
-	}
-	sort.Strings(groupNames)
+	groupNames := canonicalLabels(s.database.Entries, func(entry model.Entry) string { return entry.Group })
 	return map[string]any{"entries": entries, "file_events": s.exportFileEvents(), "groups": groupNames, "revision": s.revision, "changed": changed, "offline": s.offline, "server": s.client.BaseURL, "machine": s.cfg.Machine}
+}
+
+type labelStats struct {
+	label  string
+	count  int
+	latest int64
+}
+
+func canonicalLabels(entries []model.Entry, selector func(model.Entry) string) []string {
+	clusters := map[string]map[string]*labelStats{}
+	for _, entry := range entries {
+		label := strings.TrimSpace(selector(entry))
+		if label == "" {
+			continue
+		}
+		key := strings.ToLower(label)
+		if clusters[key] == nil {
+			clusters[key] = map[string]*labelStats{}
+		}
+		stats := clusters[key][label]
+		if stats == nil {
+			stats = &labelStats{label: label}
+			clusters[key][label] = stats
+		}
+		stats.count++
+		latest := entry.ModifiedUnixMs
+		if entry.LastUsedUnixMs > latest {
+			latest = entry.LastUsedUnixMs
+		}
+		if entry.CreatedUnixMs > latest {
+			latest = entry.CreatedUnixMs
+		}
+		if latest > stats.latest {
+			stats.latest = latest
+		}
+	}
+	result := make([]string, 0, len(clusters))
+	for _, spellings := range clusters {
+		var winner *labelStats
+		for _, candidate := range spellings {
+			if winner == nil || candidate.count > winner.count ||
+				(candidate.count == winner.count && candidate.latest > winner.latest) ||
+				(candidate.count == winner.count && candidate.latest == winner.latest && candidate.label < winner.label) {
+				winner = candidate
+			}
+		}
+		result = append(result, winner.label)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		left, right := strings.ToLower(result[i]), strings.ToLower(result[j])
+		if left == right {
+			return result[i] < result[j]
+		}
+		return left < right
+	})
+	return result
+}
+
+func canonicalLabelFor(entries []model.Entry, selector func(model.Entry) string, requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return ""
+	}
+	for _, label := range canonicalLabels(entries, selector) {
+		if strings.EqualFold(label, requested) {
+			return label
+		}
+	}
+	return requested
 }
 
 func (s *session) mutate(fn syncengine.Mutation) (any, error) {
@@ -565,12 +678,13 @@ func (s *session) update(raw json.RawMessage) (any, error) {
 		return nil, errors.New("clipboard text cannot be empty")
 	}
 	return s.mutate(func(db *model.Database, now int64) (bool, any, error) {
+		group := canonicalLabelFor(db.Entries, func(entry model.Entry) string { return entry.Group }, p.Group)
 		for i := range db.Entries {
 			if strings.EqualFold(db.Entries[i].ID, p.ID) {
 				e := &db.Entries[i]
 				textChanged := e.Text != p.Text
-				changed := textChanged || e.Name != strings.TrimSpace(p.Name) || e.Group != strings.TrimSpace(p.Group) || e.Pinned != p.Pinned || e.IsTemplate != p.IsTemplate
-				e.Text, e.Name, e.Group, e.Pinned, e.IsTemplate = p.Text, strings.TrimSpace(p.Name), strings.TrimSpace(p.Group), p.Pinned, p.IsTemplate
+				changed := textChanged || e.Name != strings.TrimSpace(p.Name) || e.Group != group || e.Pinned != p.Pinned || e.IsTemplate != p.IsTemplate
+				e.Text, e.Name, e.Group, e.Pinned, e.IsTemplate = p.Text, strings.TrimSpace(p.Name), group, p.Pinned, p.IsTemplate
 				if changed {
 					e.LastUsedUnixMs, e.ModifiedUnixMs, e.SourceMachine, db.UpdatedUnixMs = now, now, s.cfg.Machine, now
 				}
@@ -619,7 +733,8 @@ func (s *session) updateMany(raw json.RawMessage) (any, error) {
 			}
 			found++
 			entry := &db.Entries[index]
-			name, group := strings.TrimSpace(item.Name), strings.TrimSpace(item.Group)
+			name := strings.TrimSpace(item.Name)
+			group := canonicalLabelFor(db.Entries, func(entry model.Entry) string { return entry.Group }, item.Group)
 			textChanged := entry.Text != item.Text
 			itemChanged := textChanged || entry.Name != name || entry.Group != group || entry.Pinned != item.Pinned || entry.IsTemplate != item.IsTemplate
 			entry.Text, entry.Name, entry.Group, entry.Pinned, entry.IsTemplate = item.Text, name, group, item.Pinned, item.IsTemplate
@@ -857,7 +972,7 @@ func exportEntry(entry model.Entry) entryJSON {
 		display = "Empty entry"
 	}
 	richText, richTextUpdated := richTextFromEntry(entry)
-	return entryJSON{ID: entry.ID, Text: entry.Text, Name: entry.Name, Group: entry.Group, Device: entry.SourceMachine, CreatedUnixMs: entry.CreatedUnixMs, LastUsedUnixMs: entry.LastUsedUnixMs, Pinned: entry.Pinned, IsTemplate: entry.IsTemplate, ManualOrder: entry.ManualOrder, Section: section(entry.Text), Display: display, RichText: richText, RichTextUpdatedUnixMs: richTextUpdated}
+	return entryJSON{ID: entry.ID, Text: entry.Text, Name: entry.Name, Group: entry.Group, Device: entry.SourceMachine, CreatedUnixMs: entry.CreatedUnixMs, LastUsedUnixMs: entry.LastUsedUnixMs, ModifiedUnixMs: entry.ModifiedUnixMs, Pinned: entry.Pinned, IsTemplate: entry.IsTemplate, ManualOrder: entry.ManualOrder, Section: section(entry.Text), Display: display, RichText: richText, RichTextUpdatedUnixMs: richTextUpdated}
 }
 
 func normalizeRichText(value *richTextJSON) *richTextJSON {

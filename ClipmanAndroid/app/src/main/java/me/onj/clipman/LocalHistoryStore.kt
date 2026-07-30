@@ -67,14 +67,19 @@ class MobileHistoryRepository(context: Context) {
         serverUrl: String,
         token: String,
         password: String,
+        serverCaCertPem: String,
+        serverCaHost: String,
         current: ClipDatabase,
-        backupOptions: CloudBackupOptions = CloudBackupOptions(false, "")
+        backupOptions: CloudBackupOptions = CloudBackupOptions(false, ""),
+        localAlreadySaved: Boolean = false
     ): MobileSyncResult {
-        val cached = localStore.load(password)
-        val local = cached?.let {
-            SyncConflictResolver.merge(target = current, source = it)
-        } ?: current
-        val client = ServerStorageClient(serverUrl, token, password)
+        val cached = if (localAlreadySaved) current else localStore.load(password)
+        val local = if (localAlreadySaved) {
+            current
+        } else {
+            cached?.let { SyncConflictResolver.merge(target = current, source = it) } ?: current
+        }
+        val client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost)
         var remoteDownload = try {
             client.download()
         } catch (_: ServerDatabaseNotFoundException) {

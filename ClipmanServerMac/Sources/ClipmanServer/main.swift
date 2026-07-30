@@ -74,6 +74,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Copy Connection Details", action: #selector(copyConnectionDetails), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Change Listening Port...", action: #selector(changeListeningPort), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Create or Renew HTTPS Certificate", action: #selector(createHTTPSCertificate), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Copy Authority Fingerprint", action: #selector(copyAuthorityFingerprint), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Share Certificate Authority", action: #selector(shareCertificateAuthority), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Settings Folder", action: #selector(openSettingsFolder), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Logs Folder", action: #selector(openLogsFolder), keyEquivalent: ""))
@@ -224,10 +225,29 @@ final class ServerController: NSObject, NSApplicationDelegate {
             switch result {
             case .success(let output):
                 self.restartServer()
-                self.showAlert(output + "\n\nInstall and trust the public certificate authority on each client. Use Share Certificate Authority from this menu to transfer it safely.")
+                self.showAlert(output + "\n\nImport the refreshed .clpconf file in current Clipman clients. It carries the public authority for app-specific trust. Older clients may still require Share Certificate Authority and operating-system trust.")
             case .failure(let error):
                 self.appendLog(error.localizedDescription + "\n")
                 self.showAlert(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func copyAuthorityFingerprint() {
+        runPythonUtility(["--show-ca-fingerprint"], timeout: 10) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.showAlert(error.localizedDescription)
+            case .success(let output):
+                let fingerprint = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !fingerprint.isEmpty else {
+                    self.showAlert("No private certificate authority is configured.")
+                    return
+                }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(fingerprint, forType: .string)
+                self.showNotification("Authority SHA-256 fingerprint copied.")
             }
         }
     }
