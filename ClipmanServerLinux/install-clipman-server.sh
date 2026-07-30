@@ -65,6 +65,7 @@ Commands:
   console     Run Clipman Server in the current terminal
   token       Print the server token
   connection  Write and print the connection details file path
+  host        Show or change the listening host and restart safely
   port        Change the listening port and restart the server
   cert        Create or renew a private-CA HTTPS certificate
   fingerprint Show the private authority SHA-256 fingerprint
@@ -83,6 +84,10 @@ Certificate examples:
   clipmanserver cert --cert-ip 192.168.1.50
   clipmanserver fingerprint
   clipmanserver share-ca
+
+Listening host examples:
+  clipmanserver host 100.64.0.10
+  clipmanserver host 0.0.0.0 100.64.0.10
 USAGE
 }
 
@@ -168,6 +173,29 @@ PY
     ;;
   connection)
     "\$LAUNCHER" --write-connection-info
+    ;;
+  host)
+    HOST="\${2:-}"
+    if [ -z "\$HOST" ]; then
+      python3 - "\$CONFIG_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+settings = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8-sig"))
+print(settings.get("Host", "127.0.0.1"))
+PY
+      exit 0
+    fi
+    ADVERTISE_HOST="\${3:-}"
+    if [ -n "\$ADVERTISE_HOST" ]; then
+      exec python3 "\$APP_DIR/clipman_server_updater.py" --set-host "\$HOST" --advertise-host "\$ADVERTISE_HOST" \
+        --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
+        --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
+    fi
+    exec python3 "\$APP_DIR/clipman_server_updater.py" --set-host "\$HOST" \
+      --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
+      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
     ;;
   port)
     PORT="\${2:-}"

@@ -160,7 +160,7 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
       <tr><td><code>CLIPMAN_DATA_DIR</code></td><td>Container data folder. Defaults to <code>/data</code>.</td></tr>
       <tr><td><code>CLIPMAN_HOST</code></td><td>Listen host inside the container. Defaults to <code>0.0.0.0</code>.</td></tr>
       <tr><td><code>CLIPMAN_PORT</code></td><td>Listen port inside the container. Defaults to <code>8080</code>.</td></tr>
-      <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Optional host written into the generated connection files.</td></tr>
+      <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Host written into generated connection files. Set this when <code>CLIPMAN_HOST</code> is a wildcard such as <code>0.0.0.0</code>; otherwise the server runs but does not generate an unusable connection file.</td></tr>
       <tr><td><code>CLIPMAN_IS_BEHIND_REVERSE_PROXY</code></td><td>Set to <code>true</code> when TLS is handled by a reverse proxy.</td></tr>
       <tr><td><code>CLIPMAN_ALLOW_INSECURE_REMOTE</code></td><td>Set to <code>true</code> only when the published port is restricted to a trusted LAN or VPN.</td></tr>
       <tr><td><code>CLIPMAN_CERT_FILE</code> and <code>CLIPMAN_KEY_FILE</code></td><td>Optional direct TLS certificate and key paths inside the container.</td></tr>
@@ -239,6 +239,8 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
 
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
+
+  <p>Server 2.4.2 adds a safe Linux command for changing the listening host, prevents connection files from containing unusable wildcard addresses, and restores the previous working configuration if a new address cannot start. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/48">issue #48</a>.</p>
 
   <p>Server 2.4.1 fixes Linux updates for HTTPS installations whose advertised address cannot connect back to the server's private listening port. The updater now checks the local listener while still validating the advertised TLS certificate name. If a service genuinely fails to start, the update error includes useful service-status details before restoring the previous program. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/47">issue #47</a>.</p>
 
@@ -358,6 +360,7 @@ clipmanserver force-delete &lt;database-id&gt;
 clipmanserver console
 clipmanserver token
 clipmanserver connection
+clipmanserver host [listening-address] [client-address]
 clipmanserver version
 clipmanserver check-update
 clipmanserver update
@@ -365,7 +368,7 @@ clipmanserver enable-auto-updates
 clipmanserver disable-auto-updates
 clipmanserver update-status</code></pre>
 
-  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>prune</code> moves buckets inactive for the configured number of days, or for the number you type after the command. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully. The update commands use the safe update and rollback process described above.</p>
+  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>host</code> without an address reports the current listener; with an address it updates the setting, refreshes the connection files, restarts, and verifies the server. If it fails, the previous configuration is restored. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>prune</code> moves buckets inactive for the configured number of days, or for the number you type after the command. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully. The update commands use the safe update and rollback process described above.</p>
 
   <h2 id="existing-history">Starting With Existing History</h2>
   <p>Do not manually copy an existing <code>.clipdb</code> into the server's database folders. Server database buckets are derived by Clipman clients from the server token and the Clipman history password. The server deliberately does not know that history password, so it cannot safely decide which bucket an imported file belongs in.</p>
@@ -393,9 +396,15 @@ clipmanserver update-status</code></pre>
   <p>The server path is an additional storage path, not a replacement for local cache and settings.</p>
 
   <h2 id="private-network">Private LAN or VPN</h2>
-  <p>For a private network or Tailscale-only server, bind to the intended private address or all interfaces and deliberately allow insecure remote HTTP:</p>
+  <p>For an installed Tailscale-only server, bind directly to its Tailscale address:</p>
 
-  <pre><code>python3 clipman_server.py --host 0.0.0.0 --allow-insecure-remote</code></pre>
+  <pre><code>clipmanserver host 100.64.0.10</code></pre>
+
+  <p>Replace the example with the server's own Tailscale address. If a server has already been deliberately configured to allow an all-interface HTTP listener, give clients a real reachable address by providing both values:</p>
+
+  <pre><code>clipmanserver host 0.0.0.0 100.64.0.10</code></pre>
+
+  <p>The first value controls where the server listens. The optional second value is written to connection files for clients. Wildcard values such as <code>0.0.0.0</code> and <code>::</code> are never exported as client destinations. The <code>host</code> command does not weaken HTTP security checks or enable public insecure listening.</p>
 
   <p>Then configure Clipman clients with:</p>
 

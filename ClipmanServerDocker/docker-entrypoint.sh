@@ -68,5 +68,13 @@ else
   esac
 fi
 
-python3 "$@" --write-connection-info >/dev/null
+case "${ADVERTISE_HOST:-$HOST}" in
+  0.0.0.0|::|\[::\])
+    echo "Connection files were not written because a wildcard listener does not identify an address another device can use." >&2
+    echo "Set CLIPMAN_ADVERTISE_HOST to the DNS name or IP address used by Clipman clients." >&2
+    ;;
+  *)
+    python3 "$@" --write-connection-info >/dev/null
+    ;;
+esac
 exec python3 "$@"

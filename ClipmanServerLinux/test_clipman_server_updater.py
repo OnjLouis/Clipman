@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import tempfile
 import unittest
 import zipfile
@@ -126,6 +127,119 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             "KeyFile": "",
         }
         self.assertEqual("http://127.0.0.1:25767/api/v1/health", updater.health_url(settings))
+
+    def test_listen_host_validation_accepts_ipv6_brackets_and_rejects_urls(self):
+        self.assertEqual("fd7a:115c:a1e0::1", updater.normalize_listen_host("[fd7a:115c:a1e0::1]"))
+        with self.assertRaisesRegex(ValueError, "without a scheme"):
+            updater.normalize_listen_host("https://100.64.0.10")
+        with self.assertRaisesRegex(ValueError, "without a scheme"):
+            updater.normalize_listen_host("100.64.0.10:62673/path")
+
+    def test_wildcard_listen_host_requires_a_client_address(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "settings.json"
+            config.write_text(json.dumps({"Host": "127.0.0.1", "AdvertiseHost": "", "Port": 61234}), encoding="utf-8")
+            args = argparse.Namespace(config=str(config), bin_dir=str(root / "bin"))
+            with self.assertRaisesRegex(ValueError, "wildcard listener requires"):
+                updater.change_listen_host(args, "0.0.0.0")
+
+    def test_listen_host_change_restarts_and_refreshes_connection_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config" / "settings.json"
+            bin_dir = root / "bin"
+            config.parent.mkdir(parents=True)
+            bin_dir.mkdir()
+            settings = {
+                "Host": "127.0.0.1",
+                "AdvertiseHost": "127.0.0.1",
+                "Port": 61234,
+                "CertFile": "",
+                "KeyFile": "",
+            }
+            config.write_text(json.dumps(settings), encoding="utf-8")
+            connection_text = config.parent / "clipman-server-connection.txt"
+            connection_config = config.parent / "clipman-server-connection.clpconf"
+            connection_text.write_text("old text", encoding="utf-8")
+            connection_config.write_text("old config", encoding="utf-8")
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                if command[0] == str(bin_dir / "clipman-server"):
+                    updated = json.loads(config.read_text(encoding="utf-8"))
+                    updated["Host"] = command[command.index("--host") + 1]
+                    if "--advertise-host" in command:
+                        updated["AdvertiseHost"] = command[command.index("--advertise-host") + 1]
+                    config.write_text(json.dumps(updated), encoding="utf-8")
+                    connection_text.write_text("new text", encoding="utf-8")
+                    connection_config.write_text("new config", encoding="utf-8")
+                return mock.Mock(returncode=0)
+
+            args = argparse.Namespace(config=str(config), bin_dir=str(bin_dir))
+            with mock.patch.object(updater, "run", side_effect=fake_run), \
+                 mock.patch.object(updater, "wait_for_health"):
+                updater.change_listen_host(args, "100.64.0.10")
+
+            updated = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual("100.64.0.10", updated["Host"])
+            self.assertEqual("100.64.0.10", updated["AdvertiseHost"])
+            self.assertEqual("new text", connection_text.read_text(encoding="utf-8"))
+            self.assertEqual([str(bin_dir / "clipmanserver"), "stop"], commands[0])
+            self.assertIn("--write-connection-info", commands[1])
+            self.assertEqual([str(bin_dir / "clipmanserver"), "start"], commands[2])
+
+    def test_failed_listen_host_change_restores_settings_and_connection_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config" / "settings.json"
+            bin_dir = root / "bin"
+            config.parent.mkdir(parents=True)
+            bin_dir.mkdir()
+            original = json.dumps({
+                "Host": "127.0.0.1",
+                "AdvertiseHost": "clipboard.example.test",
+                "Port": 61234,
+                "CertFile": "",
+                "KeyFile": "",
+            }).encode("utf-8")
+            config.write_bytes(original)
+            connection_text = config.parent / "clipman-server-connection.txt"
+            connection_config = config.parent / "clipman-server-connection.clpconf"
+            connection_text.write_bytes(b"old text")
+            connection_config.write_bytes(b"old config")
+            config.chmod(0o600)
+            connection_text.chmod(0o600)
+            connection_config.chmod(0o600)
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                if command[0] == str(bin_dir / "clipman-server"):
+                    updated = json.loads(config.read_text(encoding="utf-8"))
+                    updated["Host"] = command[command.index("--host") + 1]
+                    config.write_text(json.dumps(updated), encoding="utf-8")
+                    connection_text.write_bytes(b"new text")
+                    connection_config.write_bytes(b"new config")
+                return mock.Mock(returncode=0)
+
+            args = argparse.Namespace(config=str(config), bin_dir=str(bin_dir))
+            with mock.patch.object(updater, "run", side_effect=fake_run), \
+                 mock.patch.object(updater, "wait_for_health", side_effect=[RuntimeError("new listener failed"), None]), \
+                 mock.patch.object(updater, "service_diagnostics", return_value="service failed"):
+                with self.assertRaisesRegex(RuntimeError, "(?s)new listener failed.*Service status before restoration"):
+                    updater.change_listen_host(args, "100.64.0.99")
+
+            self.assertEqual(original, config.read_bytes())
+            self.assertEqual(b"old text", connection_text.read_bytes())
+            self.assertEqual(b"old config", connection_config.read_bytes())
+            if os.name != "nt":
+                self.assertEqual(0o600, config.stat().st_mode & 0o777)
+                self.assertEqual(0o600, connection_text.stat().st_mode & 0o777)
+                self.assertEqual(0o600, connection_config.stat().st_mode & 0o777)
+            self.assertEqual(2, commands.count([str(bin_dir / "clipmanserver"), "stop"]))
+            self.assertEqual(2, commands.count([str(bin_dir / "clipmanserver"), "start"]))
 
     def test_failed_health_check_restores_previous_program(self):
         with tempfile.TemporaryDirectory() as temporary:

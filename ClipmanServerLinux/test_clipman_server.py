@@ -29,6 +29,7 @@ class ServerStartupTests(unittest.TestCase):
         self.assertIn(run_command, entrypoint)
         self.assertLess(entrypoint.index(write_command), entrypoint.index(run_command))
         self.assertIn("CLIPMAN_ALLOW_INSECURE_REMOTE=true only on a trusted LAN or VPN", entrypoint)
+        self.assertIn("a wildcard listener does not identify an address another device can use", entrypoint)
 
     def test_new_settings_use_persistent_port_range(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -63,6 +64,11 @@ class ServerStartupTests(unittest.TestCase):
         self.assertIn("Choose another listening port", error_output.getvalue())
         self.assertNotIn("Traceback", error_output.getvalue())
 
+    def test_wildcard_listener_is_not_treated_as_private(self) -> None:
+        self.assertFalse(clipman_server.is_local_or_private_host("0.0.0.0"))
+        self.assertFalse(clipman_server.is_local_or_private_host("::"))
+        self.assertTrue(clipman_server.is_local_or_private_host("100.64.0.10"))
+
 
 class ConnectionConfigTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -96,6 +102,12 @@ class ConnectionConfigTests(unittest.TestCase):
         target = clipman_server.maybe_write_connection_config(self.config_path, self.settings, False, False)
         self.assertEqual(clipman_server.default_connection_config_path(self.config_path), target)
         self.assertTrue(target.is_file())
+
+    def test_wildcard_listener_is_not_exported_as_a_client_address(self) -> None:
+        self.settings["Host"] = "0.0.0.0"
+        self.settings["AdvertiseHost"] = ""
+        with self.assertRaisesRegex(RuntimeError, "wildcard listening address"):
+            clipman_server.write_connection_config(self.config_path, self.settings)
 
 
 class CertificateTests(unittest.TestCase):
@@ -331,7 +343,7 @@ class ConditionalCreateTests(unittest.TestCase):
 
         self.assertEqual(200, response.status)
         self.assertTrue(response.getheader("X-Clipman-Revision", ""))
-        self.assertIn(b'"Version": "2.4.1"', data)
+        self.assertIn(b'"Version": "2.4.2"', data)
         database = clipman_server.database_path(self.settings, database_id)
         self.assertEqual(b"expect-continue", database.read_bytes())
 

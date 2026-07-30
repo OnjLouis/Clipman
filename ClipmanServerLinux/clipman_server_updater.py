@@ -252,6 +252,99 @@ def service_diagnostics(helper: Path) -> str:
     return output[-6000:]
 
 
+def normalize_listen_host(value: str) -> str:
+    host = str(value or "").strip()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1].strip()
+    if (
+        not host
+        or any(character.isspace() for character in host)
+        or "/" in host
+        or "\\" in host
+        or "[" in host
+        or "]" in host
+    ):
+        raise ValueError("The listening host must be an IP address or host name without a scheme, port, path, or spaces.")
+    return host
+
+
+def restore_configuration_files(files: Dict[Path, Optional[Tuple[bytes, int]]]) -> None:
+    for path, snapshot in files.items():
+        if snapshot is None:
+            path.unlink(missing_ok=True)
+            continue
+        content, mode = snapshot
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".restore")
+        temporary.write_bytes(content)
+        os.chmod(temporary, mode)
+        temporary.replace(path)
+
+
+def change_listen_host(
+    args: argparse.Namespace,
+    requested_host: str,
+    requested_advertised_host: Optional[str] = None,
+) -> None:
+    host = normalize_listen_host(requested_host)
+    config_file = Path(args.config).expanduser().resolve()
+    bin_dir = Path(args.bin_dir).expanduser().resolve()
+    helper = bin_dir / "clipmanserver"
+    launcher = bin_dir / "clipman-server"
+    settings = json.loads(config_file.read_text(encoding="utf-8-sig"))
+    old_host = str(settings.get("Host") or "127.0.0.1").strip()
+    old_advertised = str(settings.get("AdvertiseHost") or "").strip()
+    advertised = normalize_listen_host(requested_advertised_host) if requested_advertised_host else old_advertised
+    if not requested_advertised_host and old_advertised == old_host:
+        advertised = host
+    if host in {"0.0.0.0", "::"} and advertised.strip("[]") in {"", "0.0.0.0", "::"}:
+        raise ValueError(
+            "A wildcard listener requires the DNS name or IP address clients use. "
+            "Run: clipmanserver host <listening-address> <client-address>"
+        )
+    if host == old_host and (not requested_advertised_host or advertised == old_advertised):
+        print(f"Clipman Server already listens on {host}.")
+        return
+
+    managed_files: Dict[Path, Optional[Tuple[bytes, int]]] = {
+        config_file: (config_file.read_bytes(), config_file.stat().st_mode & 0o777),
+        config_file.parent / "clipman-server-connection.txt": None,
+        config_file.parent / "clipman-server-connection.clpconf": None,
+    }
+    for path in list(managed_files):
+        if path != config_file and path.exists():
+            managed_files[path] = (path.read_bytes(), path.stat().st_mode & 0o777)
+
+    command = [str(launcher), "--host", host]
+    if requested_advertised_host or old_advertised == old_host:
+        command.extend(["--advertise-host", advertised])
+    command.append("--write-connection-info")
+
+    run([str(helper), "stop"], check=False)
+    try:
+        run(command)
+        run([str(helper), "start"])
+        wait_for_health(config_file)
+    except Exception as error:
+        diagnostics = service_diagnostics(helper)
+        run([str(helper), "stop"], check=False)
+        restore_configuration_files(managed_files)
+        restart_error = ""
+        try:
+            run([str(helper), "start"])
+            wait_for_health(config_file)
+        except Exception as restore_error:
+            restart_error = f"\nThe previous listener also failed to restart: {restore_error}"
+        raise RuntimeError(
+            f"The server could not use listening host {host}: {error}\n"
+            f"Service status before restoration:\n{diagnostics}{restart_error}"
+        ) from error
+
+    settings = json.loads(config_file.read_text(encoding="utf-8-sig"))
+    address = settings.get("AdvertiseHost") or settings.get("Host")
+    print(f"Clipman Server now listens on {host}. Client connection address: {address}:{settings['Port']}.")
+
+
 def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]) -> None:
     if not args.yes:
         answer = input(f"Update Clipman Server {args.current_version} to {version}? [y/N] ").strip().lower()
@@ -302,11 +395,13 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Check for and safely install Clipman Server updates.")
+    parser = argparse.ArgumentParser(description="Safely update or reconfigure an installed Clipman Server.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="Check whether an update is available.")
     mode.add_argument("--install", action="store_true", help="Install an available update.")
+    mode.add_argument("--set-host", metavar="ADDRESS", help="Change the listening host and verify the restarted server.")
     parser.add_argument("--yes", action="store_true", help="Install without a confirmation prompt.")
+    parser.add_argument("--advertise-host", help="Address written to client connection files with --set-host.")
     parser.add_argument("--current-version", required=True)
     parser.add_argument("--app-dir", required=True)
     parser.add_argument("--bin-dir", required=True)
@@ -319,6 +414,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
+        if args.set_host is not None:
+            change_listen_host(args, args.set_host, args.advertise_host)
+            return 0
         releases = read_releases(args.release_api_url)
         update = find_update(releases, args.current_version)
         if update is None:
@@ -331,7 +429,8 @@ def main() -> int:
         install_update(args, version, asset)
         return 0
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError, zipfile.BadZipFile) as error:
-        print(f"Clipman Server update failed: {error}", file=sys.stderr)
+        operation = "host change" if args.set_host is not None else "update"
+        print(f"Clipman Server {operation} failed: {error}", file=sys.stderr)
         return 1
 
 

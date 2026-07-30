@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.4.1"
+APP_VERSION = "2.4.2"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"
@@ -194,7 +194,14 @@ def listen_prefix(settings: Dict[str, Any]) -> str:
 
 def advertised_host(settings: Dict[str, Any]) -> str:
     value = str(settings.get("AdvertiseHost", "")).strip()
-    return value or str(settings["Host"])
+    host = value or str(settings["Host"]).strip()
+    if host.strip("[]") in {"0.0.0.0", "::"}:
+        raise RuntimeError(
+            "A wildcard listening address cannot be used by Clipman clients. "
+            "Set AdvertiseHost to the DNS name or IP address clients use. On installed Linux servers, "
+            "run: clipmanserver host <listening-address> <client-address>"
+        )
+    return host
 
 
 def is_local_or_private_host(host: str) -> bool:
@@ -204,6 +211,8 @@ def is_local_or_private_host(host: str) -> bool:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
+        return False
+    if address.is_unspecified:
         return False
     if address.is_loopback or address.is_link_local or address.is_private:
         return True
