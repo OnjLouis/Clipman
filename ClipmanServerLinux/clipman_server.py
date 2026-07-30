@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.4.1"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"

@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
@@ -164,39 +166,90 @@ def run(command: Iterable[str], *, env: Optional[Dict[str, str]] = None, check: 
     return subprocess.run(list(command), env=env, check=check, text=True)
 
 
-def health_url(config: Dict[str, Any]) -> str:
+def health_connection(config: Dict[str, Any]) -> Tuple[str, str, str, int]:
     secure = bool(str(config.get("CertFile", "")).strip() and str(config.get("KeyFile", "")).strip())
-    # Direct TLS must use the advertised name so certificate validation is meaningful.
-    # Plain HTTP may sit behind a reverse proxy whose public name does not expose the
-    # private backend port, so verify that service through its local bind address.
-    host_value = config.get("AdvertiseHost") if secure else config.get("Host")
-    host = str(host_value or "127.0.0.1").strip()
-    if host in {"0.0.0.0", "::"}:
-        host = "127.0.0.1"
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return f"{'https' if secure else 'http'}://{host}:{int(config.get('Port', 0))}/api/v1/health"
+    bind_host = str(config.get("Host") or "127.0.0.1").strip().strip("[]")
+    if bind_host == "0.0.0.0":
+        bind_host = "127.0.0.1"
+    elif bind_host == "::":
+        bind_host = "::1"
+    certificate_host = str(config.get("AdvertiseHost") or bind_host).strip().strip("[]")
+    if not bind_host or not certificate_host or any(character in certificate_host for character in "\r\n"):
+        raise RuntimeError("The server settings contain an invalid health-check host.")
+    return ("https" if secure else "http", bind_host, certificate_host, int(config.get("Port", 0)))
+
+
+def health_url(config: Dict[str, Any]) -> str:
+    scheme, bind_host, _certificate_host, port = health_connection(config)
+    display_host = f"[{bind_host}]" if ":" in bind_host else bind_host
+    return f"{scheme}://{display_host}:{port}/api/v1/health"
+
+
+def read_health(config: Dict[str, Any], timeout: int = 3) -> Dict[str, Any]:
+    scheme, bind_host, certificate_host, port = health_connection(config)
+    if scheme == "http":
+        with urllib.request.urlopen(health_url(config), timeout=timeout) as response:
+            return json.loads(response.read(1024 * 1024).decode("utf-8"))
+
+    ca_file = str(config.get("CaFile", "")).strip()
+    context = ssl.create_default_context(cafile=ca_file or None)
+    plain_socket = socket.create_connection((bind_host, port), timeout=timeout)
+    try:
+        with context.wrap_socket(plain_socket, server_hostname=certificate_host) as tls_socket:
+            host_header = f"[{certificate_host}]" if ":" in certificate_host else certificate_host
+            request = (
+                "GET /api/v1/health HTTP/1.1\r\n"
+                f"Host: {host_header}:{port}\r\n"
+                "Accept: application/json\r\n"
+                "Connection: close\r\n\r\n"
+            )
+            tls_socket.sendall(request.encode("ascii"))
+            response = http.client.HTTPResponse(tls_socket)
+            response.begin()
+            if response.status != 200:
+                raise RuntimeError(f"The health endpoint returned HTTP {response.status}.")
+            return json.loads(response.read(1024 * 1024).decode("utf-8"))
+    finally:
+        plain_socket.close()
 
 
 def wait_for_health(config_path: Path, seconds: int = 30) -> None:
     config = json.loads(config_path.read_text(encoding="utf-8-sig"))
     url = health_url(config)
-    context = None
-    if url.startswith("https://"):
-        ca_file = str(config.get("CaFile", "")).strip()
-        context = ssl.create_default_context(cafile=ca_file or None)
+    _scheme, _bind_host, certificate_host, _port = health_connection(config)
     deadline = time.monotonic() + seconds
     last_error: Optional[Exception] = None
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=3, context=context) as response:
-                payload = json.loads(response.read(1024 * 1024).decode("utf-8"))
+            payload = read_health(config)
             if payload.get("Status") == "ok":
                 return
         except Exception as error:  # The service may still be starting.
             last_error = error
         time.sleep(1)
-    raise RuntimeError(f"The updated server did not become healthy: {last_error or 'unknown health response'}")
+    identity = f" using TLS identity {certificate_host}" if url.startswith("https://") else ""
+    raise RuntimeError(
+        f"The updated server did not become healthy at its local listener {url}{identity}: "
+        f"{last_error or 'unknown health response'}"
+    )
+
+
+def service_diagnostics(helper: Path) -> str:
+    try:
+        completed = subprocess.run(
+            [str(helper), "status"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=10,
+        )
+        output = (completed.stdout or "").strip()
+        if not output:
+            output = f"The status command exited with code {completed.returncode} without output."
+    except (OSError, subprocess.SubprocessError) as error:
+        output = f"The server status could not be collected: {error}"
+    return output[-6000:]
 
 
 def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]) -> None:
@@ -239,11 +292,12 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
             run(["sh", str(package_root / "Linux" / "install-clipman-server.sh")], env=environment)
             run([str(helper), "start"])
             wait_for_health(config_file)
-        except Exception:
+        except Exception as error:
+            diagnostics = service_diagnostics(helper)
             run([str(helper), "stop"], check=False)
             restore_program_files(app_dir, helper, launcher, service_file, backup)
             run([str(helper), "start"], check=False)
-            raise
+            raise RuntimeError(f"{error}\nService status before rollback:\n{diagnostics}") from error
     print(f"Clipman Server updated to {version} and passed its health check.")
 
 

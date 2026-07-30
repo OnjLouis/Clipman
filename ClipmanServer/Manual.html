@@ -240,6 +240,8 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
 
+  <p>Server 2.4.1 fixes Linux updates for HTTPS installations whose advertised address cannot connect back to the server's private listening port. The updater now checks the local listener while still validating the advertised TLS certificate name. If a service genuinely fails to start, the update error includes useful service-status details before restoring the previous program. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/47">issue #47</a>.</p>
+
   <p>Windows and macOS check daily for server updates and install them automatically by default. Use <strong>Install updates automatically</strong> in the notification-area or menu-bar menu to turn that behavior off or back on. <strong>Check for updates</strong> remains available for an immediate manual check. If a newer server ZIP is available, the wrapper downloads the ZIP, closes the wrapper, replaces the platform-specific server app, and starts the updated wrapper again.</p>
 
   <p>Server 2.3.0 aligns the packaged server version with Clipman 2.3.0, makes automatic updates the default on Windows, macOS and new Linux installations, and ensures server updaters ignore ordinary Clipman client releases. Server and client releases remain independent after this point.</p>

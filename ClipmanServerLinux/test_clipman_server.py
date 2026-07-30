@@ -331,7 +331,7 @@ class ConditionalCreateTests(unittest.TestCase):
 
         self.assertEqual(200, response.status)
         self.assertTrue(response.getheader("X-Clipman-Revision", ""))
-        self.assertIn(b'"Version": "2.4.0"', data)
+        self.assertIn(b'"Version": "2.4.1"', data)
         database = clipman_server.database_path(self.settings, database_id)
         self.assertEqual(b"expect-continue", database.read_bytes())
 

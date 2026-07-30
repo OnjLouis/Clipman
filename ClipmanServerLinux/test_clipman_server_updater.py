@@ -61,7 +61,7 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             updater.verify_sha256_digest("sha256:" + "b" * 64, digest)
         updater.verify_sha256_digest("sha256:" + digest, digest)
 
-    def test_health_url_uses_advertised_https_address(self):
+    def test_https_health_uses_local_listener_and_advertised_certificate_identity(self):
         settings = {
             "Host": "0.0.0.0",
             "AdvertiseHost": "server.example.test",
@@ -69,7 +69,53 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             "CertFile": "/tls/server.pem",
             "KeyFile": "/tls/server.key",
         }
-        self.assertEqual("https://server.example.test:61234/api/v1/health", updater.health_url(settings))
+        self.assertEqual(
+            ("https", "127.0.0.1", "server.example.test", 61234),
+            updater.health_connection(settings),
+        )
+        self.assertEqual("https://127.0.0.1:61234/api/v1/health", updater.health_url(settings))
+
+    def test_ipv6_wildcard_health_uses_ipv6_loopback(self):
+        settings = {
+            "Host": "::",
+            "AdvertiseHost": "2001:db8::1",
+            "Port": 61234,
+            "CertFile": "/tls/server.pem",
+            "KeyFile": "/tls/server.key",
+        }
+        self.assertEqual(
+            ("https", "::1", "2001:db8::1", 61234),
+            updater.health_connection(settings),
+        )
+        self.assertEqual("https://[::1]:61234/api/v1/health", updater.health_url(settings))
+
+    def test_https_health_connects_locally_but_validates_advertised_name(self):
+        settings = {
+            "Host": "0.0.0.0",
+            "AdvertiseHost": "server.example.test",
+            "Port": 61234,
+            "CertFile": "/tls/server.pem",
+            "KeyFile": "/tls/server.key",
+            "CaFile": "/tls/authority.pem",
+        }
+        plain_socket = mock.Mock()
+        tls_socket = mock.MagicMock()
+        context = mock.Mock()
+        context.wrap_socket.return_value = tls_socket
+        response = mock.Mock(status=200)
+        response.read.return_value = b'{"Status":"ok"}'
+
+        with mock.patch.object(updater.ssl, "create_default_context", return_value=context) as create_context, \
+             mock.patch.object(updater.socket, "create_connection", return_value=plain_socket) as create_connection, \
+             mock.patch.object(updater.http.client, "HTTPResponse", return_value=response):
+            payload = updater.read_health(settings)
+
+        self.assertEqual({"Status": "ok"}, payload)
+        create_context.assert_called_once_with(cafile="/tls/authority.pem")
+        create_connection.assert_called_once_with(("127.0.0.1", 61234), timeout=3)
+        context.wrap_socket.assert_called_once_with(plain_socket, server_hostname="server.example.test")
+        request = tls_socket.__enter__.return_value.sendall.call_args.args[0].decode("ascii")
+        self.assertIn("Host: server.example.test:61234", request)
 
     def test_health_url_uses_local_http_backend_behind_reverse_proxy(self):
         settings = {
@@ -132,8 +178,9 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
                  mock.patch.object(updater, "safe_extract", side_effect=fake_extract), \
                  mock.patch.object(updater, "run", side_effect=fake_run), \
                  mock.patch.object(updater, "wait_for_health", side_effect=RuntimeError("not healthy")):
-                with self.assertRaisesRegex(RuntimeError, "not healthy"):
-                    updater.install_update(args, "2.1.1", asset)
+                with mock.patch.object(updater, "service_diagnostics", return_value="service failed"):
+                    with self.assertRaisesRegex(RuntimeError, "(?s)not healthy.*Service status before rollback"):
+                        updater.install_update(args, "2.1.1", asset)
 
             self.assertEqual("old", (app / "old.txt").read_text(encoding="utf-8"))
             self.assertFalse((app / "new.txt").exists())
