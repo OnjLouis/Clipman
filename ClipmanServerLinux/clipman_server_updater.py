@@ -27,6 +27,12 @@ SERVER_TAG_PATTERN = re.compile(r"^server-v(?P<version>\d+\.\d+(?:\.\d+){0,2})$"
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 600 * 1024 * 1024
 MAX_ZIP_ENTRIES = 2_000
+MANAGED_PROGRAM_FILES = (
+    "clipman_server.py",
+    "clipman_server_updater.py",
+    "Manual.html",
+    "LICENSE.txt",
+)
 
 
 def version_tuple(value: str) -> Tuple[int, ...]:
@@ -162,6 +168,57 @@ def restore_program_files(app_dir: Path, helper: Path, launcher: Path, service_f
     copy_path(backup / "clipman-server.service", service_file)
 
 
+def snapshot_managed_program_files(app_dir: Path) -> Dict[Path, Optional[Tuple[bytes, int, int, int]]]:
+    snapshots: Dict[Path, Optional[Tuple[bytes, int, int, int]]] = {}
+    for name in MANAGED_PROGRAM_FILES:
+        path = app_dir / name
+        if not path.exists():
+            snapshots[path] = None
+            continue
+        status = path.stat()
+        snapshots[path] = (path.read_bytes(), status.st_mode & 0o777, status.st_uid, status.st_gid)
+    return snapshots
+
+
+def write_managed_file(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        status = destination.stat()
+        mode, owner, group = status.st_mode & 0o777, status.st_uid, status.st_gid
+    else:
+        status = destination.parent.stat()
+        mode = 0o700 if destination.suffix == ".py" else 0o644
+        owner, group = status.st_uid, status.st_gid
+    temporary = destination.with_name(destination.name + ".update")
+    shutil.copyfile(source, temporary)
+    os.chmod(temporary, mode)
+    if hasattr(os, "chown"):
+        os.chown(temporary, owner, group)
+    temporary.replace(destination)
+
+
+def install_managed_program_files(package_root: Path, app_dir: Path) -> None:
+    for name in MANAGED_PROGRAM_FILES:
+        source = package_root / name
+        if source.is_file():
+            write_managed_file(source, app_dir / name)
+
+
+def restore_managed_program_files(snapshots: Dict[Path, Optional[Tuple[bytes, int, int, int]]]) -> None:
+    for path, snapshot in snapshots.items():
+        if snapshot is None:
+            path.unlink(missing_ok=True)
+            continue
+        content, mode, owner, group = snapshot
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".rollback")
+        temporary.write_bytes(content)
+        os.chmod(temporary, mode)
+        if hasattr(os, "chown"):
+            os.chown(temporary, owner, group)
+        temporary.replace(path)
+
+
 def run(command: Iterable[str], *, env: Optional[Dict[str, str]] = None, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(list(command), env=env, check=check, text=True)
 
@@ -289,8 +346,10 @@ def change_listen_host(
     host = normalize_listen_host(requested_host)
     config_file = Path(args.config).expanduser().resolve()
     bin_dir = Path(args.bin_dir).expanduser().resolve()
-    helper = bin_dir / "clipmanserver"
-    launcher = bin_dir / "clipman-server"
+    helper_path = getattr(args, "helper_path", None)
+    launcher_path = getattr(args, "launcher_path", None)
+    helper = Path(helper_path).expanduser().resolve() if helper_path else bin_dir / "clipmanserver"
+    launcher = Path(launcher_path).expanduser().resolve() if launcher_path else bin_dir / "clipman-server"
     settings = json.loads(config_file.read_text(encoding="utf-8-sig"))
     old_host = str(settings.get("Host") or "127.0.0.1").strip()
     old_advertised = str(settings.get("AdvertiseHost") or "").strip()
@@ -356,7 +415,8 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
     bin_dir = Path(args.bin_dir).expanduser().resolve()
     config_file = Path(args.config).expanduser().resolve()
     service_file = Path(args.service_file).expanduser().resolve()
-    helper = bin_dir / "clipmanserver"
+    helper_path = getattr(args, "helper_path", None)
+    helper = Path(helper_path).expanduser().resolve() if helper_path else bin_dir / "clipmanserver"
     launcher = bin_dir / "clipman-server"
     with tempfile.TemporaryDirectory(prefix="clipman-server-update-") as temporary:
         temp = Path(temporary)
@@ -367,28 +427,37 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
         safe_extract(package_zip, extracted)
         package_root = locate_package_root(extracted, version)
 
-        copy_path(app_dir, backup / "app")
-        copy_path(helper, backup / "clipmanserver")
-        copy_path(launcher, backup / "clipman-server")
-        copy_path(service_file, backup / "clipman-server.service")
+        managed_program_only = bool(getattr(args, "managed_program_only", False))
+        managed_snapshots = snapshot_managed_program_files(app_dir) if managed_program_only else None
+        if not managed_program_only:
+            copy_path(app_dir, backup / "app")
+            copy_path(helper, backup / "clipmanserver")
+            copy_path(launcher, backup / "clipman-server")
+            copy_path(service_file, backup / "clipman-server.service")
 
         run([str(helper), "stop"], check=False)
         try:
-            environment = os.environ.copy()
-            environment.update(
-                {
-                    "CLIPMAN_SERVER_APP_DIR": str(app_dir),
-                    "CLIPMAN_SERVER_BIN_DIR": str(bin_dir),
-                    "CLIPMAN_SERVER_CONFIG_DIR": str(config_file.parent),
-                }
-            )
-            run(["sh", str(package_root / "Linux" / "install-clipman-server.sh")], env=environment)
+            if managed_program_only:
+                install_managed_program_files(package_root, app_dir)
+            else:
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "CLIPMAN_SERVER_APP_DIR": str(app_dir),
+                        "CLIPMAN_SERVER_BIN_DIR": str(bin_dir),
+                        "CLIPMAN_SERVER_CONFIG_DIR": str(config_file.parent),
+                    }
+                )
+                run(["sh", str(package_root / "Linux" / "install-clipman-server.sh")], env=environment)
             run([str(helper), "start"])
             wait_for_health(config_file)
         except Exception as error:
             diagnostics = service_diagnostics(helper)
             run([str(helper), "stop"], check=False)
-            restore_program_files(app_dir, helper, launcher, service_file, backup)
+            if managed_snapshots is not None:
+                restore_managed_program_files(managed_snapshots)
+            else:
+                restore_program_files(app_dir, helper, launcher, service_file, backup)
             run([str(helper), "start"], check=False)
             raise RuntimeError(f"{error}\nService status before rollback:\n{diagnostics}") from error
     print(f"Clipman Server updated to {version} and passed its health check.")
@@ -407,6 +476,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bin-dir", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--service-file", required=True)
+    parser.add_argument("--helper-path", help="Installed management helper used to stop, start, and inspect the server.")
+    parser.add_argument("--launcher-path", help="Installed server launcher used for a listening-host change.")
+    parser.add_argument(
+        "--managed-program-only",
+        action="store_true",
+        help="Replace only packaged program files, preserving an externally managed service and helper.",
+    )
     parser.add_argument("--release-api-url", default=RELEASE_API, help=argparse.SUPPRESS)
     return parser.parse_args()
 

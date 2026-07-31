@@ -358,6 +358,118 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             self.assertEqual("new launcher", launcher.read_text(encoding="utf-8"))
             self.assertEqual("new service", service.read_text(encoding="utf-8"))
 
+    def test_system_managed_update_replaces_only_program_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "app"
+            bin_dir = root / "bin"
+            config = root / "config" / "settings.json"
+            service = root / "systemd" / "clipman-public.service"
+            app.mkdir(parents=True)
+            bin_dir.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            service.parent.mkdir(parents=True)
+            (app / "clipman_server.py").write_text("old server", encoding="utf-8")
+            (app / "clipman_server_updater.py").write_text("old updater", encoding="utf-8")
+            helper = bin_dir / "clipmanserver"
+            helper.write_text("managed helper", encoding="utf-8")
+            service.write_text("hardened service", encoding="utf-8")
+            config.write_text('{"Host":"127.0.0.1","Port":60000,"Token":"keep-me"}', encoding="utf-8")
+
+            def fake_extract(_archive, destination):
+                package = destination / "ClipmanServer"
+                (package / "Linux").mkdir(parents=True)
+                (package / "manifest.json").write_text(
+                    json.dumps({"Name": "Clipman Server", "Version": "2.4.3"}), encoding="utf-8"
+                )
+                (package / "clipman_server.py").write_text("new server", encoding="utf-8")
+                (package / "clipman_server_updater.py").write_text("new updater", encoding="utf-8")
+                (package / "Manual.html").write_text("new manual", encoding="utf-8")
+                (package / "Linux" / "install-clipman-server.sh").write_text("unused installer", encoding="utf-8")
+
+            args = argparse.Namespace(
+                yes=True,
+                current_version="2.4.0",
+                app_dir=str(app),
+                bin_dir=str(bin_dir),
+                config=str(config),
+                service_file=str(service),
+                helper_path=str(helper),
+                managed_program_only=True,
+            )
+            before_config = config.read_bytes()
+            with mock.patch.object(updater, "download_asset", side_effect=lambda _asset, path: path.write_bytes(b"zip")), \
+                 mock.patch.object(updater, "safe_extract", side_effect=fake_extract), \
+                 mock.patch.object(updater, "run", return_value=mock.Mock(returncode=0)) as run_command, \
+                 mock.patch.object(updater, "wait_for_health"):
+                updater.install_update(args, "2.4.3", {"browser_download_url": "https://example.test/server.zip"})
+
+            self.assertEqual("new server", (app / "clipman_server.py").read_text(encoding="utf-8"))
+            self.assertEqual("new updater", (app / "clipman_server_updater.py").read_text(encoding="utf-8"))
+            self.assertEqual("managed helper", helper.read_text(encoding="utf-8"))
+            self.assertEqual("hardened service", service.read_text(encoding="utf-8"))
+            self.assertEqual(before_config, config.read_bytes())
+            self.assertNotIn("install-clipman-server.sh", " ".join(str(call) for call in run_command.call_args_list))
+
+    def test_failed_system_managed_update_restores_program_without_touching_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "app"
+            bin_dir = root / "bin"
+            config = root / "config" / "settings.json"
+            service = root / "systemd" / "clipman-public.service"
+            app.mkdir(parents=True)
+            bin_dir.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            service.parent.mkdir(parents=True)
+            server = app / "clipman_server.py"
+            server.write_text("old server", encoding="utf-8")
+            updater_file = app / "clipman_server_updater.py"
+            updater_file.write_text("old updater", encoding="utf-8")
+            helper = bin_dir / "clipmanserver"
+            helper.write_text("managed helper", encoding="utf-8")
+            service.write_text("hardened service", encoding="utf-8")
+            config.write_text('{"Host":"127.0.0.1","Port":60000,"Token":"keep-me"}', encoding="utf-8")
+            if os.name != "nt":
+                os.chmod(server, 0o750)
+            before_config = config.read_bytes()
+
+            def fake_extract(_archive, destination):
+                package = destination / "ClipmanServer"
+                (package / "Linux").mkdir(parents=True)
+                (package / "manifest.json").write_text(
+                    json.dumps({"Name": "Clipman Server", "Version": "2.4.3"}), encoding="utf-8"
+                )
+                (package / "clipman_server.py").write_text("broken server", encoding="utf-8")
+                (package / "clipman_server_updater.py").write_text("new updater", encoding="utf-8")
+                (package / "Linux" / "install-clipman-server.sh").write_text("unused installer", encoding="utf-8")
+
+            args = argparse.Namespace(
+                yes=True,
+                current_version="2.4.0",
+                app_dir=str(app),
+                bin_dir=str(bin_dir),
+                config=str(config),
+                service_file=str(service),
+                helper_path=str(helper),
+                managed_program_only=True,
+            )
+            with mock.patch.object(updater, "download_asset", side_effect=lambda _asset, path: path.write_bytes(b"zip")), \
+                 mock.patch.object(updater, "safe_extract", side_effect=fake_extract), \
+                 mock.patch.object(updater, "run", return_value=mock.Mock(returncode=0)), \
+                 mock.patch.object(updater, "wait_for_health", side_effect=RuntimeError("not healthy")), \
+                 mock.patch.object(updater, "service_diagnostics", return_value="service failed"):
+                with self.assertRaisesRegex(RuntimeError, "not healthy"):
+                    updater.install_update(args, "2.4.3", {"browser_download_url": "https://example.test/server.zip"})
+
+            self.assertEqual("old server", server.read_text(encoding="utf-8"))
+            self.assertEqual("old updater", updater_file.read_text(encoding="utf-8"))
+            self.assertEqual("managed helper", helper.read_text(encoding="utf-8"))
+            self.assertEqual("hardened service", service.read_text(encoding="utf-8"))
+            self.assertEqual(before_config, config.read_bytes())
+            if os.name != "nt":
+                self.assertEqual(0o750, server.stat().st_mode & 0o777)
+
 
 if __name__ == "__main__":
     unittest.main()

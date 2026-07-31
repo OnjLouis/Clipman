@@ -116,6 +116,17 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
 
   <p>If user systemd is available, the installer also writes a user service file and prints the commands needed to enable it. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
 
+  <h3>Existing System Services</h3>
+  <p>Administrators who already run Clipman Server as a hardened system service can add the same management and update commands without replacing that service or moving its settings and data. From the extracted package, set the existing paths and service name explicitly:</p>
+
+  <pre><code>sudo env \
+  CLIPMAN_SERVER_APP_DIR=/path/to/server/program \
+  CLIPMAN_SERVER_CONFIG_FILE=/path/to/server-settings.json \
+  CLIPMAN_SERVER_SERVICE=your-service.service \
+  sh Linux/install-clipman-server-system-helper.sh</code></pre>
+
+  <p>The installer validates every required existing file, adds a system <code>clipmanserver</code> helper and an optional disabled update timer, and leaves the running service untouched. Future updates replace only packaged program and documentation files. The existing service definition, token-bearing settings, database buckets, certificates, logs, backups, ownership, and listening configuration remain in their current locations.</p>
+
   <h2 id="docker">Docker and GHCR</h2>
   <p>Clipman Server can also run as a container. This is useful for NAS, VPS, homelab, or reverse-proxy setups where services are managed as containers instead of directly installed programs.</p>
 
@@ -240,6 +251,8 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
 
+  <p>Server 2.4.3 adds supported management and transactional updates for existing system-wide Linux services. Administrators can retain a dedicated service account and hardened service definition while using the normal <code>clipmanserver</code> commands. Program replacement preserves file ownership and permissions, verifies the restarted server locally, and restores the previous program if the health check fails.</p>
+
   <p>Server 2.4.2 adds a safe Linux command for changing the listening host, prevents connection files from containing unusable wildcard addresses, and restores the previous working configuration if a new address cannot start. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/48">issue #48</a>.</p>
 
   <p>Server 2.4.1 fixes Linux updates for HTTPS installations whose advertised address cannot connect back to the server's private listening port. The updater now checks the local listener while still validating the advertised TLS certificate name. If a service genuinely fails to start, the update error includes useful service-status details before restoring the previous program. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/47">issue #47</a>.</p>
@@ -267,7 +280,7 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
   <pre><code>clipmanserver check-update
 clipmanserver update</code></pre>
 
-  <p>Every server updater downloads the exact versioned server ZIP over HTTPS and requires its GitHub SHA-256 digest before replacing program files. Linux additionally rejects unsafe archive paths, checks the package manifest, and stages the replacement. It backs up only installed program, launcher, helper, and service files; it never includes settings, databases, logs, backups, certificates, or tokens. After installation it restarts the server and checks the health endpoint. If the updated service does not become healthy, the previous program files are restored and restarted automatically.</p>
+  <p>Every server updater downloads the exact versioned server ZIP over HTTPS and requires its GitHub SHA-256 digest before replacing program files. Linux additionally rejects unsafe archive paths, checks the package manifest, and stages the replacement. A normal per-user update backs up its installed program, launcher, helper, and service files. A system-managed update snapshots only the program files it is permitted to replace. Neither mode includes settings, databases, logs, backups, certificates, or tokens. After installation it restarts the server and checks the health endpoint. If the updated service does not become healthy, the previous program files are restored and restarted automatically.</p>
 
   <p>New Linux installations enable automatic daily updates when a systemd user service is available. Use these commands to inspect, enable or disable them:</p>
 
