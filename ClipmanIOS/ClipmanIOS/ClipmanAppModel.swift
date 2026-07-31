@@ -38,7 +38,6 @@ final class ClipmanAppModel: ObservableObject {
     @Published var historyFilter = HistoryFilter.all
     @Published var status = "Ready."
     @Published var showingSettings = false
-    @Published var showingClipboardImport = false
     @Published var isRefreshing = false
     @Published private(set) var pendingServerConnection: ServerConnectionDetails?
     @Published private(set) var serverConnectionImportError = ""
@@ -346,7 +345,6 @@ final class ClipmanAppModel: ObservableObject {
 
     func openServerConnectionFile(_ url: URL) {
         isImportingServerConnection = true
-        showingClipboardImport = false
         Task { [weak self] in
             guard let self else { return }
             let result = await Task.detached(priority: .userInitiated) {
@@ -375,7 +373,6 @@ final class ClipmanAppModel: ObservableObject {
             isImportingServerConnection = false
             serverConnectionImportSequence += 1
             if isUnlocked {
-                showingClipboardImport = false
                 showingSettings = true
             }
         }
@@ -400,7 +397,6 @@ final class ClipmanAppModel: ObservableObject {
     func processPendingQuickAction() {
         guard isUnlocked, let action = ClipmanQuickActionCenter.shared.consume() else { return }
         showingSettings = false
-        showingClipboardImport = false
         switch action {
         case .addClipboard:
             requestClipboardImport()
@@ -435,7 +431,6 @@ final class ClipmanAppModel: ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         showingSettings = false
-        showingClipboardImport = false
         isUnlocked = false
         statusResetTask?.cancel()
         statusResetTask = nil
@@ -655,11 +650,10 @@ final class ClipmanAppModel: ObservableObject {
             }
             return
         }
-        showingClipboardImport = true
+        addPastedClipboardPayload(MobileRichTextClipboard.readCurrent())
     }
 
     func addPastedClipboardPayload(_ payload: MobileClipboardPayload?) {
-        showingClipboardImport = false
         guard let payload,
               !payload.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             setTransientStatus("Clipboard does not contain text.")
@@ -677,11 +671,6 @@ final class ClipmanAppModel: ObservableObject {
         setTransientStatus(alreadyExists ? "Clipboard text already exists in history." : "Clipboard text added.")
         soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
         queueUpload(successMessage: nil)
-    }
-
-    func cancelClipboardImport() {
-        showingClipboardImport = false
-        setTransientStatus("Clipboard paste cancelled.")
     }
 
     func copy(_ entry: ClipEntry) {

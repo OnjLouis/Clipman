@@ -17,4 +17,13 @@ class AndroidUpdateServiceTest {
     fun prereleaseVersionIsNotAcceptedAsAStableUpdate() {
         AndroidUpdateService.compareVersions("2.1.0-beta", "2.0.9")
     }
+
+    @Test
+    fun onlyClientReleaseTagsAreAcceptedForAndroidUpdates() {
+        assertEquals("2.5.1", AndroidUpdateService.clientVersionFromTag("v2.5.1"))
+        assertEquals("2.5.1", AndroidUpdateService.clientVersionFromTag("V2.5.1"))
+        assertEquals(null, AndroidUpdateService.clientVersionFromTag("server-v2.5.1"))
+        assertEquals(null, AndroidUpdateService.clientVersionFromTag("cli-v2.5.1"))
+        assertEquals(null, AndroidUpdateService.clientVersionFromTag("2.5.1-beta"))
+    }
 }

@@ -23,22 +23,29 @@ internal data class AndroidUpdateCandidate(
 )
 
 internal object AndroidUpdateService {
-    private const val RELEASE_API = "https://api.github.com/repos/OnjLouis/Clipman/releases/latest"
+    private const val RELEASES_API = "https://api.github.com/repos/OnjLouis/Clipman/releases?per_page=30"
     private const val MAX_APK_BYTES = 250L * 1024L * 1024L
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun check(currentVersion: String): AndroidUpdateCandidate? = withContext(Dispatchers.IO) {
-        val release = readJson<GithubRelease>(RELEASE_API)
-        if (release.draft || release.prerelease) return@withContext null
-        val version = release.tagName.trim().removePrefix("v").removePrefix("V")
-        if (compareVersions(version, currentVersion) <= 0) return@withContext null
-        val expectedName = "Clipman-Android-$version.apk"
-        val asset = release.assets.firstOrNull { it.name.equals(expectedName, ignoreCase = true) }
-            ?: error("Clipman $version is available, but its Android APK is missing from the release.")
-        require(asset.downloadUrl.startsWith("https://", ignoreCase = true)) {
+        val candidate = readJson<List<GithubRelease>>(RELEASES_API)
+            .asSequence()
+            .filterNot { it.draft || it.prerelease }
+            .mapNotNull { release ->
+                val version = clientVersionFromTag(release.tagName) ?: return@mapNotNull null
+                if (compareVersions(version, currentVersion) <= 0) return@mapNotNull null
+                val expectedName = "Clipman-Android-$version.apk"
+                val asset = release.assets.firstOrNull { it.name.equals(expectedName, ignoreCase = true) }
+                    ?: return@mapNotNull null
+                AndroidUpdateCandidate(version, asset.downloadUrl, asset.digest)
+            }
+            .maxWithOrNull { left, right -> compareVersions(left.version, right.version) }
+            ?: return@withContext null
+        val assetUrl = candidate.downloadUrl
+        require(assetUrl.startsWith("https://", ignoreCase = true)) {
             "The Android update download did not use HTTPS."
         }
-        AndroidUpdateCandidate(version, asset.downloadUrl, asset.digest)
+        candidate
     }
 
     suspend fun downloadAndVerify(
@@ -116,6 +123,11 @@ internal object AndroidUpdateService {
             if (comparison != 0) return comparison
         }
         return 0
+    }
+
+    internal fun clientVersionFromTag(tag: String): String? {
+        val match = Regex("^[vV](\\d+(?:\\.\\d+){1,3})$").matchEntire(tag.trim()) ?: return null
+        return match.groupValues[1]
     }
 
     private inline fun <reified T> readJson(url: String): T {

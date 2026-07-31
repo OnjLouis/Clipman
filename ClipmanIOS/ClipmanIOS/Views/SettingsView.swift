@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var showConnectionExportWarning = false
     @State private var showConnectionExporter = false
     @State private var connectionDocument: ServerConnectionDocument?
+    @State private var connectionShareFile: ServerConnectionShareFile?
+    @State private var connectionShareFileForCleanup: ServerConnectionShareFile?
     @State private var pendingConnection: ServerConnectionDetails?
     @State private var pendingAuthority: ServerCertificateAuthority?
     @State private var connectionImportError = ""
@@ -50,7 +52,7 @@ struct SettingsView: View {
                     Toggle("Preserve copied formatting and show Rich Text history", isOn: $draft.richTextEnabled)
                     Toggle("Confirm before deleting entries", isOn: $draft.confirmDeletions)
                     Toggle("Copy latest remote item to iOS clipboard", isOn: $draft.autoCopyRemote)
-                    Toggle("Offer to add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
+                    Toggle("Add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
                     Toggle("Require biometric or device authentication", isOn: $draft.requireAuthentication)
                         .accessibilityHint("When enabled, Clipman asks for Face ID, Touch ID, or the device passcode whenever the app returns to the foreground.")
                 }
@@ -212,9 +214,17 @@ struct SettingsView: View {
                 }
                 connectionDocument = nil
             }
+            .sheet(item: $connectionShareFile, onDismiss: {
+                connectionShareFileForCleanup?.remove()
+                connectionShareFileForCleanup = nil
+                connectionDocument = nil
+            }) { file in
+                ConnectionShareSheet(file: file)
+            }
             .alert("Export private server connection?", isPresented: $showConnectionExportWarning) {
-                Button("Export") { showConnectionExporter = true }
                 Button("Cancel", role: .cancel) { connectionDocument = nil }
+                Button("Save to Files") { showConnectionExporter = true }
+                Button("Share") { shareConnectionDocument() }
             } message: {
                 Text("This file contains the private server token. Store and share it securely, and never place it beside an exported clipboard history.")
             }
@@ -428,6 +438,21 @@ struct SettingsView: View {
             pendingConnection = details
         } else if !errorMessage.isEmpty {
             connectionImportError = errorMessage
+        }
+    }
+
+    private func shareConnectionDocument() {
+        guard let data = connectionDocument?.data else {
+            connectionExportError = "The server connection file could not be prepared."
+            return
+        }
+        do {
+            let file = try ServerConnectionShareFile.create(data: data)
+            connectionShareFileForCleanup = file
+            connectionShareFile = file
+        } catch {
+            connectionDocument = nil
+            connectionExportError = error.localizedDescription
         }
     }
 

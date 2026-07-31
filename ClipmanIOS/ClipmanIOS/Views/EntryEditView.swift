@@ -14,7 +14,11 @@ struct EntryEditView: View {
             Form {
                 Section("Details") {
                     TextField("Name", text: $draft.Name)
+                        .accessibilityLabel("Name")
+                        .accessibilityHint("Edits the optional name shown for this entry.")
                     TextField("Group", text: $draft.Group)
+                        .accessibilityLabel("Group")
+                        .accessibilityHint("Edits the group assigned to this entry.")
                     Toggle("Pinned", isOn: $draft.Pinned)
                     Toggle("Template", isOn: $draft.IsTemplate)
                 }
@@ -22,6 +26,7 @@ struct EntryEditView: View {
                     TextEditor(text: $draft.Text)
                         .frame(minHeight: 180)
                         .accessibilityLabel("Clipboard text")
+                        .accessibilityHint("Edits the clipboard text stored in this entry.")
                 }
             }
             .navigationTitle("Edit Entry")

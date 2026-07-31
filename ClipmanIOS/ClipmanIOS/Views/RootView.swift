@@ -16,10 +16,6 @@ struct RootView: View {
             SettingsView()
                 .environmentObject(app)
         }
-        .fullScreenCover(isPresented: $app.showingClipboardImport) {
-            ClipboardImportView()
-                .environmentObject(app)
-        }
         .onAppear {
             app.sceneBecameActive()
         }
@@ -49,43 +45,6 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .clipmanShortcutCompleted)) { notification in
             guard let message = notification.object as? String else { return }
             app.shortcutCompleted(message)
-        }
-    }
-}
-
-struct ClipboardImportView: View {
-    @EnvironmentObject private var app: ClipmanAppModel
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                Text("Add Clipboard Content")
-                    .font(.largeTitle)
-                    .bold()
-                Text("Choose Paste to add the current iOS clipboard text and available formatting to Clipman, or Cancel to leave history unchanged.")
-                    .multilineTextAlignment(.center)
-                    .accessibilityAction(.escape) {
-                        app.cancelClipboardImport()
-                    }
-                Button("Cancel") {
-                    app.cancelClipboardImport()
-                }
-                .accessibilityAction(.escape) {
-                    app.cancelClipboardImport()
-                }
-                Button("Paste") {
-                    app.addPastedClipboardPayload(MobileRichTextClipboard.readCurrent())
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityAction(.escape) {
-                    app.cancelClipboardImport()
-                }
-            }
-            .padding()
-            .navigationTitle("Clipboard")
-        }
-        .accessibilityAction(.escape) {
-            app.cancelClipboardImport()
         }
     }
 }

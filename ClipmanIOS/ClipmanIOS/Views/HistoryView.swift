@@ -118,6 +118,8 @@ struct HistoryView: View {
                         copy: { app.copyText(item.url.absoluteString) },
                         open: { UIApplication.shared.open(item.url) },
                         view: { viewingEntry = item.entry },
+                        edit: { editingEntry = item.entry },
+                        togglePinned: { app.togglePinned(item.entry) },
                         delete: { requestDelete(item.entry) }
                     )
                     .id(item.id)
@@ -201,22 +203,6 @@ private struct HistoryEntryRow: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: copy)
             .swipeActions(edge: .trailing) {
-                Button(role: .destructive, action: delete) {
-                    Label("Delete", systemImage: "trash")
-                }
-                .accessibilityLabel("Delete entry")
-                Button(action: togglePinned) {
-                    Label(entry.Pinned ? "Unpin" : "Pin", systemImage: entry.Pinned ? "pin.slash" : "pin")
-                }
-                .accessibilityLabel(entry.Pinned ? "Unpin entry" : "Pin entry")
-                Button(action: edit) {
-                    Label("Edit", systemImage: "pencil")
-                }
-                .accessibilityLabel("Edit entry")
-                Button(action: view) {
-                    Label("View", systemImage: "doc.text.magnifyingglass")
-                }
-                .accessibilityLabel("View entry")
                 if let url = singleLink {
                     Button {
                         UIApplication.shared.open(url)
@@ -225,6 +211,22 @@ private struct HistoryEntryRow: View {
                     }
                     .accessibilityLabel("Open link")
                 }
+                Button(action: view) {
+                    Label("View", systemImage: "doc.text.magnifyingglass")
+                }
+                .accessibilityLabel("View entry")
+                Button(action: edit) {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .accessibilityLabel("Edit entry")
+                Button(action: togglePinned) {
+                    Label(entry.Pinned ? "Unpin" : "Pin", systemImage: entry.Pinned ? "pin.slash" : "pin")
+                }
+                .accessibilityLabel(entry.Pinned ? "Unpin entry" : "Pin entry")
+                Button(role: .destructive, action: delete) {
+                    Label("Delete", systemImage: "trash")
+                }
+                .accessibilityLabel("Delete entry")
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(entry.accessibilityLabelText)
@@ -232,13 +234,13 @@ private struct HistoryEntryRow: View {
             .accessibilityAddTraits(.isButton)
             .contextMenu {
                 Button("Copy", action: copy)
+                if let url = singleLink {
+                    Button("Open Link") { UIApplication.shared.open(url) }
+                }
                 Button("View", action: view)
                 Button("Edit", action: edit)
                 Button(entry.Pinned ? "Unpin" : "Pin", action: togglePinned)
                 Button("Delete", role: .destructive, action: delete)
-                if let url = singleLink {
-                    Button("Open Link") { UIApplication.shared.open(url) }
-                }
             }
     }
 }
@@ -248,11 +250,13 @@ private struct LinkHistoryRow: View {
     let copy: () -> Void
     let open: () -> Void
     let view: () -> Void
+    let edit: () -> Void
+    let togglePinned: () -> Void
     let delete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(item.url.absoluteString)
+            Text(item.displayText)
                 .lineLimit(2)
             if !item.entry.Group.isEmpty || !item.entry.SourceMachine.isEmpty {
                 Text(item.entry.detailText)
@@ -265,15 +269,26 @@ private struct LinkHistoryRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: copy)
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive, action: delete) {
-                Label("Delete Source Entry", systemImage: "trash")
-            }
-            Button(action: view) {
-                Label("View Source Entry", systemImage: "doc.text.magnifyingglass")
-            }
             Button(action: open) {
                 Label("Open", systemImage: "safari")
             }
+            .accessibilityLabel("Open link")
+            Button(action: view) {
+                Label("View", systemImage: "doc.text.magnifyingglass")
+            }
+            .accessibilityLabel("View entry")
+            Button(action: edit) {
+                Label("Edit", systemImage: "pencil")
+            }
+            .accessibilityLabel("Edit entry")
+            Button(action: togglePinned) {
+                Label(item.entry.Pinned ? "Unpin" : "Pin", systemImage: item.entry.Pinned ? "pin.slash" : "pin")
+            }
+            .accessibilityLabel(item.entry.Pinned ? "Unpin entry" : "Pin entry")
+            Button(role: .destructive, action: delete) {
+                Label("Delete", systemImage: "trash")
+            }
+            .accessibilityLabel("Delete entry")
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.accessibilityLabelText)
@@ -282,8 +297,10 @@ private struct LinkHistoryRow: View {
         .contextMenu {
             Button("Copy Link", action: copy)
             Button("Open Link", action: open)
-            Button("View Source Entry", action: view)
-            Button("Delete Source Entry", role: .destructive, action: delete)
+            Button("View", action: view)
+            Button("Edit", action: edit)
+            Button(item.entry.Pinned ? "Unpin" : "Pin", action: togglePinned)
+            Button("Delete", role: .destructive, action: delete)
         }
     }
 }
@@ -423,9 +440,15 @@ private extension ClipEntry {
 }
 
 private extension LinkExtractor.LinkItem {
+    var displayText: String {
+        let name = entry.Name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? url.absoluteString : "\(name): \(url.absoluteString)"
+    }
+
     var accessibilityLabelText: String {
         [
-            url.absoluteString,
+            entry.Pinned ? "Pinned" : nil,
+            displayText,
             entry.Group.isEmpty ? nil : "Group: \(entry.Group)",
             entry.SourceMachine.isEmpty ? nil : "Device: \(entry.SourceMachine)"
         ]

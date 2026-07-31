@@ -1,6 +1,7 @@
 package me.onj.clipman
 
 import android.content.Context
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -70,6 +71,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -1079,20 +1081,35 @@ private fun ClipmanApp(
             title = { Text("Export private server connection?") },
             text = { Text("This file contains the private server token. Store and share it securely, and never place it beside an exported clipboard history.") },
             confirmButton = {
-                TextButton(onClick = {
-                    showConnectionExportWarning = false
-                    runCatching { ServerConnectionConfig.create(serverUrl, token, serverCaCertPem, serverCaHost) }
-                        .onSuccess { content ->
-                            pendingConnectionExport = content
-                            launchTrustedExternalActivity {
-                                exportServerConnection.launch("Clipman Server.clpconf")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        showConnectionExportWarning = false
+                        runCatching { ServerConnectionConfig.create(serverUrl, token, serverCaCertPem, serverCaHost) }
+                            .onSuccess { content ->
+                                pendingConnectionExport = content
+                                launchTrustedExternalActivity {
+                                    exportServerConnection.launch("Clipman Server.clpconf")
+                                }
                             }
-                        }
-                        .onFailure { error ->
-                            status = error.message ?: "Could not prepare the server connection file."
-                            announce(view, status)
-                        }
-                }) { Text("Export") }
+                            .onFailure { error ->
+                                status = error.message ?: "Could not prepare the server connection file."
+                                announce(view, status)
+                            }
+                    }) { Text("Save to Files") }
+                    TextButton(onClick = {
+                        showConnectionExportWarning = false
+                        runCatching { ServerConnectionConfig.create(serverUrl, token, serverCaCertPem, serverCaHost) }
+                            .onSuccess { content ->
+                                launchTrustedExternalActivity {
+                                    shareServerConnection(context, content)
+                                }
+                            }
+                            .onFailure { error ->
+                                status = error.message ?: "Could not prepare the server connection file."
+                                announce(view, status)
+                            }
+                    }) { Text("Share") }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showConnectionExportWarning = false }) { Text("Cancel") }
@@ -2033,14 +2050,18 @@ private fun EntryPropertiesDialog(
                     onValueChange = { name = it },
                     label = { Text("Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "Name" }
                 )
                 OutlinedTextField(
                     value = group,
                     onValueChange = { group = it },
                     label = { Text("Group") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "Group" }
                 )
                 SettingCheckboxRow(
                     checked = pinned,
@@ -2058,7 +2079,9 @@ private fun EntryPropertiesDialog(
                     label = { Text("Clipboard text") },
                     minLines = 4,
                     maxLines = 8,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { contentDescription = "Clipboard text" }
                 )
             }
         },
@@ -2303,6 +2326,25 @@ private fun visibleHistorySections(richTextEnabled: Boolean): List<HistorySectio
     } else {
         listOf(HistorySection.Text, HistorySection.Links)
     }
+
+private fun shareServerConnection(context: Context, content: String) {
+    val directory = File(context.cacheDir, "shared-connections")
+    check(directory.exists() || directory.mkdirs()) { "Could not prepare private sharing storage." }
+    directory.listFiles()?.forEach { existing -> existing.delete() }
+    val file = File(directory, "Clipman Server.clpconf")
+    file.writeText(content, Charsets.UTF_8)
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val share = Intent(Intent.ACTION_SEND).apply {
+        type = "application/json"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        clipData = ClipData.newUri(context.contentResolver, "Clipman Server connection", uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val chooser = Intent.createChooser(share, "Share Clipman Server connection").apply {
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(chooser)
+}
 
 private fun entryBelongsToSection(entry: ClipEntry, section: HistorySection, richTextEnabled: Boolean): Boolean {
     if (richTextEnabled && entry.RichText != null) return section == HistorySection.RichText
