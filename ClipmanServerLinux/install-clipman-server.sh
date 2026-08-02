@@ -430,12 +430,14 @@ if [ "$INIT_SYSTEM" = runit ]; then
   cat > "$SERVICE_FILE/run" <<EOF
 #!/usr/bin/env sh
 exec 2>&1
+set -e
 exec $BIN_DIR/clipman-server
 EOF
   chmod 700 "$SERVICE_FILE/run"
   cat > "$UPDATE_SERVICE_FILE/run" <<EOF
 #!/usr/bin/env sh
 exec 2>&1
+set -e
 while :; do
   sleep 900
   $BIN_DIR/clipmanserver update --yes || true

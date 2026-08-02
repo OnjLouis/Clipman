@@ -320,6 +320,7 @@ else
   cat > "$update_dir/run" <<EOF
 #!/usr/bin/env sh
 exec 2>&1
+set -e
 while :; do
   sleep 900
   $HELPER update --yes || true
