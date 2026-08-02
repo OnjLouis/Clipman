@@ -20,6 +20,12 @@ struct ServerSyncStatus {
     var consecutiveFailures = 0
 }
 
+enum ClipStoreAddResult: Equatable, Sendable {
+    case saved
+    case failed
+    case refused(String)
+}
+
 struct ServerSyncFailureError: Error, LocalizedError {
     let underlying: Error
 
@@ -201,26 +207,53 @@ final class ClipStore: @unchecked Sendable {
     }
 
     func addText(_ text: String, group: String = "", richText: RichTextPayload? = nil, maxEntries: Int = 1000, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+        addTextWithResult(text, group: group, richText: richText, maxEntries: maxEntries) { result in
+            completion?(result == .saved)
+        }
+    }
+
+    func addTextWithResult(
+        _ text: String,
+        group: String = "",
+        richText: RichTextPayload? = nil,
+        maxEntries: Int = 1000,
+        maxEmbeddedImageBytes: Int? = nil,
+        completion: (@MainActor @Sendable (ClipStoreAddResult) -> Void)? = nil
+    ) {
         guard !text.isEmpty else {
             Task { @MainActor in
-                completion?(false)
+                completion?(.failed)
             }
             return
         }
         let trimmedGroup = group.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedRichText = RichTextData.normalize(richText)
+        let incomingImage = EmbeddedImageHTML.imageInfo(from: normalizedRichText)
         queue.async {
             guard self.mergeLatestBeforeWriteLocked() else {
                 Task { @MainActor in
-                    completion?(false)
+                    completion?(.failed)
                 }
                 return
             }
             let now = TimeUtil.nowUnixMs()
             let normalizedGroup = self.canonicalGroupLocked(trimmedGroup)
-            if let index = self.database.Entries.firstIndex(where: { $0.Text == text }) {
+            let matchingIndex = self.database.Entries.firstIndex(where: { $0.Text == text })
+            if let maxEmbeddedImageBytes, let incomingImage {
+                let existingBytes = self.database.Entries.enumerated().reduce(0) { total, pair in
+                    pair.offset == matchingIndex ? total : total + (EmbeddedImageHTML.imageInfo(from: pair.element.RichText)?.data.count ?? 0)
+                }
+                if existingBytes + incomingImage.data.count > maxEmbeddedImageBytes {
+                    Task { @MainActor in
+                        completion?(.refused("Rich Text history already uses its 8 MiB embedded-image allowance."))
+                    }
+                    return
+                }
+            }
+            if let index = matchingIndex {
                 self.database.Entries[index].LastUsedUnixMs = now
                 self.database.Entries[index].SourceMachine = self.machineName
-                if let richText = RichTextData.normalize(richText) {
+                if let richText = normalizedRichText {
                     self.database.Entries[index].RichText = richText
                     self.database.Entries[index].RichTextUpdatedUnixMs = now
                 }
@@ -229,7 +262,6 @@ final class ClipStore: @unchecked Sendable {
                     self.database.Entries[index].ModifiedUnixMs = now
                 }
             } else {
-                let normalizedRichText = RichTextData.normalize(richText)
                 self.database.Entries.append(ClipEntry(
                     Text: text,
                     Group: normalizedGroup,
@@ -248,7 +280,7 @@ final class ClipStore: @unchecked Sendable {
                 if saved {
                     self.delegate?.clipStoreDidChange()
                 }
-                completion?(saved)
+                completion?(saved ? .saved : .failed)
             }
         }
     }
@@ -326,6 +358,31 @@ final class ClipStore: @unchecked Sendable {
             }
             self.saveLocked()
             DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+        }
+    }
+
+    func setNameIfEmpty(id: String, expectedText: String, name: String, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            Task { @MainActor in completion?(false) }
+            return
+        }
+        queue.async {
+            guard self.mergeLatestBeforeWriteLocked(),
+                  let index = self.database.Entries.firstIndex(where: { $0.Id == id }),
+                  self.database.Entries[index].Text == expectedText,
+                  self.database.Entries[index].Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                Task { @MainActor in completion?(false) }
+                return
+            }
+            self.database.Entries[index].Name = trimmedName
+            self.database.Entries[index].ModifiedUnixMs = TimeUtil.nowUnixMs()
+            let saved = self.saveLocked()
+            Task { @MainActor in
+                if saved { self.delegate?.clipStoreDidChange() }
+                completion?(saved)
+            }
         }
     }
 
@@ -431,11 +488,43 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    func insertTextsAfterSelected(_ entries: [ClipEntry], afterID: String?) {
+    func insertTextsAfterSelected(
+        _ entries: [ClipEntry],
+        afterID: String?,
+        maxEmbeddedImageBytes: Int? = nil,
+        completion: (@MainActor @Sendable (ClipStoreAddResult) -> Void)? = nil
+    ) {
         queue.async {
-            let source = entries.filter { !$0.Text.isEmpty }
-            guard !source.isEmpty else { return }
-            guard self.mergeLatestBeforeWriteLocked() else { return }
+            let source = entries.compactMap { entry -> ClipEntry? in
+                guard !entry.Text.isEmpty else { return nil }
+                var normalized = entry
+                normalized.RichText = RichTextData.normalize(entry.RichText)
+                return normalized
+            }
+            guard !source.isEmpty else {
+                Task { @MainActor in completion?(.failed) }
+                return
+            }
+            guard self.mergeLatestBeforeWriteLocked() else {
+                Task { @MainActor in completion?(.failed) }
+                return
+            }
+            if let maxEmbeddedImageBytes {
+                let replacedTexts = Set(source.map(\.Text))
+                let existingBytes = self.database.Entries.reduce(0) { total, entry in
+                    guard !replacedTexts.contains(entry.Text) else { return total }
+                    return total + (EmbeddedImageHTML.imageInfo(from: entry.RichText)?.data.count ?? 0)
+                }
+                let incomingBytes = source.reduce(0) { total, entry in
+                    total + (EmbeddedImageHTML.imageInfo(from: entry.RichText)?.data.count ?? 0)
+                }
+                guard existingBytes + incomingBytes <= maxEmbeddedImageBytes else {
+                    Task { @MainActor in
+                        completion?(.refused("Rich Text history already uses its 8 MiB embedded-image allowance."))
+                    }
+                    return
+                }
+            }
             let now = TimeUtil.nowUnixMs()
             let order: Int64
             if let afterID,
@@ -459,12 +548,19 @@ final class ClipStore: @unchecked Sendable {
                     ModifiedUnixMs: entry.ModifiedUnixMs == 0 ? now : entry.ModifiedUnixMs,
                     Pinned: false,
                     IsTemplate: entry.IsTemplate,
-                    ManualOrder: order + Int64(offset)
+                    ManualOrder: order + Int64(offset),
+                    RichText: entry.RichText,
+                    RichTextUpdatedUnixMs: entry.RichText == nil ? 0 : now
                 ))
             }
             SyncConflictResolver.normalize(&self.database)
-            self.saveLocked()
-            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+            let saved = self.saveLocked()
+            Task { @MainActor in
+                if saved {
+                    self.delegate?.clipStoreDidChange()
+                }
+                completion?(saved ? .saved : .failed)
+            }
         }
     }
 

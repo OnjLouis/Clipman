@@ -42,6 +42,14 @@ struct SettingsView: View {
 
                 historyBackupSection
 
+                Section("History display") {
+                    Picker("Sort normal entries", selection: $draft.historySortMode) {
+                        ForEach(HistorySortMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                }
+
                 Section("Device") {
                     TextField("Device name", text: $draft.deviceName)
                         .textInputAutocapitalization(.words)
@@ -50,6 +58,14 @@ struct SettingsView: View {
                     Toggle("Use haptics", isOn: $draft.hapticsEnabled)
                     Toggle("Enable links history", isOn: $draft.linksEnabled)
                     Toggle("Preserve copied formatting and show Rich Text history", isOn: $draft.richTextEnabled)
+                        .onChange(of: draft.richTextEnabled) { enabled in
+                            if !enabled { draft.includeImagesInRichText = false }
+                        }
+                    Toggle("Include images in Rich Text history", isOn: $draft.includeImagesInRichText)
+                        .disabled(!draft.richTextEnabled)
+                        .accessibilityHint("Off by default. Retained metadata can include camera or location information and follows your history encryption and sync choices.")
+                    Text("Retained image metadata can include camera or location information. It follows the same encryption and sync choices as the rest of your history.")
+                        .font(.footnote)
                     Toggle("Confirm before deleting entries", isOn: $draft.confirmDeletions)
                     Toggle("Copy latest remote item to iOS clipboard", isOn: $draft.autoCopyRemote)
                     Toggle("Add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)

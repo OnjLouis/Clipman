@@ -8,6 +8,92 @@ enum MobileStorageMode: String, CaseIterable, Identifiable, Sendable {
     var label: String { rawValue.capitalized }
 }
 
+enum HistorySortMode: String, CaseIterable, Identifiable, Sendable {
+    case manual
+    case newest
+    case oldest
+    case text
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .manual: return "Manual"
+        case .newest: return "Newest first"
+        case .oldest: return "Oldest first"
+        case .text: return "Text"
+        }
+    }
+
+    var accessibilityActionLabel: String { "Set sort to \(label)" }
+
+    var next: HistorySortMode {
+        switch self {
+        case .manual: return .newest
+        case .newest: return .oldest
+        case .oldest: return .text
+        case .text: return .manual
+        }
+    }
+
+    static func normalized(_ rawValue: String?) -> HistorySortMode {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              let mode = HistorySortMode(rawValue: value) else {
+            return .manual
+        }
+        return mode
+    }
+}
+
+enum HistorySortAccessibilityOrder {
+    // SwiftUI presents chained named accessibility actions in reverse modifier order.
+    static let sourceModifierModes: [HistorySortMode] = [.text, .oldest, .newest, .manual]
+    static var voiceOverPresentedModes: [HistorySortMode] { Array(sourceModifierModes.reversed()) }
+}
+
+enum HistoryPresentationSorter {
+    static func ordered(_ entries: [ClipEntry], mode: HistorySortMode) -> [ClipEntry] {
+        let indexed = Array(entries.enumerated())
+        let pinned = indexed
+            .filter { $0.element.Pinned }
+            .sorted(by: manualOrder)
+        let normal = indexed
+            .filter { !$0.element.Pinned }
+            .sorted { left, right in
+                switch mode {
+                case .manual:
+                    return manualOrder(left, right)
+                case .newest:
+                    if left.element.LastUsedUnixMs != right.element.LastUsedUnixMs {
+                        return left.element.LastUsedUnixMs > right.element.LastUsedUnixMs
+                    }
+                case .oldest:
+                    if left.element.LastUsedUnixMs != right.element.LastUsedUnixMs {
+                        return left.element.LastUsedUnixMs < right.element.LastUsedUnixMs
+                    }
+                case .text:
+                    let comparison = left.element.displayText.localizedCaseInsensitiveCompare(right.element.displayText)
+                    if comparison != .orderedSame { return comparison == .orderedAscending }
+                }
+                return left.offset < right.offset
+            }
+        return (pinned + normal).map(\.element)
+    }
+
+    private static func manualOrder(
+        _ left: EnumeratedSequence<[ClipEntry]>.Element,
+        _ right: EnumeratedSequence<[ClipEntry]>.Element
+    ) -> Bool {
+        let leftOrder = left.element.ManualOrder <= 0 ? Int64.max : left.element.ManualOrder
+        let rightOrder = right.element.ManualOrder <= 0 ? Int64.max : right.element.ManualOrder
+        if leftOrder != rightOrder { return leftOrder < rightOrder }
+        if left.element.CreatedUnixMs != right.element.CreatedUnixMs {
+            return left.element.CreatedUnixMs < right.element.CreatedUnixMs
+        }
+        return left.offset < right.offset
+    }
+}
+
 struct ClipmanSettings: Equatable, Sendable {
     var storageMode: MobileStorageMode
     var serverURL: String
@@ -23,6 +109,8 @@ struct ClipmanSettings: Equatable, Sendable {
     var requireAuthentication: Bool
     var linksEnabled: Bool
     var richTextEnabled: Bool
+    var includeImagesInRichText: Bool
+    var historySortMode: HistorySortMode
     var confirmDeletions: Bool
     var cloudBackupEnabled: Bool
     var cloudBackupBookmark: Data
@@ -45,6 +133,8 @@ struct ClipmanSettings: Equatable, Sendable {
             requireAuthentication: false,
             linksEnabled: true,
             richTextEnabled: false,
+            includeImagesInRichText: false,
+            historySortMode: .manual,
             confirmDeletions: true,
             cloudBackupEnabled: false,
             cloudBackupBookmark: Data(),
@@ -64,6 +154,8 @@ enum SettingsStore {
         static let requireAuthentication = "requireAuthentication"
         static let linksEnabled = "linksEnabled"
         static let richTextEnabled = "richTextEnabled"
+        static let includeImagesInRichText = "includeImagesInRichText"
+        static let historySortMode = "historySortMode"
         static let confirmDeletions = "confirmDeletions"
         static let serverToken = "serverToken"
         static let serverCaCertPEM = "serverCaCertPEM"
@@ -87,6 +179,9 @@ enum SettingsStore {
         settings.requireAuthentication = UserDefaults.standard.object(forKey: Keys.requireAuthentication) as? Bool ?? false
         settings.linksEnabled = UserDefaults.standard.object(forKey: Keys.linksEnabled) as? Bool ?? true
         settings.richTextEnabled = UserDefaults.standard.object(forKey: Keys.richTextEnabled) as? Bool ?? false
+        settings.includeImagesInRichText = settings.richTextEnabled
+            && (UserDefaults.standard.object(forKey: Keys.includeImagesInRichText) as? Bool ?? false)
+        settings.historySortMode = loadHistorySort(from: UserDefaults.standard)
         settings.confirmDeletions = UserDefaults.standard.object(forKey: Keys.confirmDeletions) as? Bool ?? true
         settings.cloudBackupEnabled = UserDefaults.standard.object(forKey: Keys.cloudBackupEnabled) as? Bool ?? false
         settings.cloudBackupBookmark = UserDefaults.standard.data(forKey: Keys.cloudBackupBookmark) ?? Data()
@@ -130,6 +225,8 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.requireAuthentication, forKey: Keys.requireAuthentication)
         UserDefaults.standard.set(settings.linksEnabled, forKey: Keys.linksEnabled)
         UserDefaults.standard.set(settings.richTextEnabled, forKey: Keys.richTextEnabled)
+        UserDefaults.standard.set(settings.richTextEnabled && settings.includeImagesInRichText, forKey: Keys.includeImagesInRichText)
+        saveHistorySort(settings.historySortMode, to: UserDefaults.standard)
         UserDefaults.standard.set(settings.confirmDeletions, forKey: Keys.confirmDeletions)
         UserDefaults.standard.set(settings.cloudBackupEnabled, forKey: Keys.cloudBackupEnabled)
         UserDefaults.standard.set(settings.cloudBackupBookmark, forKey: Keys.cloudBackupBookmark)
@@ -137,5 +234,13 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Keys.deviceName)
         KeychainStore.set(settings.serverToken, for: Keys.serverToken)
         KeychainStore.set(settings.historyPassword, for: Keys.historyPassword)
+    }
+
+    static func loadHistorySort(from defaults: UserDefaults) -> HistorySortMode {
+        HistorySortMode.normalized(defaults.string(forKey: Keys.historySortMode))
+    }
+
+    static func saveHistorySort(_ mode: HistorySortMode, to defaults: UserDefaults) {
+        defaults.set(mode.rawValue, forKey: Keys.historySortMode)
     }
 }

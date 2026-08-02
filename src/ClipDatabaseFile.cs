@@ -14,6 +14,8 @@ namespace Clipman
     internal static class ClipDatabaseFile
     {
         public const string CompressedExtension = ".clipdb";
+        internal const int MaximumDecompressedDatabaseBytes = 256 * 1024 * 1024;
+        internal const long MaximumLocalDatabaseFileBytes = 272L * 1024L * 1024L;
         private static readonly byte[] CompressedMagic = Encoding.ASCII.GetBytes("CLIPDB1");
         private static readonly byte[] EncryptedMagic = Encoding.ASCII.GetBytes("CLIPDB2");
         private static readonly object KeyCacheLock = new object();
@@ -44,7 +46,7 @@ namespace Clipman
             }
             else
             {
-                text = IsCompressedPath(path) ? ReadCompressedText(path) : File.ReadAllText(path, Encoding.UTF8);
+                text = IsCompressedPath(path) ? ReadCompressedText(path) : ReadPlainText(path);
             }
             return JsonUtil.Deserialize<T>(text);
         }
@@ -73,7 +75,7 @@ namespace Clipman
                 return;
             }
 
-            JsonUtil.SaveAtomic(path, database);
+            SavePlainAtomic(path, database);
         }
 
         public static bool IsEncryptedFile(string path)
@@ -88,8 +90,9 @@ namespace Clipman
 
         private static string ReadCompressedText(string path)
         {
-            using (var file = File.OpenRead(path))
+            using (var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
+                ValidateLocalDatabaseFileLength(file.Length);
                 if (StartsWithMagic(file, CompressedMagic))
                 {
                     file.Position = CompressedMagic.Length;
@@ -100,10 +103,21 @@ namespace Clipman
                 }
 
                 using (var gzip = new GZipStream(file, CompressionMode.Decompress))
-                using (var reader = new StreamReader(gzip, Encoding.UTF8))
                 {
-                    return reader.ReadToEnd();
+                    return DecodeUtf8(ReadBounded(gzip, MaximumDecompressedDatabaseBytes));
                 }
+            }
+        }
+
+        private static string ReadPlainText(string path)
+        {
+            using (var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                if (file.Length > MaximumDecompressedDatabaseBytes)
+                {
+                    throw new InvalidDataException("The Clipman JSON database exceeds the 256 MiB safety limit.");
+                }
+                return DecodeUtf8(ReadBounded(file, MaximumDecompressedDatabaseBytes));
             }
         }
 
@@ -134,13 +148,12 @@ namespace Clipman
             return true;
         }
 
-        private static void WriteCompressedPayload<T>(Stream output, T database) where T : new()
+        private static void WriteCompressedPayload(Stream output, byte[] serialized)
         {
             output.Write(CompressedMagic, 0, CompressedMagic.Length);
             using (var gzip = new GZipStream(output, CompressionMode.Compress, true))
-            using (var writer = new StreamWriter(gzip, Encoding.UTF8))
             {
-                writer.Write(JsonUtil.SerializePretty(database));
+                gzip.Write(serialized, 0, serialized.Length);
             }
         }
 
@@ -152,12 +165,27 @@ namespace Clipman
                 Directory.CreateDirectory(dir);
             }
 
+            var serialized = SerializeBounded(database);
             var temp = path + ".tmp";
             using (var file = File.Create(temp))
             {
-                WriteCompressedPayload(file, database);
+                WriteCompressedPayload(file, serialized);
+            }
+            if (new FileInfo(temp).Length > MaximumLocalDatabaseFileBytes)
+            {
+                File.Delete(temp);
+                throw new InvalidDataException("The Clipman database would exceed the 272 MiB local-container safety limit.");
             }
 
+            ReplaceTemp(temp, path);
+        }
+
+        private static void SavePlainAtomic<T>(string path, T database) where T : new()
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var temp = path + ".tmp";
+            File.WriteAllBytes(temp, SerializeBounded(database));
             ReplaceTemp(temp, path);
         }
 
@@ -168,7 +196,12 @@ namespace Clipman
                 throw new DatabasePasswordRequiredException("This Clipman database is encrypted and needs its history password.");
             }
 
-            var bytes = File.ReadAllBytes(path);
+            byte[] bytes;
+            using (var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                ValidateLocalDatabaseFileLength(file.Length);
+                bytes = ReadExact(file, checked((int)file.Length));
+            }
             if (bytes.Length < EncryptedMagic.Length + 1 + 16 + 16 + 32)
             {
                 throw new InvalidDataException("The encrypted Clipman database is incomplete.");
@@ -187,10 +220,9 @@ namespace Clipman
             offset += 16;
             var hmac = Slice(bytes, bytes.Length - 32, 32);
             var cipherLength = bytes.Length - offset - 32;
-            var cipher = Slice(bytes, offset, cipherLength);
             var keys = DeriveKeys(password, salt);
-            var signed = Slice(bytes, 0, bytes.Length - 32);
             using (var h = new HMACSHA256(keys.MacKey))
+            using (var signed = new MemoryStream(bytes, 0, bytes.Length - 32, false))
             {
                 if (!ConstantTimeEquals(h.ComputeHash(signed), hmac))
                 {
@@ -206,9 +238,9 @@ namespace Clipman
                 aes.Padding = PaddingMode.PKCS7;
                 using (var decryptor = aes.CreateDecryptor())
                 {
-                    var plain = decryptor.TransformFinalBlock(cipher, 0, cipher.Length);
+                    var plain = decryptor.TransformFinalBlock(bytes, offset, cipherLength);
                     var compressed = DecompressBytes(plain);
-                    return Encoding.UTF8.GetString(compressed);
+                    return DecodeUtf8(compressed);
                 }
             }
         }
@@ -225,7 +257,7 @@ namespace Clipman
             var salt = ExistingEncryptedSalt(path) ?? RandomBytes(16);
             var iv = RandomBytes(16);
             var keys = DeriveKeys(password, salt);
-            var plain = Encoding.UTF8.GetBytes(JsonUtil.SerializePretty(database));
+            var plain = SerializeBounded(database);
             var compressed = CompressBytes(plain);
             byte[] cipher;
             using (var aes = Aes.Create())
@@ -249,11 +281,15 @@ namespace Clipman
                 memory.Write(cipher, 0, cipher.Length);
                 using (var h = new HMACSHA256(keys.MacKey))
                 {
-                    var signed = memory.ToArray();
-                    var mac = h.ComputeHash(signed);
+                    var mac = h.ComputeHash(memory.GetBuffer(), 0, checked((int)memory.Length));
                     memory.Write(mac, 0, mac.Length);
                 }
-                File.WriteAllBytes(temp, memory.ToArray());
+                var payload = memory.ToArray();
+                if (payload.LongLength > MaximumLocalDatabaseFileBytes)
+                {
+                    throw new InvalidDataException("The Clipman database would exceed the 272 MiB local-container safety limit.");
+                }
+                File.WriteAllBytes(temp, payload);
             }
 
             ReplaceTemp(temp, path);
@@ -271,15 +307,74 @@ namespace Clipman
             }
         }
 
+        private static byte[] SerializeBounded<T>(T database) where T : new()
+        {
+            var serialized = Encoding.UTF8.GetBytes(JsonUtil.SerializePretty(database));
+            if (serialized.LongLength > MaximumDecompressedDatabaseBytes)
+            {
+                throw new InvalidDataException("The Clipman database would expand beyond the 256 MiB safety limit.");
+            }
+            return serialized;
+        }
+
         private static byte[] DecompressBytes(byte[] value)
         {
             using (var input = new MemoryStream(value))
             using (var gzip = new GZipStream(input, CompressionMode.Decompress))
+            {
+                return ReadBounded(gzip, MaximumDecompressedDatabaseBytes);
+            }
+        }
+
+        internal static byte[] ReadBounded(Stream input, int maximumBytes)
+        {
+            if (input == null) throw new ArgumentNullException("input");
+            if (maximumBytes < 1) throw new ArgumentOutOfRangeException("maximumBytes");
             using (var output = new MemoryStream())
             {
-                gzip.CopyTo(output);
+                var buffer = new byte[64 * 1024];
+                while (true)
+                {
+                    var read = input.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+                    if (output.Length + read > maximumBytes)
+                    {
+                        throw new InvalidDataException("The Clipman database expands beyond the 256 MiB safety limit.");
+                    }
+                    output.Write(buffer, 0, read);
+                }
                 return output.ToArray();
             }
+        }
+
+        internal static void ValidateLocalDatabaseFileLength(long length)
+        {
+            if (length < 0 || length > MaximumLocalDatabaseFileBytes)
+            {
+                throw new InvalidDataException("The Clipman database file exceeds the 272 MiB local-container safety limit.");
+            }
+        }
+
+        internal static byte[] ReadExact(Stream input, int count)
+        {
+            if (input == null) throw new ArgumentNullException("input");
+            if (count < 0 || count > MaximumLocalDatabaseFileBytes) throw new ArgumentOutOfRangeException("count");
+            var output = new byte[count];
+            var offset = 0;
+            while (offset < output.Length)
+            {
+                var read = input.Read(output, offset, output.Length - offset);
+                if (read <= 0) throw new EndOfStreamException("The Clipman database file ended unexpectedly.");
+                offset += read;
+            }
+            return output;
+        }
+
+        private static string DecodeUtf8(byte[] value)
+        {
+            if (value == null || value.Length == 0) return string.Empty;
+            var offset = value.Length >= 3 && value[0] == 0xef && value[1] == 0xbb && value[2] == 0xbf ? 3 : 0;
+            return Encoding.UTF8.GetString(value, offset, value.Length - offset);
         }
 
         private static KeyPair DeriveKeys(string password, byte[] salt)

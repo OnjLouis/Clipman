@@ -1,13 +1,15 @@
 package me.onj.clipman
 
+import android.Manifest
 import android.content.Context
 import android.content.ClipData
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.util.Patterns
 import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -16,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -66,6 +70,8 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -95,10 +101,12 @@ class MainActivity : FragmentActivity() {
     private var trustedExternalActivityPending = false
     private var externalConnectionImport by mutableStateOf<ExternalServerConnectionImport?>(null)
     private var nextExternalConnectionImportId = 0L
+    private var externalImageImports by mutableStateOf<List<ExternalSharedImageImport>>(emptyList())
+    private var nextExternalImageImportId = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleConfigurationIntent(intent)
+        handleIncomingIntent(intent)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -108,6 +116,10 @@ class MainActivity : FragmentActivity() {
                             externalConnectionImport = externalConnectionImport,
                             onExternalConnectionImportConsumed = { id ->
                                 if (externalConnectionImport?.id == id) externalConnectionImport = null
+                            },
+                            externalImageImport = externalImageImports.firstOrNull(),
+                            onExternalImageImportConsumed = { id ->
+                                externalImageImports = externalImageImports.filterNot { it.id == id }
                             }
                         )
                     } else {
@@ -159,8 +171,88 @@ class MainActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleConfigurationIntent(intent)
+        handleIncomingIntent(intent)
     }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            enqueueSharedImage(intent)
+        } else {
+            handleConfigurationIntent(intent)
+        }
+    }
+
+    private fun enqueueSharedImage(intent: Intent) {
+        val requestId = ++nextExternalImageImportId
+        val sharedStreams = runCatching { sharedImageStreams(intent) }.getOrElse {
+            externalImageImports = externalImageImports + ExternalSharedImageImport(
+                requestId,
+                errorMessage = "The shared photo details could not be read safely."
+            )
+            return
+        }
+        val rejection = AndroidImageSharePolicy.rejectionMessage(intent.action, intent.type, sharedStreams.itemCount)
+        if (rejection != null) {
+            externalImageImports = externalImageImports + ExternalSharedImageImport(requestId, errorMessage = rejection)
+            return
+        }
+        val uri = sharedStreams.uris.singleOrNull()
+        if (uri == null) {
+            externalImageImports = externalImageImports + ExternalSharedImageImport(
+                requestId,
+                errorMessage = "The shared photo does not contain readable image data."
+            )
+            return
+        }
+        externalImageImports = externalImageImports + ExternalSharedImageImport(requestId, isReading = true)
+        if (AndroidSettings(this).requireAuthentication) {
+            unlockMessage = "Unlock Clipman to add the shared photo."
+        }
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { AndroidImageClipboard.readSharedImage(this@MainActivity, uri) }
+            }
+            val completed = result.fold(
+                onSuccess = { ExternalSharedImageImport(requestId, image = it) },
+                onFailure = {
+                    ExternalSharedImageImport(
+                        requestId,
+                        errorMessage = it.message ?: "The shared photo could not be added."
+                    )
+                }
+            )
+            externalImageImports = externalImageImports.map { if (it.id == requestId) completed else it }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun sharedImageStreams(intent: Intent): SharedImageStreams {
+        val candidates = mutableListOf<Uri>()
+        var extraItemCount = 0
+        when (val stream = intent.extras?.get(Intent.EXTRA_STREAM)) {
+            is Uri -> {
+                candidates += stream
+                extraItemCount = 1
+            }
+            is List<*> -> {
+                candidates += stream.filterIsInstance<Uri>()
+                extraItemCount = stream.size
+            }
+        }
+        val clipItemCount = intent.clipData?.itemCount ?: 0
+        intent.clipData?.let { clip ->
+            repeat(clip.itemCount) { index -> clip.getItemAt(index).uri?.let(candidates::add) }
+        }
+        intent.data?.let(candidates::add)
+        val distinctUris = candidates.distinctBy(Uri::toString)
+        return SharedImageStreams(
+            uris = distinctUris,
+            itemCount = maxOf(extraItemCount, clipItemCount, if (intent.data != null) 1 else 0, distinctUris.size)
+        )
+    }
+
+    private data class SharedImageStreams(val uris: List<Uri>, val itemCount: Int)
 
     private fun handleConfigurationIntent(intent: Intent?) {
         if (intent == null) return
@@ -272,13 +364,6 @@ private fun LockedScreen(
     }
 }
 
-private enum class HistorySort(val label: String) {
-    Manual("Manual order"),
-    Newest("Newest first"),
-    Oldest("Oldest first"),
-    Text("Text")
-}
-
 private enum class HistorySection(val label: String) {
     Text("Text"),
     RichText("Rich Text"),
@@ -297,7 +382,9 @@ private data class MobileSettingsSnapshot(
     val deviceName: String,
     val copyRemoteToClipboard: Boolean,
     val addClipboardOnLaunch: Boolean,
+    val historySort: HistorySort,
     val richTextEnabled: Boolean,
+    val richTextImagesEnabled: Boolean,
     val confirmDeletions: Boolean,
     val requireAuthentication: Boolean,
     val checkForUpdatesAutomatically: Boolean,
@@ -314,12 +401,30 @@ private data class ExternalServerConnectionImport(
     val errorMessage: String = ""
 )
 
+private class LocalHistoryWriteException(
+    cause: Throwable,
+    val reloadedDatabase: ClipDatabase?
+) : Exception(cause.message, cause)
+
+internal fun recoverHistoryAfterLocalWriteFailure(
+    previousDatabase: ClipDatabase,
+    reloadedDatabase: ClipDatabase?
+): ClipDatabase = reloadedDatabase ?: previousDatabase
+
+internal fun localHistoryWriteFailureStatus(actionText: String, error: Throwable): String =
+    "$actionText could not be saved. History was restored: ${error.message ?: error::class.java.simpleName}"
+
+internal fun remoteHistoryWriteFailureStatus(actionText: String, error: Throwable): String =
+    "$actionText saved locally; server sync is pending: ${error.message ?: error::class.java.simpleName}"
+
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun ClipmanApp(
     appIsForeground: Boolean,
     externalConnectionImport: ExternalServerConnectionImport?,
-    onExternalConnectionImportConsumed: (Long) -> Unit
+    onExternalConnectionImportConsumed: (Long) -> Unit,
+    externalImageImport: ExternalSharedImageImport?,
+    onExternalImageImportConsumed: (Long) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? MainActivity
@@ -345,6 +450,7 @@ private fun ClipmanApp(
     var copyRemoteToClipboard by remember { mutableStateOf(settings.copyRemoteToClipboard) }
     var addClipboardOnLaunch by remember { mutableStateOf(settings.addClipboardOnLaunch) }
     var richTextEnabled by remember { mutableStateOf(settings.richTextEnabled) }
+    var richTextImagesEnabled by remember { mutableStateOf(settings.richTextImagesEnabled) }
     var confirmDeletions by remember { mutableStateOf(settings.confirmDeletions) }
     var requireAuthentication by remember { mutableStateOf(settings.requireAuthentication) }
     var checkForUpdatesAutomatically by remember { mutableStateOf(settings.checkForUpdatesAutomatically) }
@@ -361,7 +467,7 @@ private fun ClipmanApp(
     var section by remember { mutableStateOf(HistorySection.Text) }
     val visibleSections = remember(richTextEnabled) { visibleHistorySections(richTextEnabled) }
     val pagerState = rememberPagerState(pageCount = { visibleSections.size })
-    var sortMode by remember { mutableStateOf(HistorySort.Manual) }
+    var sortMode by remember { mutableStateOf(settings.historySort) }
     var groupFilter by remember { mutableStateOf("") }
     var deviceFilter by remember { mutableStateOf("") }
     var historyFilterKind by remember { mutableStateOf(HistoryFilterKind.Group) }
@@ -392,6 +498,10 @@ private fun ClipmanApp(
     var showConnectionExportWarning by remember { mutableStateOf(false) }
     var pendingServerAuthority by remember { mutableStateOf<ServerCertificateAuthority?>(null) }
     var enableBackupAfterFolderChoice by remember { mutableStateOf(false) }
+    var websiteTitleCandidate by remember { mutableStateOf<ClipEntry?>(null) }
+    var isFetchingWebsiteTitle by remember { mutableStateOf(false) }
+    var approvedPhotoSave by remember { mutableStateOf<Pair<ClipEntry, EmbeddedImageData>?>(null) }
+    var pendingLegacyPhotoSave by remember { mutableStateOf<Pair<ClipEntry, EmbeddedImageData>?>(null) }
 
     fun setTransientStatus(message: String) {
         statusSequence += 1
@@ -414,6 +524,55 @@ private fun ClipmanApp(
             transientStatusActive = false
             status = message
         }
+    }
+
+    fun reportImageAction(message: String, succeeded: Boolean) {
+        setTransientStatus(message)
+        announce(view, message)
+        playFeedback(
+            context,
+            if (succeeded) ClipmanSound.Copy else ClipmanSound.Skip,
+            playSounds,
+            useHaptics
+        )
+    }
+
+    val legacyPhotoPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val pending = pendingLegacyPhotoSave
+        pendingLegacyPhotoSave = null
+        if (granted && pending != null) {
+            approvedPhotoSave = pending
+        } else if (!granted) {
+            reportImageAction("Clipman needs photo storage permission to save this image.", false)
+        }
+    }
+
+    LaunchedEffect(approvedPhotoSave) {
+        val request = approvedPhotoSave ?: return@LaunchedEffect
+        val (entry, image) = request
+        runCatching {
+            withContext(Dispatchers.IO) {
+                AndroidImageEntryActions.saveToPhotos(
+                    context.applicationContext,
+                    image,
+                    entry.SourceMachine,
+                    entry.CreatedUnixMs
+                )
+            }
+        }.onSuccess { saved ->
+            reportImageAction("Saved image to Photos as ${saved.displayName}.", true)
+        }.onFailure { error ->
+            reportImageAction("Could not save image to Photos: ${error.message ?: error::class.java.simpleName}", false)
+        }
+        if (approvedPhotoSave == request) approvedPhotoSave = null
+    }
+
+    fun applyHistorySort(value: HistorySort) {
+        sortMode = value
+        settings.historySort = value
+        setTransientStatus("Sort set to ${value.label}.")
     }
 
     fun launchTrustedExternalActivity(action: () -> Unit) {
@@ -561,7 +720,9 @@ private fun ClipmanApp(
         deviceName = settings.deviceName
         copyRemoteToClipboard = settings.copyRemoteToClipboard
         addClipboardOnLaunch = settings.addClipboardOnLaunch
+        sortMode = settings.historySort
         richTextEnabled = settings.richTextEnabled
+        richTextImagesEnabled = settings.richTextImagesEnabled
         confirmDeletions = settings.confirmDeletions
         requireAuthentication = settings.requireAuthentication
         checkForUpdatesAutomatically = settings.checkForUpdatesAutomatically
@@ -587,7 +748,9 @@ private fun ClipmanApp(
         settings.deviceName = snapshot.deviceName
         settings.copyRemoteToClipboard = snapshot.copyRemoteToClipboard
         settings.addClipboardOnLaunch = snapshot.addClipboardOnLaunch
+        settings.historySort = snapshot.historySort
         settings.richTextEnabled = snapshot.richTextEnabled
+        settings.richTextImagesEnabled = snapshot.richTextImagesEnabled
         settings.confirmDeletions = snapshot.confirmDeletions
         settings.requireAuthentication = snapshot.requireAuthentication
         settings.checkForUpdatesAutomatically = snapshot.checkForUpdatesAutomatically
@@ -740,11 +903,18 @@ private fun ClipmanApp(
         }
     }
 
-    fun saveDatabaseChange(actionText: String, mutation: (ClipDatabase) -> ClipDatabase) {
+    fun saveDatabaseChange(
+        actionText: String,
+        completionStatus: String = "$actionText complete.",
+        playCopyFeedback: Boolean = actionText.startsWith("Adding Android clipboard"),
+        mutation: (ClipDatabase) -> ClipDatabase
+    ) {
         loadGeneration += 1
         isLoadingHistory = false
         val generation = changeGeneration + 1
         changeGeneration = generation
+        val previousDatabase = database
+        val previousPendingLocalChanges = hasPendingLocalChanges
         val requestedMode = storageMode
         val requestedServerUrl = serverUrl
         val requestedToken = token
@@ -757,15 +927,24 @@ private fun ClipmanApp(
         entries = updatedLocal.Entries
         hasLoadedHistory = true
         if (requestedMode == MobileStorageMode.Server) hasPendingLocalChanges = true
-        setTransientStatus("$actionText complete.")
-        if (actionText == "Adding Android clipboard text") {
+        setTransientStatus(completionStatus)
+        if (playCopyFeedback) {
             playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
         }
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 storageMutex.withLock {
                     runCatching {
-                        val backupError = historyRepository.saveLocal(updatedLocal, requestedPassword, requestedBackup)
+                        val backupError = try {
+                            historyRepository.saveLocal(updatedLocal, requestedPassword, requestedBackup)
+                        } catch (error: Exception) {
+                            val reloaded = try {
+                                historyRepository.loadLocalOrNull(requestedPassword)
+                            } catch (_: Exception) {
+                                null
+                            }
+                            throw LocalHistoryWriteException(error, reloaded)
+                        }
                         if (requestedMode == MobileStorageMode.Local) {
                             MobileSyncResult(updatedLocal, "", false, backupError = backupError)
                         } else {
@@ -795,13 +974,22 @@ private fun ClipmanApp(
                     setSteadyStatus("$actionText complete, but cloud backup failed: ${sync.backupError}")
                 }
             }.onFailure { error ->
-                pollingFailureCount = minOf(pollingFailureCount + 1, 4)
-                val failure = if (requestedMode == MobileStorageMode.Server) {
-                    "$actionText saved locally; server sync is pending: ${error.message ?: error::class.java.simpleName}"
+                if (error is LocalHistoryWriteException) {
+                    val restored = recoverHistoryAfterLocalWriteFailure(previousDatabase, error.reloadedDatabase)
+                    database = restored
+                    entries = restored.Entries
+                    hasLoadedHistory = true
+                    hasPendingLocalChanges = previousPendingLocalChanges
+                    setSteadyStatus(localHistoryWriteFailureStatus(actionText, error.cause ?: error))
                 } else {
-                    "$actionText failed: ${error.message ?: error::class.java.simpleName}"
+                    pollingFailureCount = minOf(pollingFailureCount + 1, 4)
+                    val failure = if (requestedMode == MobileStorageMode.Server) {
+                        remoteHistoryWriteFailureStatus(actionText, error)
+                    } else {
+                        "$actionText failed: ${error.message ?: error::class.java.simpleName}"
+                    }
+                    setSteadyStatus(failure)
                 }
-                setSteadyStatus(failure)
             }
         }
     }
@@ -832,19 +1020,136 @@ private fun ClipmanApp(
     }
 
     fun addCurrentClipboardText() {
-        val clipboardContent = RichTextClipboard.read(context, richTextEnabled)
-        val clipboardText = clipboardContent.text.trim()
-        if (clipboardText.isEmpty()) {
-            setTransientStatus("The Android clipboard does not contain text to add.")
-            return
+        val entrySnapshot = database.Entries
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    RichTextClipboard.read(
+                        context = context,
+                        includeRichText = richTextEnabled,
+                        includeImages = richTextImagesEnabled,
+                        existingEntries = entrySnapshot,
+                        forHistoryCapture = true
+                    )
+                }
+            }
+            result.onSuccess { clipboardContent ->
+                val clipboardText = clipboardContent.text.trim()
+                if (clipboardText.isEmpty()) {
+                    setTransientStatus("The Android clipboard does not contain text or an image to add.")
+                    return@onSuccess
+                }
+                val image = EmbeddedImageRichText.parse(clipboardContent.richText)
+                if (image != null && EmbeddedImageRichText.exceedsTotalBudget(database.Entries, clipboardText, image.bytes.size)) {
+                    setTransientStatus("Clipman's 8 MiB embedded-image history limit has been reached. Delete an image entry before adding another.")
+                    return@onSuccess
+                }
+                val isImage = image != null
+                saveDatabaseChange(if (isImage) "Adding Android clipboard image" else "Adding Android clipboard text") { current ->
+                    SyncConflictResolver.addText(
+                        current,
+                        clipboardText,
+                        deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
+                        clipboardContent.richText
+                    )
+                }
+            }.onFailure { error ->
+                setTransientStatus(error.message ?: "The Android clipboard could not be added.")
+            }
         }
-        saveDatabaseChange("Adding Android clipboard text") { database ->
-            SyncConflictResolver.addText(
-                database,
-                clipboardText,
-                deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
-                clipboardContent.richText
-            )
+    }
+
+    LaunchedEffect(
+        externalImageImport?.id,
+        externalImageImport?.isReading,
+        externalImageImport?.image,
+        externalImageImport?.errorMessage,
+        hasLoadedHistory,
+        isLoadingHistory,
+        showConnectionSettings
+    ) {
+        val request = externalImageImport ?: return@LaunchedEffect
+        if (request.isReading) {
+            setTransientStatus("Reading shared photo...")
+            return@LaunchedEffect
+        }
+        request.errorMessage?.let { message ->
+            setTransientStatus(message)
+            announce(view, message)
+            onExternalImageImportConsumed(request.id)
+            return@LaunchedEffect
+        }
+        if (!hasLoadedHistory || isLoadingHistory || showConnectionSettings) return@LaunchedEffect
+        if (!richTextEnabled) {
+            val message = "Enable Rich Text history before sharing photos to Clipman."
+            setTransientStatus(message)
+            announce(view, message)
+            onExternalImageImportConsumed(request.id)
+            return@LaunchedEffect
+        }
+        if (!richTextImagesEnabled) {
+            val message = "Enable Include images in Rich Text history before sharing photos to Clipman."
+            setTransientStatus(message)
+            announce(view, message)
+            onExternalImageImportConsumed(request.id)
+            return@LaunchedEffect
+        }
+        val result = runCatching {
+            AndroidImageClipboard.contentForPreparedImage(request.image ?: error("The shared photo could not be read."), database.Entries)
+        }
+        result.onSuccess { sharedContent ->
+            saveDatabaseChange(
+                actionText = "Adding shared photo",
+                completionStatus = "Shared photo added to Rich Text history.",
+                playCopyFeedback = true
+            ) { current ->
+                SyncConflictResolver.addText(
+                    current,
+                    sharedContent.text,
+                    deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
+                    sharedContent.richText
+                )
+            }
+        }.onFailure { error ->
+            val message = error.message ?: "The shared photo could not be added."
+            setTransientStatus(message)
+            announce(view, message)
+        }
+        onExternalImageImportConsumed(request.id)
+    }
+
+    fun offerWebsiteTitle(entry: ClipEntry) {
+        if (entry.Name.isNotBlank() || !LinkPresentation.isFetchableHttpUrl(entry.Text)) return
+        websiteTitleCandidate = entry
+    }
+
+    fun fetchWebsiteTitle(entry: ClipEntry) {
+        if (isFetchingWebsiteTitle) return
+        websiteTitleCandidate = null
+        isFetchingWebsiteTitle = true
+        setTransientStatus("Retrieving website title...")
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { WebsiteTitleFetcher.fetch(entry.Text) }
+            }
+            isFetchingWebsiteTitle = false
+            result.onSuccess { title ->
+                val currentEntry = database.Entries.firstOrNull { it.Id == entry.Id }
+                if (currentEntry == null || currentEntry.Text != entry.Text || currentEntry.Name.isNotBlank()) {
+                    setTransientStatus("The entry changed before its website title was applied.")
+                    return@onSuccess
+                }
+                saveDatabaseChange("Using website title as entry name") { current ->
+                    val latest = current.Entries.firstOrNull { it.Id == entry.Id }
+                    if (latest == null || latest.Text != entry.Text || latest.Name.isNotBlank()) {
+                        current
+                    } else {
+                        SyncConflictResolver.updateEntry(current, latest.copy(Name = title))
+                    }
+                }
+            }.onFailure { error ->
+                setTransientStatus(error.message ?: "The website title could not be retrieved.")
+            }
         }
     }
 
@@ -989,6 +1294,26 @@ private fun ClipmanApp(
         }
     }
 
+    websiteTitleCandidate?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { websiteTitleCandidate = null },
+            title = { Text("Use Website Title as Name?") },
+            text = {
+                Text(
+                    "Clipman will contact ${LinkPresentation.disclosureHost(entry.Text) ?: "the selected website"} " +
+                        "once to read the page title. The website can see that it was contacted. Clipman sends the " +
+                        "selected link request, but no cookies, credentials or other clipboard content.\n\n" +
+                        "Destination: ${LinkPresentation.shortenedDestination(entry.Text) ?: entry.Text}"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { fetchWebsiteTitle(entry) }) { Text("Retrieve Title") }
+            },
+            dismissButton = {
+                TextButton(onClick = { websiteTitleCandidate = null }) { Text("Cancel") }
+            }
+        )
+    }
     editingEntry?.let { entry ->
         EntryPropertiesDialog(
             entry = entry,
@@ -1028,6 +1353,10 @@ private fun ClipmanApp(
             onEdit = {
                 viewingEntry = null
                 editingEntry = entry
+            },
+            onUseWebsiteTitle = {
+                viewingEntry = null
+                offerWebsiteTitle(entry)
             }
         )
     }
@@ -1195,8 +1524,15 @@ private fun ClipmanApp(
                 onCopyRemoteToClipboardChanged = { copyRemoteToClipboard = it },
                 addClipboardOnLaunch = addClipboardOnLaunch,
                 onAddClipboardOnLaunchChanged = { addClipboardOnLaunch = it },
+                historySort = sortMode,
+                onHistorySortChanged = { sortMode = it },
                 richTextEnabled = richTextEnabled,
-                onRichTextEnabledChanged = { richTextEnabled = it },
+                onRichTextEnabledChanged = {
+                    richTextEnabled = it
+                    if (!it) richTextImagesEnabled = false
+                },
+                richTextImagesEnabled = richTextImagesEnabled,
+                onRichTextImagesEnabledChanged = { richTextImagesEnabled = it },
                 confirmDeletions = confirmDeletions,
                 onConfirmDeletionsChanged = { confirmDeletions = it },
                 requireAuthentication = requireAuthentication,
@@ -1286,7 +1622,9 @@ private fun ClipmanApp(
                         deviceName = deviceName,
                         copyRemoteToClipboard = copyRemoteToClipboard,
                         addClipboardOnLaunch = addClipboardOnLaunch,
+                        historySort = sortMode,
                         richTextEnabled = richTextEnabled,
+                        richTextImagesEnabled = richTextEnabled && richTextImagesEnabled,
                         confirmDeletions = confirmDeletions,
                         requireAuthentication = requireAuthentication,
                         checkForUpdatesAutomatically = checkForUpdatesAutomatically,
@@ -1334,7 +1672,9 @@ private fun ClipmanApp(
                             deviceName = savedSettings.deviceName
                             copyRemoteToClipboard = savedSettings.copyRemoteToClipboard
                             addClipboardOnLaunch = savedSettings.addClipboardOnLaunch
+                            sortMode = savedSettings.historySort
                             richTextEnabled = savedSettings.richTextEnabled
+                            richTextImagesEnabled = savedSettings.richTextImagesEnabled
                             requireAuthentication = savedSettings.requireAuthentication
                             checkForUpdatesAutomatically = savedSettings.checkForUpdatesAutomatically
                             playSounds = savedSettings.playSounds
@@ -1384,7 +1724,7 @@ private fun ClipmanApp(
             },
             onAddClipboard = { addCurrentClipboardText() },
             onOpenSettings = { showConnectionSettings = true },
-            onSort = { sortMode = nextSortMode(sortMode) },
+            onSort = { applyHistorySort(nextSortMode(sortMode)) },
             onGroup = { showGroupPicker = true },
             onTop = { scope.launch { selectedListState.animateScrollToItem(0) } }
         )
@@ -1442,6 +1782,43 @@ private fun ClipmanApp(
                         onView = { viewingEntry = entry },
                         onOpenLink = { link -> openLink(context, link) },
                         onEdit = { editingEntry = entry },
+                        onUseWebsiteTitle = { offerWebsiteTitle(entry) },
+                        onSaveImageToPhotos = { image ->
+                            val request = entry to image
+                            val needsPermission = Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+                                PackageManager.PERMISSION_GRANTED
+                            if (needsPermission) {
+                                pendingLegacyPhotoSave = request
+                                legacyPhotoPermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            } else {
+                                approvedPhotoSave = request
+                            }
+                        },
+                        onShareImage = { image ->
+                            scope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        AndroidImageEntryActions.createShareChooser(
+                                            context.applicationContext,
+                                            image,
+                                            entry.SourceMachine,
+                                            entry.CreatedUnixMs
+                                        )
+                                    }
+                                }.onSuccess { chooser ->
+                                    runCatching {
+                                        launchTrustedExternalActivity { context.startActivity(chooser) }
+                                    }.onSuccess {
+                                        reportImageAction("Image share sheet opened.", true)
+                                    }.onFailure { error ->
+                                        reportImageAction("Could not open the image share sheet: ${error.message ?: error::class.java.simpleName}", false)
+                                    }
+                                }.onFailure { error ->
+                                    reportImageAction("Could not share image: ${error.message ?: error::class.java.simpleName}", false)
+                                }
+                            }
+                        },
                         onTogglePinned = {
                             saveDatabaseChange(if (entry.Pinned) "Unpinning entry" else "Pinning entry") { database ->
                                 SyncConflictResolver.togglePinned(database, entry.Id)
@@ -1460,27 +1837,54 @@ private fun ClipmanApp(
                 }
             }
         }
-        TextButton(
-            onClick = {
+        HistoryStatusBar(
+            status = status,
+            onGoToBottom = {
                 scope.launch {
                     if (visibleEntries.isNotEmpty()) {
                         selectedListState.animateScrollToItem(visibleEntries.lastIndex)
                     }
                 }
             },
-            enabled = visibleEntries.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = status,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Start,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics { liveRegion = LiveRegionMode.Polite }
-            )
+            onNextSort = { applyHistorySort(nextSortMode(sortMode)) },
+            onSetSort = ::applyHistorySort
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun HistoryStatusBar(
+    status: String,
+    onGoToBottom: () -> Unit,
+    onNextSort: () -> Unit,
+    onSetSort: (HistorySort) -> Unit
+) {
+    val sortActions = HistorySort.entries.map { mode ->
+        CustomAccessibilityAction(mode.accessibilityActionLabel) {
+            onSetSort(mode)
+            true
         }
     }
+    Text(
+        text = status,
+        style = MaterialTheme.typography.bodySmall,
+        textAlign = TextAlign.Start,
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                role = Role.Button,
+                onClickLabel = "Go to bottom of history",
+                onLongClickLabel = "Use next sort order",
+                onClick = onGoToBottom,
+                onLongClick = onNextSort
+            )
+            .semantics {
+                liveRegion = LiveRegionMode.Polite
+                customActions = sortActions
+            }
+            .padding(vertical = 12.dp)
+    )
 }
 
 @Composable
@@ -1490,7 +1894,8 @@ private fun ViewEntryDialog(
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
     onOpenLink: (String) -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onUseWebsiteTitle: () -> Unit
 ) {
     val linkActions = links.mapIndexed { index, link ->
         CustomAccessibilityAction("Open $link") {
@@ -1498,6 +1903,8 @@ private fun ViewEntryDialog(
             true
         }
     }
+    val embeddedImage = remember(entry.RichText) { EmbeddedImageRichText.parse(entry.RichText) }
+    val previewBitmap = remember(embeddedImage) { embeddedImage?.let(AndroidImageClipboard::decodePreview) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("View Entry") },
@@ -1512,6 +1919,21 @@ private fun ViewEntryDialog(
                     },
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (embeddedImage != null && previewBitmap != null) {
+                    Text(
+                        text = "Image preview",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.semantics { heading() }
+                    )
+                    Image(
+                        bitmap = previewBitmap.asImageBitmap(),
+                        contentDescription = embeddedImage.altText,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                    )
+                }
                 Text(
                     text = "Clipboard text",
                     style = MaterialTheme.typography.titleSmall,
@@ -1549,6 +1971,9 @@ private fun ViewEntryDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onCopy) { Text("Copy") }
                 TextButton(onClick = onEdit) { Text("Edit") }
+                if (entry.Name.isBlank() && LinkPresentation.isFetchableHttpUrl(entry.Text)) {
+                    TextButton(onClick = onUseWebsiteTitle) { Text("Use Website Title as Name") }
+                }
             }
         },
         dismissButton = {
@@ -1697,8 +2122,12 @@ private fun ConnectionSettingsScreen(
     onCopyRemoteToClipboardChanged: (Boolean) -> Unit,
     addClipboardOnLaunch: Boolean,
     onAddClipboardOnLaunchChanged: (Boolean) -> Unit,
+    historySort: HistorySort,
+    onHistorySortChanged: (HistorySort) -> Unit,
     richTextEnabled: Boolean,
     onRichTextEnabledChanged: (Boolean) -> Unit,
+    richTextImagesEnabled: Boolean,
+    onRichTextImagesEnabledChanged: (Boolean) -> Unit,
     confirmDeletions: Boolean,
     onConfirmDeletionsChanged: (Boolean) -> Unit,
     requireAuthentication: Boolean,
@@ -1745,6 +2174,13 @@ private fun ConnectionSettingsScreen(
             enabled = !isSaving,
             modifier = Modifier.fillMaxWidth()
         )
+        TextButton(
+            onClick = { onHistorySortChanged(nextSortMode(historySort)) },
+            enabled = !isSaving,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("History sort order: ${historySort.label}")
+        }
         Text(
             text = "History storage",
             style = MaterialTheme.typography.titleMedium,
@@ -1821,6 +2257,17 @@ private fun ConnectionSettingsScreen(
             onCheckedChange = onRichTextEnabledChanged,
             label = "Preserve copied formatting and show Rich Text history",
             enabled = !isSaving
+        )
+        SettingCheckboxRow(
+            checked = richTextImagesEnabled,
+            onCheckedChange = onRichTextImagesEnabledChanged,
+            label = "Include images in Rich Text history",
+            enabled = !isSaving && richTextEnabled
+        )
+        Text(
+            text = "Retained image metadata may contain camera or location information and follows " +
+                "your clipboard history encryption and sync choices.",
+            style = MaterialTheme.typography.bodySmall
         )
         SettingCheckboxRow(
             checked = confirmDeletions,
@@ -2119,50 +2566,45 @@ private fun ClipEntryCard(
     onView: () -> Unit,
     onOpenLink: (String) -> Unit,
     onEdit: () -> Unit,
+    onUseWebsiteTitle: () -> Unit,
+    onSaveImageToPhotos: (EmbeddedImageData) -> Unit,
+    onShareImage: (EmbeddedImageData) -> Unit,
     onTogglePinned: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val embeddedImage = remember(entry.RichText) { EmbeddedImageRichText.parse(entry.RichText) }
+    val rowText = remember(entry) { entryRowText(entry) }
     val labelParts = buildList {
         if (entry.Pinned) add("Pinned")
+        if (embeddedImage != null) add("Image, ${embeddedImage.width} by ${embeddedImage.height} pixels")
         if (entry.Group.isNotBlank()) add("Group: ${entry.Group}")
         if (entry.SourceMachine.isNotBlank()) add("Device: ${entry.SourceMachine}")
         add("${index + 1} of $total")
     }
     val links = remember(entry.Text) { extractLinks(entry.Text) }
-    val actions = buildList {
-        add(
-            CustomAccessibilityAction("Delete entry") {
-                onDelete()
-                true
+    val canOpen = links.size == 1
+    val canUseWebsiteTitle = entry.Name.isBlank() && LinkPresentation.isFetchableHttpUrl(entry.Text)
+    val actions = clipEntryActionSpecs(
+        canOpen,
+        canUseWebsiteTitle,
+        entry.Pinned,
+        hasEmbeddedImage = embeddedImage != null
+    ).map { spec ->
+        CustomAccessibilityAction(spec.label) {
+            when (spec.kind) {
+                ClipEntryActionKind.Open -> onOpenLink(links.single())
+                ClipEntryActionKind.View -> onView()
+                ClipEntryActionKind.Edit -> onEdit()
+                ClipEntryActionKind.UseWebsiteTitle -> onUseWebsiteTitle()
+                ClipEntryActionKind.Pin -> onTogglePinned()
+                ClipEntryActionKind.Delete -> onDelete()
+                ClipEntryActionKind.SaveToPhotos -> onSaveImageToPhotos(requireNotNull(embeddedImage))
+                ClipEntryActionKind.Share -> onShareImage(requireNotNull(embeddedImage))
             }
-        )
-        add(
-            CustomAccessibilityAction(if (entry.Pinned) "Unpin entry" else "Pin entry") {
-                onTogglePinned()
-                true
-            }
-        )
-        add(
-            CustomAccessibilityAction("Edit entry") {
-                onEdit()
-                true
-            }
-        )
-        add(
-            CustomAccessibilityAction("View entry") {
-                onView()
-                true
-            }
-        )
-        if (links.size == 1) {
-            add(
-                CustomAccessibilityAction("Open link") {
-                    onOpenLink(links.single())
-                    true
-                }
-            )
+            true
         }
     }
+    val accessibilityText = (listOf(rowText) + labelParts).joinToString("; ")
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -2172,8 +2614,13 @@ private fun ClipEntryCard(
                 onLongClickLabel = "View entry",
                 onLongClick = onView
             )
-            .semantics(mergeDescendants = true) {
+            .clearAndSetSemantics {
+                contentDescription = accessibilityText
                 role = Role.Button
+                onClick(label = "Copy to Android clipboard") {
+                    onCopy()
+                    true
+                }
                 customActions = actions
             }
     ) {
@@ -2183,9 +2630,42 @@ private fun ClipEntryCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(entry.displayText.take(500))
+            Text(rowText.take(500))
             Text(labelParts.joinToString("; "), style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+internal enum class ClipEntryActionKind {
+    Open,
+    View,
+    Edit,
+    UseWebsiteTitle,
+    Pin,
+    Delete,
+    SaveToPhotos,
+    Share
+}
+
+internal data class ClipEntryActionSpec(val kind: ClipEntryActionKind, val label: String)
+
+internal fun clipEntryActionSpecs(
+    canOpen: Boolean,
+    canUseWebsiteTitle: Boolean,
+    pinned: Boolean,
+    hasEmbeddedImage: Boolean = false
+): List<ClipEntryActionSpec> = buildList {
+    if (canOpen) add(ClipEntryActionSpec(ClipEntryActionKind.Open, "Open"))
+    add(ClipEntryActionSpec(ClipEntryActionKind.View, "View"))
+    add(ClipEntryActionSpec(ClipEntryActionKind.Edit, "Edit"))
+    if (canUseWebsiteTitle) {
+        add(ClipEntryActionSpec(ClipEntryActionKind.UseWebsiteTitle, "Use Website Title as Name"))
+    }
+    add(ClipEntryActionSpec(ClipEntryActionKind.Pin, if (pinned) "Unpin" else "Pin"))
+    add(ClipEntryActionSpec(ClipEntryActionKind.Delete, "Delete"))
+    if (hasEmbeddedImage) {
+        add(ClipEntryActionSpec(ClipEntryActionKind.SaveToPhotos, AndroidImageEntryActionPolicy.saveToPhotosLabel))
+        add(ClipEntryActionSpec(ClipEntryActionKind.Share, AndroidImageEntryActionPolicy.shareLabel))
     }
 }
 
@@ -2204,8 +2684,7 @@ private fun filteredAndSortedEntries(
             HistoryFilterKind.Device -> deviceFilter.isBlank() || entry.SourceMachine.equals(deviceFilter, ignoreCase = true)
         }) &&
             (query.isBlank() ||
-                entry.Text.contains(query, ignoreCase = true) ||
-                entry.Name.contains(query, ignoreCase = true) ||
+                LinkPresentation.searchableText(entry).contains(query, ignoreCase = true) ||
                 entry.Group.contains(query, ignoreCase = true) ||
                 entry.SourceMachine.contains(query, ignoreCase = true))
     }
@@ -2216,7 +2695,7 @@ private fun filteredAndSortedEntries(
             HistorySort.Manual -> normalEntries.sortedWith(compareBy<ClipEntry> { manualOrderKey(it) }.thenBy { it.CreatedUnixMs })
             HistorySort.Newest -> normalEntries.sortedByDescending { it.LastUsedUnixMs }
             HistorySort.Oldest -> normalEntries.sortedBy { it.LastUsedUnixMs }
-            HistorySort.Text -> normalEntries.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.displayText })
+            HistorySort.Text -> normalEntries.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { entryRowText(it) })
         }
     }
     return pinned + normal
@@ -2251,15 +2730,13 @@ private fun canonicalLabels(entries: List<ClipEntry>, selector: (ClipEntry) -> S
         .sortedWith(String.CASE_INSENSITIVE_ORDER)
 
 private fun ClipEntry.isLinkEntry(): Boolean {
-    val text = Text.trim()
-    if (text.isBlank() || text.any { it.isWhitespace() }) return false
-    if (text.startsWith("http://", ignoreCase = true) ||
-        text.startsWith("https://", ignoreCase = true) ||
-        text.startsWith("clipman://", ignoreCase = true) ||
-        text.startsWith("www.", ignoreCase = true)) {
-        return true
-    }
-    return Patterns.WEB_URL.matcher(text).matches()
+    return LinkPresentation.isStandaloneLink(Text)
+}
+
+private fun entryRowText(entry: ClipEntry): String {
+    val image = EmbeddedImageRichText.parse(entry.RichText)
+    if (image != null) return entry.Name.trim().ifBlank { image.altText }
+    return if (entry.isLinkEntry()) LinkPresentation.rowText(entry) else entry.displayText
 }
 
 @Composable
@@ -2391,12 +2868,19 @@ private fun textReviewLines(text: String): List<String> {
 
 private fun entryMetadataLines(entry: ClipEntry, linkCount: Int): List<String> =
     buildList {
+        val embeddedImage = EmbeddedImageRichText.parse(entry.RichText)
         if (entry.Name.isNotBlank()) add("Name: ${entry.Name}")
         if (entry.Group.isNotBlank()) add("Group: ${entry.Group}")
         if (entry.SourceMachine.isNotBlank()) add("Device: ${entry.SourceMachine}")
         add("Pinned: ${if (entry.Pinned) "Yes" else "No"}")
         add("Template: ${if (entry.IsTemplate) "Yes" else "No"}")
         add("Formatting: ${entry.richTextDescription()}")
+        if (embeddedImage != null) {
+            add("Image filename: ${embeddedImage.filename}")
+            add("Image type: ${if (embeddedImage.mimeType == "image/png") "PNG" else "JPEG"}")
+            add("Image dimensions: ${embeddedImage.width} by ${embeddedImage.height} pixels")
+            add("Stored image size: ${formatByteSize(embeddedImage.bytes.size.toLong())}")
+        }
         add("Added: ${formatUnixMilliseconds(entry.CreatedUnixMs)}")
         add("Last used: ${formatUnixMilliseconds(entry.LastUsedUnixMs)}")
         if (entry.ManualOrder > 0) add("Manual order: ${entry.ManualOrder}")
@@ -2489,6 +2973,11 @@ private fun announce(view: View, message: String) {
 
 private fun readClipboardText(context: Context): String {
     return RichTextClipboard.read(context, includeRichText = false).text
+}
+
+private fun formatByteSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes bytes"
+    else -> String.format(Locale.US, "%.1f KiB", bytes / 1024.0)
 }
 
 private fun cleanServerToken(value: String): String {

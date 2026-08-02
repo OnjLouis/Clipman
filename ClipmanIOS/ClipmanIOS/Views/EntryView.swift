@@ -9,6 +9,10 @@ struct EntryView: View {
         LinkExtractor.links(in: entry.Text)
     }
 
+    private var embeddedImage: EmbeddedImage? {
+        EmbeddedImageCodec.recognize(entry.RichText)
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -16,6 +20,16 @@ struct EntryView: View {
                     ForEach(lines, id: \.self) { line in
                         Text(line)
                             .textSelection(.enabled)
+                    }
+                }
+                if let embeddedImage, let image = UIImage(data: embeddedImage.data) {
+                    Section("Image preview") {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(embeddedImage.altText)
                     }
                 }
                 if !links.isEmpty {
@@ -63,6 +77,13 @@ struct EntryView: View {
         lines.append("Pinned: \(entry.Pinned ? "Yes" : "No")")
         lines.append("Template: \(entry.IsTemplate ? "Yes" : "No")")
         lines.append("Formatting: \(formattingDescription)")
+        if let image = embeddedImage {
+            lines.append("Image filename: \(image.filename)")
+            lines.append("Image type: \(image.typeDescription)")
+            lines.append("Image dimensions: \(image.width) by \(image.height) pixels")
+            lines.append("Stored image size: \(ByteCountFormatter.string(fromByteCount: Int64(image.data.count), countStyle: .file))")
+            lines.append("Image metadata: \(image.containsMetadata ? "Present" : "Not present")")
+        }
         lines.append("Added: \(formatUnixMilliseconds(entry.CreatedUnixMs))")
         lines.append("Last used: \(formatUnixMilliseconds(entry.LastUsedUnixMs))")
         if entry.ManualOrder > 0 {
@@ -77,6 +98,7 @@ struct EntryView: View {
     }
 
     private var formattingDescription: String {
+        if let image = embeddedImage { return "Embedded \(image.typeDescription) image" }
         guard let payload = MobileRichTextClipboard.normalize(entry.RichText) else { return "Plain text" }
         var formats: [String] = []
         if !payload.HtmlFragment.isEmpty { formats.append("HTML") }

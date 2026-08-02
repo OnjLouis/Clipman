@@ -44,6 +44,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var monitoringPausedForStorage = false
     private var databaseErrorAlertShown = false
     private var databasePasswordRecoveryInProgress = false
+    private var websiteTitleFetches = Set<String>()
 
     private var storageUnavailableReason: String {
         storageUnavailableReasons.values.sorted().joined(separator: "; ")
@@ -110,6 +111,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.delegate = self
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
+        monitor.includeImagesInRichTextHistory = settings.richTextHistoryEnabled && settings.includeImagesInRichTextHistory
+        monitor.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
+            includeImagesEnabled: settings.includeImagesInRichTextHistory,
+            alsoAddCopiedImageFilesEnabled: settings.alsoAddCopiedImageFilesToRichTextHistory
+        )
         monitor.start()
         if settings.captureClipboardOnStartup {
             monitor.captureCurrentContents()
@@ -407,14 +414,27 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         switch mode {
         case .pasteRestore:
-            monitor.writeTemporaryInternalText(text, richText: resolvedRichText(entry), restoreAfter: 0.35) {
+            monitor.writeTemporaryInternalText(
+                text,
+                richText: resolvedRichText(entry),
+                imageFilename: embeddedImageFilename(for: entry),
+                restoreAfter: 0.35
+            ) {
                 self.sendPasteKeystroke()
             }
         case .pasteKeep:
-            monitor.writeInternalText(text, richText: resolvedRichText(entry))
+            monitor.writeInternalText(
+                text,
+                richText: resolvedRichText(entry),
+                imageFilename: embeddedImageFilename(for: entry)
+            )
             sendPasteKeystroke()
         case .copyOnly:
-            monitor.writeInternalText(text, richText: resolvedRichText(entry))
+            monitor.writeInternalText(
+                text,
+                richText: resolvedRichText(entry),
+                imageFilename: embeddedImageFilename(for: entry)
+            )
         }
         sounds.play(.copy)
         store.markUsed(entry.Id)
@@ -719,15 +739,47 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             return
         }
         let capturedRichText = settings.richTextHistoryEnabled ? richText : nil
-        store.addText(text, group: sourceApplication, richText: capturedRichText) { [weak self] saved in
+        let isEmbeddedImage = EmbeddedImageHTML.imageInfo(from: capturedRichText) != nil
+        store.addTextWithResult(
+            text,
+            group: sourceApplication,
+            richText: capturedRichText,
+            maxEmbeddedImageBytes: isEmbeddedImage ? EmbeddedImageHTML.totalBudgetBytes : nil
+        ) { [weak self] result in
             guard let self else { return }
-            if saved {
+            switch result {
+            case .saved:
                 self.rememberReceivedHistoryTab(capturedRichText != nil ? HistoryTabID.richText : LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text)
                 self.sounds.play(.copy)
-            } else if self.storageUnavailableReason.isEmpty {
-                self.sounds.play(.skip)
+            case .refused(let reason):
+                self.reportImageRefusal(reason, deliberate: deliberate)
+            case .failed:
+                if self.storageUnavailableReason.isEmpty {
+                    self.sounds.play(.skip)
+                }
             }
         }
+    }
+
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didRejectImage reason: String, deliberate: Bool) {
+        reportImageRefusal(reason, deliberate: deliberate)
+    }
+
+    private func reportImageRefusal(_ reason: String, deliberate: Bool) {
+        sounds.play(.skip)
+        RuntimeLogger.write("Clipboard image was not saved.", details: reason)
+        if deliberate {
+            showInformationalAlert(title: "Image Not Saved", message: reason)
+            return
+        }
+        NSAccessibility.post(
+            element: NSApplication.shared,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: "Clipman did not save the image. \(reason)",
+                .priority: NSAccessibilityPriorityLevel.high.rawValue
+            ]
+        )
     }
 
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, deliberate: Bool) {
@@ -742,6 +794,20 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 self.sounds.play(.copy)
             } else if self.storageUnavailableReason.isEmpty {
                 self.sounds.play(.skip)
+            }
+        }
+    }
+
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String) {
+        guard storageUnavailableReason.isEmpty else { return }
+        store.addTextWithResult(
+            text,
+            group: sourceApplication,
+            richText: richText,
+            maxEmbeddedImageBytes: EmbeddedImageHTML.totalBudgetBytes
+        ) { result in
+            if case .refused(let reason) = result {
+                RuntimeLogger.write("Copied image file was kept in File History but not added to Rich Text history.", details: reason)
             }
         }
     }
@@ -974,7 +1040,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     private func copyAndCloseHistory(_ entry: ClipEntry, controller: HistoryWindowController) {
-        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry), richText: resolvedRichText(entry))
+        monitor.writeInternalText(
+            TemplateResolver.resolveEntryText(entry),
+            richText: resolvedRichText(entry),
+            imageFilename: embeddedImageFilename(for: entry)
+        )
         sounds.play(.copy)
         store.markUsed(entry.Id)
         controller.hide()
@@ -1013,7 +1083,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry]) {
         let text = entries.map(TemplateResolver.resolveEntryText).joined(separator: "\n---\n")
-        monitor.writeInternalText(text, richText: entries.count == 1 ? resolvedRichText(entries[0]) : nil)
+        monitor.writeInternalText(
+            text,
+            richText: entries.count == 1 ? resolvedRichText(entries[0]) : nil,
+            imageFilename: entries.count == 1 ? embeddedImageFilename(for: entries[0]) : nil
+        )
         sounds.play(.copy)
     }
 
@@ -1049,6 +1123,52 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindowDidRequestPaste(_ controller: HistoryWindowController, after entry: ClipEntry?) {
+        if controller.isShowingRichTextHistory,
+           let fileURLs = RichTextData.localFileURLs(from: NSPasteboard.general) {
+            guard settings.richTextHistoryEnabled, settings.includeImagesInRichTextHistory else {
+                reportExplicitImagePasteFailure(
+                    "Enable Rich Text history and Include images in Rich Text history before pasting an image file.",
+                    in: controller
+                )
+                return
+            }
+            guard storageUnavailableReason.isEmpty else {
+                reportExplicitImagePasteFailure("Clipman storage is currently unavailable.", in: controller)
+                return
+            }
+            Task { @MainActor [weak self, weak controller] in
+                guard let self, let controller else { return }
+                do {
+                    let prepared = try await Task.detached(priority: .utility) {
+                        try EmbeddedImageFileImport.prepare(urls: fileURLs)
+                    }.value
+                    let pastedEntry = ClipEntry(
+                        Text: prepared.text,
+                        SourceMachine: self.settings.deviceName,
+                        RichText: prepared.payload
+                    )
+                    self.store.insertTextsAfterSelected(
+                        [pastedEntry],
+                        afterID: entry?.Id,
+                        maxEmbeddedImageBytes: EmbeddedImageHTML.totalBudgetBytes
+                    ) { [weak self, weak controller] result in
+                        guard let self, let controller else { return }
+                        switch result {
+                        case .saved:
+                            controller.reportPasteStatus("Added image to Rich Text history after the selected entry.")
+                            self.sounds.play(.copy)
+                        case .refused(let reason):
+                            self.reportExplicitImagePasteFailure(reason, in: controller)
+                        case .failed:
+                            self.reportExplicitImagePasteFailure("The image could not be saved to Clipman history.", in: controller)
+                        }
+                    }
+                } catch {
+                    self.reportExplicitImagePasteFailure(error.localizedDescription, in: controller)
+                }
+            }
+            return
+        }
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
             NSSound.beep()
             return
@@ -1059,6 +1179,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             .filter { !$0.isEmpty }
             .map { ClipEntry(Text: $0, SourceMachine: settings.deviceName) }
         store.insertTextsAfterSelected(pasted, afterID: entry?.Id)
+    }
+
+    private func reportExplicitImagePasteFailure(_ reason: String, in controller: HistoryWindowController) {
+        controller.reportPasteStatus("Image not added: \(reason)")
+        sounds.play(.skip)
+        RuntimeLogger.write("Explicit Rich Text image-file paste was refused.", details: reason)
     }
 
     func historyWindowDidRequestSaveCurrentClipboard(_ controller: HistoryWindowController) {
@@ -1253,6 +1379,65 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func historyWindow(_ controller: HistoryWindowController, didCleanURLTracking entries: [ClipEntry]) {
         transformSelectedEntries(entries, transform: URLTrackingCleaner.cleanText(_:))
+    }
+
+    func historyWindow(_ controller: HistoryWindowController, didRequestWebsiteTitleFor entry: ClipEntry) {
+        guard let current = store.entry(id: entry.Id),
+              current.Text == entry.Text,
+              current.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              LinkClassifier.isLinkOnlyText(current.Text)
+        else {
+            NSSound.beep()
+            return
+        }
+        let validatedURL: URL
+        do {
+            validatedURL = try LinkFetchSafety.validatedURL(current.Text, resolveHost: false)
+        } catch {
+            showInformationalAlert(title: "Website Title Not Available", message: error.localizedDescription)
+            return
+        }
+        guard !websiteTitleFetches.contains(current.Id) else {
+            showInformationalAlert(title: "Website Title", message: "Clipman is already requesting a title for this link.")
+            return
+        }
+
+        let host = validatedURL.host ?? "this website"
+        let alert = NSAlert()
+        alert.messageText = "Contact Website for Its Title?"
+        alert.informativeText = "Clipman will contact \(host) once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Use Website Title")
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+
+        websiteTitleFetches.insert(current.Id)
+        WebsiteTitleFetcher.fetch(urlText: current.Text) { [weak self] result in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.websiteTitleFetches.remove(current.Id)
+                switch result {
+                case .failure(let error):
+                    self.showInformationalAlert(title: "Website Title Not Available", message: error.localizedDescription)
+                case .success(let title):
+                    guard let latest = self.store.entry(id: current.Id),
+                          latest.Text == current.Text,
+                          latest.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    else {
+                        self.showInformationalAlert(title: "Website Title Not Applied", message: "The entry changed while Clipman was reading the website title, so its Name was left unchanged.")
+                        return
+                    }
+                    self.store.setNameIfEmpty(id: latest.Id, expectedText: latest.Text, name: title) { [weak self] saved in
+                        guard let self else { return }
+                        if saved {
+                            self.sounds.play(.copy)
+                        } else {
+                            self.showInformationalAlert(title: "Website Title Not Applied", message: "The entry changed before the title could be saved, so its Name was left unchanged.")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     func historyWindow(_ controller: HistoryWindowController, didCleanLinksForSharing entries: [ClipEntry]) {
@@ -1540,6 +1725,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         sounds.isEnabled = settings.soundsEnabled
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
+        monitor.includeImagesInRichTextHistory = settings.richTextHistoryEnabled && settings.includeImagesInRichTextHistory
+        monitor.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
+            includeImagesEnabled: settings.includeImagesInRichTextHistory,
+            alsoAddCopiedImageFilesEnabled: settings.alsoAddCopiedImageFilesToRichTextHistory
+        )
         updateStatusItem()
         applyStartupRegistration(showErrors: true)
         registerHotkeys()
@@ -1658,12 +1849,29 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         guard stamp > baseline.stamp || (stamp == baseline.stamp && entry.Id != baseline.id) else { return }
         remoteClipboardBaseline = (entry.Id, stamp)
-        monitor.writeInternalText(TemplateResolver.resolveEntryText(entry), richText: resolvedRichText(entry))
+        monitor.writeInternalText(
+            TemplateResolver.resolveEntryText(entry),
+            richText: resolvedRichText(entry),
+            imageFilename: embeddedImageFilename(for: entry)
+        )
         sounds.play(.remote)
     }
 
     private func resolvedRichText(_ entry: ClipEntry) -> RichTextPayload? {
         entry.IsTemplate ? nil : RichTextData.normalize(entry.RichText)
+    }
+
+    private func embeddedImageFilename(for entry: ClipEntry) -> String? {
+        guard !entry.IsTemplate,
+              let image = EmbeddedImageHTML.imageInfo(from: entry.RichText)
+        else {
+            return nil
+        }
+        return EmbeddedImageFileNaming.suggestedFilename(
+            capturedUnixMs: entry.CreatedUnixMs,
+            device: entry.SourceMachine,
+            mimeType: image.mimeType
+        )
     }
 
     private func resetRemoteClipboardBaseline() {

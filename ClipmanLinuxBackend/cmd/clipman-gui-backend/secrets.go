@@ -33,17 +33,13 @@ func (s *session) loadSecrets() (model.Database, []byte, error) {
 	if err != nil {
 		return model.Database{}, nil, err
 	}
-	limits := clipdb.DefaultLimits()
-	if s.engine != nil {
-		limits = s.engine.Limits
-	}
-	database, err := clipdb.Decode(blob, s.password, limits)
+	database, err := clipdb.Decode(blob, s.password, s.codecLimits())
 	return database, blob, err
 }
 
 func (s *session) saveSecrets(database model.Database, existing []byte) error {
 	database.UpdatedUnixMs = time.Now().UnixMilli()
-	blob, err := clipdb.Encode(database, s.password, existing)
+	blob, err := clipdb.EncodeWithLimits(database, s.password, existing, s.codecLimits())
 	if err != nil {
 		return err
 	}

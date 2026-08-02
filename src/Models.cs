@@ -201,6 +201,8 @@ namespace Clipman
         public bool SaveListPosition { get; set; }
         public bool LinksHistoryEnabled { get; set; }
         public bool RichTextHistoryEnabled { get; set; }
+        public bool IncludeImagesInRichText { get; set; }
+        public bool AutoAddImageFilesToRichText { get; set; }
         public bool Active { get; set; }
         public string DatabasePath { get; set; }
         public bool UseDefaultDatabasePath { get; set; }
@@ -263,6 +265,8 @@ namespace Clipman
             SaveListPosition = true;
             LinksHistoryEnabled = false;
             RichTextHistoryEnabled = false;
+            IncludeImagesInRichText = false;
+            AutoAddImageFilesToRichText = false;
             Active = true;
             DatabasePath = string.Empty;
             UseDefaultDatabasePath = true;

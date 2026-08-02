@@ -99,10 +99,15 @@ $version = Get-ClipmanVersion
 $zipPath = Join-Path $OutputDirectory "ClipmanServer-$version.zip"
 $localBuildDirectory = Join-Path ([IO.Path]::GetTempPath()) ('Clipman-server-build-' + [guid]::NewGuid().ToString('N'))
 $windowsWrapperDist = Join-Path $localBuildDirectory 'Clipman Server.exe'
-$remoteTempWindowsExe = "/tmp/clipman-server-wrapper-$version-$([guid]::NewGuid().ToString('N')).exe"
-$remoteMacDist = "/tmp/clipman-server-mac-$version-$([guid]::NewGuid().ToString('N'))"
-$remoteCombinedDist = "/tmp/clipman-server-combined-$version-$([guid]::NewGuid().ToString('N'))"
-$remoteTempZip = "/tmp/ClipmanServer-$version-$([guid]::NewGuid().ToString('N')).zip"
+$remoteHome = (& ssh $MacHost 'printf %s "$HOME"').Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remoteHome)) {
+    throw "Could not determine the home folder on $MacHost."
+}
+$remoteRunDirectory = "$remoteHome/Projects/Codex/Temp/clipman/server-bundle-$version-$([guid]::NewGuid().ToString('N'))"
+$remoteTempWindowsExe = "$remoteRunDirectory/windows-wrapper.exe"
+$remoteMacDist = "$remoteRunDirectory/mac-dist"
+$remoteCombinedDist = "$remoteRunDirectory/combined-dist"
+$remoteTempZip = "$remoteRunDirectory/ClipmanServer-$version.zip"
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
@@ -112,7 +117,7 @@ try {
 
     Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 
-    & ssh $MacHost "/bin/rm -rf '$remoteMacDist' '$remoteCombinedDist'; /bin/mkdir -p '$remoteMacDist' '$remoteCombinedDist'"
+    & ssh $MacHost "/bin/rm -rf '$remoteRunDirectory'; /bin/mkdir -p '$remoteMacDist' '$remoteCombinedDist'"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not prepare Mac server bundle folders on $MacHost."
     }
@@ -155,7 +160,7 @@ finally {
             Start-Sleep -Milliseconds 300
         }
     }
-    & ssh $MacHost "/bin/rm -rf '$remoteTempZip' '$remoteTempWindowsExe' '$remoteMacDist' '$remoteCombinedDist'" 2>$null
+    & ssh $MacHost "/bin/rm -rf '$remoteRunDirectory'" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Could not remove one or more remote Clipman Server scratch paths from $MacHost."
     }

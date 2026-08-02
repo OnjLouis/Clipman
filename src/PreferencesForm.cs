@@ -24,6 +24,8 @@ namespace Clipman
         private readonly CheckBox autoRemoveUrlTracking;
         private readonly CheckBox linksHistoryEnabled;
         private readonly CheckBox richTextHistoryEnabled;
+        private readonly CheckBox includeImagesInRichText;
+        private readonly CheckBox autoAddImageFilesToRichText;
         private readonly CheckBox saveListPosition;
         private readonly CheckBox active;
         private readonly TextBox deviceName;
@@ -116,7 +118,28 @@ namespace Clipman
             autoRemoveUrlTracking = NewCheckBox("Automatically remove URL &tracking from copied text", settings.AutoRemoveUrlTracking);
             linksHistoryEnabled = NewCheckBox("Show &Links history tab", settings.LinksHistoryEnabled);
             richTextHistoryEnabled = NewCheckBox("Preserve copied formatting and show rich te&xt history", settings.RichTextHistoryEnabled);
+            includeImagesInRichText = NewCheckBox("Include copied i&mages in rich text history", settings.IncludeImagesInRichText);
+            autoAddImageFilesToRichText = NewCheckBox("Also add copied PNG and JPEG &files to rich text history", settings.AutoAddImageFilesToRichText);
             richTextHistoryEnabled.AccessibleDescription = "When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows the Rich Text history tab. Enable this before copying formatted content. This is off by default.";
+            includeImagesInRichText.AccessibleDescription = "When checked, Clipman can store a bounded PNG or JPEG clipboard image as an optimized Rich Text entry. Images remain inside the history database and count toward its size. Preserved image metadata can include camera or location information and follows the history's encryption and sync choices. This is off by default.";
+            autoAddImageFilesToRichText.AccessibleDescription = "When checked, copying exactly one PNG or JPEG file records the normal File History event and also adds the image to Rich Text history. This is off by default. You can still paste one copied image file explicitly while Rich Text history is open.";
+            includeImagesInRichText.Enabled = richTextHistoryEnabled.Checked;
+            autoAddImageFilesToRichText.Enabled = richTextHistoryEnabled.Checked && includeImagesInRichText.Checked;
+            richTextHistoryEnabled.CheckedChanged += (s, e) =>
+            {
+                includeImagesInRichText.Enabled = richTextHistoryEnabled.Checked;
+                if (!richTextHistoryEnabled.Checked)
+                {
+                    includeImagesInRichText.Checked = false;
+                    autoAddImageFilesToRichText.Checked = false;
+                }
+                autoAddImageFilesToRichText.Enabled = richTextHistoryEnabled.Checked && includeImagesInRichText.Checked;
+            };
+            includeImagesInRichText.CheckedChanged += (s, e) =>
+            {
+                autoAddImageFilesToRichText.Enabled = richTextHistoryEnabled.Checked && includeImagesInRichText.Checked;
+                if (!includeImagesInRichText.Checked) autoAddImageFilesToRichText.Checked = false;
+            };
             linksHistoryEnabled.AccessibleDescription = "When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.";
             saveListPosition = NewCheckBox("Save list &position", settings.SaveListPosition);
             removeDuplicates = NewCheckBox("&Remove duplicate entries", settings.RemoveDuplicates);
@@ -137,6 +160,8 @@ namespace Clipman
             AddFullRow(generalLayout, autoRemoveUrlTracking);
             AddFullRow(generalLayout, linksHistoryEnabled);
             AddFullRow(generalLayout, richTextHistoryEnabled);
+            AddFullRow(generalLayout, includeImagesInRichText);
+            AddFullRow(generalLayout, autoAddImageFilesToRichText);
             AddFullRow(generalLayout, saveListPosition);
             AddFullRow(generalLayout, removeDuplicates);
             AddRow(generalLayout, "&Duplicate handling:", duplicateMode);
@@ -441,6 +466,8 @@ namespace Clipman
             settings.AutoRemoveUrlTracking = autoRemoveUrlTracking.Checked;
             settings.LinksHistoryEnabled = linksHistoryEnabled.Checked;
             settings.RichTextHistoryEnabled = richTextHistoryEnabled.Checked;
+            settings.IncludeImagesInRichText = richTextHistoryEnabled.Checked && includeImagesInRichText.Checked;
+            settings.AutoAddImageFilesToRichText = settings.IncludeImagesInRichText && autoAddImageFilesToRichText.Checked;
             settings.LastSelectedHistoryTab = HistoryTabs.Normalize(settings.LastSelectedHistoryTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
             settings.SaveListPosition = saveListPosition.Checked;
             settings.Active = active.Checked;
@@ -1059,6 +1086,8 @@ namespace Clipman
                 AutoRemoveUrlTracking = current.AutoRemoveUrlTracking,
                 LinksHistoryEnabled = current.LinksHistoryEnabled,
                 RichTextHistoryEnabled = current.RichTextHistoryEnabled,
+                IncludeImagesInRichText = current.IncludeImagesInRichText,
+                AutoAddImageFilesToRichText = current.AutoAddImageFilesToRichText,
                 LastSelectedHistoryTab = current.LastSelectedHistoryTab,
                 HistoryTabOrder = HistoryTabs.NormalizeOrder(current.HistoryTabOrder),
                 AutoRemoveUnavailableFileHistoryEvents = current.AutoRemoveUnavailableFileHistoryEvents,

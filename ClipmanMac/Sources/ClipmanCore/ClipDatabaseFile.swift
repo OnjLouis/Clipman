@@ -7,6 +7,9 @@ public enum ClipDatabaseError: Error, LocalizedError, Equatable {
     case incorrectPassword
     case incompleteEncryptedDatabase
     case unsupportedEncryptedVersion(UInt8)
+    case inputTooLarge(Int)
+    case encodedJSONTooLarge(Int)
+    case outputTooLarge(Int)
     case unsupportedFormat(String)
 
     public var errorDescription: String? {
@@ -19,6 +22,12 @@ public enum ClipDatabaseError: Error, LocalizedError, Equatable {
             "The encrypted Clipman database is incomplete."
         case .unsupportedEncryptedVersion:
             "This encrypted Clipman database uses an unsupported format."
+        case .inputTooLarge(let limit):
+            "The Clipman database exceeds the \(limit)-byte input safety limit."
+        case .encodedJSONTooLarge(let limit):
+            "The encoded Clipman database exceeds the \(limit)-byte safety limit."
+        case .outputTooLarge(let limit):
+            "The saved Clipman database would exceed the \(limit)-byte storage limit."
         case .unsupportedFormat(let message):
             message
         }
@@ -28,10 +37,13 @@ public enum ClipDatabaseError: Error, LocalizedError, Equatable {
 public enum ClipDatabaseFile {
     public static let compressedMagic = Data("CLIPDB1".utf8)
     public static let encryptedMagic = Data("CLIPDB2".utf8)
+    public static let maximumStoredDatabaseBytes = 272 * 1024 * 1024
+    public static let maximumEncodedJSONBytes = Gzip.maximumDecompressedBytes
+    private static let readChunkBytes = 1024 * 1024
 
     public static func isEncryptedFile(_ url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return false }
-        return data.starts(with: encryptedMagic)
+        guard let prefix = try? readPrefix(url, count: encryptedMagic.count) else { return false }
+        return prefix == encryptedMagic
     }
 
     public static func load(_ url: URL, password: String = "") throws -> ClipDatabase {
@@ -42,7 +54,7 @@ public enum ClipDatabaseFile {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return defaultValue
         }
-        let data = try Data(contentsOf: url)
+        let data = try readDatabaseData(url)
         if data.isEmpty {
             return defaultValue
         }
@@ -64,14 +76,19 @@ public enum ClipDatabaseFile {
     }
 
     public static func saveAtomicCodable<T: Encodable>(_ url: URL, value: T, password: String = "") throws {
+        let json = try encode(value)
+        try validateEncodedJSONByteCount(json.count)
+        let isDatabaseContainer = url.pathExtension.lowercased() == "clipdb"
         let data: Data
-        if !password.isEmpty && url.pathExtension.lowercased() == "clipdb" {
-            data = try writeEncrypted(url, value: value, password: password)
-        } else if url.pathExtension.lowercased() == "clipdb" {
-            let json = try encode(value)
+        if !password.isEmpty && isDatabaseContainer {
+            data = try writeEncrypted(url, json: json, password: password)
+        } else if isDatabaseContainer {
             data = compressedMagic + (try Gzip.compress(json))
         } else {
-            data = try encode(value)
+            data = json
+        }
+        if isDatabaseContainer {
+            try validateStoredDatabaseByteCount(data.count)
         }
 
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -121,11 +138,10 @@ public enum ClipDatabaseFile {
         return try Gzip.decompress(Data(decrypted))
     }
 
-    private static func writeEncrypted<T: Encodable>(_ url: URL, value: T, password: String) throws -> Data {
+    private static func writeEncrypted(_ url: URL, json: Data, password: String) throws -> Data {
         let salt = existingEncryptedSalt(url) ?? randomBytes(count: 16)
         let iv = randomBytes(count: 16)
         let keys = try deriveKeys(password: password, salt: salt)
-        let json = try encode(value)
         let compressed = Array(try Gzip.compress(json))
         let cipher = try aesCBC(data: compressed, key: keys.encryptionKey, iv: iv, operation: CCOperation(kCCEncrypt))
         var signed = Data()
@@ -140,13 +156,81 @@ public enum ClipDatabaseFile {
     }
 
     private static func existingEncryptedSalt(_ url: URL) -> [UInt8]? {
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? readPrefix(url, count: encryptedMagic.count + 1 + 16),
               data.starts(with: encryptedMagic),
               data.count >= encryptedMagic.count + 1 + 16 else {
             return nil
         }
         let start = encryptedMagic.count + 1
         return Array(data[start..<start + 16])
+    }
+
+    package static func validateContainerInputByteCount(_ count: UInt64) throws {
+        guard count <= UInt64(maximumStoredDatabaseBytes) else {
+            throw ClipDatabaseError.inputTooLarge(maximumStoredDatabaseBytes)
+        }
+    }
+
+    package static func validatePlainJSONInputByteCount(_ count: UInt64) throws {
+        guard count <= UInt64(maximumEncodedJSONBytes) else {
+            throw ClipDatabaseError.inputTooLarge(maximumEncodedJSONBytes)
+        }
+    }
+
+    package static func validateEncodedJSONByteCount(_ count: Int) throws {
+        guard count <= maximumEncodedJSONBytes else {
+            throw ClipDatabaseError.encodedJSONTooLarge(maximumEncodedJSONBytes)
+        }
+    }
+
+    package static func validateStoredDatabaseByteCount(_ count: Int) throws {
+        guard count <= maximumStoredDatabaseBytes else {
+            throw ClipDatabaseError.outputTooLarge(maximumStoredDatabaseBytes)
+        }
+    }
+
+    private static func readDatabaseData(_ url: URL) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        let magicCount = max(compressedMagic.count, encryptedMagic.count)
+        let prefix = try readPrefix(handle, count: magicCount)
+        let isContainer = url.pathExtension.lowercased() == "clipdb" || prefix.starts(with: encryptedMagic)
+        let maximumBytes = isContainer ? maximumStoredDatabaseBytes : maximumEncodedJSONBytes
+        let totalBytes = try handle.seekToEnd()
+        if isContainer {
+            try validateContainerInputByteCount(totalBytes)
+        } else {
+            try validatePlainJSONInputByteCount(totalBytes)
+        }
+
+        try handle.seek(toOffset: UInt64(prefix.count))
+        var data = prefix
+        while true {
+            let remaining = maximumBytes - data.count
+            let requestCount = min(readChunkBytes, remaining + 1)
+            guard let chunk = try handle.read(upToCount: requestCount), !chunk.isEmpty else { break }
+            guard chunk.count <= remaining else {
+                throw ClipDatabaseError.inputTooLarge(maximumBytes)
+            }
+            data.append(chunk)
+        }
+        return data
+    }
+
+    private static func readPrefix(_ url: URL, count: Int) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        return try readPrefix(handle, count: count)
+    }
+
+    private static func readPrefix(_ handle: FileHandle, count: Int) throws -> Data {
+        var result = Data()
+        while result.count < count {
+            guard let chunk = try handle.read(upToCount: count - result.count), !chunk.isEmpty else { break }
+            result.append(chunk)
+        }
+        return result
     }
 
     private static func deriveKeys(password: String, salt: [UInt8]) throws -> (encryptionKey: [UInt8], macKey: [UInt8]) {

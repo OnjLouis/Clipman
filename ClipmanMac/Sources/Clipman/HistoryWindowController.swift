@@ -208,6 +208,7 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
     private var modalIsRunning = false
 
     init(title: String, accessibilityLabel: String, text: String, details: [(String, String)], richText: RichTextPayload?) {
+        let embeddedImage = EmbeddedImageHTML.imageInfo(from: richText)
         panel = ReadOnlyTextPanel(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: details.isEmpty ? 470 : 650),
             styleMask: [.titled, .closable, .resizable],
@@ -253,6 +254,20 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
         let heading = NSTextField(labelWithString: title)
         heading.font = .boldSystemFont(ofSize: 15)
         rootStack.addArrangedSubview(heading)
+        if let embeddedImage,
+           let image = NSImage(data: embeddedImage.data) {
+            let imageView = NSImageView()
+            imageView.image = image
+            imageView.imageScaling = .scaleProportionallyUpOrDown
+            imageView.imageAlignment = .alignCenter
+            imageView.setAccessibilityElement(true)
+            imageView.setAccessibilityRole(.image)
+            imageView.setAccessibilityLabel(embeddedImage.altText.isEmpty
+                ? "Image \(embeddedImage.filename), \(embeddedImage.width) by \(embeddedImage.height) pixels"
+                : "\(embeddedImage.altText), \(embeddedImage.width) by \(embeddedImage.height) pixels")
+            rootStack.addArrangedSubview(imageView)
+            imageView.heightAnchor.constraint(equalToConstant: 220).isActive = true
+        }
         rootStack.addArrangedSubview(textScroll)
         textScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
 
@@ -425,6 +440,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindowDidRequestSaveCurrentClipboard(_ controller: HistoryWindowController)
     func historyWindowDidRequestImport(_ controller: HistoryWindowController)
     func historyWindowDidRequestExport(_ controller: HistoryWindowController)
+    func historyWindow(_ controller: HistoryWindowController, didRequestWebsiteTitleFor entry: ClipEntry)
     func historyWindow(_ controller: HistoryWindowController, didCleanURLTracking entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCleanLinksForSharing entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didNormalizeLineEndings entries: [ClipEntry], style: LineEndingStyle)
@@ -804,6 +820,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var quickCopyHotkeys: [String: HotkeyDescriptor] = [:]
     private var quickPasteModes: [String: String] = [:]
     private var keyMonitor: Any?
+
+    var isShowingRichTextHistory: Bool { mode == .richText }
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
@@ -1337,7 +1355,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 filteredEntries = grouped
             } else {
                 filteredEntries = grouped.filter {
-                    $0.Text.lowercased().contains(query) || $0.Name.lowercased().contains(query) || $0.Group.lowercased().contains(query)
+                    $0.Text.lowercased().contains(query)
+                        || $0.Name.lowercased().contains(query)
+                        || $0.Group.lowercased().contains(query)
+                        || (LinkClassifier.isLinkOnlyText($0.Text)
+                            && LinkPresentation.searchableText(urlText: $0.Text, assignedName: $0.Name).lowercased().contains(query))
                 }
             }
         case .files:
@@ -1418,6 +1440,20 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         statusLabel.stringValue = text
         statusLabel.toolTip = text
         statusLabel.setAccessibilityValue(text)
+    }
+
+    func reportPasteStatus(_ text: String) {
+        statusLabel.stringValue = text
+        statusLabel.toolTip = text
+        statusLabel.setAccessibilityValue(text)
+        NSAccessibility.post(
+            element: statusLabel,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: text,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue
+            ]
+        )
     }
 
     private func filterEntries(_ entries: [ClipEntry]) -> [ClipEntry] {
@@ -1529,6 +1565,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             addMenuItem("View Selected Text", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
             addMenuItem("Set As Quick Paste Target...", action: #selector(menuSetQuickCopyTarget), to: menu)
             addMenuItem("Push To Other Devices", action: #selector(menuPushToOtherMachines), to: menu, shortcut: "Command+P")
+            if let entry = selectedEntry(),
+               entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               LinkClassifier.isLinkOnlyText(entry.Text) {
+                addMenuItem("Use Website Title as Name...", action: #selector(menuUseWebsiteTitleAsName), to: menu)
+            }
             addQuickPasteTargetItems(to: menu)
         } else {
             addMenuItem("View File Event Details", action: #selector(menuViewSelected), to: menu, shortcut: "F4")
@@ -1787,6 +1828,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuFind() { focusSearch() }
     @objc private func menuFindNext() { selectSearchResult(direction: 1) }
     @objc private func menuFindPrevious() { selectSearchResult(direction: -1) }
+    @objc private func menuUseWebsiteTitleAsName() {
+        guard let entry = selectedEntry(),
+              entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              LinkClassifier.isLinkOnlyText(entry.Text)
+        else {
+            NSSound.beep()
+            return
+        }
+        historyDelegate?.historyWindow(self, didRequestWebsiteTitleFor: entry)
+    }
     @objc private func menuPreferences() { historyDelegate?.historyWindowDidRequestPreferences(self) }
     @objc private func menuSecrets() { historyDelegate?.historyWindowDidRequestSecrets(self) }
     @objc private func menuManual() { historyDelegate?.historyWindowDidRequestManual(self) }
@@ -2053,6 +2104,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             if !richText.HtmlFragment.isEmpty { formats.append("HTML") }
             if !richText.RtfBase64.isEmpty { formats.append("RTF") }
             details.append(("Formatting", formats.joined(separator: " and ")))
+            if let image = EmbeddedImageHTML.imageInfo(from: richText) {
+                details.append(("Image filename", image.filename))
+                details.append(("Image type", image.mimeType == "image/png" ? "PNG" : "JPEG"))
+                details.append(("Image dimensions", "\(image.width) by \(image.height) pixels"))
+                details.append(("Image size", ByteCountFormatter.string(fromByteCount: Int64(image.data.count), countStyle: .file)))
+            }
         }
         addDetail(&details, "Entry ID", entry.Id)
         return details
@@ -2786,7 +2843,15 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func displayText(for entry: ClipEntry) -> String {
-        entry.Name.isEmpty ? entry.Text : "\(entry.Name): \(entry.Text)"
+        if let image = EmbeddedImageHTML.imageInfo(from: entry.RichText) {
+            let name = entry.Name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? "Image: \(image.filename)" : name
+        }
+        if LinkClassifier.isLinkOnlyText(entry.Text),
+           let presentation = LinkPresentation.make(urlText: entry.Text, assignedName: entry.Name) {
+            return presentation.rowText
+        }
+        return entry.Name.isEmpty ? entry.Text : "\(entry.Name): \(entry.Text)"
     }
 
     private func fileEventLabel(_ event: FileClipboardEvent) -> String {

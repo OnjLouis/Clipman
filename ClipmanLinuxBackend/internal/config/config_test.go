@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/clipdb"
 )
 
 func TestLoadRejectsMalformedQuotedString(t *testing.T) {
@@ -47,6 +49,21 @@ func TestLoadRejectsUnsafeLimit(t *testing.T) {
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "max_blob_bytes") {
 		t.Fatalf("Load error = %v", err)
+	}
+}
+
+func TestLoadMigratesLegacyClientContainerLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := "renderer = \"line\"\ndefault_kind = \"history\"\npassword_mode = \"prompt\"\n[limits]\nmax_blob_bytes = 67108864\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	value, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Limits.MaxBlobBytes != clipdb.DefaultMaxBlobBytes {
+		t.Fatalf("legacy client limit was not migrated: %d", value.Limits.MaxBlobBytes)
 	}
 }
 

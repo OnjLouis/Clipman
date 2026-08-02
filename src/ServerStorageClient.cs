@@ -10,6 +10,7 @@ namespace Clipman
 {
     internal sealed class ServerStorageClient
     {
+        internal const long MaximumServerTransferBytes = 272L * 1024L * 1024L;
         private readonly string baseUrl;
         private readonly string token;
         private readonly string databaseId;
@@ -50,7 +51,16 @@ namespace Clipman
             using (var response = (HttpWebResponse)request.GetResponse())
             using (var memory = new MemoryStream())
             {
-                response.GetResponseStream().CopyTo(memory);
+                ValidateServerTransferLength(response.ContentLength);
+                var stream = response.GetResponseStream();
+                if (stream == null) throw new InvalidDataException("Clipman Server returned an empty database response.");
+                var buffer = new byte[64 * 1024];
+                int count;
+                while ((count = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    ValidateServerTransferLength(memory.Length + count);
+                    memory.Write(buffer, 0, count);
+                }
                 return new ServerDatabaseDownload
                 {
                     Metadata = MetadataFromResponse(response),
@@ -61,6 +71,7 @@ namespace Clipman
 
         public ServerDatabaseMetadata Upload(byte[] data, string expectedRevision)
         {
+            ValidateServerTransferLength(data == null ? 0 : data.LongLength);
             var request = CreateRequest(DatabasePath(), "PUT");
             if (!string.IsNullOrWhiteSpace(expectedRevision))
             {
@@ -78,6 +89,14 @@ namespace Clipman
             using (var response = (HttpWebResponse)request.GetResponse())
             {
                 return MetadataFromResponse(response);
+            }
+        }
+
+        internal static void ValidateServerTransferLength(long length)
+        {
+            if (length > MaximumServerTransferBytes)
+            {
+                throw new InvalidDataException("The Clipman Server database transfer exceeds the 272 MiB client safety limit.");
             }
         }
 

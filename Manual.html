@@ -53,6 +53,7 @@
 
   <h2 id="contents">Contents</h2>
   <ul>
+    <li><a href="#changelog">Changelog</a></li>
     <li><a href="#notes">Notes</a></li>
     <li><a href="#basic-use">Basic Use</a></li>
     <li><a href="#keyboard-shortcuts">Keyboard Shortcuts</a></li>
@@ -83,521 +84,21 @@
     <li><a href="#application-files">Application Files</a></li>
     <li><a href="#non-text-clipboard-events">Non-text Clipboard Events</a></li>
     <li><a href="#command-line">Command Line</a></li>
-    <li><a href="#changelog">Changelog</a></li>
     <li><a href="#license">License</a></li>
     <li><a href="#credits">Credits</a></li>
   </ul>
 
-  <h2 id="notes">Notes</h2>
-  <p>Clipman runs as a portable Windows app, a Mac menu bar app, or a per-user Linux desktop app. It stores device-specific settings separately from shared clipboard history, so several computers can share history without sharing hotkeys, startup choices, or local-only preferences.</p>
-
-  <h2 id="basic-use">Basic Use</h2>
-  <ul>
-    <li>Copy normally. Clipman stores text clips and separate file-history events while monitoring is on.</li>
-    <li>Open history, choose an item, and press <code>Enter</code> to put it back on the clipboard. An optional preference can also paste it into the application that was active before Clipman opened. Press <code>Esc</code> or close the window to hide history without quitting.</li>
-    <li>Use search, groups, pinned entries, sort order, and Entry Properties as your history grows. The detailed commands are in the Keyboard Shortcuts table.</li>
-    <li>Use template entries for reusable text that should resolve date, time, system, or username variables only when copied or pasted.</li>
-    <li>Turn monitoring off temporarily when copying text that should not enter history, add sensitive apps to the ignored applications list, or enable sensitive-data exclusions for known text patterns.</li>
-    <li>On Mac, <code>Option+M</code> opens the history window's Clipman command menu directly.</li>
-  </ul>
-
-  <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
-  <p>Most commands are shared between Windows and Mac, but the modifier keys follow each platform's conventions. Windows uses <code>Ctrl</code>, <code>Alt</code>, <code>Shift</code>, and sometimes <code>Win</code>. Mac uses <code>Command</code>, <code>Option</code>, and <code>Control</code>. Global hotkeys can be changed in Preferences where supported. The Linux download includes a dedicated manual with its GTK and X11 shortcuts.</p>
-  <table>
-    <thead>
-      <tr>
-        <th>What it does</th>
-        <th>Windows shortcut</th>
-        <th>Mac shortcut</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td>Show or hide clipboard history</td><td><code>Ctrl+Alt+\</code></td><td><code>Option+Shift+`</code></td></tr>
-      <tr><td>Toggle monitoring on or off</td><td><code>Ctrl+Alt+`</code></td><td><code>Option+Shift+\</code></td></tr>
-      <tr><td>Save the current clipboard to history, even while monitoring is off</td><td>User-assigned in Preferences; unset by default</td><td>User-assigned in Preferences; unset by default</td></tr>
-      <tr><td>Paste an entry assigned to Quick Paste</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
-      <tr><td>Paste a saved secret</td><td>User-assigned in Secrets</td><td>User-assigned in Secrets</td></tr>
-      <tr><td>Open Secrets</td><td><code>Ctrl+Shift+E</code></td><td><code>Command+Shift+E</code></td></tr>
-      <tr><td>Switch to Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+T</code></td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
-      <tr><td>Switch to Links history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+L</code> when Links history is enabled</td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
-      <tr><td>Switch to Rich Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+R</code> when Rich Text history is enabled</td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
-      <tr><td>Switch to File history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+I</code></td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
-      <tr><td>Move the current history tab left or right</td><td><code>Alt+Left</code> or <code>Alt+Right</code></td><td><code>Option+Left</code> or <code>Option+Right</code></td></tr>
-      <tr><td>Open Preferences</td><td><code>Ctrl+,</code></td><td><code>Command+,</code></td></tr>
-      <tr><td>Open search</td><td><code>Ctrl+F</code></td><td><code>Command+F</code></td></tr>
-      <tr><td>Find next search result</td><td><code>F3</code></td><td><code>F3</code></td></tr>
-      <tr><td>Find previous search result</td><td><code>Shift+F3</code></td><td><code>Shift+F3</code></td></tr>
-      <tr><td>Move to the first visible history row</td><td><code>Home</code></td><td><code>Home</code></td></tr>
-      <tr><td>Move to the last visible history row</td><td><code>End</code></td><td><code>End</code></td></tr>
-      <tr><td>Move up by one visible page</td><td><code>Page Up</code></td><td><code>Page Up</code></td></tr>
-      <tr><td>Move down by one visible page</td><td><code>Page Down</code></td><td><code>Page Down</code></td></tr>
-      <tr><td>Jump to first normal item below pinned items</td><td><code>Backspace</code></td><td><code>Backspace</code></td></tr>
-      <tr><td>Open this manual</td><td><code>F1</code></td><td><code>F1</code></td></tr>
-      <tr><td>Check for updates</td><td><code>Shift+F1</code></td><td><code>Shift+F1</code></td></tr>
-      <tr><td>Open the project page</td><td><code>Ctrl+F1</code></td><td><code>Command+F1</code></td></tr>
-      <tr><td>Open diagnostics</td><td><code>Alt+F1</code></td><td><code>Option+F1</code></td></tr>
-      <tr><td>Close or hide the history window</td><td><code>Esc</code></td><td><code>Escape</code></td></tr>
-      <tr><td>Switch Preferences tabs</td><td><code>Ctrl+1</code> to <code>Ctrl+6</code></td><td>Tab control navigation</td></tr>
-      <tr><td>Copy selected text entry and close history; optionally paste into the previous application</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
-      <tr><td>Copy selected text entry without closing history</td><td><code>Ctrl+C</code></td><td><code>Command+C</code></td></tr>
-      <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
-      <tr><td>Paste clipboard text into history</td><td><code>Ctrl+V</code></td><td><code>Command+V</code></td></tr>
-      <tr><td>Push selected text entry to other synced devices</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
-      <tr><td>Pin or unpin selected entry</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
-      <tr><td>Open Entry Properties</td><td><code>F2</code></td><td><code>F2</code></td></tr>
-      <tr><td>View selected text in a read-only window</td><td><code>F4</code></td><td><code>F4</code></td></tr>
-      <tr><td>Move by URL/code boundary in text review or Entry Properties text</td><td><code>Ctrl+Left</code> or <code>Ctrl+Right</code></td><td><code>Option+Left</code> or <code>Option+Right</code></td></tr>
-      <tr><td>Assign selected entries to a group</td><td><code>Ctrl+G</code></td><td><code>Command+G</code></td></tr>
-      <tr><td>Move focus to the group filter</td><td><code>Alt+G</code></td><td><code>Option+G</code></td></tr>
-      <tr><td>Jump to one of the first ten group filters</td><td><code>Alt+1</code> to <code>Alt+0</code></td><td><code>Option+1</code> to <code>Option+0</code></td></tr>
-      <tr><td>Copy one of the first ten pinned text entries</td><td><code>Ctrl+1</code> to <code>Ctrl+0</code></td><td><code>Command+1</code> to <code>Command+0</code></td></tr>
-      <tr><td>Move selected entries in manual order</td><td><code>Alt+Up</code> or <code>Alt+Down</code></td><td><code>Option+Up</code> or <code>Option+Down</code></td></tr>
-      <tr><td>Delete selected unpinned text entries</td><td><code>Del</code></td><td><code>Command+Backspace</code></td></tr>
-      <tr><td>Import clipboard entries</td><td><code>Ctrl+I</code></td><td><code>Command+I</code></td></tr>
-      <tr><td>Export clipboard entries</td><td><code>Ctrl+E</code></td><td><code>Command+E</code></td></tr>
-      <tr><td>Clean URL tracking from selected text</td><td><code>Ctrl+Shift+R</code></td><td><code>Command+Shift+R</code></td></tr>
-      <tr><td>Clean link for sharing</td><td><code>Ctrl+Shift+S</code></td><td><code>Command+Shift+S</code></td></tr>
-      <tr><td>Restore selected file-history event to the clipboard</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
-      <tr><td>Pin or unpin selected file-history event</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
-      <tr><td>Go to selected file or folder</td><td><code>Ctrl+Enter</code></td><td><code>Command+Enter</code></td></tr>
-      <tr><td>Remove selected unpinned file-history events</td><td><code>Del</code></td><td><code>Command+Backspace</code></td></tr>
-      <tr><td>Clear normal file history</td><td><code>Ctrl+Del</code></td><td><code>Control+Backspace</code></td></tr>
-      <tr><td>Remove unavailable unpinned file-history events</td><td><code>Alt+Del</code></td><td><code>Option+Backspace</code></td></tr>
-      <tr><td>Restore one of the first ten pinned file events</td><td><code>Ctrl+1</code> to <code>Ctrl+0</code></td><td><code>Command+1</code> to <code>Command+0</code></td></tr>
-      <tr><td>Copy paths from one of the first ten pinned file events</td><td><code>Ctrl+Shift+1</code> to <code>Ctrl+Shift+0</code></td><td><code>Command+C</code> after selecting the event</td></tr>
-    </tbody>
-  </table>
-
-  <h2 id="preferences">Preferences</h2>
-  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, optional Links and Rich Text history, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
-
-  <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text, Links, or Rich Text history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. On Mac, macOS asks for permission before Clipman can send that command; allow Clipman to control the computer when prompted, then quit and reopen Clipman if the first paste is blocked. Clipman only sends the paste command when the destination has an editable text control in focus. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
-
-  <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, a newly accepted clipboard event selects Text, Links, Rich Text, or Files the next time history opens. That automatic selection is used once; afterward, a section you choose manually remains selected until another new clipboard event arrives. Ignored, excluded, or failed captures do not change the destination. If an optional history view is disabled, its entries open through their plain-text fallback in Text history.</p>
-
-  <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
-
-  <p><strong>Save Current Clipboard to History</strong> is another deliberate command that works while monitoring is off. Use it from the Clipman menu, or assign its optional global hotkey in Preferences. It reads the clipboard once and sends supported text, links, rich text, or files through normal duplicate, storage, and synchronization handling without turning monitoring on. Ignored-application and sensitive-pattern rules apply to automatic capture, so they do not block this explicit save; cooperative private-clipboard markers and concealed pasteboard data remain protected.</p>
-
-  <p>Each Quick Paste target has a mode. <strong>Paste and restore previous clipboard</strong> temporarily places the entry on the system clipboard, sends the normal paste command to the active app, and then restores the previous clipboard contents where possible. <strong>Paste and keep target on clipboard</strong> pastes the entry and leaves that entry on the clipboard. <strong>Copy to clipboard only</strong> places the entry on the clipboard without sending a paste command.</p>
-
-  <p>Use the <strong>Quick Paste</strong> menu on Windows, or <strong>Quick Paste Targets</strong> from the Mac <code>Option+M</code> Clipman menu, to review all entries that currently have Quick Paste hotkeys. Choosing one of those menu items moves focus to the matching entry so you can press <code>F2</code> to edit or remove its Quick Paste assignment. Entries with Quick Paste targets include the assigned hotkey and mode in the row text; entries without Quick Paste targets do not carry that extra wording.</p>
-
-  <p><strong>Template entries:</strong> In Entry Properties, mark a text entry as a template when you want variables to resolve at copy or paste time. The stored text remains unchanged in the database, exports, search, and Entry Properties. Clipman resolves the template only when the entry is copied, quick-pasted, or automatically copied as a new remote entry.</p>
-
-  <p>Template variables include <code>{{year_full}}</code>, <code>{{year_short}}</code>, <code>{{month_name}}</code>, <code>{{month_name_full}}</code>, <code>{{month_name_short}}</code>, <code>{{month_num}}</code>, <code>{{month_num_padded}}</code>, <code>{{day_of_month}}</code>, <code>{{day_of_month_padded}}</code>, <code>{{day_name_full}}</code>, <code>{{day_name_short}}</code>, <code>{{hour_24}}</code>, <code>{{hour_24_padded}}</code>, <code>{{hour_12}}</code>, <code>{{hour_12_padded}}</code>, <code>{{minute}}</code>, <code>{{minute_padded}}</code>, <code>{{second}}</code>, <code>{{second_padded}}</code>, <code>{{utc_offset}}</code>, <code>{{time_zone}}</code>, <code>{{time_zone_short}}</code>, <code>{{os_name}}</code>, <code>{{os_version}}</code>, and <code>{{username}}</code>. Unknown variables are left alone.</p>
-
-  <p>Example templates: <code>{{year_full}}-{{month_num_padded}}-{{day_of_month_padded}}</code>, <code>Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}</code>, or <code>{{os_name}} version {{os_version}}</code>. Entry Properties includes buttons to insert sample templates, insert individual fields at the current cursor, preview the resolved template, and view the variable list. Built-in samples include <code>{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}</code>, <code>{{day_of_month_padded}} {{month_name_short}} {{year_full}}</code>, and <code>{{month_name_short}} {{day_of_month_padded}}, {{year_full}}</code>.</p>
-
-  <p><strong>Automatically group new clips by source application</strong> is enabled by default for new installs where the setting is exposed. It places newly captured clipboard text into a group named after the application Clipman believes supplied the clipboard text, such as Chrome, Thunderbird, Outlook, Safari, TextEdit, or Logic. Disable it if you prefer all new entries to start ungrouped.</p>
-
-  <p>Windows first asks for the clipboard owner application, then falls back to the foreground application if Windows does not expose a useful owner. Mac uses the foreground application reported by macOS when the clipboard change is captured. Some background hotkeys or automation tools may still be attributed to the foreground application because operating systems do not always preserve reliable source metadata.</p>
-
-  <p>Global hotkey fields accept combinations with modifiers and one real key, such as <code>Ctrl+Alt+\</code>, <code>Ctrl+Shift+H</code>, <code>Option+Shift+1</code>, or <code>Control+Option+F1</code>. Two modifiers are safest. For compatibility with existing clipboard-manager habits, Clipman also allows one modifier with function keys or with the grave/accent and backslash-style punctuation keys. Single-modifier letters, numbers, comma, space, Tab, Delete, Backspace, Escape, and reserved operating-system shortcuts are rejected. Clipman warns before saving a single-modifier global hotkey because it may conflict with another app or keyboard layout.</p>
-
-  <p><strong>Storage and Password:</strong> Choose the shared Clipman data folder, set or change the history password, choose whether this computer remembers the password, remove password encryption, and manage ignored applications. Clipman stores shared text history as <code>clipman-history.clipdb</code> inside the chosen folder.</p>
-
-  <p>The Remember history password on this computer checkbox controls convenience versus exposure. When unchecked, Clipman asks for the history password when it starts and keeps the password only for the current run. When checked, Windows stores an unlockable password protected by Windows for the current user and machine, including on Windows 7, and Mac stores it in that user's Keychain for the selected database path. That is convenient for automatic startup, but it cannot protect against malware already running as the same signed-in user. The Use no password button clears the saved history password, clears any session-only password, and rewrites the current database without password encryption. It exists because blank password fields mean "keep the current password"; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
-
-  <p><strong>Sensitive data:</strong> Sensitive-data exclusions are off by default and device-specific. When the mode is set to Exclude from history, Clipman checks automatic clipboard text capture against the presets you enable. Matching text is not stored in Clipman history, and the system clipboard is not changed, so your immediate paste still works. This filter does not apply to existing history, imports, Send To, Quick Paste, Push to other devices, or entries manually copied from Clipman.</p>
-
-  <p>The built-in presets include credit card numbers with Luhn validation, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys, and approximate US driver-license shapes. International phone numbers include compact E.164-style numbers such as <code>+447890123456</code> and common spaced, dashed, dotted, or bracketed variants. Built-in presets are deliberately unchecked by default because pattern matching can have false positives.</p>
-
-  <h2 id="platform-notes">Platform Notes</h2>
-  <p>The same manual ships with the Windows and Mac builds. The app name, shared history format, sounds folder behavior, password model, and database sync model are intended to stay aligned across platforms.</p>
-
-  <p><strong>Windows:</strong> Clipman runs in the notification area and opens the history window with the configured global hotkey. Windows Preferences includes Send To integration, Windows startup registration, command-line import/export support, and Windows-protected password remembering when explicitly enabled.</p>
-
-  <p><strong>Mac:</strong> Clipman is packaged as a signed and notarized <code>Clipman.app</code> and runs as a menu bar app. After unzipping, move or drag <code>Clipman.app</code> to <code>/Applications</code>, then open it normally.</p>
-
-  <p><strong>Linux:</strong> Clipman is a GTK 4 desktop app that connects to Clipman Server and keeps an encrypted offline read cache. Its archive includes a per-user installer and a dedicated accessible manual covering desktop dependencies, X11 and Wayland differences, shortcuts, updates, File History, Secrets, and installed files.</p>
-
-  <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
-
-  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu and <code>Command+F</code> opens search. The Clipman menu shows the current <code>Control+number</code> for each visible history area; those numbers update immediately when tabs are moved. The status line shows the active history area and visible entry count. It is not part of normal Tab navigation, but VoiceOver can reach it with VoiceOver navigation. Pressing <code>Enter</code> from search returns focus to the history list.</p>
-
-  <p>Mac global hotkeys are stored by physical key code so the displayed shortcut remains readable on different keyboard layouts. Default Mac global hotkeys avoid common VoiceOver conflicts, but they can be changed in Preferences.</p>
-  <h2 id="startup-state">Startup State</h2>
-  <p>Clipman remembers whether monitoring was on or off. When sounds are enabled, it plays the on or off sound at launch so you know the app is running and which state it restored.</p>
-
-  <p>Use <strong>Preferences, Startup and updates, Run Clipman at Windows startup</strong> on Windows or <strong>Run Clipman at login</strong> on Mac to start Clipman automatically when you sign in. Windows creates a per-user startup entry for the current <code>clipman.exe</code> path. Mac creates a per-user LaunchAgent for the current <code>Clipman.app</code>. Neither requires administrator permission.</p>
-
-  <p>Use <strong>Add current clipboard item to Clipman on start</strong> if you want Clipman to try to save whatever is already on the system clipboard when Clipman launches. This is off by default. When enabled, it still follows normal monitoring state, ignored-application rules, clipboard privacy signals where supported, concealed pasteboard handling where supported, and Sensitive Data preferences.</p>
-
-  <h2 id="pinned-entries">Pinned Entries</h2>
-  <p>Pinned entries are grouped at the top of the history list. A separator marks the start of normal entries. Pinned entries are numbered when they can be copied by shortcut, so the first pinned entry starts with 1, the second with 2, and so on through 0 for the tenth. Pinned state is still shown in the Pinned column or metadata, but not before the item text.</p>
-
-  <p>Pinned entries are protected from normal cleanup: Delete skips them, and history size or age limits do not remove them. Use <code>Shift+Enter</code> or the menu command to change the pinned state. Use the pinned-entry shortcuts in the Keyboard Shortcuts table to copy one of the first ten pinned entries and close history.</p>
-
-  <p>Deletion confirmation is enabled by default. Android and iOS provide a Settings toggle. Windows, Mac and Linux also let you turn future entry confirmations off from the first confirmation dialog; the preference can be restored later. Commands that clear an entire history area keep their separate stronger confirmation.</p>
-
-  <h2 id="entry-names-and-text">Entry Names and Text</h2>
-  <p>Use <code>F2</code> to open Entry Properties for the selected entry. You can add a short name or hint, assign a group, configure a Quick Paste hotkey, and edit the stored clipboard text itself. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
-
-  <p>In Entry Properties and the <code>F4</code> text review window, word navigation is tuned for URLs and code-like strings. On Windows, <code>Ctrl+Left</code> and <code>Ctrl+Right</code> stop at punctuation and symbol boundaries such as slashes, question marks, ampersands, equals signs, dashes, and underscores. On Mac, use <code>Option+Left</code> and <code>Option+Right</code>. Add <code>Shift</code> on either platform to extend the selection.</p>
-
-  <p>The <code>F4</code> text review window shows the clipboard text first, followed by a separate Details list or table in tab order. Details include useful metadata such as name, group, source device, pinned/template state, added and last-used times, manual order where present, text length, link count, and entry ID.</p>
-
-  <p>For example, an entry containing <code>1234</code> can be shown as <code>Test: 1234</code>. The name is metadata only: copying, cutting, exporting to text, and viewing full text use the clipboard text without the name.</p>
-
-  <p>Type-to-jump navigation uses the original clipboard text, not the entry name. If <code>1234</code> is named <code>Test</code>, typing <code>123</code> jumps to that entry, while typing <code>Test</code> does not jump to it because the clipboard text does not start with Test. Search with <code>Ctrl+F</code> checks both names and clipboard text.</p>
-
-  <p>For quick named lookup, type a slash followed by the entry name prefix, such as <code>/Test</code>. Clipman jumps to the matching named entry when it is visible in the current group filter.</p>
-
-  <h2 id="links-history">Links History</h2>
-  <p>Links history is optional and off by default. Enable it in Preferences with <strong>Show Links history tab</strong>. When enabled, Clipman adds a separate Links history view for entries where the whole clipboard text is a single absolute <code>http</code>, <code>https</code>, or <code>clipman</code> URL. Prose that merely contains a link, multiline text, <code>mailto:</code>, <code>file:</code>, and other custom schemes remain in Text history.</p>
-
-  <p>Links are not stored in a separate database and are not removed from shared text history. The Links tab is a filtered view of the same entries, so copy, cut, paste after selected, grouping, pinning, Quick Paste, templates, search, sorting, cleanup actions, and sharing across machines work like Text history wherever applicable. If the Links tab is disabled, links simply appear in Text history as before.</p>
-
-  <p>Enabling Links history adds its tab at the saved per-device position. On Mac, the Clipman menu shows its current <code>Control+number</code> shortcut. On Windows and Linux, <code>Alt+L</code> always opens Links when enabled, <code>Alt+I</code> always opens File history, and <code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code> moves through the visible history areas in their current order.</p>
-
-  <h2 id="rich-text-history">Rich Text History</h2>
-  <p>Rich Text history is optional and off by default on Windows, Mac, Linux, Android and iOS. Enable <strong>Preserve copied formatting and show Rich Text history</strong> in Preferences or mobile Settings when you want Clipman to retain formatting supplied by applications such as browsers, word processors, email clients, and rich-text editors. Enable it before copying formatted content; entries captured earlier as plain text cannot have their original formatting reconstructed. Clipman stores bounded rich data alongside the normal plain-text fallback in the shared text-history database. The separate Rich Text section is an accessible filtered list, not a second database.</p>
-
-  <p>For example, enable the preference, copy a formatted heading or link from a browser, and then select that new entry in Rich Text History. Press <code>Enter</code> or Copy and paste into a word processor or another rich-text destination. Clipman puts the available plain and rich formats on the clipboard together, so the destination chooses the richest format it supports.</p>
-
-  <p>Pressing <code>Enter</code>, Copy, Quick Paste, or receiving a newly created remote rich-text entry can place the available formats on the clipboard together. Templates and copies that combine several entries remain plain text. F4 shows the normal text and entry details; Windows and Mac safely preview stored RTF, while Linux safely presents common stored HTML formatting. Clipman does not load stored HTML into an active browser or execute scripts, remote content, or embedded objects.</p>
-
-  <p>Formatting belongs to the exact stored text. Editing the text in Entry Properties or applying a text transformation clears the old rich payload so stale formatting cannot be attached to different content. If HTML exceeds 768 KiB, RTF exceeds 1 MiB, the combined payload exceeds 1.75 MiB, or a payload is invalid, Clipman keeps the plain text and discards the rich data. Diagnostics reports aggregate rich-entry counts and byte totals but never includes the formatted payload itself.</p>
-
-  <p>Android captures and restores HTML, the rich-text format supported by Android's standard text clipboard. It preserves RTF received from desktop or iOS clients but uses the plain-text fallback when an entry contains only RTF. iPhone and iPad capture and restore both HTML and RTF through Apple's explicit Paste control. On mobile, use the section-switch button or the screen-reader page gesture to move through Text, Rich Text and Links while the option is enabled.</p>
-
-  <h2 id="groups">Groups</h2>
-  <p>Use <code>Ctrl+G</code> on Windows, <code>Command+G</code> on Mac, or the group command in the history window to assign selected entries to a group. Type a new group name, or choose an existing group from the list and press <code>Enter</code> or OK. Choose No group, or leave the group name blank, to remove the group. The Filter control can show all entries, pinned entries, named entries, ungrouped entries, one custom group, or entries attributed to one device. Filter choices keep their names short for fast typed navigation, with device choices presented separately from groups.</p>
-
-  <p>Group names are case-insensitive. For example, <strong>GitHub</strong>, <strong>Github</strong>, and <strong>github</strong> are treated as one group instead of three. When old entries contain several capitalizations, Clipman displays the spelling used most often; the newest spelling resolves a tie. Assigning an entry with different capitalization reuses that displayed spelling.</p>
-
-  <p>On Windows, the <strong>Groups</strong> menu lists the same filters as the Group field. The first ten filters show their <code>Alt+1</code> through <code>Alt+0</code> shortcuts in the menu; additional groups appear by name without a numbered shortcut. The top-level Groups menu deliberately does not use <code>Alt+G</code>, because <code>Alt+G</code> moves focus directly to the Group field.</p>
-
-  <p>Use <code>Alt+1</code> through <code>Alt+0</code> on Windows, or <code>Option+1</code> through <code>Option+0</code> on Mac, to jump to one of the first ten group filters. These follow the same order as the Group filter field: All, Pinned, Named, Ungrouped, then custom groups.</p>
-
-  <p>On Windows, the Group filter applies when you press <code>Enter</code> in the group field or move focus away from it. Arrowing through the group list does not immediately throw focus back to the history list. On Mac, open the group filter with <code>Option+G</code> or the toolbar Filter button, then choose the filter from the menu.</p>
-
-  <p>Each Clipman client includes a Device name setting for new clipboard events. Changing it does not rewrite old history or move machine-specific data; it only changes the device label recorded on future entries from that client.</p>
-
-  <h2 id="sorting-and-manual-order">Sorting and Manual Order</h2>
-  <p>The Text history list includes the entry text, name, group, device, added time, and last-used time. The Device column records the computer, phone, or tablet that added or most recently re-added the entry, which helps when several devices share the same database.</p>
-
-  <p>The View menu on Windows includes Text history, Links history, Rich Text history, and File history commands with <code>Alt+T</code>, <code>Alt+L</code>, <code>Alt+R</code>, and <code>Alt+I</code> where those areas are enabled. Linux provides the same four history commands and shortcuts. Focus a tab and move it with <code>Alt+Left</code> or <code>Alt+Right</code> on Windows and Linux, or <code>Option+Left</code> or <code>Option+Right</code> on Mac. Mac keeps keyboard focus on the moved tab instead of entering its history list. The selected Mac tab is part of the normal Tab and Shift+Tab sequence; use Left or Right Arrow while it is focused to switch history areas, then Tab onward to the history list. Tab order is stored for the current device. Disabled optional tabs keep their place and return there when enabled; moving a tab does not change the fixed named shortcuts on Windows or Linux, while Mac updates the visible <code>Control+number</code> shortcuts immediately. The View menu on Windows and Linux, and the Sort controls or Clipman menu on Mac, can sort normal Text, Links, or Rich Text history entries by last used, added date, text, group, device, or manual order. On File history, the same controls sort by time captured, file count, name, operation, source application, or manual order.</p>
-
-  <p>Sort direction labels describe the next result plainly, such as oldest first, newest first, A first, Z first, fewest files first, or most files first. Pinned entries and pinned file events stay above normal items and keep their own manual order. Move pinned and normal items separately.</p>
-
-  <h2 id="cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</h2>
-  <p><code>Ctrl+C</code> and <code>Ctrl+X</code> on Windows, or <code>Command+C</code> and <code>Command+X</code> on Mac, put normal text on the system clipboard, so the text can be pasted into other applications. Windows also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries. Mac pastes multiple copied entries back as separate entries when they are separated by Clipman's text separator.</p>
-
-  <h2 id="history-limits">History Limits</h2>
-  <p>Preferences can limit the maximum number of entries or maximum entry age. Use <code>0</code> for no limit. Pinned entries and named entries are kept even when limits are applied.</p>
-
-  <h2 id="actions">Actions</h2>
-  <p>On Windows, the Actions menu contains simple text cleanup tools for selected entries: copy as plain text, trim whitespace, convert to single line, remove blank lines, remove URL tracking, clean links for sharing, line endings, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode. The most common actions also have shortcuts: <code>Ctrl+Shift+C</code> for plain-text copy, <code>Ctrl+Shift+T</code> for trim, <code>Ctrl+Shift+L</code> for single line, <code>Ctrl+Shift+B</code> for remove blank lines, <code>Ctrl+Shift+R</code> for remove URL tracking, <code>Ctrl+Shift+S</code> for clean link for sharing, <code>Ctrl+Shift+H</code> for HTML to readable text, and <code>Ctrl+Shift+U</code> for URL encode. Transform actions update the stored entry and also put the transformed result on the Windows clipboard. Mac includes URL cleanup and line-ending actions in the Clipman menu; <code>Command+Shift+R</code> removes URL tracking and <code>Command+Shift+S</code> cleans links for sharing. These update the stored entry and put the transformed result on the Mac clipboard.</p>
-
-  <p>On Windows, <strong>Copy as plain text</strong> copies the selected entry using only the Windows plain-text clipboard format. It does not strip HTML tags from stored HTML source. Use <strong>HTML to readable text</strong> when you want Clipman to remove HTML tags and keep the readable text.</p>
-
-  <p>Text transforms change the stored plain text and therefore clear any previous Rich Text formatting for that entry. Copy as plain text does not modify the stored entry.</p>
-
-  <p><strong>Remove URL tracking</strong> removes common tracking query parameters from web links, including <code>utm_*</code>, <code>fbclid</code>, <code>gclid</code>, <code>msclkid</code>, and similar marketing identifiers. It works on plain links and common HTML link attributes such as <code>href</code> and <code>src</code>. Automatic URL-tracking removal is opt-in from Preferences; when enabled, newly copied text is cleaned before Clipman stores it, and the cleaned text is placed on the Windows clipboard.</p>
-
-  <p><strong>Clean link for sharing</strong> removes tracking parameters and also removes share-state parameters that can change how a shared link opens. For YouTube links this includes timestamp parameters such as <code>t</code>, <code>start</code>, and <code>time_continue</code>, plus common share metadata such as <code>pp</code>, <code>si</code>, and <code>feature</code>. Use this when you want to share the clean video or page URL rather than a link that opens from the middle of a video.</p>
-
-  <p><strong>Line endings</strong> normalizes selected text entries to Windows <code>CRLF</code>, Unix <code>LF</code>, or old Mac <code>CR</code>. Use Windows <code>CRLF</code> when text copied from macOS, Linux, web tools, or scripts appears as one long line in an older Windows editor. This is an explicit action rather than an automatic default, because code, scripts, patches, and configuration files may need their original line endings preserved.</p>
-
-  <p><strong>URL encode</strong> is for text that needs to be safe inside a URL. For example, <code>Where's My Car?</code> becomes <code>Where%27s%20My%20Car%3F</code>. <strong>HTML encode</strong> is for text that needs to be safe inside HTML source, where characters such as ampersands and quotes may need to become HTML entities. Use URL encode for web links, query strings, podcast episode links, and similar copy/paste jobs.</p>
-
-  <h2 id="menus">Menus</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Menu</th>
-        <th>What it contains</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>File</td>
-        <td>Import, import and replace, export, clear text history, close the history window, or exit Clipman completely.</td>
-      </tr>
-      <tr>
-        <td>Edit</td>
-        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, push to other devices, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history. When a selected pinned text entry or file event is in the first ten pinned items, the menu also shows the relevant pinned shortcut.</td>
-      </tr>
-      <tr>
-        <td>Actions</td>
-        <td>Text cleanup and transformation commands for selected Text history entries, including plain-text copy, trim, single line, remove blank lines, remove URL tracking, clean link for sharing, line-ending normalization, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode.</td>
-      </tr>
-      <tr>
-        <td>View</td>
-        <td>Sort Text history or File history entries from the Sort by submenu, toggle the sort direction with plain first-style labels such as oldest first or A first, and move selected entries up or down in manual order. The sort fields change to match the active tab.</td>
-      </tr>
-      <tr>
-        <td>Options</td>
-        <td>Open Preferences or toggle clipboard monitoring on and off.</td>
-      </tr>
-      <tr>
-        <td>Help</td>
-        <td>Open the manual, check for updates, review version history, open the project page, contact the project, donate, show diagnostics, or view About Clipman.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h2 id="sensitive-data">Sensitive Data Exclusions</h2>
-  <p>Sensitive-data exclusions live in Preferences. They are off by default. Set the mode to <strong>Exclude from history</strong>, then check the presets you want. When automatic clipboard text matches a checked preset, Clipman does not save that text to history. The system clipboard or Mac pasteboard is not changed, so your immediate paste still works.</p>
-
-  <p>This feature is deliberately conservative. It applies only to automatic text capture. It does not filter existing history, imports, Send To, Quick Paste, Push to other devices, or entries manually copied from Clipman. Presets can have false positives, so enable only the ones that fit the work you do.</p>
-
-  <table>
-    <thead>
-      <tr><th>Preset</th><th>What it looks for</th><th>Notes</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Credit card number</td><td>13 to 19 digits, with optional spaces or dashes</td><td>Uses a Luhn checksum, so random 16-digit numbers usually do not match.</td></tr>
-      <tr><td>US Social Security number</td><td>Three digits, two digits, four digits</td><td>Can match dashed, spaced, or run-together forms.</td></tr>
-      <tr><td>International phone number</td><td>A plus sign followed by 8 to 15 digits, allowing common separators</td><td>Examples include compact E.164-style numbers such as <code>+447890123456</code>.</td></tr>
-      <tr><td>Long API key or token</td><td>A run of 32 or more letters and numbers</td><td>Useful for many raw tokens. Complete <code>http</code> and <code>https</code> URLs are not excluded by any sensitive-data preset, so ordinary shopping/search/archive links with long tracking parameters or date-like path segments can still be saved as links.</td></tr>
-      <tr><td>Software license key</td><td>Five groups of five letters or numbers separated by hyphens</td><td>Covers common Windows-style product keys and similar software serials. Clipman checks the shape only; it does not validate vendor-specific keys.</td></tr>
-      <tr><td>US driver license, approximate</td><td>One letter followed by 6 to 13 digits</td><td>Approximate because US license formats vary by state.</td></tr>
-    </tbody>
-  </table>
-
-  <p>Use these harmless test values to check that a preset is enabled and that the exclude sound plays. Copying one of these from the button should trigger <code>exclude.wav</code> when that preset is checked and sounds are enabled. If the browser or reader blocks clipboard buttons, select the text manually and copy it.</p>
-
-  <div class="copy-test"><code>4111111111111111</code><button type="button" data-copy-test="4111111111111111">Copy credit-card test number</button></div>
-  <div class="copy-test"><code>+447890123456</code><button type="button" data-copy-test="+447890123456">Copy international phone test number</button></div>
-  <div class="copy-test"><code>AAAAA-BBBBB-CCCCC-DDDDD-EEEEE</code><button type="button" data-copy-test="AAAAA-BBBBB-CCCCC-DDDDD-EEEEE">Copy software license key test</button></div>
-  <div class="copy-test"><code>0123456789ABCDEF0123456789ABCDEF</code><button type="button" data-copy-test="0123456789ABCDEF0123456789ABCDEF">Copy API-token test string</button></div>
-
-  <p>The credit-card test number is a common non-real test value that passes the Luhn checksum. It is useful precisely because Clipman should exclude it while ignoring most random 16-digit strings.</p>
-
-  <h2 id="clipboard-privacy-signals">Clipboard Privacy Signals</h2>
-  <p>On Windows, Clipman also honors standard clipboard privacy signals added by the application that placed data on the clipboard. If a clipboard update contains <code>Clipboard Viewer Ignore</code>, <code>ExcludeClipboardContentFromMonitorProcessing</code>, <code>CanIncludeInClipboardHistory</code> set to zero, or <code>CanUploadToCloudClipboard</code> set to zero, Clipman treats that update as private, plays <code>exclude.wav</code> when sounds are enabled, and stores nothing in text history or file history.</p>
-
-  <p>This helps with password managers and secure-copy workflows that mark their own clipboard data as not suitable for history or sync. It is still cooperative: if Chrome, a webpage, a password manager, or another app puts only ordinary text on the clipboard with no privacy format, Clipman cannot reliably tell whether that text came from a password field or a normal webpage. Use ignored applications and Sensitive Data Exclusions for cases where the source app does not mark private clipboard updates itself.</p>
-
-  <h2 id="ignored-applications">Ignored Applications</h2>
-  <p>Preferences can list applications that Clipman should ignore, one per line. This is useful for password managers, banking tools, private notes, or any app where clipboard history should not be recorded.</p>
-
-  <p>On Windows, enter process names with or without <code>.exe</code>, or use <strong>Add running app</strong> to choose from currently running processes. On Mac, enter the app name, bundle identifier, or executable name, such as <code>Safari</code>, <code>com.apple.TextEdit</code>, or <code>KeePassXC</code>. Ignored applications are machine-specific settings. Clipman also treats related helper names as ignored when they use the same name or bundle/process prefix. On Mac, Clipman also refuses concealed pasteboard data and can use pasteboard type metadata from password-manager quick-access panels where macOS does not report the password manager as the foreground app.</p>
-
-  <p>Ignored applications and sensitive-data exclusions solve different problems. Ignored applications are best when an entire app should never be captured. Sensitive-data exclusions are best when ordinary apps sometimes copy text matching a known sensitive pattern.</p>
-
-  <h2 id="database-and-sync">Database and Sync</h2>
-  <p>Clipman supports three storage approaches. <strong>Local storage</strong> keeps history on one device. <strong>Shared-folder storage</strong> lets the Windows and Mac clients use a folder provided by a cloud-sync service, network share, or filesystem mount. <strong>Clipman Server</strong> lets Windows, Mac, Linux, Android, and iOS clients synchronize through a separately hosted server while retaining a local cache. Clipman does not contain a WebDAV client and cannot connect directly to a WebDAV URL; WebDAV works only when the operating system or another tool has already mounted it as a normal folder.</p>
-  <p>On Windows, Clipman defaults to a portable <code>Settings</code> folder beside <code>clipman.exe</code>. On Mac, Clipman stores a small pointer under Application Support and keeps the active machine settings in the selected Clipman data folder. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code>, <code>Settings\Laptop-settings.json</code>, or <code>MacBook-settings.json</code>. This lets multiple computers share one data folder without fighting over hotkeys, monitoring state, startup choices, or window position. The shared text history database is <code>clipman-history.clipdb</code>.</p>
-  <p>If you choose a different data folder, Clipman stores this machine's active settings in that folder beside <code>clipman-history.clipdb</code> and the machine-specific file-history database. A small <code>settings-location.json</code> pointer remains in the app's local <code>Settings</code> folder so Clipman can find the selected data folder on the next launch. That pointer stores locations per computer name, so two machines using different local paths to reach the same cloud or network data folder do not overwrite each other's location. If a cloud service creates a conflict copy of the pointer, Clipman merges the known clients back into one pointer file. If the selected folder is unavailable when Clipman starts, Clipman reports that location and stops rather than silently switching to the default folder; reconnect the drive, cloud service, mounted filesystem, or network share and start Clipman again.</p>
-  <p>If the default data folder is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different data folder, Clipman stores the shared history as <code>clipman-history.clipdb</code> inside that folder. Existing explicit <code>.clipdb</code> file paths remain readable for compatibility. If an explicit data location is missing at startup, Clipman asks whether to browse for the data folder in a new location, use the default database beside Clipman, or stop startup.</p>
-
-  <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, Spotlight, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's data folder to the same synced or network-shared folder. Clipman uses the <code>clipman-history.clipdb</code> file inside that folder for shared text history.</p>
-
-  <p>Multiple running Clipman instances can use the same history database. When one device writes a new entry, the database is saved atomically and the other devices reload it when the changed file arrives. Each text entry stores the device name that added or most recently re-added it, and the history list includes a Device column and device sort mode so shared setups can tell which computer, phone, or tablet supplied an entry.</p>
-
-  <p>Preferences can optionally put newly created text entries received from another device onto this device's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another device updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. To intentionally send an existing selected entry to other devices, use <strong>Push to other devices</strong> from the entry menu, or press <code>Ctrl+P</code> on Windows and <code>Command+P</code> on Mac. This creates a fresh shared-history event from the selected text so other opted-in devices can receive it as the latest remote text. When duplicate removal is enabled, Clipman refreshes the selected entry instead of leaving an extra duplicate behind. This preference is device-specific and does not change the shared database format.</p>
-
-  <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. Background clipboard captures do not display blocking error dialogs while storage is missing. On Mac, Clipman pauses monitoring and adds a Retry Storage command to the status menu until the data folder returns. On Windows, the notification-area menu and tooltip report that storage is unavailable and offer Retry storage. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
-
-  <p><strong>History password:</strong> Preferences can encrypt the shared history database with a password. With local or shared-folder storage, leaving the password fields blank on a new database means Clipman uses compressed <code>.clipdb</code> storage without password encryption. Clipman Server requires a nonblank password before a connection can be applied. If you enter and confirm a history password, the database is encrypted with AES and checked with a message authentication code before loading. The password is not stored inside the shared <code>.clipdb</code> file.</p>
-
-  <p>New settings do not remember the history password by default. In that mode, Clipman prompts for the password when it starts, keeps it only while Clipman is running, and clears any saved platform password. If you check Remember history password on this computer, Windows stores the password using Windows user protection for this account and machine, including on Windows 7, and Mac stores it in that user's Keychain for the selected database path. On Mac, Preferences reports whether database encryption is on and whether the password is saved in Keychain; the password field stays blank for security even when a remembered password exists. Copying a settings file to another computer does not copy a working key; that computer must be given the same history password through its own Preferences window. Remembered passwords are still recoverable by software already running as the same signed-in user, so leave Remember unchecked if you prefer startup prompts over same-user recoverability.</p>
-
-  <p>The Generate password button, where available, creates a random history password, fills both password fields, and copies it to the clipboard. Clipman deliberately ignores that generated password copy, so it is not added to clipboard history. You are responsible for saving that password somewhere safe and entering it on each computer that shares the encrypted history. If the password is lost, Clipman cannot recover the encrypted history.</p>
-
-  <p>When typing a history password manually, enter it in both password fields. The Show history password checkbox temporarily reveals both fields so you can verify what you typed. Leave both password fields blank to keep the current encrypted database password. Use the Use no password button if you want to remove password encryption and rewrite the current database without a history password. Windows command-line import, export, and Send To operations can open encrypted databases only when this computer is set to remember the password; the already-running Clipman window can use a session-only password.</p>
-
-  <p>If a sync service creates conflict copies of Clipman's settings or history database, Clipman attempts to tidy them automatically when it next loads the affected file. History database conflicts are merged by entry, then the conflict copies are removed. Machine settings conflicts use the newest copy for that machine, then remove the extra files. This is intended only for Clipman's own settings and <code>.clipdb</code> files.</p>
-
-  <p>Clipman also writes a small shared update-state file in the <code>Settings</code> folder. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy.</p>
-
-  <p>During an online or automatic update, Clipman downloads the release ZIP to a temporary folder, asks other instances running from the same shared folder to close briefly, replaces the app files while preserving <code>Settings</code>, then starts the updated copy. When the new copy starts it publishes the new shared update state, so other computers can restart after their cloud service or network share exposes the updated executable. This is designed to make shared-folder updates feel seamless whether the folder is synced locally or opened from a direct network share.</p>
-
-  <h2 id="secrets">Secrets</h2>
-  <p>Clipman 2.0 includes a small optional Secrets area for short private snippets that you type deliberately, such as a system password or code that you sometimes need to paste quickly outside a web browser. Secrets are not captured automatically from the clipboard, are not shown in normal Text history, and are not included in ordinary history import or export. Open <strong>Options, Secrets</strong> on Windows, <strong>Secrets</strong> from the Mac status menu, or <strong>Secrets</strong> from the Mac in-window Clipman menu with <code>Option+M</code>. You can also open Secrets directly with <code>Ctrl+Shift+E</code> on Windows or <code>Command+Shift+E</code> on Mac.</p>
-
-  <p>Secrets require a history password. They are stored in a separate per-machine <code>&lt;computer-name&gt;-secrets.clipdb</code> file beside the active settings/history files and use the same history password as the main database. They do not sync through the shared text-history database. Opening the Secrets manager asks for the current history password so names and assigned hotkeys are not shown casually from an unlocked desktop. The secrets list shows names and assigned hotkeys only; secret values are hidden in the list and are edited in password fields. If you remove the history password, Clipman does not rewrite secrets as an unencrypted file.</p>
-
-  <p>In the Secrets manager, press <code>Insert</code> to add a secret, <code>F2</code> to edit the selected secret, <code>Delete</code> to remove it, <code>Enter</code> to Quick Paste it immediately, and <code>Esc</code> to close the window. The secret editor has fields for a name, the secret value, confirmation, and an optional Quick Paste hotkey. <code>Ctrl+A</code> on Windows and <code>Command+A</code> on Mac work in the password and secret text fields so a mistyped value can be selected and replaced without holding Backspace.</p>
-
-  <p>Each secret can have its own Quick Paste hotkey. Pressing that hotkey temporarily places the secret value on the system clipboard, sends the normal paste command to the active app, then restores the previous clipboard where the platform allows it. This is meant for convenience, not as a full password manager: any app that can monitor keystrokes, inspect the clipboard at the wrong moment, or run as the same signed-in user may still be able to see what you paste.</p>
-
-  <h2 id="clipman-server">Clipman Server</h2>
-  <p>Clipman 2.0 adds an optional Clipman Server path for people who want to host the shared history database from one machine, a Raspberry Pi, or a VPS instead of relying only on a cloud service, synced folder, or network share. This is an additional storage path, not a replacement for the existing local and shared-folder workflow.</p>
-
-  <p>The normal Clipman app packages are client-only. Clipman Server is distributed as a separate cross-platform server package from the <a href="https://github.com/OnjLouis/Clipman/releases">Clipman releases page</a>. That package runs the same Python server on Linux, macOS, and Windows so the safety model stays consistent: random high port and random bearer token on first run, password-scoped database buckets, cheap revision polling, rolling backups, private file permissions where supported, rotating logs, database-ID log redaction, lightweight runtime counters, and optional direct TLS.</p>
-
-  <p>The server stores and serves raw <code>.clipdb</code> files. It does not know, request, or store the history password. Encrypted databases remain encrypted on the server; Clipman clients unlock, merge, and save history locally, then upload the updated database with a revision check. If another client has already uploaded a newer copy, the server rejects the stale upload so the client can download, merge, and try again instead of overwriting newer history.</p>
-
-  <p>Each server token plus each history password maps to a separate server-side database bucket. That means two clients using the same server token and same history password see the same history, while a wrong password or intentionally different password does not overwrite the existing database. Clipman Server requires a nonblank, preferably unique history password; passwordless history remains available only with local or shared-folder storage.</p>
-
-  <p>Backups are written under each database bucket. The default backup schedule is hourly, with roughly 24 hours of backups kept and a maximum of 48 backup files.</p>
-
-  <p>For private LAN, localhost, or VPN-only use, clients can use <code>clipman://host:port</code>. Clipman displays that form to avoid making the server look like a normal web page, then uses the local server transport internally. Do not expose plain <code>clipman://</code> or plain HTTP to the public internet. For VPS or internet-facing use, put the server behind HTTPS or start the server with <code>--cert-file</code> and <code>--key-file</code> so clients connect using an <code>https://</code> address.</p>
-
-  <p>Clipman Server 2.4 can embed its public private-certificate authority in the generated <code>.clpconf</code> connection file. Current clients validate that authority and trust it only inside Clipman, only for the HTTPS host shown during import, while still requiring a valid server certificate and matching host name. It is not installed as a device-wide root, and public HTTPS connections continue to use the operating system trust store. Transfer the connection file through a channel you trust because it also contains the private server token. The older operating-system certificate installation and <code>share-ca</code> flow remain available for older clients and recovery; after a current client connects with the embedded authority, an old Clipman authority can be removed from the operating-system trust store.</p>
-
-  <p>On Linux, <code>Linux/install-clipman-server.sh</code> installs the server and its startup helper. On first setup, Clipman Server creates <code>clipman-server-connection.clpconf</code> beside its settings file. In Clipman Preferences, choose <strong>Import server file</strong> on Windows or <strong>Import Server File</strong> on Mac, review the server address, enter a unique history password if one is not already configured, then apply the settings. On Android or iOS, tap the <code>.clpconf</code> file in the system file browser to open it in Clipman, or use <strong>Import server connection file</strong> in Clipman Settings. Clipman can export the currently configured connection from the same Preferences or Settings area on Windows, Mac, Android, and iOS. Mobile export offers both Save to Files and the native share sheet, so the connection can be sent through Messages, WhatsApp, AirDrop, Nearby Share, or another chosen app. Clipman warns before export because the file contains the private server token; store and share it securely, and never keep it beside an exported clipboard history. Imported details still require review and Save before synchronization begins. The server also writes a readable <code>clipman-server-connection.txt</code> file for manual setup and older clients. Both files contain the private server token; delete them or move the details to a password manager once every client is configured.</p>
-
-  <p>To start a server from an existing history, connect first from the Clipman client that already has the desired history and history password. Do not manually copy a <code>.clipdb</code> into the server's database folders; clients derive the correct server bucket from the server token and the history password, and the server deliberately does not know the history password.</p>
-
-  <p>To use a server from the Windows or Mac client, open <strong>Preferences</strong>, set <strong>Storage type</strong> to <strong>Clipman Server</strong>, enter the server host and token, and keep the data folder set to a local cache/settings folder. The host can be typed as <code>home-server:49152</code>; Clipman infers the local server protocol. The server token field is hidden on screen and saved with per-user protection: Windows uses current-user DPAPI protection, and Mac uses the user's Keychain. The client still watches and saves a local cache, but text history is synchronized through the server.</p>
-
-  <p>Clients normally poll the server cheaply by checking the database revision. If the server, network, or VPN is temporarily unavailable, Clipman keeps its local cache, backs off repeated polling failures, and retries automatically. Diagnostics include the last server poll, last successful sync, last upload, current server revision, and failure count so sync problems can be diagnosed without guessing.</p>
-
-  <p>Android and iOS clients can choose <strong>Local</strong> or <strong>Server</strong> in Settings. Local mode keeps <code>clipman-history.clipdb</code> in the mobile operating system's private app storage and does not require a server. Server mode uses the same private file as an offline cache. Server details remain saved while Local mode is selected, and switching back to Server merges local additions, edits, pins, and deletions with the server history before uploading, so work done without a connection is not blindly replaced.</p>
-
-  <p>Android and iOS Settings can optionally back up encrypted history to a folder you choose through the system file picker, including supported cloud and document providers. A nonblank history password is required. Clipman writes one <code>Clipman History.clipdb</code> file containing history only; server details, tokens, settings, and passwords are never included. Use <strong>Restore and merge history backup</strong> to combine its entries and deletion records with current history instead of replacing newer information.</p>
-
-  <p>When a mobile client starts in Server mode, it displays its encrypted on-device cache first and refreshes from the server in the background. A normal launch therefore does not show an empty history merely because the network response has not arrived yet.</p>
-
-  <p>Clipman iOS provides <strong>Add Clipboard to Clipman</strong> and <strong>Copy Latest Clip</strong> actions through Apple's Shortcuts app and Siri. Either action can be assigned to the iPhone Action Button. Add Clipboard stores the current iOS clipboard text and available formatting; Copy Latest places the newest Clipman history entry on the iOS clipboard. Both honour Clipman's biometric or device-authentication setting, save through the encrypted local cache, and continue safely when the server is temporarily unavailable. Long-press the Clipman Home Screen icon to use the same two commands without creating a shortcut. Suggested Siri phrases include <strong>Add clipboard to Clipman</strong> and <strong>Copy latest from Clipman</strong>. Clipboard access follows the <strong>Paste from Other Apps</strong> choice in iOS Settings; Clipman does not add a second confirmation screen.</p>
-
-  <p>Android and iOS Settings also offer <strong>Require biometric or device authentication</strong>. It is off by default. When enabled, Clipman asks for Face ID, Touch ID, biometrics, or the device credential before showing history after the app returns to the foreground.</p>
-
-  <p>Mobile Settings includes optional ways to support Clipman. Android opens Clipman's donation page, while iOS presents one-time tips through Apple's in-app purchase system. Tips do not unlock features, content, or services.</p>
-
-  <p>Clipman Android can check GitHub for updates automatically while the app is open, at most once per day. Use <strong>Check Now</strong> in Settings for an immediate check. Clipman verifies the downloaded package name, version, digest when supplied by GitHub, and application signing key before opening Android's installer. Android always asks the user to approve the installation; Clipman does not silently replace itself. TestFlight provides update delivery for iPhone and iPad.</p>
-
-  <p>Read the server package's <code>Manual.html</code> for setup, security, service-path, TLS, logging, backup, and API details.</p>
-
-  <h2 id="send-to">Send To</h2>
-  <p>Send To is a Windows feature. Windows Preferences can add Clipman to the Windows Send To menu. Sending a supported text-oriented file to Clipman adds the file's text content to clipboard history. Supported examples include plain text, logs, Markdown, CSV, JSON, XML, HTML, CSS, JavaScript, PowerShell, batch files, INI/config files, AutoHotkey scripts, registry files, and common source-code files. The imported text uses the current duplicate and history-limit preferences.</p>
-
-  <p>The Send To shortcut is named <strong>Clipman - add text to history</strong> with <code>C</code> as its menu accelerator.</p>
-
-  <p>The Send To entry calls Clipman with the selected file path. If Clipman is already running, the file is imported into the configured database. Preferences can choose whether a successful Send To import also brings the history window to the front. If Clipman is not already running, it imports the file using the settings in the <code>Settings</code> folder beside <code>clipman.exe</code>. When automatic grouping is enabled, Send To imports are placed in a group named <strong>Send To</strong>. Mac does not currently ship a Send To equivalent.</p>
-
-  <h2 id="file-history">File History</h2>
-  <p>The File history tab shows file, folder, and non-text clipboard events captured by Clipman. File history is stored separately from text history in a machine-specific database named like <code>Settings\Desktop-file-history.clipdb</code>, <code>Desktop-file-history.clipdb</code> inside a custom data folder, or <code>MacBook-file-history.clipdb</code> inside the selected Mac data folder. If you set a history password, file history uses the same password; there is not a second password to remember. File history stores paths and clipboard-format details only. It does not copy or preserve the actual file contents.</p>
-
-  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. File history rows start with the file or folder name, then show the operation and file count. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> on Windows or <code>Command+C</code> on Mac to copy all selected file paths as text without closing. Use the View menu on Windows, or the Sort controls and Clipman menu on Mac, to sort normal file events by time captured, file count, name, operation, source application, or manual order. Press <code>Home</code>, <code>End</code>, <code>Page Up</code>, and <code>Page Down</code> for larger list jumps. Press <code>Backspace</code> to jump to the first normal file event below pinned file events. Press <code>Shift+Enter</code> to pin or unpin selected file events. Press <code>Ctrl+Enter</code> on Windows or <code>Command+Enter</code> on Mac to go to a single selected file or folder in Explorer or Finder. Press <code>Alt+Up</code> or <code>Alt+Down</code> on Windows, or <code>Option+Up</code> or <code>Option+Down</code> on Mac, to move selected file events within the pinned or normal section. Moving file events switches File history back to manual order. Press <code>Del</code> on Windows or <code>Command+Backspace</code> on Mac to remove selected unpinned file-history events from the list.</p>
-
-  <p>Pinned file events are grouped at the top of File history, with the same normal-entries separator used by Text history. They are numbered when they can be restored by shortcut, and their pinned state is shown in the Pinned column or metadata rather than before the event name. They are protected from delete, clear-normal cleanup, automatic unavailable-event cleanup, and file-history size trimming. Use <code>Ctrl+1</code> through <code>Ctrl+0</code> on Windows, or <code>Command+1</code> through <code>Command+0</code> on Mac, from the File history tab to restore one of the first ten pinned file events and close history. Windows also supports <code>Ctrl+Shift+1</code> through <code>Ctrl+Shift+0</code> to copy paths from one of the first ten pinned file events as text and close history.</p>
-
-  <p>File history can clear normal file-history events or remove unavailable unpinned events. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> and <code>Alt+Del</code> on Windows, or <code>Control+Backspace</code> and <code>Option+Backspace</code> on Mac. Windows Preferences can also remove unavailable unpinned events automatically as new file-history events are captured.</p>
-
-  <h2 id="import-and-export">Import and Export</h2>
-  <ul>
-    <li><strong>Import</strong> adds entries from a <code>.clipdb</code>, JSON, or text file on both platforms. Windows can also import old Clipman <code>clipman.db</code> or Ditto SQLite databases.</li>
-    <li><strong>Import and replace</strong> replaces the current clipboard database with the selected file on Windows. Mac currently imports into the existing history.</li>
-    <li><strong>Export</strong> saves the current clipboard history as compressed <code>.clipdb</code>, JSON, or text on both platforms.</li>
-  </ul>
-  <p>When importing an encrypted <code>.clipdb</code>, Clipman asks for that import file's password if it is different from the current database password. When exporting a <code>.clipdb</code> from the app, Clipman asks whether to use the current history password, a new export-only password, or no password. If the current history database is password protected, Clipman asks you to re-enter the current history password before creating any <code>.clipdb</code> export, including an export that uses no password. JSON and text exports are deliberately readable interchange formats, so use <code>.clipdb</code> when exporting private history that should stay encrypted.</p>
-
-  <p>Old Clipman and Ditto imports are Windows-only and read text entries only. They do not import images or every custom clipboard format. Imported entries are grouped as <strong>Imported from old Clipman</strong> or <strong>Imported from Ditto</strong> so they are easy to review after import.</p>
-
-  <h2 id="updates">Updates</h2>
-  <p>Use <strong>Help, Check for updates</strong> on Windows, the Clipman status or history-window menu on Mac, or <code>Shift+F1</code> on either platform to check GitHub releases. If a newer release includes a Clipman ZIP package for your platform, Clipman can download it and update the app.</p>
-
-  <p>Use <strong>Preferences, Startup and updates</strong> to choose whether Clipman checks for updates never, at startup, hourly, or daily. If <strong>Install updates silently when possible</strong> is enabled, automatic checks can install a newer ZIP release without prompting where supported. Manual update checks still show the normal update dialog.</p>
-
-  <p>Use <strong>Help, Version history</strong> on Windows or <strong>Version History</strong> on Mac to review the latest release notes. Use <strong>Help, Project page</strong> or <code>Ctrl+F1</code> on Windows and <strong>Project Page</strong> or <code>Command+F1</code> on Mac to open the GitHub project page. Use <strong>Help, Contact</strong> on Windows or <strong>Contact</strong> on Mac for feedback, and <strong>Help, Donate</strong> on Windows or <strong>Donate</strong> on Mac to support Clipman. Use <strong>Help, Diagnostics</strong> or <code>Alt+F1</code> on Windows and <strong>Diagnostics</strong> or <code>Option+F1</code> on Mac to open diagnostics.</p>
-
-  <h2 id="sounds">Sounds</h2>
-  <p>Clipman can play short sounds when text is copied, remote text is copied from another synced machine, monitoring is turned on, monitoring is turned off, a clipboard item is ignored because monitoring is off, or a sensitive-data exclusion blocks automatic capture. Sounds can be enabled or disabled in preferences.</p>
-
-  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, <code>skip.wav</code>, and <code>exclude.wav</code>. If <code>exclude.wav</code> is missing, Clipman falls back to <code>skip.wav</code>.</p>
-
-  <h2 id="application-files">Application Files</h2>
-  <p>A normal Windows portable Clipman folder contains only the files needed to run the app. A Mac package contains <code>Clipman.app</code>, which bundles the executable, manual, sounds, and supporting resources inside the app package.</p>
-  <table>
-    <thead>
-      <tr>
-        <th>File or Folder</th>
-        <th>Purpose</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>clipman.exe</code></td>
-        <td>The Windows Clipman application.</td>
-      </tr>
-      <tr>
-        <td><code>Clipman.app</code></td>
-        <td>The Mac Clipman application bundle. Move or drag this to <code>/Applications</code> for normal use. VoiceOver users can copy and paste the app in Finder instead of dragging if preferred.</td>
-      </tr>
-      <tr>
-        <td><code>Manual.html</code></td>
-        <td>This user manual. Press <code>F1</code> in Clipman to open it. On Mac, the manual is bundled inside <code>Clipman.app</code>.</td>
-      </tr>
-      <tr>
-        <td><code>LICENSE.txt</code></td>
-        <td>The MIT License text for Clipman.</td>
-      </tr>
-      <tr>
-        <td><code>sqlite3.dll</code></td>
-        <td>Windows SQLite runtime used only when importing old Clipman or Ditto SQLite databases.</td>
-      </tr>
-      <tr>
-        <td><code>sounds</code></td>
-        <td>Default WAV files for copy, remote sync copy, on, off, and skipped-copy feedback.</td>
-      </tr>
-      <tr>
-        <td><code>Settings</code></td>
-        <td>Created on first run on Windows. By default it stores machine-specific settings, the shared text-history database, the machine-specific file-history database, optional custom sounds, logs, and shared update state. If you choose a custom data folder, this folder keeps a small <code>settings-location.json</code> pointer and the active data moves to the selected folder. The pointer stores one location per computer name so machines with different local cloud paths can share the same app folder without fighting. On Mac, the active settings and databases live in the selected data folder, with a small Application Support pointer back to that folder.</td>
-      </tr>
-    </tbody>
-  </table>
-  <p>The source package also includes <code>README.md</code>, source files, and build project files. Those source-only files are not required in the portable runtime folder.</p>
-
-  <h2 id="non-text-clipboard-events">Non-text Clipboard Events</h2>
-  <p>Clipman stores text history in the main history database and stores file or non-text clipboard events in a separate machine-specific file-history database. Use the File history tab to review those events. It can show files copied or cut in Windows Explorer or macOS Finder, file-like clipboard operations from other programs, and specialist formats such as audio-editor clipboard data. Clipman cannot retrieve events from before it was running, and file events are useful only while the referenced files still exist at the same paths.</p>
-
-  <p>Press <code>Enter</code> on a file event to put its files back on the clipboard, ready to paste into Explorer, Finder, or another file-aware application. Press <code>Ctrl+C</code> on Windows or <code>Command+C</code> on Mac to copy the file paths as text, <code>Shift+Enter</code> to pin or unpin selected events, <code>Del</code> on Windows or <code>Command+Backspace</code> on Mac to remove selected unpinned events from file history, <code>F4</code> to view event details, or <code>Ctrl+Enter</code> on Windows and <code>Command+Enter</code> on Mac to go to one selected file or folder. Non-file events are informational; they can be reviewed, pinned, moved, or deleted, but they cannot be restored as files. Open diagnostics for a text report of the same events.</p>
-
-  <h2 id="command-line">Command Line</h2>
-  <p>The command-line interface is currently Windows-focused. The Mac app is intended to be used through <code>Clipman.app</code>, the menu bar item, global hotkeys, and the history window.</p>
-  <table>
-    <thead>
-      <tr>
-        <th>Command</th>
-        <th>Effect</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>clipman.exe --show</code></td>
-        <td>Shows the history window for the running Clipman instance.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --close</code></td>
-        <td>Closes the running Clipman instance.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --pause</code></td>
-        <td>Turns clipboard monitoring off in the running Clipman instance.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --resume</code></td>
-        <td>Turns clipboard monitoring on in the running Clipman instance.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --toggle</code></td>
-        <td>Toggles clipboard monitoring in the running Clipman instance.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --add "Some text"</code></td>
-        <td>Adds the provided text directly to Clipman history.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --export "C:\Path\backup.clipdb"</code></td>
-        <td>Exports the current Clipman database to a compressed <code>.clipdb</code> file. Existing files are not overwritten.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --import "C:\Path\backup.clipdb"</code></td>
-        <td>Imports entries from a <code>.clipdb</code>, JSON, or text file into the current database without replacing existing entries.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --import-replace "C:\Path\backup.clipdb"</code></td>
-        <td>Asks for confirmation, creates a timestamped backup of the current database, then replaces the current database with entries from the selected <code>.clipdb</code>, JSON, or text file.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe --import-replace "C:\Path\backup.clipdb" --yes</code></td>
-        <td>Runs the same replacement silently for scripts. A timestamped backup is still created first.</td>
-      </tr>
-      <tr>
-        <td><code>clipman.exe "C:\Path\Example.txt"</code></td>
-        <td>Adds supported text-oriented file content to Clipman history. Examples include <code>.txt</code>, <code>.log</code>, <code>.md</code>, <code>.csv</code>, <code>.json</code>, <code>.xml</code>, <code>.html</code>, <code>.ps1</code>, <code>.cmd</code>, <code>.bat</code>, <code>.ini</code>, <code>.ahk</code>, <code>.reg</code>, and common source-code files.</td>
-      </tr>
-    </tbody>
-  </table>
-
   <h2 id="changelog">Changelog</h2>
+  <h3>2.6.0</h3>
+  <ul>
+    <li>Made unnamed website links easier to identify across Windows, Mac, Linux, Android and iOS. History rows now show a useful offline label followed by the scheme-less destination, while the full unchanged URL remains available when viewing or copying the entry. An explicit <strong>Use Website Title as Name</strong> command can contact a public HTTP or HTTPS page once, after confirmation, and stores the returned title in the existing Name field. Clipman never fetches titles automatically or in bulk. This closes <a href="https://github.com/OnjLouis/Clipman/issues/50">issue #50</a>.</li>
+    <li>Added optional standalone PNG and JPEG image sharing through Rich Text history on every client. Android and iOS can receive one selected photo through the system Share sheet, then save or share a stored image directly from its accessible entry actions. Windows, Mac and Linux can paste a copied image entry directly into the normal file manager as an image file, or paste one copied PNG or JPEG file into Rich Text history to share it in the other direction. An additional off-by-default desktop preference can add a single copied image file to File History and Rich Text history together. The feature preserves already-compliant image bytes and metadata, safely reduces larger accepted images, restores native image and rich-text clipboard formats, and keeps shared images inside the existing encrypted history database without requiring a Clipman Server change.</li>
+    <li>Improved Windows update windows so their title bar says <strong>Clipman Update</strong>, making it clear which application is requesting an update.</li>
+    <li>Added persistent mobile history sorting by Manual order, Newest first, Oldest first, or Text. Android and iOS expose the choice in Settings, through the history status bar, and as explicit TalkBack or VoiceOver actions without rewriting shared database order.</li>
+    <li>Made mobile deletion return immediately to the remaining history while local storage and server synchronization continue in the background. A failed local save restores durable history and reports the problem instead of leaving an apparently empty screen.</li>
+    <li>Released Clipman Server 2.5.0 with native runit and turnstile support for Void Linux and other runit systems while retaining systemd and manual-start choices. The server now prevents two processes from writing to the same data folder, avoids rewriting unchanged settings during routine startup, and safely stops and restarts managed Linux services around protected maintenance commands. This incorporates <a href="https://github.com/OnjLouis/Clipman/pull/51">pull request #51</a> and closes the maintainer review in <a href="https://github.com/OnjLouis/Clipman/issues/52">issue #52</a>.</li>
+  </ul>
+
   <h3>2.5.2</h3>
   <ul>
     <li>Added an optional, unassigned <strong>Save Current Clipboard to History</strong> global hotkey on Windows, Mac and Linux. The matching menu command performs one deliberate save while monitoring remains off, preserves explicit clipboard privacy markers, and handles supported text, links, rich text and files through the normal history rules. This closes <a href="https://github.com/OnjLouis/Clipman/issues/49">issue #49</a>.</li>
@@ -1024,6 +525,536 @@
     <li>Added Help menu Contact and Donate links. Clipman remains free software.</li>
   </ul>
 
+  <h2 id="notes">Notes</h2>
+  <p>Clipman runs as a portable Windows app, a Mac menu bar app, or a per-user Linux desktop app. It stores device-specific settings separately from shared clipboard history, so several computers can share history without sharing hotkeys, startup choices, or local-only preferences.</p>
+
+  <h2 id="basic-use">Basic Use</h2>
+  <ul>
+    <li>Copy normally. Clipman stores text clips and separate file-history events while monitoring is on.</li>
+    <li>Open history, choose an item, and press <code>Enter</code> to put it back on the clipboard. An optional preference can also paste it into the application that was active before Clipman opened. Press <code>Esc</code> or close the window to hide history without quitting.</li>
+    <li>Use search, groups, pinned entries, sort order, and Entry Properties as your history grows. The detailed commands are in the Keyboard Shortcuts table.</li>
+    <li>Use template entries for reusable text that should resolve date, time, system, or username variables only when copied or pasted.</li>
+    <li>Turn monitoring off temporarily when copying text that should not enter history, add sensitive apps to the ignored applications list, or enable sensitive-data exclusions for known text patterns.</li>
+    <li>On Mac, <code>Option+M</code> opens the history window's Clipman command menu directly.</li>
+  </ul>
+
+  <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
+  <p>Most commands are shared between Windows and Mac, but the modifier keys follow each platform's conventions. Windows uses <code>Ctrl</code>, <code>Alt</code>, <code>Shift</code>, and sometimes <code>Win</code>. Mac uses <code>Command</code>, <code>Option</code>, and <code>Control</code>. Global hotkeys can be changed in Preferences where supported. The Linux download includes a dedicated manual with its GTK and X11 shortcuts.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>What it does</th>
+        <th>Windows shortcut</th>
+        <th>Mac shortcut</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Show or hide clipboard history</td><td><code>Ctrl+Alt+\</code></td><td><code>Option+Shift+`</code></td></tr>
+      <tr><td>Toggle monitoring on or off</td><td><code>Ctrl+Alt+`</code></td><td><code>Option+Shift+\</code></td></tr>
+      <tr><td>Save the current clipboard to history, even while monitoring is off</td><td>User-assigned in Preferences; unset by default</td><td>User-assigned in Preferences; unset by default</td></tr>
+      <tr><td>Paste an entry assigned to Quick Paste</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
+      <tr><td>Paste a saved secret</td><td>User-assigned in Secrets</td><td>User-assigned in Secrets</td></tr>
+      <tr><td>Open Secrets</td><td><code>Ctrl+Shift+E</code></td><td><code>Command+Shift+E</code></td></tr>
+      <tr><td>Switch to Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+T</code></td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Switch to Links history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+L</code> when Links history is enabled</td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Switch to Rich Text history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+R</code> when Rich Text history is enabled</td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Switch to File history</td><td><code>Ctrl+Tab</code>, <code>Ctrl+Shift+Tab</code>, or <code>Alt+I</code></td><td>The <code>Control+number</code> shown in the Clipman menu</td></tr>
+      <tr><td>Move the current history tab left or right</td><td><code>Alt+Left</code> or <code>Alt+Right</code></td><td><code>Option+Left</code> or <code>Option+Right</code></td></tr>
+      <tr><td>Open Preferences</td><td><code>Ctrl+,</code></td><td><code>Command+,</code></td></tr>
+      <tr><td>Open search</td><td><code>Ctrl+F</code></td><td><code>Command+F</code></td></tr>
+      <tr><td>Find next search result</td><td><code>F3</code></td><td><code>F3</code></td></tr>
+      <tr><td>Find previous search result</td><td><code>Shift+F3</code></td><td><code>Shift+F3</code></td></tr>
+      <tr><td>Move to the first visible history row</td><td><code>Home</code></td><td><code>Home</code></td></tr>
+      <tr><td>Move to the last visible history row</td><td><code>End</code></td><td><code>End</code></td></tr>
+      <tr><td>Move up by one visible page</td><td><code>Page Up</code></td><td><code>Page Up</code></td></tr>
+      <tr><td>Move down by one visible page</td><td><code>Page Down</code></td><td><code>Page Down</code></td></tr>
+      <tr><td>Jump to first normal item below pinned items</td><td><code>Backspace</code></td><td><code>Backspace</code></td></tr>
+      <tr><td>Open this manual</td><td><code>F1</code></td><td><code>F1</code></td></tr>
+      <tr><td>Check for updates</td><td><code>Shift+F1</code></td><td><code>Shift+F1</code></td></tr>
+      <tr><td>Open the project page</td><td><code>Ctrl+F1</code></td><td><code>Command+F1</code></td></tr>
+      <tr><td>Open diagnostics</td><td><code>Alt+F1</code></td><td><code>Option+F1</code></td></tr>
+      <tr><td>Close or hide the history window</td><td><code>Esc</code></td><td><code>Escape</code></td></tr>
+      <tr><td>Switch Preferences tabs</td><td><code>Ctrl+1</code> to <code>Ctrl+6</code></td><td>Tab control navigation</td></tr>
+      <tr><td>Copy selected text entry and close history; optionally paste into the previous application</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
+      <tr><td>Copy selected text entry without closing history</td><td><code>Ctrl+C</code></td><td><code>Command+C</code></td></tr>
+      <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
+      <tr><td>Paste clipboard text into history</td><td><code>Ctrl+V</code></td><td><code>Command+V</code></td></tr>
+      <tr><td>Push selected text entry to other synced devices</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
+      <tr><td>Pin or unpin selected entry</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
+      <tr><td>Open Entry Properties</td><td><code>F2</code></td><td><code>F2</code></td></tr>
+      <tr><td>View selected text in a read-only window</td><td><code>F4</code></td><td><code>F4</code></td></tr>
+      <tr><td>Move by URL/code boundary in text review or Entry Properties text</td><td><code>Ctrl+Left</code> or <code>Ctrl+Right</code></td><td><code>Option+Left</code> or <code>Option+Right</code></td></tr>
+      <tr><td>Assign selected entries to a group</td><td><code>Ctrl+G</code></td><td><code>Command+G</code></td></tr>
+      <tr><td>Move focus to the group filter</td><td><code>Alt+G</code></td><td><code>Option+G</code></td></tr>
+      <tr><td>Jump to one of the first ten group filters</td><td><code>Alt+1</code> to <code>Alt+0</code></td><td><code>Option+1</code> to <code>Option+0</code></td></tr>
+      <tr><td>Copy one of the first ten pinned text entries</td><td><code>Ctrl+1</code> to <code>Ctrl+0</code></td><td><code>Command+1</code> to <code>Command+0</code></td></tr>
+      <tr><td>Move selected entries in manual order</td><td><code>Alt+Up</code> or <code>Alt+Down</code></td><td><code>Option+Up</code> or <code>Option+Down</code></td></tr>
+      <tr><td>Delete selected unpinned text entries</td><td><code>Del</code></td><td><code>Command+Backspace</code></td></tr>
+      <tr><td>Import clipboard entries</td><td><code>Ctrl+I</code></td><td><code>Command+I</code></td></tr>
+      <tr><td>Export clipboard entries</td><td><code>Ctrl+E</code></td><td><code>Command+E</code></td></tr>
+      <tr><td>Clean URL tracking from selected text</td><td><code>Ctrl+Shift+R</code></td><td><code>Command+Shift+R</code></td></tr>
+      <tr><td>Clean link for sharing</td><td><code>Ctrl+Shift+S</code></td><td><code>Command+Shift+S</code></td></tr>
+      <tr><td>Restore selected file-history event to the clipboard</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
+      <tr><td>Pin or unpin selected file-history event</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
+      <tr><td>Go to selected file or folder</td><td><code>Ctrl+Enter</code></td><td><code>Command+Enter</code></td></tr>
+      <tr><td>Remove selected unpinned file-history events</td><td><code>Del</code></td><td><code>Command+Backspace</code></td></tr>
+      <tr><td>Clear normal file history</td><td><code>Ctrl+Del</code></td><td><code>Control+Backspace</code></td></tr>
+      <tr><td>Remove unavailable unpinned file-history events</td><td><code>Alt+Del</code></td><td><code>Option+Backspace</code></td></tr>
+      <tr><td>Restore one of the first ten pinned file events</td><td><code>Ctrl+1</code> to <code>Ctrl+0</code></td><td><code>Command+1</code> to <code>Command+0</code></td></tr>
+      <tr><td>Copy paths from one of the first ten pinned file events</td><td><code>Ctrl+Shift+1</code> to <code>Ctrl+Shift+0</code></td><td><code>Command+C</code> after selecting the event</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="preferences">Preferences</h2>
+  <p>Open Preferences from <strong>Options, Preferences</strong> on Windows, from the Clipman status menu on Mac, or with <code>Ctrl+,</code> on Windows and <code>Command+,</code> on Mac. Preferences controls monitoring, sounds, hotkeys, storage, history password, ignored applications, optional Links and Rich Text history, startup, update checks, and shared-database behavior. In hotkey fields, press a valid shortcut to assign it, or press <code>Delete</code> or <code>Backspace</code> to clear it.</p>
+
+  <p><strong>After Enter, paste into the previous application</strong> is off by default. When enabled, pressing <code>Enter</code> on a Text, Links, or Rich Text history entry copies it, closes Clipman, returns to the application that was active before history opened, and sends the normal paste command. On Mac, macOS asks for permission before Clipman can send that command; allow Clipman to control the computer when prompted, then quit and reopen Clipman if the first paste is blocked. Clipman only sends the paste command when the destination has an editable text control in focus. The selected entry remains on the clipboard. This does not change double-click, Copy, pinned-number shortcuts, or File history.</p>
+
+  <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, a newly accepted clipboard event selects Text, Links, Rich Text, or Files the next time history opens. That automatic selection is used once; afterward, a section you choose manually remains selected until another new clipboard event arrives. Ignored, excluded, or failed captures do not change the destination. If an optional history view is disabled, its entries open through their plain-text fallback in Text history.</p>
+
+  <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
+
+  <p><strong>Save Current Clipboard to History</strong> is another deliberate command that works while monitoring is off. Use it from the Clipman menu, or assign its optional global hotkey in Preferences. It reads the clipboard once and sends supported text, links, rich text, or files through normal duplicate, storage, and synchronization handling without turning monitoring on. Ignored-application and sensitive-pattern rules apply to automatic capture, so they do not block this explicit save; cooperative private-clipboard markers and concealed pasteboard data remain protected.</p>
+
+  <p>Each Quick Paste target has a mode. <strong>Paste and restore previous clipboard</strong> temporarily places the entry on the system clipboard, sends the normal paste command to the active app, and then restores the previous clipboard contents where possible. <strong>Paste and keep target on clipboard</strong> pastes the entry and leaves that entry on the clipboard. <strong>Copy to clipboard only</strong> places the entry on the clipboard without sending a paste command.</p>
+
+  <p>Use the <strong>Quick Paste</strong> menu on Windows, or <strong>Quick Paste Targets</strong> from the Mac <code>Option+M</code> Clipman menu, to review all entries that currently have Quick Paste hotkeys. Choosing one of those menu items moves focus to the matching entry so you can press <code>F2</code> to edit or remove its Quick Paste assignment. Entries with Quick Paste targets include the assigned hotkey and mode in the row text; entries without Quick Paste targets do not carry that extra wording.</p>
+
+  <p><strong>Template entries:</strong> In Entry Properties, mark a text entry as a template when you want variables to resolve at copy or paste time. The stored text remains unchanged in the database, exports, search, and Entry Properties. Clipman resolves the template only when the entry is copied, quick-pasted, or automatically copied as a new remote entry.</p>
+
+  <p>Template variables include <code>{{year_full}}</code>, <code>{{year_short}}</code>, <code>{{month_name}}</code>, <code>{{month_name_full}}</code>, <code>{{month_name_short}}</code>, <code>{{month_num}}</code>, <code>{{month_num_padded}}</code>, <code>{{day_of_month}}</code>, <code>{{day_of_month_padded}}</code>, <code>{{day_name_full}}</code>, <code>{{day_name_short}}</code>, <code>{{hour_24}}</code>, <code>{{hour_24_padded}}</code>, <code>{{hour_12}}</code>, <code>{{hour_12_padded}}</code>, <code>{{minute}}</code>, <code>{{minute_padded}}</code>, <code>{{second}}</code>, <code>{{second_padded}}</code>, <code>{{utc_offset}}</code>, <code>{{time_zone}}</code>, <code>{{time_zone_short}}</code>, <code>{{os_name}}</code>, <code>{{os_version}}</code>, and <code>{{username}}</code>. Unknown variables are left alone.</p>
+
+  <p>Example templates: <code>{{year_full}}-{{month_num_padded}}-{{day_of_month_padded}}</code>, <code>Today is {{day_name_full}}, {{month_name_full}} {{day_of_month}}, {{year_full}}</code>, or <code>{{os_name}} version {{os_version}}</code>. Entry Properties includes buttons to insert sample templates, insert individual fields at the current cursor, preview the resolved template, and view the variable list. Built-in samples include <code>{{year_full}}/{{month_num_padded}}/{{day_of_month_padded}}</code>, <code>{{day_of_month_padded}} {{month_name_short}} {{year_full}}</code>, and <code>{{month_name_short}} {{day_of_month_padded}}, {{year_full}}</code>.</p>
+
+  <p><strong>Automatically group new clips by source application</strong> is enabled by default for new installs where the setting is exposed. It places newly captured clipboard text into a group named after the application Clipman believes supplied the clipboard text, such as Chrome, Thunderbird, Outlook, Safari, TextEdit, or Logic. Disable it if you prefer all new entries to start ungrouped.</p>
+
+  <p>Windows first asks for the clipboard owner application, then falls back to the foreground application if Windows does not expose a useful owner. Mac uses the foreground application reported by macOS when the clipboard change is captured. Some background hotkeys or automation tools may still be attributed to the foreground application because operating systems do not always preserve reliable source metadata.</p>
+
+  <p>Global hotkey fields accept combinations with modifiers and one real key, such as <code>Ctrl+Alt+\</code>, <code>Ctrl+Shift+H</code>, <code>Option+Shift+1</code>, or <code>Control+Option+F1</code>. Two modifiers are safest. For compatibility with existing clipboard-manager habits, Clipman also allows one modifier with function keys or with the grave/accent and backslash-style punctuation keys. Single-modifier letters, numbers, comma, space, Tab, Delete, Backspace, Escape, and reserved operating-system shortcuts are rejected. Clipman warns before saving a single-modifier global hotkey because it may conflict with another app or keyboard layout.</p>
+
+  <p><strong>Storage and Password:</strong> Choose the shared Clipman data folder, set or change the history password, choose whether this computer remembers the password, remove password encryption, and manage ignored applications. Clipman stores shared text history as <code>clipman-history.clipdb</code> inside the chosen folder.</p>
+
+  <p>The Remember history password on this computer checkbox controls convenience versus exposure. When unchecked, Clipman asks for the history password when it starts and keeps the password only for the current run. When checked, Windows stores an unlockable password protected by Windows for the current user and machine, including on Windows 7, and Mac stores it in that user's Keychain for the selected database path. That is convenient for automatic startup, but it cannot protect against malware already running as the same signed-in user. The Use no password button clears the saved history password, clears any session-only password, and rewrites the current database without password encryption. It exists because blank password fields mean "keep the current password"; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
+
+  <p><strong>Sensitive data:</strong> Sensitive-data exclusions are off by default and device-specific. When the mode is set to Exclude from history, Clipman checks automatic clipboard text capture against the presets you enable. Matching text is not stored in Clipman history, and the system clipboard is not changed, so your immediate paste still works. This filter does not apply to existing history, imports, Send To, Quick Paste, Push to other devices, or entries manually copied from Clipman.</p>
+
+  <p>The built-in presets include credit card numbers with Luhn validation, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys, and approximate US driver-license shapes. International phone numbers include compact E.164-style numbers such as <code>+447890123456</code> and common spaced, dashed, dotted, or bracketed variants. Built-in presets are deliberately unchecked by default because pattern matching can have false positives.</p>
+
+  <h2 id="platform-notes">Platform Notes</h2>
+  <p>The same manual ships with the Windows and Mac builds. The app name, shared history format, sounds folder behavior, password model, and database sync model are intended to stay aligned across platforms.</p>
+
+  <p><strong>Windows:</strong> Clipman runs in the notification area and opens the history window with the configured global hotkey. Windows Preferences includes Send To integration, Windows startup registration, command-line import/export support, and Windows-protected password remembering when explicitly enabled.</p>
+
+  <p><strong>Mac:</strong> Clipman is packaged as a signed and notarized <code>Clipman.app</code> and runs as a menu bar app. After unzipping, move or drag <code>Clipman.app</code> to <code>/Applications</code>, then open it normally.</p>
+
+  <p><strong>Linux:</strong> Clipman is a GTK 4 desktop app that connects to Clipman Server and keeps an encrypted offline read cache. Its archive includes a per-user installer and a dedicated accessible manual covering desktop dependencies, X11 and Wayland differences, shortcuts, updates, File History, Secrets, and installed files.</p>
+
+  <p>The Mac status menu includes Show History, Show File History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. The history window also has a tabbable Clipman menu button because menu bar access can be less reliable for an accessory app. Press <code>Option+M</code> in the history window to open that menu directly. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
+
+  <p><strong>Mac VoiceOver notes:</strong> Clipman is an accessory menu bar app, so it may not always appear in the normal app switcher like a full document app. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, <code>Option+M</code> opens the Clipman command menu and <code>Command+F</code> opens search. The Clipman menu shows the current <code>Control+number</code> for each visible history area; those numbers update immediately when tabs are moved. The status line shows the active history area and visible entry count. It is not part of normal Tab navigation, but VoiceOver can reach it with VoiceOver navigation. Pressing <code>Enter</code> from search returns focus to the history list.</p>
+
+  <p>Mac global hotkeys are stored by physical key code so the displayed shortcut remains readable on different keyboard layouts. Default Mac global hotkeys avoid common VoiceOver conflicts, but they can be changed in Preferences.</p>
+  <h2 id="startup-state">Startup State</h2>
+  <p>Clipman remembers whether monitoring was on or off. When sounds are enabled, it plays the on or off sound at launch so you know the app is running and which state it restored.</p>
+
+  <p>Use <strong>Preferences, Startup and updates, Run Clipman at Windows startup</strong> on Windows or <strong>Run Clipman at login</strong> on Mac to start Clipman automatically when you sign in. Windows creates a per-user startup entry for the current <code>clipman.exe</code> path. Mac creates a per-user LaunchAgent for the current <code>Clipman.app</code>. Neither requires administrator permission.</p>
+
+  <p>Use <strong>Add current clipboard item to Clipman on start</strong> if you want Clipman to try to save whatever is already on the system clipboard when Clipman launches. This is off by default. When enabled, it still follows normal monitoring state, ignored-application rules, clipboard privacy signals where supported, concealed pasteboard handling where supported, and Sensitive Data preferences.</p>
+
+  <h2 id="pinned-entries">Pinned Entries</h2>
+  <p>Pinned entries are grouped at the top of the history list. A separator marks the start of normal entries. Pinned entries are numbered when they can be copied by shortcut, so the first pinned entry starts with 1, the second with 2, and so on through 0 for the tenth. Pinned state is still shown in the Pinned column or metadata, but not before the item text.</p>
+
+  <p>Pinned entries are protected from normal cleanup: Delete skips them, and history size or age limits do not remove them. Use <code>Shift+Enter</code> or the menu command to change the pinned state. Use the pinned-entry shortcuts in the Keyboard Shortcuts table to copy one of the first ten pinned entries and close history.</p>
+
+  <p>Deletion confirmation is enabled by default. Android and iOS provide a Settings toggle. Windows, Mac and Linux also let you turn future entry confirmations off from the first confirmation dialog; the preference can be restored later. Commands that clear an entire history area keep their separate stronger confirmation.</p>
+
+  <h2 id="entry-names-and-text">Entry Names and Text</h2>
+  <p>Use <code>F2</code> to open Entry Properties for the selected entry. You can add a short name or hint, assign a group, configure a Quick Paste hotkey, and edit the stored clipboard text itself. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
+
+  <p>In Entry Properties and the <code>F4</code> text review window, word navigation is tuned for URLs and code-like strings. On Windows, <code>Ctrl+Left</code> and <code>Ctrl+Right</code> stop at punctuation and symbol boundaries such as slashes, question marks, ampersands, equals signs, dashes, and underscores. On Mac, use <code>Option+Left</code> and <code>Option+Right</code>. Add <code>Shift</code> on either platform to extend the selection.</p>
+
+  <p>The <code>F4</code> text review window shows the clipboard text first, followed by a separate Details list or table in tab order. Details include useful metadata such as name, group, source device, pinned/template state, added and last-used times, manual order where present, text length, link count, and entry ID.</p>
+
+  <p>For example, an entry containing <code>1234</code> can be shown as <code>Test: 1234</code>. The name is metadata only: copying, cutting, exporting to text, and viewing full text use the clipboard text without the name.</p>
+
+  <p>Type-to-jump navigation normally uses the original clipboard text. Links use their assigned name or readable offline label, and image entries use their assigned name or filename, so those filtered lists remain practical without listening to a URL or content fingerprint first. Search checks names, original text, readable link labels, destinations, and image filenames.</p>
+
+  <p>For quick named lookup, type a slash followed by the entry name prefix, such as <code>/Test</code>. Clipman jumps to the matching named entry when it is visible in the current group filter.</p>
+
+  <h2 id="links-history">Links History</h2>
+  <p>Links history is an optional view controlled by <strong>Show Links history tab</strong> in Preferences or Settings. When enabled, Clipman adds a separate Links history view for entries where the whole clipboard text is a single absolute <code>http</code>, <code>https</code>, or <code>clipman</code> URL. Prose that merely contains a link, multiline text, <code>mailto:</code>, <code>file:</code>, and other custom schemes remain in Text history.</p>
+
+  <p>Links are not stored in a separate database and are not removed from shared text history. The Links tab is a filtered view of the same entries, so copy, cut, paste after selected, grouping, pinning, Quick Paste, templates, search, sorting, cleanup actions, and sharing across machines work like Text history wherever applicable. If the Links tab is disabled, links simply appear in Text history as before.</p>
+
+  <p>Clipman gives unnamed links a readable label from the address itself, such as <strong>Issues 50; github.com/OnjLouis/Clipman/issues/50</strong>. This works immediately, including for existing history, and never contacts the website. An F2 name remains first and always takes precedence.</p>
+
+  <p>For an unnamed HTTP or HTTPS link, use <strong>Use website title as name</strong> from the entry menu when you deliberately want Clipman to contact that site once. Clipman explains that the website can see the request and asks before continuing. It sends the selected link request without cookies, credentials, or other clipboard content, refuses local or private addresses, non-standard ports, sign-in and reset links, and other token-like capability links, then stores a useful returned title in the ordinary Name field. The exact URL is never replaced and remains available in F4, Entry Properties, and copy operations. Because this is an ordinary name rather than a separate preview file, it follows the entry to other synced clients. Clipman never fetches titles automatically or in bulk.</p>
+
+  <p>Enabling Links history adds its tab at the saved per-device position. On Mac, the Clipman menu shows its current <code>Control+number</code> shortcut. On Windows and Linux, <code>Alt+L</code> always opens Links when enabled, <code>Alt+I</code> always opens File history, and <code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code> moves through the visible history areas in their current order.</p>
+
+  <h2 id="rich-text-history">Rich Text History</h2>
+  <p>Rich Text history is optional and off by default on Windows, Mac, Linux, Android and iOS. Enable <strong>Preserve copied formatting and show Rich Text history</strong> in Preferences or mobile Settings when you want Clipman to retain formatting supplied by applications such as browsers, word processors, email clients, and rich-text editors. Enable it before copying formatted content; entries captured earlier as plain text cannot have their original formatting reconstructed. Clipman stores bounded rich data alongside the normal plain-text fallback in the shared text-history database. The separate Rich Text section is an accessible filtered list, not a second database.</p>
+
+  <p>For example, enable the preference, copy a formatted heading or link from a browser, and then select that new entry in Rich Text History. Press <code>Enter</code> or Copy and paste into a word processor or another rich-text destination. Clipman puts the available plain and rich formats on the clipboard together, so the destination chooses the richest format it supports.</p>
+
+  <p>Pressing <code>Enter</code>, Copy, Quick Paste, or receiving a newly created remote rich-text entry can place the available formats on the clipboard together. Templates and copies that combine several entries remain plain text. F4 shows the normal text and entry details; Windows and Mac safely preview stored RTF, while Linux safely presents common stored HTML formatting. Clipman does not load stored HTML into an active browser or execute scripts, remote content, or embedded objects.</p>
+
+  <p>Formatting belongs to the exact stored text. Editing the text in Entry Properties or applying a text transformation clears the old rich payload so stale formatting cannot be attached to different content. If HTML exceeds 768 KiB, RTF exceeds 1 MiB, the combined payload exceeds 1.75 MiB, or a payload is invalid, Clipman keeps the plain text and discards the rich data. Diagnostics reports aggregate rich-entry counts and byte totals but never includes the formatted payload itself.</p>
+
+  <p>Android captures and restores HTML, the rich-text format supported by Android's standard text clipboard. It preserves RTF received from desktop or iOS clients but uses the plain-text fallback when an entry contains only RTF. iPhone and iPad capture and restore both HTML and RTF through Apple's explicit Paste control. On mobile, use the section-switch button or the screen-reader page gesture to move through Text, Rich Text and Links while the option is enabled.</p>
+
+  <p><strong>Include copied images in rich text history</strong> is a separate option beneath Rich Text history and is also off by default. When enabled, Clipman can store a standalone PNG or JPEG clipboard image inside the existing history database. On Android or iPhone, choose Clipman from the system Share sheet to add one selected photo directly; Clipman waits for the normal device unlock and history load before storing it. The Rich Text row announces its filename rather than a content fingerprint, F4 or View provides an accessible image preview and dimensions, and copying the entry restores a native image format alongside its plain-text fallback. On mobile, an image row also provides <strong>Save to Photos</strong> followed by <strong>Share</strong> after the standard entry actions in both TalkBack and VoiceOver. These image-only actions save the stored image to the device photo library or open the system Share sheet without changing the history entry. The stored image follows the same local, shared-folder, or Clipman Server storage path as the rest of the history; no sidecar image folder or server change is required.</p>
+
+  <p>Image capture accepts at most 16 MiB, 16 megapixels, and 4096 pixels in either dimension. An image already within 512 KiB and 2048 pixels keeps its original PNG or JPEG bytes and metadata. Larger accepted images are reduced to at most 2048 pixels and 512 KiB, retaining a bounded amount of metadata where the platform supports it. Metadata can include camera or location information and follows the history's encryption and sync choices. Clipman refuses another locally captured image when embedded images already occupy 8 MiB of the current database. Concurrent additions from several syncing devices can take a merged history beyond that threshold; Clipman keeps those existing entries and refuses further image capture rather than silently deleting data.</p>
+
+  <p>On Windows, Mac and Linux, copying one embedded-image entry also supplies a temporary file representation without removing its native image or rich-text formats. Paste normally into Explorer, Finder, or a Linux file manager to create an image file named from the capture date and source device; paste into a document or image editor to use the richest format that application supports. Clipman preserves the stored PNG or JPEG bytes where possible and clears its bounded temporary file cache automatically. This does not turn File History into arbitrary cross-device file transfer.</p>
+
+  <p>Copying a PNG or JPEG file in Explorer, Finder, or a Linux file manager normally records it in machine-local File History, like any other file. To share that image through Rich Text history as well, open Clipman, switch to Rich Text, select the position where it belongs, and press <code>Ctrl+V</code> on Windows or Linux or <code>Command+V</code> on Mac. Clipman accepts exactly one available PNG or JPEG file and applies the same image limits and metadata rules described above. Other files, folders, and multi-file selections remain File History only.</p>
+
+  <p><strong>Also add copied PNG and JPEG files to Rich Text history</strong> is a separate desktop preference and is off by default. When enabled, copying exactly one supported image file records the normal File History event and also adds the image to shared Rich Text history automatically. The Rich Text and image-history options must also be enabled. Leave this preference off when you want explicit Rich Text paste to be the only way copied image files are shared.</p>
+
+  <h2 id="groups">Groups</h2>
+  <p>Use <code>Ctrl+G</code> on Windows, <code>Command+G</code> on Mac, or the group command in the history window to assign selected entries to a group. Type a new group name, or choose an existing group from the list and press <code>Enter</code> or OK. Choose No group, or leave the group name blank, to remove the group. The Filter control can show all entries, pinned entries, named entries, ungrouped entries, one custom group, or entries attributed to one device. Filter choices keep their names short for fast typed navigation, with device choices presented separately from groups.</p>
+
+  <p>Group names are case-insensitive. For example, <strong>GitHub</strong>, <strong>Github</strong>, and <strong>github</strong> are treated as one group instead of three. When old entries contain several capitalizations, Clipman displays the spelling used most often; the newest spelling resolves a tie. Assigning an entry with different capitalization reuses that displayed spelling.</p>
+
+  <p>On Windows, the <strong>Groups</strong> menu lists the same filters as the Group field. The first ten filters show their <code>Alt+1</code> through <code>Alt+0</code> shortcuts in the menu; additional groups appear by name without a numbered shortcut. The top-level Groups menu deliberately does not use <code>Alt+G</code>, because <code>Alt+G</code> moves focus directly to the Group field.</p>
+
+  <p>Use <code>Alt+1</code> through <code>Alt+0</code> on Windows, or <code>Option+1</code> through <code>Option+0</code> on Mac, to jump to one of the first ten group filters. These follow the same order as the Group filter field: All, Pinned, Named, Ungrouped, then custom groups.</p>
+
+  <p>On Windows, the Group filter applies when you press <code>Enter</code> in the group field or move focus away from it. Arrowing through the group list does not immediately throw focus back to the history list. On Mac, open the group filter with <code>Option+G</code> or the toolbar Filter button, then choose the filter from the menu.</p>
+
+  <p>Each Clipman client includes a Device name setting for new clipboard events. Changing it does not rewrite old history or move machine-specific data; it only changes the device label recorded on future entries from that client.</p>
+
+  <h2 id="sorting-and-manual-order">Sorting and Manual Order</h2>
+  <p>The Text history list includes the entry text, name, group, device, added time, and last-used time. The Device column records the computer, phone, or tablet that added or most recently re-added the entry, which helps when several devices share the same database.</p>
+
+  <p>The View menu on Windows includes Text history, Links history, Rich Text history, and File history commands with <code>Alt+T</code>, <code>Alt+L</code>, <code>Alt+R</code>, and <code>Alt+I</code> where those areas are enabled. Linux provides the same four history commands and shortcuts. Focus a tab and move it with <code>Alt+Left</code> or <code>Alt+Right</code> on Windows and Linux, or <code>Option+Left</code> or <code>Option+Right</code> on Mac. Mac keeps keyboard focus on the moved tab instead of entering its history list. The selected Mac tab is part of the normal Tab and Shift+Tab sequence; use Left or Right Arrow while it is focused to switch history areas, then Tab onward to the history list. Tab order is stored for the current device. Disabled optional tabs keep their place and return there when enabled; moving a tab does not change the fixed named shortcuts on Windows or Linux, while Mac updates the visible <code>Control+number</code> shortcuts immediately. The View menu on Windows and Linux, and the Sort controls or Clipman menu on Mac, can sort normal Text, Links, or Rich Text history entries by last used, added date, text, group, device, or manual order. On File history, the same controls sort by time captured, file count, name, operation, source application, or manual order.</p>
+
+  <p>Sort direction labels describe the next result plainly, such as oldest first, newest first, A first, Z first, fewest files first, or most files first. Pinned entries and pinned file events stay above normal items and keep their own manual order. Move pinned and normal items separately.</p>
+
+  <p>Android and iOS can show normal entries in Manual, Newest first, Oldest first, or Text order. Choose the mode directly in mobile Settings, cycle it from the history controls, or long-press the status bar. VoiceOver and TalkBack also expose a named action for each mode. The choice is saved on that phone or tablet and changes only the displayed list; it does not rewrite shared history or disturb pinned-entry order.</p>
+
+  <h2 id="cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</h2>
+  <p><code>Ctrl+C</code> and <code>Ctrl+X</code> on Windows, or <code>Command+C</code> and <code>Command+X</code> on Mac, put normal text on the system clipboard, so the text can be pasted into other applications. Windows also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries. Mac pastes multiple copied entries back as separate entries when they are separated by Clipman's text separator.</p>
+
+  <h2 id="history-limits">History Limits</h2>
+  <p>Preferences can limit the maximum number of entries or maximum entry age. Use <code>0</code> for no limit. Pinned entries and named entries are kept even when limits are applied.</p>
+
+  <h2 id="actions">Actions</h2>
+  <p>On Windows, the Actions menu contains simple text cleanup tools for selected entries: copy as plain text, trim whitespace, convert to single line, remove blank lines, remove URL tracking, clean links for sharing, line endings, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode. The most common actions also have shortcuts: <code>Ctrl+Shift+C</code> for plain-text copy, <code>Ctrl+Shift+T</code> for trim, <code>Ctrl+Shift+L</code> for single line, <code>Ctrl+Shift+B</code> for remove blank lines, <code>Ctrl+Shift+R</code> for remove URL tracking, <code>Ctrl+Shift+S</code> for clean link for sharing, <code>Ctrl+Shift+H</code> for HTML to readable text, and <code>Ctrl+Shift+U</code> for URL encode. Transform actions update the stored entry and also put the transformed result on the Windows clipboard. Mac includes URL cleanup and line-ending actions in the Clipman menu; <code>Command+Shift+R</code> removes URL tracking and <code>Command+Shift+S</code> cleans links for sharing. These update the stored entry and put the transformed result on the Mac clipboard.</p>
+
+  <p>On Windows, <strong>Copy as plain text</strong> copies the selected entry using only the Windows plain-text clipboard format. It does not strip HTML tags from stored HTML source. Use <strong>HTML to readable text</strong> when you want Clipman to remove HTML tags and keep the readable text.</p>
+
+  <p>Text transforms change the stored plain text and therefore clear any previous Rich Text formatting for that entry. Copy as plain text does not modify the stored entry.</p>
+
+  <p><strong>Remove URL tracking</strong> removes common tracking query parameters from web links, including <code>utm_*</code>, <code>fbclid</code>, <code>gclid</code>, <code>msclkid</code>, and similar marketing identifiers. It works on plain links and common HTML link attributes such as <code>href</code> and <code>src</code>. Automatic URL-tracking removal is opt-in from Preferences; when enabled, newly copied text is cleaned before Clipman stores it, and the cleaned text is placed on the Windows clipboard.</p>
+
+  <p><strong>Clean link for sharing</strong> removes tracking parameters and also removes share-state parameters that can change how a shared link opens. For YouTube links this includes timestamp parameters such as <code>t</code>, <code>start</code>, and <code>time_continue</code>, plus common share metadata such as <code>pp</code>, <code>si</code>, and <code>feature</code>. Use this when you want to share the clean video or page URL rather than a link that opens from the middle of a video.</p>
+
+  <p><strong>Line endings</strong> normalizes selected text entries to Windows <code>CRLF</code>, Unix <code>LF</code>, or old Mac <code>CR</code>. Use Windows <code>CRLF</code> when text copied from macOS, Linux, web tools, or scripts appears as one long line in an older Windows editor. This is an explicit action rather than an automatic default, because code, scripts, patches, and configuration files may need their original line endings preserved.</p>
+
+  <p><strong>URL encode</strong> is for text that needs to be safe inside a URL. For example, <code>Where's My Car?</code> becomes <code>Where%27s%20My%20Car%3F</code>. <strong>HTML encode</strong> is for text that needs to be safe inside HTML source, where characters such as ampersands and quotes may need to become HTML entities. Use URL encode for web links, query strings, podcast episode links, and similar copy/paste jobs.</p>
+
+  <h2 id="menus">Menus</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Menu</th>
+        <th>What it contains</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>File</td>
+        <td>Import, import and replace, export, clear text history, close the history window, or exit Clipman completely.</td>
+      </tr>
+      <tr>
+        <td>Edit</td>
+        <td>Clipboard entry commands on Text history, including copy, cut, paste after selected, edit entry, group entry, properties, push to other devices, view full text, pin or unpin, delete, and search. On File history it changes to file-event commands: restore files to the clipboard, copy file paths, view event details, delete selected events, remove unavailable events, and clear file history. When a selected pinned text entry or file event is in the first ten pinned items, the menu also shows the relevant pinned shortcut.</td>
+      </tr>
+      <tr>
+        <td>Actions</td>
+        <td>Text cleanup and transformation commands for selected Text history entries, including plain-text copy, trim, single line, remove blank lines, remove URL tracking, clean link for sharing, line-ending normalization, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode.</td>
+      </tr>
+      <tr>
+        <td>View</td>
+        <td>Sort Text history or File history entries from the Sort by submenu, toggle the sort direction with plain first-style labels such as oldest first or A first, and move selected entries up or down in manual order. The sort fields change to match the active tab.</td>
+      </tr>
+      <tr>
+        <td>Options</td>
+        <td>Open Preferences or toggle clipboard monitoring on and off.</td>
+      </tr>
+      <tr>
+        <td>Help</td>
+        <td>Open the manual, check for updates, review version history, open the project page, contact the project, donate, show diagnostics, or view About Clipman.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="sensitive-data">Sensitive Data Exclusions</h2>
+  <p>Sensitive-data exclusions live in Preferences. They are off by default. Set the mode to <strong>Exclude from history</strong>, then check the presets you want. When automatic clipboard text matches a checked preset, Clipman does not save that text to history. The system clipboard or Mac pasteboard is not changed, so your immediate paste still works.</p>
+
+  <p>This feature is deliberately conservative. It applies only to automatic text capture. It does not filter existing history, imports, Send To, Quick Paste, Push to other devices, or entries manually copied from Clipman. Presets can have false positives, so enable only the ones that fit the work you do.</p>
+
+  <table>
+    <thead>
+      <tr><th>Preset</th><th>What it looks for</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Credit card number</td><td>13 to 19 digits, with optional spaces or dashes</td><td>Uses a Luhn checksum, so random 16-digit numbers usually do not match.</td></tr>
+      <tr><td>US Social Security number</td><td>Three digits, two digits, four digits</td><td>Can match dashed, spaced, or run-together forms.</td></tr>
+      <tr><td>International phone number</td><td>A plus sign followed by 8 to 15 digits, allowing common separators</td><td>Examples include compact E.164-style numbers such as <code>+447890123456</code>.</td></tr>
+      <tr><td>Long API key or token</td><td>A run of 32 or more letters and numbers</td><td>Useful for many raw tokens. Complete <code>http</code> and <code>https</code> URLs are not excluded by any sensitive-data preset, so ordinary shopping/search/archive links with long tracking parameters or date-like path segments can still be saved as links.</td></tr>
+      <tr><td>Software license key</td><td>Five groups of five letters or numbers separated by hyphens</td><td>Covers common Windows-style product keys and similar software serials. Clipman checks the shape only; it does not validate vendor-specific keys.</td></tr>
+      <tr><td>US driver license, approximate</td><td>One letter followed by 6 to 13 digits</td><td>Approximate because US license formats vary by state.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Use these harmless test values to check that a preset is enabled and that the exclude sound plays. Copying one of these from the button should trigger <code>exclude.wav</code> when that preset is checked and sounds are enabled. If the browser or reader blocks clipboard buttons, select the text manually and copy it.</p>
+
+  <div class="copy-test"><code>4111111111111111</code><button type="button" data-copy-test="4111111111111111">Copy credit-card test number</button></div>
+  <div class="copy-test"><code>+447890123456</code><button type="button" data-copy-test="+447890123456">Copy international phone test number</button></div>
+  <div class="copy-test"><code>AAAAA-BBBBB-CCCCC-DDDDD-EEEEE</code><button type="button" data-copy-test="AAAAA-BBBBB-CCCCC-DDDDD-EEEEE">Copy software license key test</button></div>
+  <div class="copy-test"><code>0123456789ABCDEF0123456789ABCDEF</code><button type="button" data-copy-test="0123456789ABCDEF0123456789ABCDEF">Copy API-token test string</button></div>
+
+  <p>The credit-card test number is a common non-real test value that passes the Luhn checksum. It is useful precisely because Clipman should exclude it while ignoring most random 16-digit strings.</p>
+
+  <h2 id="clipboard-privacy-signals">Clipboard Privacy Signals</h2>
+  <p>On Windows, Clipman also honors standard clipboard privacy signals added by the application that placed data on the clipboard. If a clipboard update contains <code>Clipboard Viewer Ignore</code>, <code>ExcludeClipboardContentFromMonitorProcessing</code>, <code>CanIncludeInClipboardHistory</code> set to zero, or <code>CanUploadToCloudClipboard</code> set to zero, Clipman treats that update as private, plays <code>exclude.wav</code> when sounds are enabled, and stores nothing in text history or file history.</p>
+
+  <p>This helps with password managers and secure-copy workflows that mark their own clipboard data as not suitable for history or sync. It is still cooperative: if Chrome, a webpage, a password manager, or another app puts only ordinary text on the clipboard with no privacy format, Clipman cannot reliably tell whether that text came from a password field or a normal webpage. Use ignored applications and Sensitive Data Exclusions for cases where the source app does not mark private clipboard updates itself.</p>
+
+  <h2 id="ignored-applications">Ignored Applications</h2>
+  <p>Preferences can list applications that Clipman should ignore, one per line. This is useful for password managers, banking tools, private notes, or any app where clipboard history should not be recorded.</p>
+
+  <p>On Windows, enter process names with or without <code>.exe</code>, or use <strong>Add running app</strong> to choose from currently running processes. On Mac, enter the app name, bundle identifier, or executable name, such as <code>Safari</code>, <code>com.apple.TextEdit</code>, or <code>KeePassXC</code>. Ignored applications are machine-specific settings. Clipman also treats related helper names as ignored when they use the same name or bundle/process prefix. On Mac, Clipman also refuses concealed pasteboard data and can use pasteboard type metadata from password-manager quick-access panels where macOS does not report the password manager as the foreground app.</p>
+
+  <p>Ignored applications and sensitive-data exclusions solve different problems. Ignored applications are best when an entire app should never be captured. Sensitive-data exclusions are best when ordinary apps sometimes copy text matching a known sensitive pattern.</p>
+
+  <h2 id="database-and-sync">Database and Sync</h2>
+  <p>Clipman supports three storage approaches. <strong>Local storage</strong> keeps history on one device. <strong>Shared-folder storage</strong> lets the Windows and Mac clients use a folder provided by a cloud-sync service, network share, or filesystem mount. <strong>Clipman Server</strong> lets Windows, Mac, Linux, Android, and iOS clients synchronize through a separately hosted server while retaining a local cache. Clipman does not contain a WebDAV client and cannot connect directly to a WebDAV URL; WebDAV works only when the operating system or another tool has already mounted it as a normal folder.</p>
+  <p>On Windows, Clipman defaults to a portable <code>Settings</code> folder beside <code>clipman.exe</code>. On Mac, Clipman stores a small pointer under Application Support and keeps the active machine settings in the selected Clipman data folder. Settings are machine-specific and use the computer name, such as <code>Settings\Desktop-settings.json</code>, <code>Settings\Laptop-settings.json</code>, or <code>MacBook-settings.json</code>. This lets multiple computers share one data folder without fighting over hotkeys, monitoring state, startup choices, or window position. The shared text history database is <code>clipman-history.clipdb</code>.</p>
+  <p>If you choose a different data folder, Clipman stores this machine's active settings in that folder beside <code>clipman-history.clipdb</code> and the machine-specific file-history database. A small <code>settings-location.json</code> pointer remains in the app's local <code>Settings</code> folder so Clipman can find the selected data folder on the next launch. That pointer stores locations per computer name, so two machines using different local paths to reach the same cloud or network data folder do not overwrite each other's location. If a cloud service creates a conflict copy of the pointer, Clipman merges the known clients back into one pointer file. If the selected folder is unavailable when Clipman starts, Clipman reports that location and stops rather than silently switching to the default folder; reconnect the drive, cloud service, mounted filesystem, or network share and start Clipman again.</p>
+  <p>If the default data folder is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different data folder, Clipman stores the shared history as <code>clipman-history.clipdb</code> inside that folder. Existing explicit <code>.clipdb</code> file paths remain readable for compatibility. If an explicit data location is missing at startup, Clipman asks whether to browse for the data folder in a new location, use the default database beside Clipman, or stop startup.</p>
+
+  <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, Spotlight, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's data folder to the same synced or network-shared folder. Clipman uses the <code>clipman-history.clipdb</code> file inside that folder for shared text history.</p>
+
+  <p>Multiple running Clipman instances can use the same history database. When one device writes a new entry, the database is saved atomically and the other devices reload it when the changed file arrives. Each text entry stores the device name that added or most recently re-added it, and the history list includes a Device column and device sort mode so shared setups can tell which computer, phone, or tablet supplied an entry.</p>
+
+  <p>Preferences can optionally put newly created text entries received from another device onto this device's clipboard. This is off by default. When enabled, Clipman baselines the current newest remote entry first, so enabling the option does not unexpectedly copy older history. Reusing an older entry with Quick Paste on another device updates that entry's last-used time, but it does not trigger remote auto-copy because it is not a newly created entry. To intentionally send an existing selected entry to other devices, use <strong>Push to other devices</strong> from the entry menu, or press <code>Ctrl+P</code> on Windows and <code>Command+P</code> on Mac. This creates a fresh shared-history event from the selected text so other opted-in devices can receive it as the latest remote text. When duplicate removal is enabled, Clipman refreshes the selected entry instead of leaving an extra duplicate behind. This preference is device-specific and does not change the shared database format.</p>
+
+  <p>If the shared database file is missing but its folder is available, Clipman starts with an empty history and creates the file when it next saves. If the shared folder or drive is temporarily unavailable, Clipman keeps running, reports the storage problem in diagnostics, and avoids crashing. Background clipboard captures do not display blocking error dialogs while storage is missing. On Mac, Clipman pauses monitoring and adds a Retry Storage command to the status menu until the data folder returns. On Windows, the notification-area menu and tooltip report that storage is unavailable and offer Retry storage. When the location becomes available again, Clipman merges the existing database before saving so it does not blindly overwrite a shared history file.</p>
+
+  <p><strong>History password:</strong> Preferences can encrypt the shared history database with a password. With local or shared-folder storage, leaving the password fields blank on a new database means Clipman uses compressed <code>.clipdb</code> storage without password encryption. Clipman Server requires a nonblank password before a connection can be applied. If you enter and confirm a history password, the database is encrypted with AES and checked with a message authentication code before loading. The password is not stored inside the shared <code>.clipdb</code> file.</p>
+
+  <p>New settings do not remember the history password by default. In that mode, Clipman prompts for the password when it starts, keeps it only while Clipman is running, and clears any saved platform password. If you check Remember history password on this computer, Windows stores the password using Windows user protection for this account and machine, including on Windows 7, and Mac stores it in that user's Keychain for the selected database path. On Mac, Preferences reports whether database encryption is on and whether the password is saved in Keychain; the password field stays blank for security even when a remembered password exists. Copying a settings file to another computer does not copy a working key; that computer must be given the same history password through its own Preferences window. Remembered passwords are still recoverable by software already running as the same signed-in user, so leave Remember unchecked if you prefer startup prompts over same-user recoverability.</p>
+
+  <p>The Generate password button, where available, creates a random history password, fills both password fields, and copies it to the clipboard. Clipman deliberately ignores that generated password copy, so it is not added to clipboard history. You are responsible for saving that password somewhere safe and entering it on each computer that shares the encrypted history. If the password is lost, Clipman cannot recover the encrypted history.</p>
+
+  <p>When typing a history password manually, enter it in both password fields. The Show history password checkbox temporarily reveals both fields so you can verify what you typed. Leave both password fields blank to keep the current encrypted database password. Use the Use no password button if you want to remove password encryption and rewrite the current database without a history password. Windows command-line import, export, and Send To operations can open encrypted databases only when this computer is set to remember the password; the already-running Clipman window can use a session-only password.</p>
+
+  <p>If a sync service creates conflict copies of Clipman's settings or history database, Clipman attempts to tidy them automatically when it next loads the affected file. History database conflicts are merged by entry, then the conflict copies are removed. Machine settings conflicts use the newest copy for that machine, then remove the extra files. This is intended only for Clipman's own settings and <code>.clipdb</code> files.</p>
+
+  <p>Clipman also writes a small shared update-state file in the <code>Settings</code> folder. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy.</p>
+
+  <p>During an online or automatic update, Clipman downloads the release ZIP to a temporary folder, asks other instances running from the same shared folder to close briefly, replaces the app files while preserving <code>Settings</code>, then starts the updated copy. When the new copy starts it publishes the new shared update state, so other computers can restart after their cloud service or network share exposes the updated executable. This is designed to make shared-folder updates feel seamless whether the folder is synced locally or opened from a direct network share.</p>
+
+  <h2 id="secrets">Secrets</h2>
+  <p>Clipman 2.0 includes a small optional Secrets area for short private snippets that you type deliberately, such as a system password or code that you sometimes need to paste quickly outside a web browser. Secrets are not captured automatically from the clipboard, are not shown in normal Text history, and are not included in ordinary history import or export. Open <strong>Options, Secrets</strong> on Windows, <strong>Secrets</strong> from the Mac status menu, or <strong>Secrets</strong> from the Mac in-window Clipman menu with <code>Option+M</code>. You can also open Secrets directly with <code>Ctrl+Shift+E</code> on Windows or <code>Command+Shift+E</code> on Mac.</p>
+
+  <p>Secrets require a history password. They are stored in a separate per-machine <code>&lt;computer-name&gt;-secrets.clipdb</code> file beside the active settings/history files and use the same history password as the main database. They do not sync through the shared text-history database. Opening the Secrets manager asks for the current history password so names and assigned hotkeys are not shown casually from an unlocked desktop. The secrets list shows names and assigned hotkeys only; secret values are hidden in the list and are edited in password fields. If you remove the history password, Clipman does not rewrite secrets as an unencrypted file.</p>
+
+  <p>In the Secrets manager, press <code>Insert</code> to add a secret, <code>F2</code> to edit the selected secret, <code>Delete</code> to remove it, <code>Enter</code> to Quick Paste it immediately, and <code>Esc</code> to close the window. The secret editor has fields for a name, the secret value, confirmation, and an optional Quick Paste hotkey. <code>Ctrl+A</code> on Windows and <code>Command+A</code> on Mac work in the password and secret text fields so a mistyped value can be selected and replaced without holding Backspace.</p>
+
+  <p>Each secret can have its own Quick Paste hotkey. Pressing that hotkey temporarily places the secret value on the system clipboard, sends the normal paste command to the active app, then restores the previous clipboard where the platform allows it. This is meant for convenience, not as a full password manager: any app that can monitor keystrokes, inspect the clipboard at the wrong moment, or run as the same signed-in user may still be able to see what you paste.</p>
+
+  <h2 id="clipman-server">Clipman Server</h2>
+  <p>Clipman 2.0 adds an optional Clipman Server path for people who want to host the shared history database from one machine, a Raspberry Pi, or a VPS instead of relying only on a cloud service, synced folder, or network share. This is an additional storage path, not a replacement for the existing local and shared-folder workflow.</p>
+
+  <p>The normal Clipman app packages are client-only. Clipman Server is distributed as a separate cross-platform server package from the <a href="https://github.com/OnjLouis/Clipman/releases">Clipman releases page</a>. That package runs the same Python server on Linux, macOS, and Windows so the safety model stays consistent: random high port and random bearer token on first run, password-scoped database buckets, cheap revision polling, rolling backups, private file permissions where supported, rotating logs, database-ID log redaction, lightweight runtime counters, and optional direct TLS.</p>
+
+  <p>The server stores and serves raw <code>.clipdb</code> files. It does not know, request, or store the history password. Encrypted databases remain encrypted on the server; Clipman clients unlock, merge, and save history locally, then upload the updated database with a revision check. If another client has already uploaded a newer copy, the server rejects the stale upload so the client can download, merge, and try again instead of overwriting newer history.</p>
+
+  <p>Each server token plus each history password maps to a separate server-side database bucket. That means two clients using the same server token and same history password see the same history, while a wrong password or intentionally different password does not overwrite the existing database. Clipman Server requires a nonblank, preferably unique history password; passwordless history remains available only with local or shared-folder storage.</p>
+
+  <p>Backups are written under each database bucket. The default backup schedule is hourly, with roughly 24 hours of backups kept and a maximum of 48 backup files.</p>
+
+  <p>For private LAN, localhost, or VPN-only use, clients can use <code>clipman://host:port</code>. Clipman displays that form to avoid making the server look like a normal web page, then uses the local server transport internally. Do not expose plain <code>clipman://</code> or plain HTTP to the public internet. For VPS or internet-facing use, put the server behind HTTPS or start the server with <code>--cert-file</code> and <code>--key-file</code> so clients connect using an <code>https://</code> address.</p>
+
+  <p>Clipman Server 2.4 can embed its public private-certificate authority in the generated <code>.clpconf</code> connection file. Current clients validate that authority and trust it only inside Clipman, only for the HTTPS host shown during import, while still requiring a valid server certificate and matching host name. It is not installed as a device-wide root, and public HTTPS connections continue to use the operating system trust store. Transfer the connection file through a channel you trust because it also contains the private server token. The older operating-system certificate installation and <code>share-ca</code> flow remain available for older clients and recovery; after a current client connects with the embedded authority, an old Clipman authority can be removed from the operating-system trust store.</p>
+
+  <p>On Linux, <code>Linux/install-clipman-server.sh</code> installs the server and its startup helper. On first setup, Clipman Server creates <code>clipman-server-connection.clpconf</code> beside its settings file. In Clipman Preferences, choose <strong>Import server file</strong> on Windows or <strong>Import Server File</strong> on Mac, review the server address, enter a unique history password if one is not already configured, then apply the settings. On Android or iOS, tap the <code>.clpconf</code> file in the system file browser to open it in Clipman, or use <strong>Import server connection file</strong> in Clipman Settings. Clipman can export the currently configured connection from the same Preferences or Settings area on Windows, Mac, Android, and iOS. Mobile export offers both Save to Files and the native share sheet, so the connection can be sent through Messages, WhatsApp, AirDrop, Nearby Share, or another chosen app. Clipman warns before export because the file contains the private server token; store and share it securely, and never keep it beside an exported clipboard history. Imported details still require review and Save before synchronization begins. The server also writes a readable <code>clipman-server-connection.txt</code> file for manual setup and older clients. Both files contain the private server token; delete them or move the details to a password manager once every client is configured.</p>
+
+  <h3>Linux service management</h3>
+  <p>The Linux server installer supports systemd and runit. It detects the active service manager automatically, or an administrator can select <code>systemd</code> or <code>runit</code> with <code>CLIPMAN_SERVER_INIT_SYSTEM</code>. Per-user runit supervision uses turnstile and service directories under <code>~/.config/service</code>. A system-wide runit service uses <code>/etc/sv</code> and <code>/var/service</code> and does not require turnstile.</p>
+
+  <p>The generated <code>clipmanserver</code> helper uses the selected service manager for starting, stopping, restarting and checking the server, as well as for enabling or disabling automatic updates. If runit is present without turnstile, the normal user-local program and helper are installed without claiming that a persistent per-user service is available.</p>
+
+  <p>To start a server from an existing history, connect first from the Clipman client that already has the desired history and history password. Do not manually copy a <code>.clipdb</code> into the server's database folders; clients derive the correct server bucket from the server token and the history password, and the server deliberately does not know the history password.</p>
+
+  <p>To use a server from the Windows or Mac client, open <strong>Preferences</strong>, set <strong>Storage type</strong> to <strong>Clipman Server</strong>, enter the server host and token, and keep the data folder set to a local cache/settings folder. The host can be typed as <code>home-server:49152</code>; Clipman infers the local server protocol. The server token field is hidden on screen and saved with per-user protection: Windows uses current-user DPAPI protection, and Mac uses the user's Keychain. The client still watches and saves a local cache, but text history is synchronized through the server.</p>
+
+  <p>Clients normally poll the server cheaply by checking the database revision. If the server, network, or VPN is temporarily unavailable, Clipman keeps its local cache, backs off repeated polling failures, and retries automatically. Diagnostics include the last server poll, last successful sync, last upload, current server revision, and failure count so sync problems can be diagnosed without guessing.</p>
+
+  <p>Android and iOS clients can choose <strong>Local</strong> or <strong>Server</strong> in Settings. Local mode keeps <code>clipman-history.clipdb</code> in the mobile operating system's private app storage and does not require a server. Server mode uses the same private file as an offline cache. Server details remain saved while Local mode is selected, and switching back to Server merges local additions, edits, pins, and deletions with the server history before uploading, so work done without a connection is not blindly replaced.</p>
+
+  <p>Android and iOS Settings can optionally back up encrypted history to a folder you choose through the system file picker, including supported cloud and document providers. A nonblank history password is required. Clipman writes one <code>Clipman History.clipdb</code> file containing history only; server details, tokens, settings, and passwords are never included. Use <strong>Restore and merge history backup</strong> to combine its entries and deletion records with current history instead of replacing newer information.</p>
+
+  <p>When a mobile client starts in Server mode, it displays its encrypted on-device cache first and refreshes from the server in the background. A normal launch therefore does not show an empty history merely because the network response has not arrived yet.</p>
+
+  <p>Clipman iOS provides <strong>Add Clipboard to Clipman</strong> and <strong>Copy Latest Clip</strong> actions through Apple's Shortcuts app and Siri. Either action can be assigned to the iPhone Action Button. Add Clipboard stores the current iOS clipboard text and available formatting; Copy Latest places the newest Clipman history entry on the iOS clipboard. Both honour Clipman's biometric or device-authentication setting, save through the encrypted local cache, and continue safely when the server is temporarily unavailable. Long-press the Clipman Home Screen icon to use the same two commands without creating a shortcut. Suggested Siri phrases include <strong>Add clipboard to Clipman</strong> and <strong>Copy latest from Clipman</strong>. Clipboard access follows the <strong>Paste from Other Apps</strong> choice in iOS Settings; Clipman does not add a second confirmation screen.</p>
+
+  <p>Android and iOS Settings also offer <strong>Require biometric or device authentication</strong>. It is off by default. When enabled, Clipman asks for Face ID, Touch ID, biometrics, or the device credential before showing history after the app returns to the foreground.</p>
+
+  <p>Mobile Settings includes optional ways to support Clipman. Android opens Clipman's donation page, while iOS presents one-time tips through Apple's in-app purchase system. Tips do not unlock features, content, or services.</p>
+
+  <p>Clipman Android can check GitHub for updates automatically while the app is open, at most once per day. Use <strong>Check Now</strong> in Settings for an immediate check. Clipman verifies the downloaded package name, version, digest when supplied by GitHub, and application signing key before opening Android's installer. Android always asks the user to approve the installation; Clipman does not silently replace itself. TestFlight provides update delivery for iPhone and iPad.</p>
+
+  <p>Read the server package's <code>Manual.html</code> for setup, security, service-path, TLS, logging, backup, and API details.</p>
+
+  <h2 id="send-to">Send To</h2>
+  <p>Send To is a Windows feature. Windows Preferences can add Clipman to the Windows Send To menu. Sending a supported text-oriented file to Clipman adds the file's text content to clipboard history. Supported examples include plain text, logs, Markdown, CSV, JSON, XML, HTML, CSS, JavaScript, PowerShell, batch files, INI/config files, AutoHotkey scripts, registry files, and common source-code files. The imported text uses the current duplicate and history-limit preferences.</p>
+
+  <p>The Send To shortcut is named <strong>Clipman - add text to history</strong> with <code>C</code> as its menu accelerator.</p>
+
+  <p>The Send To entry calls Clipman with the selected file path. If Clipman is already running, the file is imported into the configured database. Preferences can choose whether a successful Send To import also brings the history window to the front. If Clipman is not already running, it imports the file using the settings in the <code>Settings</code> folder beside <code>clipman.exe</code>. When automatic grouping is enabled, Send To imports are placed in a group named <strong>Send To</strong>. Mac does not currently ship a Send To equivalent.</p>
+
+  <h2 id="file-history">File History</h2>
+  <p>The File history tab shows file, folder, and non-text clipboard events captured by Clipman. File history is stored separately from text history in a machine-specific database named like <code>Settings\Desktop-file-history.clipdb</code>, <code>Desktop-file-history.clipdb</code> inside a custom data folder, or <code>MacBook-file-history.clipdb</code> inside the selected Mac data folder. If you set a history password, file history uses the same password; there is not a second password to remember. File history stores paths and clipboard-format details only. It does not copy or preserve the actual file contents.</p>
+
+  <p>Copying the same file set again moves the existing event to the top instead of adding another duplicate. File history rows start with the file or folder name, then show the operation and file count. Press <code>Enter</code> to restore all existing files and folders from the selected file events to the clipboard and close the history window, matching Text history behavior. Press <code>Ctrl+C</code> on Windows or <code>Command+C</code> on Mac to copy all selected file paths as text without closing. Use the View menu on Windows, or the Sort controls and Clipman menu on Mac, to sort normal file events by time captured, file count, name, operation, source application, or manual order. Press <code>Home</code>, <code>End</code>, <code>Page Up</code>, and <code>Page Down</code> for larger list jumps. Press <code>Backspace</code> to jump to the first normal file event below pinned file events. Press <code>Shift+Enter</code> to pin or unpin selected file events. Press <code>Ctrl+Enter</code> on Windows or <code>Command+Enter</code> on Mac to go to a single selected file or folder in Explorer or Finder. Press <code>Alt+Up</code> or <code>Alt+Down</code> on Windows, or <code>Option+Up</code> or <code>Option+Down</code> on Mac, to move selected file events within the pinned or normal section. Moving file events switches File history back to manual order. Press <code>Del</code> on Windows or <code>Command+Backspace</code> on Mac to remove selected unpinned file-history events from the list.</p>
+
+  <p>Pinned file events are grouped at the top of File history, with the same normal-entries separator used by Text history. They are numbered when they can be restored by shortcut, and their pinned state is shown in the Pinned column or metadata rather than before the event name. They are protected from delete, clear-normal cleanup, automatic unavailable-event cleanup, and file-history size trimming. Use <code>Ctrl+1</code> through <code>Ctrl+0</code> on Windows, or <code>Command+1</code> through <code>Command+0</code> on Mac, from the File history tab to restore one of the first ten pinned file events and close history. Windows also supports <code>Ctrl+Shift+1</code> through <code>Ctrl+Shift+0</code> to copy paths from one of the first ten pinned file events as text and close history.</p>
+
+  <p>File history can clear normal file-history events or remove unavailable unpinned events. Unavailable events include non-file clipboard events that cannot be restored as files, and file events where all referenced files and folders are now missing. These actions are also available from the keyboard with <code>Ctrl+Del</code> and <code>Alt+Del</code> on Windows, or <code>Control+Backspace</code> and <code>Option+Backspace</code> on Mac. Windows Preferences can also remove unavailable unpinned events automatically as new file-history events are captured.</p>
+
+  <h2 id="import-and-export">Import and Export</h2>
+  <ul>
+    <li><strong>Import</strong> adds entries from a <code>.clipdb</code>, JSON, or text file on both platforms. Windows can also import old Clipman <code>clipman.db</code> or Ditto SQLite databases.</li>
+    <li><strong>Import and replace</strong> replaces the current clipboard database with the selected file on Windows. Mac currently imports into the existing history.</li>
+    <li><strong>Export</strong> saves the current clipboard history as compressed <code>.clipdb</code>, JSON, or text on both platforms.</li>
+  </ul>
+  <p>When importing an encrypted <code>.clipdb</code>, Clipman asks for that import file's password if it is different from the current database password. When exporting a <code>.clipdb</code> from the app, Clipman asks whether to use the current history password, a new export-only password, or no password. If the current history database is password protected, Clipman asks you to re-enter the current history password before creating any <code>.clipdb</code> export, including an export that uses no password. JSON and text exports are deliberately readable interchange formats, so use <code>.clipdb</code> when exporting private history that should stay encrypted.</p>
+
+  <p>Old Clipman and Ditto imports are Windows-only and read text entries only. They do not import images or every custom clipboard format. Imported entries are grouped as <strong>Imported from old Clipman</strong> or <strong>Imported from Ditto</strong> so they are easy to review after import.</p>
+
+  <h2 id="updates">Updates</h2>
+  <p>Use <strong>Help, Check for updates</strong> on Windows, the Clipman status or history-window menu on Mac, or <code>Shift+F1</code> on either platform to check GitHub releases. If a newer release includes a Clipman ZIP package for your platform, Clipman can download it and update the app.</p>
+
+  <p>Use <strong>Preferences, Startup and updates</strong> to choose whether Clipman checks for updates never, at startup, hourly, or daily. If <strong>Install updates silently when possible</strong> is enabled, automatic checks can install a newer ZIP release without prompting where supported. Manual update checks still show the normal update dialog.</p>
+
+  <p>Use <strong>Help, Version history</strong> on Windows or <strong>Version History</strong> on Mac to review the latest release notes. Use <strong>Help, Project page</strong> or <code>Ctrl+F1</code> on Windows and <strong>Project Page</strong> or <code>Command+F1</code> on Mac to open the GitHub project page. Use <strong>Help, Contact</strong> on Windows or <strong>Contact</strong> on Mac for feedback, and <strong>Help, Donate</strong> on Windows or <strong>Donate</strong> on Mac to support Clipman. Use <strong>Help, Diagnostics</strong> or <code>Alt+F1</code> on Windows and <strong>Diagnostics</strong> or <code>Option+F1</code> on Mac to open diagnostics.</p>
+
+  <h2 id="sounds">Sounds</h2>
+  <p>Clipman can play short sounds when text is copied, remote text is copied from another synced machine, monitoring is turned on, monitoring is turned off, a clipboard item is ignored because monitoring is off, or a sensitive-data exclusion blocks automatic capture. Sounds can be enabled or disabled in preferences.</p>
+
+  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, <code>skip.wav</code>, and <code>exclude.wav</code>. If <code>exclude.wav</code> is missing, Clipman falls back to <code>skip.wav</code>.</p>
+
+  <h2 id="application-files">Application Files</h2>
+  <p>A normal Windows portable Clipman folder contains only the files needed to run the app. A Mac package contains <code>Clipman.app</code>, which bundles the executable, manual, sounds, and supporting resources inside the app package.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>File or Folder</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>clipman.exe</code></td>
+        <td>The Windows Clipman application.</td>
+      </tr>
+      <tr>
+        <td><code>Clipman.app</code></td>
+        <td>The Mac Clipman application bundle. Move or drag this to <code>/Applications</code> for normal use. VoiceOver users can copy and paste the app in Finder instead of dragging if preferred.</td>
+      </tr>
+      <tr>
+        <td><code>Manual.html</code></td>
+        <td>This user manual. Press <code>F1</code> in Clipman to open it. On Mac, the manual is bundled inside <code>Clipman.app</code>.</td>
+      </tr>
+      <tr>
+        <td><code>LICENSE.txt</code></td>
+        <td>The MIT License text for Clipman.</td>
+      </tr>
+      <tr>
+        <td><code>sqlite3.dll</code></td>
+        <td>Windows SQLite runtime used only when importing old Clipman or Ditto SQLite databases.</td>
+      </tr>
+      <tr>
+        <td><code>sounds</code></td>
+        <td>Default WAV files for copy, remote sync copy, on, off, and skipped-copy feedback.</td>
+      </tr>
+      <tr>
+        <td><code>Settings</code></td>
+        <td>Created on first run on Windows. By default it stores machine-specific settings, the shared text-history database, the machine-specific file-history database, optional custom sounds, logs, and shared update state. If you choose a custom data folder, this folder keeps a small <code>settings-location.json</code> pointer and the active data moves to the selected folder. The pointer stores one location per computer name so machines with different local cloud paths can share the same app folder without fighting. On Mac, the active settings and databases live in the selected data folder, with a small Application Support pointer back to that folder.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>The source package also includes <code>README.md</code>, source files, and build project files. Those source-only files are not required in the portable runtime folder.</p>
+
+  <h2 id="non-text-clipboard-events">Non-text Clipboard Events</h2>
+  <p>Clipman stores text history in the main history database and stores file or non-text clipboard events in a separate machine-specific file-history database. Use the File history tab to review those events. It can show files copied or cut in Windows Explorer or macOS Finder, file-like clipboard operations from other programs, and specialist formats such as audio-editor clipboard data. Clipman cannot retrieve events from before it was running, and file events are useful only while the referenced files still exist at the same paths.</p>
+
+  <p>Press <code>Enter</code> on a file event to put its files back on the clipboard, ready to paste into Explorer, Finder, or another file-aware application. Press <code>Ctrl+C</code> on Windows or <code>Command+C</code> on Mac to copy the file paths as text, <code>Shift+Enter</code> to pin or unpin selected events, <code>Del</code> on Windows or <code>Command+Backspace</code> on Mac to remove selected unpinned events from file history, <code>F4</code> to view event details, or <code>Ctrl+Enter</code> on Windows and <code>Command+Enter</code> on Mac to go to one selected file or folder. Non-file events are informational; they can be reviewed, pinned, moved, or deleted, but they cannot be restored as files. Open diagnostics for a text report of the same events.</p>
+
+  <h2 id="command-line">Command Line</h2>
+  <p>The command-line interface is currently Windows-focused. The Mac app is intended to be used through <code>Clipman.app</code>, the menu bar item, global hotkeys, and the history window.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Command</th>
+        <th>Effect</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>clipman.exe --show</code></td>
+        <td>Shows the history window for the running Clipman instance.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --close</code></td>
+        <td>Closes the running Clipman instance.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --pause</code></td>
+        <td>Turns clipboard monitoring off in the running Clipman instance.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --resume</code></td>
+        <td>Turns clipboard monitoring on in the running Clipman instance.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --toggle</code></td>
+        <td>Toggles clipboard monitoring in the running Clipman instance.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --add "Some text"</code></td>
+        <td>Adds the provided text directly to Clipman history.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --export "C:\Path\backup.clipdb"</code></td>
+        <td>Exports the current Clipman database to a compressed <code>.clipdb</code> file. Existing files are not overwritten.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --import "C:\Path\backup.clipdb"</code></td>
+        <td>Imports entries from a <code>.clipdb</code>, JSON, or text file into the current database without replacing existing entries.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --import-replace "C:\Path\backup.clipdb"</code></td>
+        <td>Asks for confirmation, creates a timestamped backup of the current database, then replaces the current database with entries from the selected <code>.clipdb</code>, JSON, or text file.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe --import-replace "C:\Path\backup.clipdb" --yes</code></td>
+        <td>Runs the same replacement silently for scripts. A timestamped backup is still created first.</td>
+      </tr>
+      <tr>
+        <td><code>clipman.exe "C:\Path\Example.txt"</code></td>
+        <td>Adds supported text-oriented file content to Clipman history. Examples include <code>.txt</code>, <code>.log</code>, <code>.md</code>, <code>.csv</code>, <code>.json</code>, <code>.xml</code>, <code>.html</code>, <code>.ps1</code>, <code>.cmd</code>, <code>.bat</code>, <code>.ini</code>, <code>.ahk</code>, <code>.reg</code>, and common source-code files.</td>
+      </tr>
+    </tbody>
+  </table>
+
   <h2 id="license">License</h2>
   <p>Clipman is released under the MIT License. The portable and source packages include the full license text in <code>LICENSE.txt</code>.</p>
 
@@ -1034,6 +1065,7 @@
   <p>Questions and feedback can be sent through <strong>Help, Contact</strong> in the app or <a href="https://onj.me/contact">https://onj.me/contact</a>.</p>
 
   <p>Clipman is free software. If you want to support Andre's work, use <strong>Help, Donate</strong> in the app or visit <a href="https://onj.me/donate">https://onj.me/donate</a>.</p>
+
   <script>
     (function () {
       var buttons = document.querySelectorAll("button[data-copy-test]");

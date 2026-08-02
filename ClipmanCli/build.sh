@@ -2,7 +2,12 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-output=${CLIPMAN_CLI_BUILD_DIR:-/tmp/clipman-cli-build}
+if [ "$(uname -s)" = "Darwin" ]; then
+  default_output="$HOME/Projects/Codex/Temp/clipman/cli-build"
+else
+  default_output="${TMPDIR:-/tmp}/clipman-cli-build"
+fi
+output=${CLIPMAN_CLI_BUILD_DIR:-$default_output}
 version=$(tr -d '\r\n' < "$root/VERSION")
 staging="$output/staging"
 final="$output/ClipmanCli-$version"

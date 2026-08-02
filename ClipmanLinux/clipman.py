@@ -3,10 +3,12 @@ import json
 import html
 import base64
 import binascii
+import hashlib
 import os
 import pathlib
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import threading
@@ -18,8 +20,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
+gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Pango", "1.0")
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 from update_service import UpdateError, find_update, stage_update
 
 
@@ -50,9 +53,24 @@ FILE_CLIPBOARD_MIME_TYPES = (
 )
 RICH_HTML_MIME_TYPES = ("text/html",)
 RICH_RTF_MIME_TYPES = ("text/rtf", "application/rtf")
+IMAGE_MIME_TYPES = ("image/png", "image/jpeg")
+IMAGE_CLIPBOARD_FILE_TTL_SECONDS = 24 * 60 * 60
 MAX_RICH_HTML_BYTES = 768 * 1024
 MAX_RICH_RTF_BYTES = 1024 * 1024
 MAX_RICH_COMBINED_BYTES = 1792 * 1024
+MAX_IMAGE_INPUT_BYTES = 16 * 1024 * 1024
+MAX_STORED_IMAGE_BYTES = 512 * 1024
+MAX_LINK_URL_CHARACTERS = 8192
+IMAGE_METADATA_DISCLOSURE = (
+    "Clipman preserves image metadata when possible. Metadata can include camera or location information. "
+    "Retained metadata follows your history encryption and sync choices. "
+    "Images are limited to 512 KiB each and 8 MiB in total."
+)
+LINK_SEGMENT_UUID = re.compile(r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+CLIPMAN_IMAGE_WRAPPER = re.compile(
+    r'^<img data-clipman-image="1" data-clipman-filename="([^"<>]*)" alt="([^"<>]*)" '
+    r'src="data:(image/(?:jpeg|png));base64,([A-Za-z0-9+/]*={0,2})">$'
+)
 
 
 def normalize_history_tab_order(values):
@@ -133,6 +151,9 @@ def data_home():
 
 
 def entry_summary(entry, limit=240):
+    embedded_image = parse_clipman_image(entry.get("rich_text"))
+    if embedded_image:
+        return str(entry.get("name", "")).strip() or "Image: " + embedded_image["filename"]
     text = " ".join(str(entry.get("text", "")).split())
     if len(text) > limit:
         text = text[:limit]
@@ -142,12 +163,427 @@ def entry_summary(entry, limit=240):
     return name or text or str(entry.get("display", "Empty entry"))
 
 
+def _url_within_link_limit(value):
+    return len(str(value or "")) <= MAX_LINK_URL_CHARACTERS
+
+
+def _clean_link_text(value, limit=None):
+    result = []
+    pending_space = False
+    for character in str(value or ""):
+        category = unicodedata_category(character)
+        if character == "\ufffd" or category in ("Cc", "Cf", "Cs", "Zl", "Zp"):
+            continue
+        if character.isspace():
+            pending_space = bool(result)
+            continue
+        if pending_space:
+            if limit is not None and len(result) >= limit:
+                break
+            result.append(" ")
+            pending_space = False
+        if limit is not None and len(result) >= limit:
+            break
+        result.append(character)
+    return "".join(result)
+
+
+def _web_link(text):
+    value = str(text or "").strip()
+    if (not value or not _url_within_link_limit(value)
+            or any(character.isspace() for character in value)):
+        return None
+    candidate = value if "://" in value else "https://" + value
+    if not _url_within_link_limit(candidate):
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(candidate)
+    except ValueError:
+        return None
+    return parsed if parsed.scheme.casefold() in ("http", "https") and parsed.hostname else None
+
+
+def is_explicit_web_link(text):
+    parsed = _web_link(text)
+    return bool(parsed and str(text or "").strip().casefold().startswith(("http://", "https://")))
+
+
+def can_use_website_title(entry):
+    return bool(
+        entry
+        and not str(entry.get("name", "")).strip()
+        and is_explicit_web_link(entry.get("text", ""))
+    )
+
+
+def _meaningful_link_segment(segment):
+    try:
+        value = _clean_link_text(urllib.parse.unquote(segment, errors="replace"))
+    except (TypeError, ValueError):
+        return ""
+    if not value or LINK_SEGMENT_UUID.fullmatch(value):
+        return ""
+    lower = value.casefold()
+    if lower in ("default", "home", "index", "index.htm", "index.html", "main"):
+        return ""
+    if "." in value:
+        stem, extension = value.rsplit(".", 1)
+        if extension.casefold() in ("asp", "aspx", "htm", "html", "php", "shtml"):
+            value = stem
+    compact = re.sub(r"[^A-Za-z0-9]", "", value)
+    if len(compact) >= 20:
+        classes = sum(bool(re.search(pattern, compact)) for pattern in (r"[a-z]", r"[A-Z]", r"[0-9]"))
+        if re.fullmatch(r"(?i)[0-9a-f]+", compact) or classes >= 3:
+            return ""
+    value = re.sub(r"[-_+]+", " ", value)
+    value = _clean_link_text(value)
+    if len(value) > 80:
+        value = value[:77].rstrip() + "..."
+    return value[:1].upper() + value[1:] if value else ""
+
+
+def link_display_parts(text, name=""):
+    raw_text = str(text or "").strip()
+    if not _url_within_link_limit(raw_text):
+        fallback = _clean_link_text(name) or "Link"
+        return fallback, "Link"
+    parsed = _web_link(text)
+    if not parsed:
+        fallback = _clean_link_text(name or text)
+        return fallback, fallback
+    host = _clean_link_text((parsed.hostname or "").rstrip("."))
+    if host.casefold().startswith("www."):
+        host = host[4:]
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    meaningful = ""
+    for index in range(len(segments) - 1, -1, -1):
+        segment = segments[index]
+        try:
+            decoded = _clean_link_text(urllib.parse.unquote(segment, errors="replace"))
+        except (TypeError, ValueError):
+            decoded = segment
+        if decoded.isdigit() and index > 0:
+            category = _meaningful_link_segment(segments[index - 1])
+            if category:
+                meaningful = category + " " + decoded
+                break
+        meaningful = _meaningful_link_segment(segment)
+        if meaningful:
+            break
+    label = _clean_link_text(name) or meaningful or host
+    try:
+        path = _clean_link_text(urllib.parse.unquote(parsed.path, errors="replace"))
+    except (TypeError, ValueError):
+        path = parsed.path
+    if path == "/":
+        path = ""
+    destination = host + path
+    if len(destination) > 120:
+        destination = destination[:65].rstrip("/") + "..." + destination[-50:]
+    return label, destination
+
+
+def link_row_text(text, name=""):
+    label, destination = link_display_parts(text, name)
+    return label if label.casefold() == destination.casefold() else label + "; " + destination
+
+
+def website_title_disclosure(host):
+    host = _clean_link_text(host) or "the selected website"
+    return (
+        "Clipman will contact " + host + " once to read the page title. "
+        "The website can see that it was contacted. Clipman sends the selected link request, "
+        "but no cookies, credentials or other clipboard content."
+    )
+
+
+def entry_display_text(entry):
+    embedded_image = parse_clipman_image(entry.get("rich_text"))
+    if embedded_image:
+        return str(entry.get("name", "")).strip() or "Image: " + embedded_image["filename"]
+    if entry.get("section") == "links" or is_explicit_web_link(entry.get("text", "")):
+        return link_row_text(entry.get("text", ""), entry.get("name", ""))
+    return str(entry.get("display", ""))
+
+
+def entry_search_text(entry):
+    parts = [
+        entry.get("text", ""), entry.get("name", ""), entry.get("group", ""), entry.get("device", ""),
+    ]
+    if entry.get("section") == "links" or is_explicit_web_link(entry.get("text", "")):
+        parts.extend(link_display_parts(entry.get("text", ""), entry.get("name", "")))
+    return " ".join(str(part or "") for part in parts)
+
+
+def _safe_image_attribute(value):
+    value = html.unescape(str(value or ""))
+    if not value or any(unicodedata_category(character) in ("Cc", "Cf", "Cs") for character in value):
+        return ""
+    return value
+
+
+def _escape_clipman_image_attribute(value):
+    return (str(value or "").replace("&", "&amp;").replace('"', "&quot;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def unicodedata_category(character):
+    # Imported lazily so ordinary text-only startup does not load Unicode tables unnecessarily.
+    import unicodedata
+    return unicodedata.category(character)
+
+
+def _is_unicode_whitespace(character):
+    codepoint = ord(character)
+    return (0x0009 <= codepoint <= 0x000d or codepoint in (0x0020, 0x0085, 0x00a0, 0x1680,
+            0x2028, 0x2029, 0x202f, 0x205f, 0x3000) or 0x2000 <= codepoint <= 0x200a)
+
+
+def _canonical_image_filename(value, mime_type):
+    result = []
+    pending_space = False
+    for character in str(value or ""):
+        if _is_unicode_whitespace(character):
+            pending_space = bool(result)
+            continue
+        if (unicodedata_category(character) in ("Cc", "Cf", "Cs")
+                or character == "\ufffd" or character in "/\\:"):
+            continue
+        if pending_space:
+            result.append(" ")
+            pending_space = False
+        result.append(character)
+    clean = "".join(result)
+    lower = clean.casefold()
+    if mime_type == "image/png":
+        suffix = ".png"
+        stem = clean[:-4] if lower.endswith(".png") else re.sub(r"(?i)\.(?:jpe?g|png)$", "", clean)
+    elif mime_type == "image/jpeg":
+        if lower.endswith(".jpeg"):
+            suffix, stem = ".jpeg", clean[:-5]
+        elif lower.endswith(".jpg"):
+            suffix, stem = ".jpg", clean[:-4]
+        else:
+            suffix = ".jpg"
+            stem = re.sub(r"(?i)\.(?:jpe?g|png)$", "", clean)
+    else:
+        return ""
+    stem = stem.strip()
+    if not stem or stem == ".":
+        stem = "Clipboard image"
+    stem = stem[:120 - len(suffix)].rstrip()
+    return (stem or "Clipboard image") + suffix
+
+
+def image_dimensions(data, mime_type):
+    if mime_type == "image/png":
+        if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+            return None
+        return struct.unpack(">II", data[16:24])
+    if mime_type != "image/jpeg" or len(data) < 4 or data[:2] != b"\xff\xd8":
+        return None
+    offset = 2
+    while offset + 4 <= len(data):
+        if data[offset] != 0xff:
+            offset += 1
+            continue
+        marker = data[offset + 1]
+        offset += 2
+        if marker in (0xd8, 0xd9) or 0xd0 <= marker <= 0xd7:
+            continue
+        if offset + 2 > len(data):
+            return None
+        length = int.from_bytes(data[offset:offset + 2], "big")
+        if length < 2 or offset + length > len(data):
+            return None
+        if marker in (0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf):
+            if length < 7:
+                return None
+            height = int.from_bytes(data[offset + 3:offset + 5], "big")
+            width = int.from_bytes(data[offset + 5:offset + 7], "big")
+            return width, height
+        offset += length
+    return None
+
+
+def png_contains_chunk(data, wanted):
+    if len(data) < 8 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return False
+    offset = 8
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        chunk_end = offset + 12 + length
+        if chunk_end > len(data):
+            return False
+        chunk_type = data[offset + 4:offset + 8]
+        if chunk_type == wanted:
+            return True
+        offset = chunk_end
+        if chunk_type == b"IEND":
+            break
+    return False
+
+
+def parse_clipman_image(rich_text):
+    rich_text = normalize_rich_text(rich_text)
+    if not rich_text or not rich_text.get("html_fragment"):
+        return None
+    match = CLIPMAN_IMAGE_WRAPPER.fullmatch(rich_text["html_fragment"])
+    if not match:
+        return None
+    filename = _safe_image_attribute(match.group(1))
+    alt = _safe_image_attribute(match.group(2))
+    if not filename or not alt:
+        return None
+    if match.group(1) != _escape_clipman_image_attribute(filename) or match.group(2) != _escape_clipman_image_attribute(alt):
+        return None
+    mime_type = match.group(3)
+    if _canonical_image_filename(filename, mime_type) != filename:
+        return None
+    if alt != "Image: " + filename:
+        return None
+    try:
+        data = base64.b64decode(match.group(4), validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        return None
+    if not data or len(data) > MAX_STORED_IMAGE_BYTES:
+        return None
+    dimensions = image_dimensions(data, mime_type)
+    if not dimensions:
+        return None
+    if dimensions[0] <= 0 or dimensions[1] <= 0 or dimensions[0] > 2048 or dimensions[1] > 2048 or dimensions[0] * dimensions[1] > 2048 * 2048:
+        return None
+    if mime_type == "image/png" and png_contains_chunk(data, b"acTL"):
+        return None
+    if mime_type == "image/png" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    if mime_type == "image/jpeg" and not data.startswith(b"\xff\xd8"):
+        return None
+    return {
+        "filename": filename, "alt": alt, "mime": mime_type, "data": data,
+        "width": dimensions[0], "height": dimensions[1], "size": len(data),
+        "html": rich_text["html_fragment"],
+    }
+
+
+def clipboard_payloads(text, rich_text=None):
+    encoded = str(text or "").encode("utf-8")
+    payloads = [
+        ("text/plain;charset=utf-8", encoded),
+        ("text/plain", encoded),
+    ]
+    rich_text = normalize_rich_text(rich_text)
+    if not rich_text:
+        return payloads
+    if rich_text.get("html_fragment"):
+        payloads.append(("text/html", rich_text["html_fragment"].encode("utf-8")))
+    if rich_text.get("rtf_base64"):
+        rtf = base64.b64decode(rich_text["rtf_base64"])
+        payloads.extend((("text/rtf", rtf), ("application/rtf", rtf)))
+    image = parse_clipman_image(rich_text)
+    if image:
+        payloads.append((image["mime"], image["data"]))
+    return payloads
+
+
+def _safe_clipboard_filename_component(value, limit=72):
+    value = "".join(
+        character for character in str(value or "")
+        if character.isprintable() and character not in '\\/:*?"<>|'
+    )
+    value = " ".join(value.split()).strip(" .")
+    return value[:limit].rstrip(" .")
+
+
+def image_clipboard_filename(entry, image):
+    milliseconds = entry.get("created_unix_ms", 0) if isinstance(entry, dict) else 0
+    try:
+        timestamp = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(float(milliseconds) / 1000)) if milliseconds else ""
+    except (OverflowError, OSError, TypeError, ValueError):
+        timestamp = ""
+    device = _safe_clipboard_filename_component(entry.get("device", "") if isinstance(entry, dict) else "")
+    parts = [value for value in (timestamp, device) if value]
+    if not parts:
+        original = pathlib.Path(str(image.get("filename") or "")).stem
+        parts = [_safe_clipboard_filename_component(original) or "Clipman image"]
+    extension = pathlib.Path(str(image.get("filename") or "")).suffix.casefold()
+    if image.get("mime") == "image/png":
+        extension = ".png"
+    elif image.get("mime") == "image/jpeg" and extension not in (".jpg", ".jpeg"):
+        extension = ".jpg"
+    return " - ".join(parts) + extension
+
+
+def image_file_clipboard_payloads(path):
+    uri = Gio.File.new_for_path(str(path)).get_uri()
+    return [
+        ("x-special/gnome-copied-files", ("copy\n" + uri).encode("utf-8")),
+        ("x-special/mate-copied-files", ("copy\n" + uri).encode("utf-8")),
+        ("text/uri-list", (uri + "\r\n").encode("utf-8")),
+    ]
+
+
+class ClipboardImageFileCache:
+    def __init__(self, root=None):
+        runtime_root = pathlib.Path(root) if root is not None else pathlib.Path(GLib.get_user_runtime_dir() or GLib.get_user_cache_dir())
+        self.directory = runtime_root / "clipman-linux" / "clipboard-images"
+        self.current = None
+        try:
+            self.clear()
+        except OSError:
+            pass
+
+    def clear(self):
+        self.current = None
+        if not self.directory.exists():
+            return
+        if self.directory.is_symlink() or not self.directory.is_dir():
+            raise OSError("Clipman's clipboard image cache path is not a directory")
+        for child in self.directory.iterdir():
+            if child.is_file() and not child.is_symlink():
+                child.unlink()
+        try:
+            self.directory.rmdir()
+            self.directory.parent.rmdir()
+        except OSError:
+            pass
+
+    def materialize(self, image, entry=None):
+        self.clear()
+        self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.directory, 0o700)
+        filename = image_clipboard_filename(entry or {}, image)
+        target = self.directory / filename
+        temporary = self.directory / ("." + filename + ".tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(image["data"])
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+            os.chmod(target, 0o600)
+        except BaseException:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+            raise
+        self.current = target
+        return target
+
+
 def normalize_rich_text(value):
     if not isinstance(value, dict):
         return None
     html_fragment = str(value.get("html_fragment") or "")
-    if len(html_fragment.encode("utf-8")) > MAX_RICH_HTML_BYTES:
+    try:
+        html_size = len(html_fragment.encode("utf-8"))
+    except UnicodeEncodeError:
+        html_fragment, html_size = "", 0
+    if html_size > MAX_RICH_HTML_BYTES:
         html_fragment = ""
+        html_size = 0
     rtf_base64 = str(value.get("rtf_base64") or "")
     try:
         rtf = base64.b64decode(rtf_base64, validate=True) if rtf_base64 else b""
@@ -155,7 +591,7 @@ def normalize_rich_text(value):
         rtf, rtf_base64 = b"", ""
     if len(rtf) > MAX_RICH_RTF_BYTES:
         rtf, rtf_base64 = b"", ""
-    if len(html_fragment.encode("utf-8")) + len(rtf) > MAX_RICH_COMBINED_BYTES:
+    if html_size + len(rtf) > MAX_RICH_COMBINED_BYTES:
         if html_fragment:
             rtf, rtf_base64 = b"", ""
         else:
@@ -322,12 +758,62 @@ def parse_file_clipboard_payload(text, mime_type="text/uri-list"):
     return paths, operation
 
 
+def local_image_file_candidate(paths):
+    if len(paths) != 1:
+        if paths:
+            raise ValueError("Clipboard contains multiple files. Copy one PNG or JPEG image and try again.")
+        raise ValueError("Clipboard does not contain a local file.")
+    path = pathlib.Path(paths[0])
+    if not path.exists():
+        raise ValueError("The copied file is no longer available.")
+    if path.is_dir():
+        raise ValueError("Folders cannot be added to Rich Text history.")
+    if not path.is_file():
+        raise ValueError("Clipboard does not contain a regular local file.")
+    suffix = path.suffix.casefold()
+    if suffix == ".png":
+        mime_type = "image/png"
+    elif suffix in (".jpg", ".jpeg"):
+        mime_type = "image/jpeg"
+    else:
+        raise ValueError("Only local PNG and JPEG files can be added to Rich Text history.")
+    return str(path), mime_type
+
+
+def read_bounded_local_image_file(path, limit=MAX_IMAGE_INPUT_BYTES):
+    with open(path, "rb") as stream:
+        data = stream.read(limit + 1)
+    if not data:
+        raise ValueError("The copied image file is empty.")
+    if len(data) > limit:
+        raise ValueError("The copied image file is larger than the 16 MiB input limit.")
+    return data
+
+
+def should_import_file_as_rich_image(settings, section, explicit):
+    parents_enabled = bool(
+        settings.get("rich_text_history_enabled")
+        and settings.get("include_images_in_rich_text_history")
+    )
+    if not parents_enabled:
+        return False
+    if explicit:
+        return section == "rich"
+    return bool(settings.get("add_copied_image_files_to_rich_text_history"))
+
+
 def is_standalone_link(text):
     value = str(text or "").strip()
-    if not value or any(character.isspace() for character in value):
+    if (not value or not _url_within_link_limit(value)
+            or any(character.isspace() for character in value)):
         return False
     candidate = value if "://" in value else "https://" + value
-    parsed = urllib.parse.urlsplit(candidate)
+    if not _url_within_link_limit(candidate):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(candidate)
+    except ValueError:
+        return False
     return parsed.scheme.casefold() in ("http", "https", "clipman") and bool(parsed.netloc)
 
 
@@ -380,7 +866,7 @@ def sensitive_data_match(text, enabled_ids):
     if not value or not enabled_ids:
         return ""
     stripped = value.strip()
-    if is_standalone_link(stripped) and urllib.parse.urlsplit(stripped).scheme.casefold() in ("http", "https"):
+    if is_explicit_web_link(stripped):
         return ""
     enabled = set(enabled_ids)
     if "credit-card" in enabled:
@@ -426,6 +912,8 @@ def html_to_text(text):
 
 
 def clean_tracking_url(value, sharing=False):
+    if not _url_within_link_limit(value):
+        return value
     try:
         parsed = urllib.parse.urlsplit(value.replace("&amp;", "&"))
     except ValueError:
@@ -553,6 +1041,8 @@ class Preferences:
             "paste_after_enter": False,
             "links_history_enabled": True,
             "rich_text_history_enabled": False,
+            "include_images_in_rich_text_history": False,
+            "add_copied_image_files_to_rich_text_history": False,
             "save_list_position": True,
             "auto_group_by_app": False,
             "auto_remove_url_tracking": False,
@@ -580,9 +1070,13 @@ class Preferences:
                         self.values[key] = loaded[key]
         except (OSError, ValueError):
             pass
-        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries", "confirm_deletions"):
+        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "include_images_in_rich_text_history", "add_copied_image_files_to_rich_text_history", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries", "confirm_deletions"):
             if not isinstance(self.values[key], bool):
                 self.values[key] = defaults[key]
+        if not self.values["rich_text_history_enabled"]:
+            self.values["include_images_in_rich_text_history"] = False
+        if not (self.values["rich_text_history_enabled"] and self.values["include_images_in_rich_text_history"]):
+            self.values["add_copied_image_files_to_rich_text_history"] = False
         if self.values["last_section"] not in ("text", "links", "rich", "files"):
             self.values["last_section"] = defaults["last_section"]
         self.values["history_tab_order"] = normalize_history_tab_order(self.values["history_tab_order"])
@@ -857,7 +1351,10 @@ class ClipmanApplication(Gtk.Application):
         self.last_clipboard_signature = None
         self.clipboard_baseline_ready = False
         self.own_clipboard_text = None
+        self.own_clipboard_image_signature = None
         self.own_clipboard_files = None
+        self.image_clipboard_cache = ClipboardImageFileCache()
+        self.image_clipboard_expiry_source = 0
         self.clipboard_read_busy = False
         self.clipboard_change_source = 0
         self.poll_source = 0
@@ -900,7 +1397,8 @@ class ClipmanApplication(Gtk.Application):
             self._open_pending_connection(configuring=not self.backend_configured)
 
     def do_shutdown(self):
-        for source in (self.poll_source, self.clipboard_change_source, self.update_poll_source, self.startup_update_source):
+        self._clear_clipboard_image_file()
+        for source in (self.poll_source, self.clipboard_change_source, self.update_poll_source, self.startup_update_source, self.image_clipboard_expiry_source):
             if source:
                 GLib.source_remove(source)
         if self.backend:
@@ -954,6 +1452,7 @@ class ClipmanApplication(Gtk.Application):
             "remove-blank-lines": lambda *_: self.transform_selected(remove_blank_lines, "Removed blank lines from selected entry."),
             "remove-tracking": lambda *_: self.transform_selected(lambda value: clean_tracking_text(value, False), "Removed URL tracking from selected entry."),
             "clean-sharing": lambda *_: self.transform_selected(lambda value: clean_tracking_text(value, True), "Cleaned selected link for sharing."),
+            "website-title": self.use_website_title_as_name,
             "line-crlf": lambda *_: self.transform_selected(lambda value: normalize_line_endings(value, "\r\n"), "Converted selected entry to Windows CRLF line endings."),
             "line-lf": lambda *_: self.transform_selected(lambda value: normalize_line_endings(value, "\n"), "Converted selected entry to Unix LF line endings."),
             "line-cr": lambda *_: self.transform_selected(lambda value: normalize_line_endings(value, "\r"), "Converted selected entry to old Mac CR line endings."),
@@ -1170,6 +1669,7 @@ class ClipmanApplication(Gtk.Application):
             ("Remove URL trac_king", "remove-tracking"), ("Clean link for sharin_g", "clean-sharing"),
         ):
             self.actions_menu.append(label, "app." + action)
+        self.actions_menu.append("Use _Website Title as Name...", "app.website-title")
         line_endings = Gio.Menu(); line_endings.append("_Windows CRLF", "app.line-crlf"); line_endings.append("_Unix LF", "app.line-lf"); line_endings.append("_Old Mac CR", "app.line-cr")
         self.actions_menu.append_submenu("Line _endings", line_endings)
         for label, action in (
@@ -1206,6 +1706,7 @@ class ClipmanApplication(Gtk.Application):
             "import": writable_text, "import-replace": writable_text, "export": not files,
             "select-all": bool(self.visible_entries()), "find": True, "find-next": True, "find-previous": True,
             "clear-file-history": files, "remove-unavailable-files": files,
+            "website-title": one_selected and writable_text and can_use_website_title(entry),
         }
         for name in (
             "plain-text", "trim", "single-line", "remove-blank-lines", "remove-tracking", "clean-sharing",
@@ -1416,6 +1917,10 @@ class ClipmanApplication(Gtk.Application):
         except GLib.Error:
             self.clipboard_read_busy = False
             return
+        image_mime = self._standalone_image_mime(clipboard)
+        if image_mime:
+            self._read_clipboard_image(clipboard, image_mime, False)
+            return
         if text is not None and is_file_manager_clipboard_payload(text):
             self.clipboard_read_busy = False
             mime_type = text.replace("\r\n", "\n").split("\n", 1)[0].strip().casefold()
@@ -1423,6 +1928,120 @@ class ClipmanApplication(Gtk.Application):
             self._capture_file_paths(clipboard, paths, operation, mime_type, False)
             return
         self._read_rich_clipboard(clipboard, text, self._process_clipboard_text)
+
+    def _standalone_image_mime(self, clipboard):
+        if not (self.preferences.values["rich_text_history_enabled"] and self.preferences.values["include_images_in_rich_text_history"]):
+            return None
+        formats = clipboard.get_formats()
+        if any(formats.contain_mime_type(value) for value in RICH_HTML_MIME_TYPES + RICH_RTF_MIME_TYPES):
+            return None
+        return next((value for value in IMAGE_MIME_TYPES if formats.contain_mime_type(value)), None)
+
+    def _read_clipboard_image(self, clipboard, mime_type, force):
+        self.clipboard_read_busy = True
+        state = {"clipboard": clipboard, "mime": mime_type, "force": force, "chunks": bytearray(), "source": self.clipboard_source_application}
+        clipboard.read_async([mime_type], GLib.PRIORITY_DEFAULT, None, self._image_stream_ready, state)
+
+    def _image_stream_ready(self, clipboard, result, state):
+        try:
+            stream, returned_mime = clipboard.read_finish(result)
+            if stream is None or returned_mime not in IMAGE_MIME_TYPES:
+                raise ValueError("Clipboard returned no supported image stream")
+            state["stream"] = stream
+            state["mime"] = returned_mime
+            self._read_next_image_chunk(state)
+        except (GLib.Error, ValueError) as error:
+            self.clipboard_read_busy = False
+            if state["force"]:
+                self.show_error(str(error))
+
+    def _read_next_image_chunk(self, state):
+        remaining = MAX_IMAGE_INPUT_BYTES + 1 - len(state["chunks"])
+        if remaining <= 0:
+            self._finish_image_stream(state, "The clipboard image is larger than the 16 MiB input limit.")
+            return
+        state["stream"].read_bytes_async(min(1024 * 1024, remaining), GLib.PRIORITY_DEFAULT, None, self._image_chunk_ready, state)
+
+    def _image_chunk_ready(self, stream, result, state):
+        try:
+            chunk = bytes(stream.read_bytes_finish(result).get_data())
+        except GLib.Error as error:
+            self._finish_image_stream(state, str(error))
+            return
+        if not chunk:
+            self._finish_image_stream(state)
+            return
+        state["chunks"].extend(chunk)
+        self._read_next_image_chunk(state)
+
+    def _finish_image_stream(self, state, error=""):
+        try:
+            state.get("stream").close(None)
+        except (AttributeError, GLib.Error):
+            pass
+        if error:
+            self.clipboard_read_busy = False
+            self._image_capture_failed(error)
+            return
+        data = bytes(state["chunks"])
+        threading.Thread(target=self._image_hash_worker, args=(data, state), daemon=True).start()
+
+    def _image_hash_worker(self, data, state):
+        digest = hashlib.sha256(data).hexdigest()
+        GLib.idle_add(self._image_hash_ready, data, state, digest)
+
+    def _image_hash_ready(self, data, state, digest):
+        first = not self.clipboard_baseline_ready
+        self.clipboard_baseline_ready = True
+        signature = ("image", state["mime"], digest)
+        if signature == self.last_clipboard_signature:
+            self.clipboard_read_busy = False
+            return GLib.SOURCE_REMOVE
+        self.last_clipboard_signature = signature
+        if first:
+            capture = self.capture_current_clipboard
+            self.capture_current_clipboard = False
+            if not capture and not state["force"]:
+                self.clipboard_read_busy = False
+                return GLib.SOURCE_REMOVE
+        if digest == self.own_clipboard_image_signature:
+            self.own_clipboard_image_signature = None
+            self.clipboard_read_busy = False
+            return GLib.SOURCE_REMOVE
+        self._clear_clipboard_image_file()
+        source = state.get("source", "")
+        ignored = {value.casefold() for value in self.preferences.values["ignored_applications"]}
+        if not state["force"] and source and source.casefold() in ignored:
+            self.clipboard_read_busy = False
+            self.sounds.play("skip")
+            return GLib.SOURCE_REMOVE
+        filename = "Clipboard image.png" if state["mime"] == "image/png" else "Clipboard image.jpg"
+        threading.Thread(target=self._prepare_image_worker, args=(data, state, filename), daemon=True).start()
+        return GLib.SOURCE_REMOVE
+
+    def _prepare_image_worker(self, data, state, filename):
+        self.backend.call(
+            "prepare_image",
+            {"mime": state["mime"], "filename": filename, "data_base64": base64.b64encode(data).decode("ascii")},
+            lambda message: self._image_prepared(message, state),
+        )
+
+    def _image_prepared(self, message, state):
+        if not message.get("ok"):
+            self.clipboard_read_busy = False
+            self._image_capture_failed(message.get("error", "The clipboard image could not be prepared."))
+            return
+        result = message.get("result", {})
+        self._put_text(
+            result.get("text", ""), quiet=not state["force"], automatic=not state["force"], source=state.get("source", ""),
+            rich_text=result.get("rich_text"), failure=self._image_capture_failed,
+            success=lambda: setattr(self, "clipboard_read_busy", False),
+        )
+
+    def _image_capture_failed(self, message):
+        self.clipboard_read_busy = False
+        self.sounds.play("skip")
+        self.set_status("Image was not added: " + str(message), True)
 
     def _read_rich_clipboard(self, clipboard, text, callback):
         if not self.preferences.values["rich_text_history_enabled"]:
@@ -1485,6 +2104,7 @@ class ClipmanApplication(Gtk.Application):
         first = not self.clipboard_baseline_ready
         self.clipboard_baseline_ready = True
         if text is None:
+            self._clear_clipboard_image_file()
             if first: self.capture_current_clipboard = False
             return
         if (
@@ -1510,6 +2130,7 @@ class ClipmanApplication(Gtk.Application):
         if text == self.own_clipboard_text:
             self.own_clipboard_text = None
             return
+        self._clear_clipboard_image_file()
         if text.strip():
             source = self.clipboard_source_application
             ignored = {value.casefold() for value in self.preferences.values["ignored_applications"]}
@@ -1558,6 +2179,8 @@ class ClipmanApplication(Gtk.Application):
             if force: self.sounds.play("skip"); self.set_status("Clipboard does not contain local files.", True)
             return
         signature = ("files", tuple(sorted(paths, key=str.casefold)), operation)
+        if signature != self.own_clipboard_files:
+            self._clear_clipboard_image_file()
         self.last_clipboard_files = signature
         self.last_file_clipboard_monotonic = time.monotonic()
         if not force and signature == self.last_clipboard_signature:
@@ -1577,9 +2200,15 @@ class ClipmanApplication(Gtk.Application):
             "files": paths, "formats": [mime_type], "operation": operation,
             "source": ("Files" if force else self.clipboard_source_application) or "Files", "contains_text": clipboard.get_formats().contain_mime_type("text/plain"),
         }
-        self.backend.call("file_add", params, lambda message: self._file_capture_response(message, force))
+        rich_image = None
+        if not force and should_import_file_as_rich_image(self.preferences.values, self.section, False):
+            try:
+                rich_image = local_image_file_candidate(paths)
+            except ValueError:
+                pass
+        self.backend.call("file_add", params, lambda message: self._file_capture_response(message, force, rich_image, params["source"]))
 
-    def _file_capture_response(self, message, announce):
+    def _file_capture_response(self, message, announce, rich_image=None, source=""):
         if not message.get("ok"):
             if announce: self.show_error(message.get("error"))
             return
@@ -1587,8 +2216,57 @@ class ClipmanApplication(Gtk.Application):
         self._remember_received_section("files")
         if self.preferences.values["auto_remove_unavailable_file_history"]:
             self.backend.call("file_remove_unavailable", {}, self._history_response)
+        if rich_image:
+            path, mime_type = rich_image
+            self._prepare_local_image_file(
+                path, mime_type,
+                lambda prepared: self._automatic_file_image_prepared(prepared, source),
+            )
+            return
         self.sounds.play("copy")
         if announce: self.set_status("Clipboard files added to file history.", True)
+
+    def _prepare_local_image_file(self, path, mime_type, callback):
+        threading.Thread(
+            target=self._prepare_local_image_file_worker,
+            args=(path, mime_type, callback), daemon=True,
+        ).start()
+
+    def _prepare_local_image_file_worker(self, path, mime_type, callback):
+        try:
+            data = read_bounded_local_image_file(path)
+            encoded = base64.b64encode(data).decode("ascii")
+            filename = pathlib.Path(path).name
+        except (OSError, ValueError) as error:
+            GLib.idle_add(callback, {"ok": False, "error": str(error)})
+            return
+        self.backend.call(
+            "prepare_image",
+            {"mime": mime_type, "filename": filename, "data_base64": encoded},
+            lambda message: GLib.idle_add(callback, message),
+        )
+
+    def _automatic_file_image_prepared(self, message, source):
+        if not message.get("ok"):
+            self.sounds.play("copy")
+            self.set_status("Clipboard file added to File History; image was not added to Rich Text: " + str(message.get("error", "unknown error")), True)
+            return GLib.SOURCE_REMOVE
+        result = message.get("result", {})
+        self._put_text(
+            result.get("text", ""), quiet=True, automatic=True, source=source,
+            rich_text=result.get("rich_text"),
+            failure=self._automatic_file_image_failed,
+            success=self._automatic_file_image_added,
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _automatic_file_image_failed(self, message):
+        self.sounds.play("copy")
+        self.set_status("Clipboard file added to File History; image was not added to Rich Text: " + str(message), True)
+
+    def _automatic_file_image_added(self):
+        self.sounds.play("copy")
+        self.set_status("Clipboard image added to File and Rich Text history.")
 
     def refresh(self, announce=False):
         if self.busy or not self.backend: return
@@ -1656,14 +2334,14 @@ class ClipmanApplication(Gtk.Application):
         if entry.get("is_template"):
             self.backend.call("resolve_template", {"id": entry["id"]}, lambda message: self._remote_template_result(message, entry))
         else:
-            self._copy_remote_text(entry.get("text", ""), entry.get("device", "another device"), entry.get("rich_text"))
+            self._copy_remote_text(entry.get("text", ""), entry.get("device", "another device"), entry.get("rich_text"), entry)
 
     def _remote_template_result(self, message, entry):
         if message.get("ok"):
             self._copy_remote_text(message["result"]["text"], entry.get("device", "another device"))
 
-    def _copy_remote_text(self, text, device, rich_text=None):
-        self._set_clipboard(text, rich_text)
+    def _copy_remote_text(self, text, device, rich_text=None, entry=None):
+        self._set_clipboard(text, rich_text, entry)
         self.sounds.play("remote")
         self.set_status("Clipboard updated by " + device + ".", True)
 
@@ -1828,7 +2506,7 @@ class ClipmanApplication(Gtk.Application):
                 if filter_value == "Normal" and entry.get("pinned"): continue
                 if filter_value == "Ungrouped" and entry.get("group"): continue
                 if filter_value not in ("All", "Pinned", "Normal", "Ungrouped") and entry.get("group", "").casefold() != filter_value.casefold(): continue
-            haystack = " ".join([entry.get("text", ""), entry.get("name", ""), entry.get("group", ""), entry.get("device", "")]).casefold()
+            haystack = entry_search_text(entry).casefold()
             if query and query not in haystack: continue
             result.append(entry)
         pinned = [entry for entry in result if entry.get("pinned")]
@@ -1836,9 +2514,9 @@ class ClipmanApplication(Gtk.Application):
         mode = self.preferences.values["sort_mode"]
         if mode == "newest": normal.sort(key=lambda entry: entry.get("last_used_unix_ms", 0), reverse=True)
         elif mode == "oldest": normal.sort(key=lambda entry: entry.get("last_used_unix_ms", 0))
-        elif mode == "text": normal.sort(key=lambda entry: entry.get("display", "").casefold())
-        elif mode == "group": normal.sort(key=lambda entry: (entry.get("group", "").casefold(), entry.get("display", "").casefold()))
-        elif mode == "device": normal.sort(key=lambda entry: (entry.get("device", "").casefold(), entry.get("display", "").casefold()))
+        elif mode == "text": normal.sort(key=lambda entry: entry_display_text(entry).casefold())
+        elif mode == "group": normal.sort(key=lambda entry: (entry.get("group", "").casefold(), entry_display_text(entry).casefold()))
+        elif mode == "device": normal.sort(key=lambda entry: (entry.get("device", "").casefold(), entry_display_text(entry).casefold()))
         else: normal.sort(key=lambda entry: (entry.get("manual_order", 0), entry.get("created_unix_ms", 0)))
         pinned.sort(key=lambda entry: (entry.get("manual_order", 0), entry.get("created_unix_ms", 0)))
         return pinned + normal
@@ -1877,7 +2555,7 @@ class ClipmanApplication(Gtk.Application):
             row.clipman_entry = entry
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             box.set_margin_top(6); box.set_margin_bottom(6); box.set_margin_start(8); box.set_margin_end(8)
-            title = entry["display"]
+            title = entry_display_text(entry)
             state = []
             if entry.get("pinned"):
                 pinned_position += 1
@@ -1911,6 +2589,8 @@ class ClipmanApplication(Gtk.Application):
             description = self.entry_description(entry, index, len(rows))
             if self.section == "files":
                 accessible_label = (", ".join(state) + ". " if state else "") + file_event_summary(entry)
+            elif entry.get("section") == "links" or is_explicit_web_link(entry.get("text", "")):
+                accessible_label = (", ".join(state) + ". " if state else "") + entry_display_text(entry)
             else:
                 accessible_label = (", ".join(state) + ". " if state else "") + entry_summary(entry)
             row.set_tooltip_text(description)
@@ -2012,6 +2692,8 @@ class ClipmanApplication(Gtk.Application):
             menu.append("Paste After Selected", "app.paste-after")
             menu.append("Group Entry", "app.group-entry")
             menu.append("Entry Properties", "app.properties")
+            if can_use_website_title(row.clipman_entry):
+                menu.append("Use Website Title as Name...", "app.website-title")
             menu.append("Set as Quick Paste Target", "app.quick-assign")
             menu.append("Push to Other Devices", "app.push")
             menu.append("Entry Details", "app.details")
@@ -2167,7 +2849,7 @@ class ClipmanApplication(Gtk.Application):
         self.type_buffer += character.casefold()
         for row in self._entry_rows():
             entry = row.clipman_entry
-            if entry.get("display", "").casefold().startswith(self.type_buffer):
+            if entry_display_text(entry).casefold().startswith(self.type_buffer):
                 self.listbox.unselect_all(); self.listbox.select_row(row); row.grab_focus(); return
 
     def copy_pinned_number(self, number, paths_only=False):
@@ -2221,7 +2903,7 @@ class ClipmanApplication(Gtk.Application):
         else:
             text = "\n".join(entry.get("text", "") for entry in entries)
             rich_text = entries[0].get("rich_text") if len(entries) == 1 else None
-            self._set_clipboard(text, rich_text); self._after_copy(entries, close)
+            self._set_clipboard(text, rich_text, entries[0] if len(entries) == 1 else None); self._after_copy(entries, close)
 
     def _copy_result(self, message, entries, close):
         if not message.get("ok"): self.show_error(message.get("error")); return
@@ -2229,25 +2911,57 @@ class ClipmanApplication(Gtk.Application):
         text = "\n".join(result.get("texts", [])) if "texts" in result else result.get("text", "")
         self._set_clipboard(text); self._after_copy(entries, close)
 
-    def _set_clipboard(self, text, rich_text=None):
+    def _set_clipboard(self, text, rich_text=None, entry=None):
         self.own_clipboard_text = text
+        self._clear_clipboard_image_file()
         rich_text = normalize_rich_text(rich_text)
         if not rich_text:
+            self.own_clipboard_image_signature = None
+            self.own_clipboard_files = None
             self.window.get_display().get_clipboard().set(text)
             return
-        encoded = text.encode("utf-8")
-        providers = [
-            Gdk.ContentProvider.new_for_bytes("text/plain;charset=utf-8", GLib.Bytes.new(encoded)),
-            Gdk.ContentProvider.new_for_bytes("text/plain", GLib.Bytes.new(encoded)),
-        ]
-        if rich_text.get("html_fragment"):
-            providers.append(Gdk.ContentProvider.new_for_bytes("text/html", GLib.Bytes.new(rich_text["html_fragment"].encode("utf-8"))))
-        if rich_text.get("rtf_base64"):
-            providers.append(Gdk.ContentProvider.new_for_bytes("text/rtf", GLib.Bytes.new(base64.b64decode(rich_text["rtf_base64"]))))
-            providers.append(Gdk.ContentProvider.new_for_bytes("application/rtf", GLib.Bytes.new(base64.b64decode(rich_text["rtf_base64"]))))
+        image = parse_clipman_image(rich_text)
+        self.own_clipboard_image_signature = hashlib.sha256(image["data"]).hexdigest() if image else None
+        providers = [Gdk.ContentProvider.new_for_bytes(mime_type, GLib.Bytes.new(data)) for mime_type, data in clipboard_payloads(text, rich_text)]
+        if image:
+            try:
+                image_path = self.image_clipboard_cache.materialize(image, entry)
+                providers.extend(
+                    Gdk.ContentProvider.new_for_bytes(mime_type, GLib.Bytes.new(data))
+                    for mime_type, data in image_file_clipboard_payloads(image_path)
+                )
+                self.own_clipboard_files = ("files", (str(image_path),), "Copy")
+                self.image_clipboard_expiry_source = GLib.timeout_add_seconds(
+                    IMAGE_CLIPBOARD_FILE_TTL_SECONDS, self._expire_clipboard_image_file, image_path,
+                )
+            except OSError:
+                self.own_clipboard_files = None
+        else:
+            self.own_clipboard_files = None
         self.window.get_display().get_clipboard().set_content(Gdk.ContentProvider.new_union(providers))
 
+    def _clear_clipboard_image_file(self):
+        if self.image_clipboard_expiry_source:
+            GLib.source_remove(self.image_clipboard_expiry_source)
+            self.image_clipboard_expiry_source = 0
+        try:
+            self.image_clipboard_cache.clear()
+        except OSError:
+            pass
+
+    def _expire_clipboard_image_file(self, expected_path):
+        self.image_clipboard_expiry_source = 0
+        if self.image_clipboard_cache.current == expected_path:
+            try:
+                self.image_clipboard_cache.clear()
+            except OSError:
+                pass
+            if self.own_clipboard_files == ("files", (str(expected_path),), "Copy"):
+                self.own_clipboard_files = None
+        return GLib.SOURCE_REMOVE
+
     def _set_file_clipboard(self, paths, operation="Copy"):
+        self._clear_clipboard_image_file()
         uris = [Gio.File.new_for_path(path).get_uri() for path in paths]
         marker = "cut" if str(operation).casefold() in ("move", "cut") else "copy"
         providers = [
@@ -2308,6 +3022,9 @@ class ClipmanApplication(Gtk.Application):
     def _add_clipboard_read(self, clipboard, result, _data):
         try: text = clipboard.read_text_finish(result)
         except GLib.Error as error: self.show_error(str(error)); return
+        image_mime = self._standalone_image_mime(clipboard)
+        if image_mime:
+            self._read_clipboard_image(clipboard, image_mime, True); return
         if not text or not text.strip(): self.sounds.play("skip"); self.set_status("Clipboard does not contain text.", True); return
         if is_file_manager_clipboard_payload(text):
             mime_type = text.replace("\r\n", "\n").split("\n", 1)[0].strip().casefold()
@@ -2328,7 +3045,7 @@ class ClipmanApplication(Gtk.Application):
 
     def _cut_entries(self, entries):
         rich_text = entries[0].get("rich_text") if len(entries) == 1 else None
-        self._set_clipboard("\n".join(entry.get("text", "") for entry in entries), rich_text)
+        self._set_clipboard("\n".join(entry.get("text", "") for entry in entries), rich_text, entries[0] if len(entries) == 1 else None)
         self.backend.call("delete_many", {"ids": [entry["id"] for entry in entries]}, self._cut_response)
 
     def _cut_response(self, message):
@@ -2343,7 +3060,65 @@ class ClipmanApplication(Gtk.Application):
         entry = self.selected_entry()
         after_id = entry.get("id", "") if entry else ""
         clipboard = self.window.get_display().get_clipboard()
+        if should_import_file_as_rich_image(self.preferences.values, self.section, True):
+            mime_type = next((mime for mime in FILE_CLIPBOARD_MIME_TYPES if clipboard.get_formats().contain_mime_type(mime)), None)
+            if mime_type:
+                clipboard.read_async(
+                    [mime_type], GLib.PRIORITY_DEFAULT, None,
+                    self._paste_after_file_stream_ready, (after_id, mime_type),
+                )
+                return
         clipboard.read_text_async(None, lambda c, result, _data: self._paste_after_read(c, result, after_id), None)
+
+    def _paste_after_file_stream_ready(self, clipboard, result, state):
+        after_id, requested_mime = state
+        try:
+            stream, returned_mime = clipboard.read_finish(result)
+            if stream is None:
+                raise ValueError("Clipboard returned no file-data stream.")
+            stream.read_bytes_async(
+                1024 * 1024 + 1, GLib.PRIORITY_DEFAULT, None,
+                self._paste_after_file_payload_read,
+                (stream, after_id, returned_mime or requested_mime),
+            )
+        except (GLib.Error, ValueError) as error:
+            self._paste_after_image_file_failed(error)
+
+    def _paste_after_file_payload_read(self, stream, result, state):
+        source_stream, after_id, mime_type = state
+        try:
+            raw = stream.read_bytes_finish(result).get_data()
+            if len(raw) > 1024 * 1024:
+                raise ValueError("Clipboard file data is too large.")
+            payload = raw.decode("utf-8", errors="strict")
+            paths, _operation = parse_file_clipboard_payload(payload, mime_type)
+            path, image_mime = local_image_file_candidate(paths)
+        except (GLib.Error, UnicodeError, ValueError) as error:
+            self._paste_after_image_file_failed(error)
+            return
+        finally:
+            try: source_stream.close(None)
+            except GLib.Error: pass
+        self._prepare_local_image_file(
+            path, image_mime,
+            lambda prepared: self._paste_after_image_file_prepared(prepared, after_id),
+        )
+
+    def _paste_after_image_file_prepared(self, message, after_id):
+        if not message.get("ok"):
+            self._paste_after_image_file_failed(message.get("error", "The image file could not be prepared."))
+            return GLib.SOURCE_REMOVE
+        result = message.get("result", {})
+        self.backend.call(
+            "put_after",
+            {"after_id": after_id, "text": result.get("text", ""), "rich_text": result.get("rich_text")},
+            lambda response: self._operation_response(response, "Pasted image file after the selected Rich Text entry."),
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _paste_after_image_file_failed(self, message):
+        self.sounds.play("skip")
+        self.set_status("Image file was not added: " + str(message), True)
 
     def _paste_after_read(self, clipboard, result, after_id):
         try:
@@ -2375,7 +3150,7 @@ class ClipmanApplication(Gtk.Application):
 
     def _push_entries(self, entries, texts):
         rich_text = entries[0].get("rich_text") if len(entries) == 1 and not entries[0].get("is_template") else None
-        self._set_clipboard("\n".join(texts), rich_text)
+        self._set_clipboard("\n".join(texts), rich_text, entries[0] if len(entries) == 1 else None)
         self.backend.call("push", {"ids": [entry["id"] for entry in entries]}, lambda message: self._operation_response(message, "Pushed selected entries to other devices and copied them to this clipboard."))
 
     def _operation_response(self, message, status):
@@ -2473,7 +3248,7 @@ class ClipmanApplication(Gtk.Application):
             dialog.destroy()
         dialog.connect("response", response); dialog.present(); password.grab_focus()
 
-    def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None):
+    def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None, failure=None, success=None):
         original_text = text
         if self.preferences.values["auto_remove_url_tracking"]:
             text = clean_tracking_text(text, False)
@@ -2482,15 +3257,17 @@ class ClipmanApplication(Gtk.Application):
         duplicate = "keep" if self.preferences.values["keep_duplicate_entries"] else "move"
         group = source if automatic and source and self.preferences.values["auto_group_by_app"] else ""
         normalized_rich = normalize_rich_text(rich_text) if self.preferences.values["rich_text_history_enabled"] else None
-        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate, "rich_text": normalized_rich}, lambda m: self._put_response(m, quiet, text, normalized_rich))
+        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate, "rich_text": normalized_rich}, lambda m: self._put_response(m, quiet, text, normalized_rich, failure, success))
 
-    def _put_response(self, message, quiet, text, rich_text=None):
+    def _put_response(self, message, quiet, text, rich_text=None, failure=None, success=None):
         if not message.get("ok"):
-            if not quiet: self.show_error(message.get("error"))
+            if failure: failure(message.get("error"))
+            elif not quiet: self.show_error(message.get("error"))
             return
         self._history_response(message)
         self._remember_received_section("rich" if rich_text else "links" if is_standalone_link(text) else "text")
         if not quiet: self.sounds.play("copy"); self.set_status("Clipboard text added to history.", True)
+        if success: success()
 
     def _remember_received_section(self, section):
         if not self.preferences.values["dynamic_history_mode"]:
@@ -2531,6 +3308,74 @@ class ClipmanApplication(Gtk.Application):
                 self.backend.call("update_many", {"entries": updates}, self._history_response)
             dialog.destroy()
         dialog.connect("response", response); dialog.present(); field.grab_focus()
+
+    def use_website_title_as_name(self, *_args):
+        entry = self.selected_entry()
+        if not can_use_website_title(entry):
+            self.sounds.play("skip")
+            return
+        selected_url = entry.get("text", "")
+        _label, destination = link_display_parts(selected_url, "")
+        parsed = _web_link(selected_url)
+        if not parsed:
+            self.sounds.play("skip")
+            return
+        host = parsed.hostname or destination.split("/", 1)[0]
+        dialog = Gtk.Dialog(title="Use Website Title as Name", transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Continue", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+        area = dialog.get_content_area()
+        area.set_spacing(10); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
+        area.append(Gtk.Label(
+            label=website_title_disclosure(host),
+            wrap=True, xalign=0,
+        ))
+        destination_label = Gtk.Label(label="Destination: " + destination, wrap=True, xalign=0, selectable=True)
+        destination_label.update_property([Gtk.AccessibleProperty.LABEL], ["Website destination: " + destination])
+        area.append(destination_label)
+
+        def response(_dialog, code):
+            dialog.destroy()
+            if code != Gtk.ResponseType.OK:
+                return
+            self.set_status("Requesting website title...", True)
+            self.backend.call(
+                "fetch_website_title", {"url": entry.get("text", "")},
+                lambda message: self._website_title_received(message, entry.get("id", ""), entry.get("text", "")),
+            )
+        dialog.connect("response", response)
+        dialog.present()
+
+    def _website_title_received(self, message, entry_id, expected_text):
+        if not message.get("ok"):
+            self.show_error(message.get("error", "The website title could not be requested."))
+            return
+        current = next((item for item in self.entries if item.get("id") == entry_id), None)
+        if not current or current.get("text") != expected_text:
+            self.sounds.play("skip"); self.set_status("The link changed or was deleted before its title could be applied.", True)
+            return
+        if str(current.get("name", "")).strip():
+            self.sounds.play("skip"); self.set_status("The link already has a name, so its website title was not applied.", True)
+            return
+        title = _clean_link_text(message.get("result", {}).get("title", ""), 200)
+        if not title:
+            self.show_error("The website did not provide a usable title.")
+            return
+        self.backend.call(
+            "set_name_if_blank",
+            {"id": entry_id, "expected_text": expected_text, "name": title},
+            self._website_title_saved,
+        )
+
+    def _website_title_saved(self, message):
+        if not message.get("ok"):
+            self.show_error(message.get("error", "The website title could not be applied."))
+            return
+        self._history_response(message)
+        self.sounds.play("copy")
+        self.set_status("Website title saved as the link name.", True)
+
     def view_selected(self, *_args):
         entry = self.selected_entry()
         if not entry: return
@@ -2644,7 +3489,20 @@ class ClipmanApplication(Gtk.Application):
         text = Gtk.TextView(editable=False, cursor_visible=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, vexpand=True)
         text.set_accepts_tab(False)
         rich_text = normalize_rich_text(entry.get("rich_text"))
-        rendered_html = populate_safe_rich_buffer(text.get_buffer(), rich_text, entry["text"])
+        embedded_image = parse_clipman_image(rich_text)
+        if embedded_image:
+            preview = Gtk.Picture()
+            preview.set_can_shrink(True)
+            preview.set_size_request(-1, 260)
+            preview.update_property(
+                [Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+                ["Image preview: " + embedded_image["alt"], f'{embedded_image["filename"]}, {embedded_image["width"]} by {embedded_image["height"]} pixels'],
+            )
+            content.append(preview)
+            threading.Thread(target=self._decode_image_preview, args=(preview, embedded_image), daemon=True).start()
+        rendered_html = False if embedded_image else populate_safe_rich_buffer(text.get_buffer(), rich_text, entry["text"])
+        if embedded_image:
+            text.get_buffer().set_text(entry["text"])
         text.update_property([Gtk.AccessibleProperty.LABEL], ["Formatted clipboard text" if rendered_html else "Clipboard text"])
         content.append(text)
         details = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
@@ -2660,10 +3518,34 @@ class ClipmanApplication(Gtk.Application):
             if rich_text.get("html_fragment"): formats.append("HTML")
             if rich_text.get("rtf_base64"): formats.append("RTF")
             values.insert(5, ("Formatting", " and ".join(formats)))
+        if embedded_image:
+            image_values = [
+                ("Filename", embedded_image["filename"]),
+                ("Image type", "PNG" if embedded_image["mime"] == "image/png" else "JPEG"),
+                ("Dimensions", f'{embedded_image["width"]} by {embedded_image["height"]} pixels'),
+                ("Image size", f'{embedded_image["size"]:,} bytes'),
+            ]
+            values[5:5] = image_values
         for key, value in values:
             row = Gtk.Label(label=f"{key}: {value}", xalign=0); row.set_margin_top(3); row.set_margin_bottom(3); details.append(row)
         content.append(details); dialog.set_default_size(650, 540)
         dialog.connect("response", lambda d, _r: d.destroy()); dialog.present()
+
+    def _decode_image_preview(self, picture, embedded_image):
+        try:
+            loader = GdkPixbuf.PixbufLoader.new_with_type("png" if embedded_image["mime"] == "image/png" else "jpeg")
+            loader.write(embedded_image["data"])
+            loader.close()
+            pixbuf = loader.get_pixbuf()
+            if pixbuf:
+                GLib.idle_add(self._set_image_preview, picture, pixbuf)
+        except (GLib.Error, ValueError):
+            pass
+
+    @staticmethod
+    def _set_image_preview(picture, pixbuf):
+        picture.set_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+        return GLib.SOURCE_REMOVE
 
     def show_file_details(self, event):
         dialog = Gtk.Dialog(title="File History Event Details", transient_for=self.window, modal=True)
@@ -3200,7 +4082,7 @@ class ClipmanApplication(Gtk.Application):
             clipboard.read_text_async(None, lambda source, result, _data: self._quick_paste_previous_read(source, result, entry, text), None)
             return
         rich_text = None if entry.get("is_template") else entry.get("rich_text")
-        self._set_clipboard(text, rich_text)
+        self._set_clipboard(text, rich_text, entry)
         self.backend.call("touch", {"id": entry["id"]}, self._history_response)
         self.sounds.play("copy")
         if mode == "keep":
@@ -3214,7 +4096,7 @@ class ClipmanApplication(Gtk.Application):
         self._read_rich_clipboard(clipboard, previous, lambda _clipboard, old_text, old_rich: self._quick_paste_with_previous(entry, text, old_text, old_rich))
 
     def _quick_paste_with_previous(self, entry, text, previous, previous_rich):
-        self._set_clipboard(text, None if entry.get("is_template") else entry.get("rich_text"))
+        self._set_clipboard(text, None if entry.get("is_template") else entry.get("rich_text"), entry)
         self.backend.call("touch", {"id": entry["id"]}, self._history_response)
         self.sounds.play("copy")
         GLib.timeout_add(100, self._quick_paste_send, {"text": previous, "rich_text": previous_rich})
@@ -3318,10 +4200,45 @@ class ClipmanApplication(Gtk.Application):
         links_enabled = Gtk.CheckButton(label="Show Links History", active=self.preferences.values["links_history_enabled"])
         rich_enabled = Gtk.CheckButton(label="Preserve copied formatting and show Rich Text history", active=self.preferences.values["rich_text_history_enabled"])
         rich_enabled.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows a separate Rich Text history section. Enable this before copying formatted content. This is off by default."])
+        include_images = Gtk.CheckButton(label="Include images in Rich Text history", active=self.preferences.values["include_images_in_rich_text_history"])
+        include_images.set_margin_start(24)
+        include_images.set_sensitive(rich_enabled.get_active())
+        image_privacy_text = IMAGE_METADATA_DISCLOSURE
+        include_images.update_property([Gtk.AccessibleProperty.DESCRIPTION], [image_privacy_text + " This is off by default."])
+        image_privacy = Gtk.Label(label=image_privacy_text, wrap=True, xalign=0)
+        image_privacy.set_margin_start(48)
+        image_privacy.set_sensitive(rich_enabled.get_active())
+        add_copied_image_files = Gtk.CheckButton(
+            label="Also add copied PNG and JPEG files to Rich Text history",
+            active=self.preferences.values["add_copied_image_files_to_rich_text_history"],
+        )
+        add_copied_image_files.set_margin_start(48)
+        add_copied_image_files.update_property(
+            [Gtk.AccessibleProperty.DESCRIPTION],
+            ["When checked, copying one local PNG or JPEG file adds it to File History and also to Rich Text history. Multiple files, folders and unsupported files remain only in File History. This is off by default."],
+        )
+        def update_image_file_dependency():
+            enabled = rich_enabled.get_active() and include_images.get_active()
+            add_copied_image_files.set_sensitive(enabled)
+            if not enabled:
+                add_copied_image_files.set_active(False)
+        update_image_file_dependency()
+        def rich_text_toggled(control):
+            enabled = control.get_active()
+            include_images.set_sensitive(enabled)
+            image_privacy.set_sensitive(enabled)
+            if not enabled:
+                include_images.set_active(False)
+            update_image_file_dependency()
+        rich_enabled.connect("toggled", rich_text_toggled)
+        include_images.connect("toggled", lambda _control: update_image_file_dependency())
         save_position = Gtk.CheckButton(label="Save list position", active=self.preferences.values["save_list_position"])
         duplicates = Gtk.CheckButton(label="Keep duplicate text entries", active=self.preferences.values["keep_duplicate_entries"])
         confirm_deletions = Gtk.CheckButton(label="Confirm before deleting entries", active=self.preferences.values["confirm_deletions"])
-        for control in (monitor, sounds, auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, save_position, duplicates, confirm_deletions):
+        for control in (monitor, sounds, auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, include_images, add_copied_image_files):
+            general.append(control)
+        general.append(image_privacy)
+        for control in (save_position, duplicates, confirm_deletions):
             general.append(control)
 
         startup_run = Gtk.CheckButton(label="Run Clipman when this desktop session starts", active=self.preferences.values["run_at_startup"])
@@ -3414,7 +4331,10 @@ class ClipmanApplication(Gtk.Application):
                     "paste_after_enter": paste_enter.get_active(), "dynamic_history_mode": dynamic.get_active(),
                     "auto_remove_url_tracking": remove_tracking.get_active(), "keep_duplicate_entries": duplicates.get_active(),
                     "confirm_deletions": confirm_deletions.get_active(),
-                    "links_history_enabled": links_enabled.get_active(), "rich_text_history_enabled": rich_enabled.get_active(), "save_list_position": save_position.get_active(),
+                    "links_history_enabled": links_enabled.get_active(), "rich_text_history_enabled": rich_enabled.get_active(),
+                    "include_images_in_rich_text_history": include_images.get_active(),
+                    "add_copied_image_files_to_rich_text_history": add_copied_image_files.get_active(),
+                    "save_list_position": save_position.get_active(),
                     "run_at_startup": startup_run.get_active(), "show_history_hotkey": show_accelerator,
                     "toggle_monitoring_hotkey": toggle_accelerator,
                     "save_current_clipboard_hotkey": save_clipboard_accelerator,

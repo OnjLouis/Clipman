@@ -69,6 +69,7 @@ namespace Clipman
 
         public ClipmanApplicationContext()
         {
+            RichImageFileDropData.Cleanup();
             appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             settingsStore = new SettingsStore(appDirectory, Program.WriteRuntimeLog);
             settings = settingsStore.Load();
@@ -418,6 +419,8 @@ namespace Clipman
             settings.AutoRemoveUrlTracking = updated.AutoRemoveUrlTracking;
             settings.LinksHistoryEnabled = updated.LinksHistoryEnabled;
             settings.RichTextHistoryEnabled = updated.RichTextHistoryEnabled;
+            settings.IncludeImagesInRichText = updated.RichTextHistoryEnabled && updated.IncludeImagesInRichText;
+            settings.AutoAddImageFilesToRichText = settings.IncludeImagesInRichText && updated.AutoAddImageFilesToRichText;
             settings.LastSelectedHistoryTab = HistoryTabs.Normalize(updated.LastSelectedHistoryTab, settings.LinksHistoryEnabled, settings.RichTextHistoryEnabled);
             settings.HistoryTabOrder = HistoryTabs.NormalizeOrder(updated.HistoryTabOrder);
             settings.AutoRemoveUnavailableFileHistoryEvents = updated.AutoRemoveUnavailableFileHistoryEvents;
@@ -680,10 +683,47 @@ namespace Clipman
 
             lastClipboardPrivacySignal = "None";
 
+            if (settings.RichTextHistoryEnabled && settings.IncludeImagesInRichText &&
+                !Clipboard.ContainsText(TextDataFormat.UnicodeText) && RichImageData.ClipboardHasStandaloneImage())
+            {
+                var imageCapture = RichImageData.CaptureFromClipboard();
+                if (imageCapture == null)
+                {
+                    sounds.Skip(settings.SoundsEnabled);
+                    return;
+                }
+                if (store.EmbeddedImageByteCount() + imageCapture.ImageBytes > RichImageData.MaximumDatabaseImageBytes)
+                {
+                    Program.WriteRuntimeLog("Clipman did not store a clipboard image because the 8 MiB history image budget is full.", null);
+                    sounds.Skip(settings.SoundsEnabled);
+                    return;
+                }
+                var imageGroup = settings.AutoGroupByApp ? FriendlyProcessName(sourceProcessName) : string.Empty;
+                store.AddText(imageCapture.Text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, imageGroup, imageCapture.RichText);
+                if (IsStorageUnavailable())
+                {
+                    sounds.Skip(settings.SoundsEnabled);
+                    UpdateTray();
+                    return;
+                }
+                RememberReceivedHistoryTab(HistoryTabs.RichText);
+                sounds.Copy(settings.SoundsEnabled);
+                return;
+            }
+
             var recordedFileEvent = RecordClipboardEvent(sourceProcessName);
             if (recordedFileEvent)
             {
                 RememberReceivedHistoryTab(HistoryTabs.Files);
+                if (settings.RichTextHistoryEnabled && settings.IncludeImagesInRichText && settings.AutoAddImageFilesToRichText)
+                {
+                    string imageFilePath;
+                    string ignoredFailureMessage;
+                    if (RichImageData.TryGetSingleClipboardImageFile(out imageFilePath, out ignoredFailureMessage))
+                    {
+                        AddCopiedImageFileToRichTextAsync(imageFilePath, sourceProcessName);
+                    }
+                }
             }
 
             if (!Clipboard.ContainsText(TextDataFormat.UnicodeText))
@@ -766,6 +806,31 @@ namespace Clipman
             }
 
             sounds.Copy(settings.SoundsEnabled);
+        }
+
+        private void AddCopiedImageFileToRichTextAsync(string path, string sourceProcessName)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                var capture = RichImageData.CaptureFromFile(path);
+                if (capture == null)
+                {
+                    Program.WriteRuntimeLog("Clipman could not add the copied image file to Rich Text history because it was unavailable or invalid.", null);
+                    return;
+                }
+                BeginInvokeIfReady(() =>
+                {
+                    if (!settings.RichTextHistoryEnabled || !settings.IncludeImagesInRichText || !settings.AutoAddImageFilesToRichText) return;
+                    if (store.EmbeddedImageByteCount() + capture.ImageBytes > RichImageData.MaximumDatabaseImageBytes)
+                    {
+                        Program.WriteRuntimeLog("Clipman did not add a copied image file to Rich Text history because the 8 MiB history image budget is full.", null);
+                        return;
+                    }
+                    var group = settings.AutoGroupByApp ? FriendlyProcessName(sourceProcessName) : string.Empty;
+                    store.AddText(capture.Text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group, capture.RichText);
+                    if (IsStorageUnavailable()) UpdateTray();
+                });
+            });
         }
 
         private void ClipboardFloodRecoveryTimerTick(object sender, EventArgs e)
@@ -1321,6 +1386,8 @@ namespace Clipman
                 "Database storage status: " + (string.IsNullOrWhiteSpace(store.LastStorageError) ? "OK" : "Unavailable: " + store.LastStorageError) + "\r\n" +
                 "Entries: " + entries.Count + "\r\n" +
                 "Rich text history: " + (settings.RichTextHistoryEnabled ? "enabled" : "disabled") + "\r\n" +
+                "Rich text images: " + (settings.IncludeImagesInRichText ? "enabled" : "disabled") + "\r\n" +
+                "Automatically add copied image files to Rich Text: " + (settings.AutoAddImageFilesToRichText ? "enabled" : "disabled") + "\r\n" +
                 "Rich text payloads: " + richEntries.Count + " entries (HTML " + richHtmlEntries + ", RTF " + richRtfEntries + ", " + richBytes + " bytes)\r\n" +
                 "File history path: " + fileEventStore.DatabasePath + "\r\n" +
                 "File history storage status: " + (string.IsNullOrWhiteSpace(fileEventStore.LastStorageError) ? "OK" : "Unavailable: " + fileEventStore.LastStorageError) + "\r\n" +
@@ -1872,7 +1939,7 @@ namespace Clipman
             data.SetText(text, TextDataFormat.UnicodeText);
             if (entry != null && !entry.IsTemplate && string.Equals(text, entry.Text ?? string.Empty, StringComparison.Ordinal))
             {
-                RichTextData.AddToDataObject(data, entry.RichText);
+                RichTextData.AddToDataObject(data, entry.RichText, entry);
             }
             Clipboard.SetDataObject(data, true);
         }

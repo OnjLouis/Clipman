@@ -14,6 +14,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/merge"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/model"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/operation"
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/platform"
 )
 
 func passwordMatches(first, second string) bool {
@@ -90,14 +91,7 @@ func (s *session) importHistory(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("could not open the import file: %w", err)
-	}
-	if info.Size() > s.engine.Limits.MaxBlobBytes {
-		return nil, errors.New("the import file is larger than the configured database limit")
-	}
-	blob, err := os.ReadFile(path)
+	blob, err := platform.ReadFileBounded(path, s.engine.Limits.MaxBlobBytes)
 	if err != nil {
 		return nil, fmt.Errorf("could not read the import file: %w", err)
 	}
@@ -180,7 +174,7 @@ func (s *session) exportHistory(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	blob, err := clipdb.Encode(s.database, exportPassword, nil)
+	blob, err := clipdb.EncodeWithLimits(s.database, exportPassword, nil, s.codecLimits())
 	if err != nil {
 		return nil, fmt.Errorf("could not encode the export: %w", err)
 	}

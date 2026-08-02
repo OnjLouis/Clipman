@@ -6,7 +6,12 @@ struct HistoryView: View {
     @State private var viewingEntry: ClipEntry?
     @State private var editingEntry: ClipEntry?
     @State private var pendingDeleteEntry: ClipEntry?
+    @State private var pendingWebsiteTitleItem: LinkExtractor.LinkItem?
+    @State private var imageShareFile: EmbeddedImageShareFile?
     @State private var showingHistoryFilter = false
+    @AccessibilityFocusState private var focusedHistoryItemID: String?
+
+    private let statusFocusID = "history-status"
 
     var body: some View {
         NavigationStack {
@@ -54,6 +59,21 @@ struct HistoryView: View {
             .sheet(item: $editingEntry) { entry in
                 EntryEditView(entry: entry)
             }
+            .sheet(item: $imageShareFile) { file in
+                EmbeddedImageShareSheet(file: file) { completed, error in
+                    Task { @MainActor in
+                        imageShareFile = nil
+                        if let error {
+                            app.setTransientStatus("Image could not be shared: \(error.localizedDescription)")
+                        } else if completed {
+                            app.setTransientStatus("Image shared.")
+                        } else {
+                            app.setTransientStatus("Sharing cancelled.")
+                        }
+                    }
+                }
+                .onDisappear { file.remove() }
+            }
             .sheet(isPresented: $showingHistoryFilter) {
                 HistoryFilterChooser()
                     .environmentObject(app)
@@ -66,10 +86,23 @@ struct HistoryView: View {
                 Button("Delete", role: .destructive) {
                     guard let entry = pendingDeleteEntry else { return }
                     pendingDeleteEntry = nil
-                    app.delete(entry)
+                    performDelete(entry)
                 }
             } message: {
                 Text("This removes the entry from synchronized history.")
+            }
+            .confirmationDialog("Use Website Title as Name?", isPresented: Binding(
+                get: { pendingWebsiteTitleItem != nil },
+                set: { if !$0 { pendingWebsiteTitleItem = nil } }
+            ), titleVisibility: .visible) {
+                Button("Cancel", role: .cancel) { pendingWebsiteTitleItem = nil }
+                Button("Use Website Title") {
+                    guard let item = pendingWebsiteTitleItem else { return }
+                    pendingWebsiteTitleItem = nil
+                    Task { await app.useWebsiteTitleAsName(entryID: item.entry.Id, url: item.url) }
+                }
+            } message: {
+                Text("Clipman will contact \(pendingWebsiteTitleItem?.url.host ?? "the website") once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content.")
             }
         }
     }
@@ -120,9 +153,11 @@ struct HistoryView: View {
                         view: { viewingEntry = item.entry },
                         edit: { editingEntry = item.entry },
                         togglePinned: { app.togglePinned(item.entry) },
-                        delete: { requestDelete(item.entry) }
+                        delete: { requestDelete(item.entry) },
+                        useWebsiteTitle: { pendingWebsiteTitleItem = item }
                     )
                     .id(item.id)
+                    .accessibilityFocused($focusedHistoryItemID, equals: linkFocusID(item.id))
                 }
             } else {
                 if app.visibleEntries(in: section).isEmpty {
@@ -136,9 +171,19 @@ struct HistoryView: View {
                         view: { viewingEntry = entry },
                         edit: { editingEntry = entry },
                         togglePinned: { app.togglePinned(entry) },
-                        delete: { requestDelete(entry) }
+                        delete: { requestDelete(entry) },
+                        saveImageToPhotos: saveImageToPhotos,
+                        shareImage: shareImage,
+                        useWebsiteTitle: { url in
+                            pendingWebsiteTitleItem = LinkExtractor.LinkItem(
+                                id: "\(entry.Id)-website-title",
+                                url: url,
+                                entry: entry
+                            )
+                        }
                     )
                     .id(entry.Id)
+                    .accessibilityFocused($focusedHistoryItemID, equals: entryFocusID(entry.Id))
                 }
             }
         }
@@ -149,15 +194,56 @@ struct HistoryView: View {
         if app.settings.confirmDeletions {
             pendingDeleteEntry = entry
         } else {
-            app.delete(entry)
+            performDelete(entry)
         }
     }
 
-    private var currentListIsEmpty: Bool {
-        app.selectedSection == .links
-            ? app.visibleLinkItems(in: app.selectedSection).isEmpty
-            : app.visibleEntries(in: app.selectedSection).isEmpty
+    private func saveImageToPhotos(_ image: EmbeddedImage) {
+        Task { @MainActor in
+            app.setTransientStatus("Saving image to Photos.")
+            do {
+                try await EmbeddedImagePhotoLibrary.save(image)
+                app.setTransientStatus("Image saved to Photos.")
+            } catch {
+                app.setTransientStatus("Image could not be saved to Photos: \(error.localizedDescription)")
+            }
+        }
     }
+
+    private func shareImage(_ image: EmbeddedImage) {
+        do {
+            imageShareFile = try EmbeddedImageShareFile.create(for: image)
+        } catch {
+            app.setTransientStatus("Image could not be shared: \(error.localizedDescription)")
+        }
+    }
+
+    private func performDelete(_ entry: ClipEntry) {
+        let nextFocusID = focusTarget(afterDeleting: entry)
+        guard app.delete(entry) != nil else { return }
+        Task { @MainActor in
+            await Task.yield()
+            focusedHistoryItemID = nextFocusID ?? statusFocusID
+        }
+    }
+
+    private func focusTarget(afterDeleting entry: ClipEntry) -> String? {
+        if app.selectedSection == .links {
+            let items = app.visibleLinkItems(in: app.selectedSection)
+            let removed = Set(items.filter { $0.entry.Id == entry.Id }.map(\.id))
+            return HistoryDeletionFocusResolver.nextID(
+                afterRemoving: removed,
+                from: items.map(\.id)
+            ).map(linkFocusID)
+        }
+        return HistoryDeletionFocusResolver.nextID(
+            afterRemoving: [entry.Id],
+            from: app.visibleEntries(in: app.selectedSection).map(\.Id)
+        ).map(entryFocusID)
+    }
+
+    private func entryFocusID(_ entryID: String) -> String { "entry:\(entryID)" }
+    private func linkFocusID(_ linkID: String) -> String { "link:\(linkID)" }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
         if app.selectedSection == .links, let last = app.visibleLinkItems.last {
@@ -180,8 +266,33 @@ struct HistoryView: View {
                 .padding(.bottom, 4)
         }
         .buttonStyle(.plain)
-        .disabled(currentListIsEmpty)
         .accessibilityHint("Moves to the bottom of the current history list.")
+        .accessibilityValue("Sort: \(app.settings.historySortMode.label)")
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.6)
+                .onEnded { _ in app.advanceHistorySortMode() }
+        )
+        .historySortAccessibilityActions { mode in
+            app.setHistorySortMode(mode)
+        }
+        .accessibilityFocused($focusedHistoryItemID, equals: statusFocusID)
+    }
+}
+
+enum HistoryDeletionFocusResolver {
+    static func nextID(afterRemoving removedIDs: Set<String>, from orderedIDs: [String]) -> String? {
+        let removedIndices = orderedIDs.indices.filter { removedIDs.contains(orderedIDs[$0]) }
+        guard let firstRemoved = removedIndices.first, let lastRemoved = removedIndices.last else {
+            return nil
+        }
+        if lastRemoved + 1 < orderedIDs.count,
+           let next = orderedIDs[(lastRemoved + 1)...].first(where: { !removedIDs.contains($0) }) {
+            return next
+        }
+        if firstRemoved > 0 {
+            return orderedIDs[..<firstRemoved].reversed().first(where: { !removedIDs.contains($0) })
+        }
+        return nil
     }
 }
 
@@ -192,10 +303,22 @@ private struct HistoryEntryRow: View {
     let edit: () -> Void
     let togglePinned: () -> Void
     let delete: () -> Void
+    let saveImageToPhotos: (EmbeddedImage) -> Void
+    let shareImage: (EmbeddedImage) -> Void
+    let useWebsiteTitle: (URL) -> Void
+
+    private var embeddedImage: EmbeddedImage? {
+        EmbeddedImageCodec.recognize(entry.RichText)
+    }
 
     private var singleLink: URL? {
         let links = LinkExtractor.links(in: entry.Text)
         return links.count == 1 ? links[0] : nil
+    }
+
+    private var websiteTitleURL: URL? {
+        guard entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return LinkExtractor.exactHTTPURL(in: entry)
     }
 
     var body: some View {
@@ -227,11 +350,24 @@ private struct HistoryEntryRow: View {
                     Label("Delete", systemImage: "trash")
                 }
                 .accessibilityLabel("Delete entry")
+                if let embeddedImage {
+                    ForEach(EmbeddedImageHistoryActionPolicy.actions(for: embeddedImage), id: \.self) { action in
+                        Button {
+                            performImageAction(action, image: embeddedImage)
+                        } label: {
+                            Label(action.label, systemImage: action.systemImage)
+                        }
+                        .accessibilityLabel(action.label)
+                    }
+                }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(entry.accessibilityLabelText)
             .accessibilityHint("Double tap to copy to clipboard.")
             .accessibilityAddTraits(.isButton)
+            .websiteTitleAccessibilityAction(enabled: websiteTitleURL != nil) {
+                if let websiteTitleURL { useWebsiteTitle(websiteTitleURL) }
+            }
             .contextMenu {
                 Button("Copy", action: copy)
                 if let url = singleLink {
@@ -239,9 +375,26 @@ private struct HistoryEntryRow: View {
                 }
                 Button("View", action: view)
                 Button("Edit", action: edit)
+                if let websiteTitleURL {
+                    Button("Use Website Title as Name") { useWebsiteTitle(websiteTitleURL) }
+                }
                 Button(entry.Pinned ? "Unpin" : "Pin", action: togglePinned)
                 Button("Delete", role: .destructive, action: delete)
+                if let embeddedImage {
+                    ForEach(EmbeddedImageHistoryActionPolicy.actions(for: embeddedImage), id: \.self) { action in
+                        Button(action.label) { performImageAction(action, image: embeddedImage) }
+                    }
+                }
             }
+    }
+
+    private func performImageAction(_ action: EmbeddedImageHistoryAction, image: EmbeddedImage) {
+        switch action {
+        case .saveToPhotos:
+            saveImageToPhotos(image)
+        case .share:
+            shareImage(image)
+        }
     }
 }
 
@@ -253,6 +406,12 @@ private struct LinkHistoryRow: View {
     let edit: () -> Void
     let togglePinned: () -> Void
     let delete: () -> Void
+    let useWebsiteTitle: () -> Void
+
+    private var canUseWebsiteTitle: Bool {
+        return item.entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && LinkExtractor.isExactWebsiteTitleTarget(item.entry, matching: item.url)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -294,13 +453,45 @@ private struct LinkHistoryRow: View {
         .accessibilityLabel(item.accessibilityLabelText)
         .accessibilityHint("Double tap to copy link to clipboard.")
         .accessibilityAddTraits(.isButton)
+        .websiteTitleAccessibilityAction(enabled: canUseWebsiteTitle, action: useWebsiteTitle)
         .contextMenu {
             Button("Copy Link", action: copy)
             Button("Open Link", action: open)
             Button("View", action: view)
             Button("Edit", action: edit)
+            if canUseWebsiteTitle {
+                Button("Use Website Title as Name", action: useWebsiteTitle)
+            }
             Button(item.entry.Pinned ? "Unpin" : "Pin", action: togglePinned)
             Button("Delete", role: .destructive, action: delete)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func websiteTitleAccessibilityAction(enabled: Bool, action: @escaping () -> Void) -> some View {
+        if enabled {
+            accessibilityAction(named: "Use Website Title as Name", action)
+        } else {
+            self
+        }
+    }
+
+    func historySortAccessibilityActions(
+        setSort: @escaping (HistorySortMode) -> Void
+    ) -> some View {
+        accessibilityAction(named: HistorySortAccessibilityOrder.sourceModifierModes[0].accessibilityActionLabel) {
+            setSort(HistorySortAccessibilityOrder.sourceModifierModes[0])
+        }
+        .accessibilityAction(named: HistorySortAccessibilityOrder.sourceModifierModes[1].accessibilityActionLabel) {
+            setSort(HistorySortAccessibilityOrder.sourceModifierModes[1])
+        }
+        .accessibilityAction(named: HistorySortAccessibilityOrder.sourceModifierModes[2].accessibilityActionLabel) {
+            setSort(HistorySortAccessibilityOrder.sourceModifierModes[2])
+        }
+        .accessibilityAction(named: HistorySortAccessibilityOrder.sourceModifierModes[3].accessibilityActionLabel) {
+            setSort(HistorySortAccessibilityOrder.sourceModifierModes[3])
         }
     }
 }
@@ -410,10 +601,17 @@ private struct HistoryFilterChooser: View {
     }
 }
 
-private extension ClipEntry {
+extension ClipEntry {
     var displayText: String {
-        if !Name.isEmpty {
-            return "\(Name): \(Text)"
+        let name = Name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let image = EmbeddedImageCodec.recognize(RichText) {
+            return name.isEmpty ? EmbeddedImageCodec.displayText(filename: image.filename) : name
+        }
+        if let url = LinkExtractor.exactHTTPURL(in: self) {
+            return LinkDisplay.rowText(for: url, name: name)
+        }
+        if !name.isEmpty {
+            return "\(name): \(Text)"
         }
         return Text
     }
@@ -441,8 +639,7 @@ private extension ClipEntry {
 
 private extension LinkExtractor.LinkItem {
     var displayText: String {
-        let name = entry.Name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? url.absoluteString : "\(name): \(url.absoluteString)"
+        LinkDisplay.rowText(for: url, name: entry.Name)
     }
 
     var accessibilityLabelText: String {

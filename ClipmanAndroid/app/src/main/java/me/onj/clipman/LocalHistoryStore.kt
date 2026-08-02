@@ -9,7 +9,10 @@ class LocalHistoryStore(context: Context) {
 
     fun load(password: String): ClipDatabase? {
         if (!atomicFile.baseFile.exists()) return null
-        return ClipDatabaseFile.load(atomicFile.readFully(), password)
+        val bytes = atomicFile.openRead().use { input ->
+            ClipDatabaseFile.readDatabaseBlob(input, atomicFile.baseFile.length())
+        }
+        return ClipDatabaseFile.load(bytes, password)
     }
 
     fun save(database: ClipDatabase, password: String) {
@@ -17,6 +20,7 @@ class LocalHistoryStore(context: Context) {
     }
 
     fun saveBytes(bytes: ByteArray) {
+        ClipDatabaseFile.requireDatabaseBlobSize(bytes.size.toLong())
         val output = atomicFile.startWrite()
         try {
             output.write(bytes)

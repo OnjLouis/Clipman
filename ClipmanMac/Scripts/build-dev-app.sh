@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRATCH="${CLIPMAN_MAC_BUILD_DIR:-/tmp/ClipmanMac-build}"
-APP="${CLIPMAN_MAC_APP:-/tmp/ClipmanMac-dev/Clipman.app}"
+TEMP_ROOT="${CLIPMAN_TEMP_ROOT:-$HOME/Projects/Codex/Temp/clipman}"
+SCRATCH="${CLIPMAN_MAC_BUILD_DIR:-$TEMP_ROOT/mac-dev-build}"
+APP="${CLIPMAN_MAC_APP:-$TEMP_ROOT/mac-dev/Clipman.app}"
+LOG_DIR="$TEMP_ROOT/logs"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
 BUILD_STAMP="$(zsh "$ROOT/Scripts/shared-version.sh" stamp)"
@@ -19,6 +21,7 @@ cleanup_build() {
   exit "$exit_code"
 }
 trap cleanup_build EXIT
+mkdir -p "$TEMP_ROOT" "$LOG_DIR"
 
 swift build --package-path "$ROOT" --scratch-path "$SCRATCH"
 swift run --package-path "$ROOT" --scratch-path "$SCRATCH" ClipmanCodecSmoke
@@ -67,11 +70,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP" >/tmp/clipmanmac-codesign.log 2>&1 || true
+codesign --force --sign - "$APP" >"$LOG_DIR/mac-dev-codesign.log" 2>&1 || true
 
 if [[ "${1:-}" == "--restart" ]]; then
   pkill -f "$APP/Contents/MacOS/Clipman|swift run.*Clipman" 2>/dev/null || true
-  open -n "$APP" || (nohup "$APP/Contents/MacOS/Clipman" >/tmp/clipmanmac.log 2>&1 &)
+  open -n "$APP" || (nohup "$APP/Contents/MacOS/Clipman" >"$LOG_DIR/mac-dev.log" 2>&1 &)
 fi
 
 echo "$APP"

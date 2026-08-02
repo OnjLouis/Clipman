@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/clipdb"
 )
 
 var ErrNotFound = errors.New("database not found")
@@ -132,7 +134,7 @@ func New(rawURL, token, databaseID, version string, suppliedOptions ...Option) (
 		}
 		return nil
 	}
-	return &Client{BaseURL: normalized, Token: CleanToken(token), DatabaseID: databaseID, Version: version, MaxBlobBytes: 64 << 20, HTTP: client}, nil
+	return &Client{BaseURL: normalized, Token: CleanToken(token), DatabaseID: databaseID, Version: version, MaxBlobBytes: clipdb.DefaultMaxBlobBytes, HTTP: client}, nil
 }
 func NormalizeURL(value string) (string, error) {
 	value = strings.TrimSpace(value)
@@ -349,7 +351,7 @@ func (c *Client) Get(ctx context.Context) (Download, error) {
 	}
 	limit := c.MaxBlobBytes
 	if limit <= 0 {
-		limit = 64 << 20
+		limit = clipdb.DefaultMaxBlobBytes
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
@@ -361,6 +363,13 @@ func (c *Client) Get(ctx context.Context) (Download, error) {
 	return Download{Data: data, Revision: revision(response)}, nil
 }
 func (c *Client) Put(ctx context.Context, data []byte, expected string, createOnly bool) (Metadata, error) {
+	limit := c.MaxBlobBytes
+	if limit <= 0 {
+		limit = clipdb.DefaultMaxBlobBytes
+	}
+	if int64(len(data)) > limit {
+		return Metadata{}, fmt.Errorf("server database exceeds %d-byte limit", limit)
+	}
 	request, err := c.request(ctx, http.MethodPut, c.databasePath(), bytes.NewReader(data))
 	if err != nil {
 		return Metadata{}, err

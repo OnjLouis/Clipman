@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -92,6 +93,40 @@ func TestPutUsesConditionalCreate(t *testing.T) {
 	}
 	if header != "*" {
 		t.Fatalf("If-None-Match=%q", header)
+	}
+}
+
+func TestDatabaseTransfersUseBoundedClientContainerLimit(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 33)
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(payload)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer testServer.Close()
+	client, err := New(testServer.URL, "token", "database", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.MaxBlobBytes != 272<<20 {
+		t.Fatalf("default server compatibility limit = %d", client.MaxBlobBytes)
+	}
+	client.MaxBlobBytes = 32
+	payload = payload[:32]
+	if download, err := client.Get(context.Background()); err != nil || len(download.Data) != 32 {
+		t.Fatalf("exact-limit download failed: bytes=%d err=%v", len(download.Data), err)
+	}
+	payload = append(payload, 'x')
+	if _, err := client.Get(context.Background()); err == nil {
+		t.Fatal("limit-plus-one download was accepted")
+	}
+	if _, err := client.Put(context.Background(), bytes.Repeat([]byte("y"), 32), "", false); err != nil {
+		t.Fatalf("exact-limit upload failed: %v", err)
+	}
+	if _, err := client.Put(context.Background(), bytes.Repeat([]byte("y"), 33), "", false); err == nil {
+		t.Fatal("limit-plus-one upload was accepted")
 	}
 }
 

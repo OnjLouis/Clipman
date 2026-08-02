@@ -9,36 +9,66 @@ fi
 APP_DIR="${CLIPMAN_SERVER_APP_DIR:-}"
 CONFIG_FILE="${CLIPMAN_SERVER_CONFIG_FILE:-}"
 SERVICE="${CLIPMAN_SERVER_SERVICE:-}"
-SERVICE_FILE="${CLIPMAN_SERVER_SERVICE_FILE:-/etc/systemd/system/$SERVICE}"
+if [ -n "${CLIPMAN_SERVER_INIT_SYSTEM:-}" ]; then
+  INIT_SYSTEM="$CLIPMAN_SERVER_INIT_SYSTEM"
+elif [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  INIT_SYSTEM=systemd
+elif command -v sv >/dev/null 2>&1; then
+  INIT_SYSTEM=runit
+else
+  echo "Could not detect systemd or runit." >&2
+  exit 1
+fi
+case "$INIT_SYSTEM" in
+  systemd) DEFAULT_SERVICE_FILE="/etc/systemd/system/$SERVICE" ;;
+  runit) DEFAULT_SERVICE_FILE="/etc/sv/$SERVICE" ;;
+  *) echo "Unsupported CLIPMAN_SERVER_INIT_SYSTEM: $INIT_SYSTEM (use systemd or runit)." >&2; exit 2 ;;
+esac
+SERVICE_FILE="${CLIPMAN_SERVER_SERVICE_FILE:-$DEFAULT_SERVICE_FILE}"
 HELPER="${CLIPMAN_SERVER_HELPER:-/usr/local/sbin/clipmanserver}"
 LAUNCHER="${CLIPMAN_SERVER_LAUNCHER:-/usr/local/libexec/clipman-server-managed}"
 MANAGER_CONFIG="${CLIPMAN_SERVER_MANAGER_CONFIG:-/etc/clipman-server-manager.conf}"
 SYSTEMD_DIR="${CLIPMAN_SERVER_SYSTEMD_DIR:-/etc/systemd/system}"
 SYSTEMCTL="${CLIPMAN_SERVER_SYSTEMCTL:-systemctl}"
+SV="${CLIPMAN_SERVER_SV:-sv}"
+RUNIT_SERVICE_DIR="${CLIPMAN_SERVER_RUNIT_SERVICE_DIR:-/etc/sv}"
+RUNIT_ACTIVE_DIR="${CLIPMAN_SERVER_RUNIT_ACTIVE_DIR:-/var/service}"
 
-for value in "$APP_DIR" "$CONFIG_FILE" "$SERVICE" "$SERVICE_FILE" "$HELPER" "$LAUNCHER" "$MANAGER_CONFIG" "$SYSTEMD_DIR" "$SYSTEMCTL"; do
+for value in "$APP_DIR" "$CONFIG_FILE" "$SERVICE" "$SERVICE_FILE" "$HELPER" "$LAUNCHER" "$MANAGER_CONFIG" "$SYSTEMD_DIR" "$SYSTEMCTL" "$SV" "$RUNIT_SERVICE_DIR" "$RUNIT_ACTIVE_DIR"; do
   case "$value" in
     ""|*"'"*|*"
 "*) echo "System-managed Clipman Server paths and service names must be non-empty and cannot contain quotes or newlines." >&2; exit 2 ;;
   esac
 done
 
-case "$APP_DIR:$CONFIG_FILE:$SERVICE_FILE:$HELPER:$LAUNCHER:$MANAGER_CONFIG:$SYSTEMD_DIR" in
-  /*:/*:/*:/*:/*:/*:/*) ;;
+case "$APP_DIR:$CONFIG_FILE:$SERVICE_FILE:$HELPER:$LAUNCHER:$MANAGER_CONFIG:$SYSTEMD_DIR:$RUNIT_SERVICE_DIR:$RUNIT_ACTIVE_DIR" in
+  /*:/*:/*:/*:/*:/*:/*:/*:/*) ;;
   *) echo "System-managed Clipman Server paths must be absolute." >&2; exit 2 ;;
 esac
 case "$SERVICE" in
-  *[!A-Za-z0-9_.@-]*|"") echo "Invalid systemd service name: $SERVICE" >&2; exit 2 ;;
+  *[!A-Za-z0-9_.@-]*|"") echo "Invalid service name: $SERVICE" >&2; exit 2 ;;
 esac
 
-for required in "$APP_DIR/clipman_server.py" "$APP_DIR/clipman_server_updater.py" "$CONFIG_FILE" "$SERVICE_FILE"; do
+for required in "$APP_DIR/clipman_server.py" "$APP_DIR/clipman_server_updater.py" "$CONFIG_FILE"; do
   if [ ! -f "$required" ]; then
     echo "Required existing server file was not found: $required" >&2
     exit 1
   fi
 done
-if ! command -v "$SYSTEMCTL" >/dev/null 2>&1; then
-  echo "A system-managed installation requires systemd." >&2
+if [ "$INIT_SYSTEM" = systemd ] && [ ! -f "$SERVICE_FILE" ]; then
+  echo "Required existing systemd unit was not found: $SERVICE_FILE" >&2
+  exit 1
+fi
+if [ "$INIT_SYSTEM" = runit ] && [ ! -x "$SERVICE_FILE/run" ]; then
+  echo "Required existing runit service was not found: $SERVICE_FILE/run" >&2
+  exit 1
+fi
+if [ "$INIT_SYSTEM" = systemd ] && ! command -v "$SYSTEMCTL" >/dev/null 2>&1; then
+  echo "systemctl was not found." >&2
+  exit 1
+fi
+if [ "$INIT_SYSTEM" = runit ] && ! command -v "$SV" >/dev/null 2>&1; then
+  echo "sv was not found." >&2
   exit 1
 fi
 
@@ -54,6 +84,10 @@ CLIPMAN_SERVER_HELPER='$HELPER'
 CLIPMAN_SERVER_LAUNCHER='$LAUNCHER'
 CLIPMAN_SERVER_SYSTEMD_DIR='$SYSTEMD_DIR'
 CLIPMAN_SERVER_SYSTEMCTL='$SYSTEMCTL'
+CLIPMAN_SERVER_INIT_SYSTEM='$INIT_SYSTEM'
+CLIPMAN_SERVER_SV='$SV'
+CLIPMAN_SERVER_RUNIT_SERVICE_DIR='$RUNIT_SERVICE_DIR'
+CLIPMAN_SERVER_RUNIT_ACTIVE_DIR='$RUNIT_ACTIVE_DIR'
 EOF
 chmod 600 "$temporary_config"
 mv -f "$temporary_config" "$MANAGER_CONFIG"
@@ -91,6 +125,10 @@ APP_DIR="$CLIPMAN_SERVER_APP_DIR"
 BIN_DIR="$(dirname "$HELPER")"
 SYSTEMD_DIR="$CLIPMAN_SERVER_SYSTEMD_DIR"
 SYSTEMCTL="$CLIPMAN_SERVER_SYSTEMCTL"
+INIT_SYSTEM="$CLIPMAN_SERVER_INIT_SYSTEM"
+SV="$CLIPMAN_SERVER_SV"
+RUNIT_SERVICE_DIR="$CLIPMAN_SERVER_RUNIT_SERVICE_DIR"
+RUNIT_ACTIVE_DIR="$CLIPMAN_SERVER_RUNIT_ACTIVE_DIR"
 
 usage() {
   cat <<'USAGE'
@@ -125,14 +163,105 @@ updater() {
     --current-version "$(server_version)" \
     --app-dir "$APP_DIR" --bin-dir "$BIN_DIR" --config "$CONFIG" \
     --service-file "$SERVICE_FILE" --helper-path "$HELPER" \
-    --launcher-path "$SERVER" --managed-program-only
+    --launcher-path "$SERVER" --managed-program-only --init-system "$INIT_SYSTEM"
+}
+
+ensure_runit_link() {
+  service_path="$1"
+  service_name="$2"
+  active_path="$RUNIT_ACTIVE_DIR/$service_name"
+  if [ -e "$active_path" ] || [ -L "$active_path" ]; then
+    if ! [ "$active_path" -ef "$service_path" ]; then
+      echo "Refusing to replace an existing runit service link: $active_path" >&2
+      return 1
+    fi
+  else
+    ln -s "$service_path" "$active_path"
+  fi
+}
+
+wait_for_runit_supervision() {
+  service_path="$1"
+  seconds=0
+  while [ ! -e "$service_path/supervise/ok" ] && [ "$seconds" -lt 10 ]; do
+    sleep 1
+    seconds=$((seconds + 1))
+  done
+  if [ ! -e "$service_path/supervise/ok" ]; then
+    echo "The runit service is enabled but is not supervised: $service_path" >&2
+    return 1
+  fi
+}
+
+service_action() {
+  action="$1"
+  if [ "$INIT_SYSTEM" = systemd ]; then
+    case "$action" in
+      start) "$SYSTEMCTL" daemon-reload; "$SYSTEMCTL" enable --now "$SERVICE" ;;
+      status) "$SYSTEMCTL" status "$SERVICE" --no-pager ;;
+      *) "$SYSTEMCTL" "$action" "$SERVICE" ;;
+    esac
+    return
+  fi
+
+  case "$action" in
+    start)
+      rm -f "$SERVICE_FILE/down"
+      ensure_runit_link "$SERVICE_FILE" "$SERVICE"
+      wait_for_runit_supervision "$SERVICE_FILE"
+      "$SV" -w 15 start "$SERVICE_FILE"
+      ;;
+    stop) "$SV" -w 15 stop "$SERVICE_FILE" ;;
+    restart)
+      wait_for_runit_supervision "$SERVICE_FILE"
+      "$SV" -w 15 restart "$SERVICE_FILE"
+      ;;
+    status) "$SV" status "$SERVICE_FILE" ;;
+  esac
+}
+
+service_is_running() {
+  if [ "$INIT_SYSTEM" = systemd ]; then
+    "$SYSTEMCTL" is-active --quiet "$SERVICE"
+  else
+    "$SV" status "$SERVICE_FILE" >/dev/null 2>&1
+  fi
+}
+
+run_offline_maintenance() {
+  was_running=0
+  if service_is_running; then
+    service_action stop
+    was_running=1
+  fi
+
+  if "$@"; then
+    maintenance_result=0
+  else
+    maintenance_result=$?
+  fi
+
+  if [ "$was_running" -eq 1 ]; then
+    if [ "$INIT_SYSTEM" = systemd ]; then
+      restart_ok=0
+      "$SYSTEMCTL" start "$SERVICE" || restart_ok=$?
+    else
+      restart_ok=0
+      service_action start || restart_ok=$?
+    fi
+    if [ "$restart_ok" -ne 0 ]; then
+      echo "Clipman Server maintenance finished, but the server could not be restarted." >&2
+      [ "$maintenance_result" -ne 0 ] || maintenance_result=1
+    fi
+  fi
+  return "$maintenance_result"
 }
 
 case "${1:-help}" in
-  start) require_root; "$SYSTEMCTL" daemon-reload; "$SYSTEMCTL" enable --now "$SERVICE" ;;
-  stop) require_root; "$SYSTEMCTL" stop "$SERVICE" ;;
-  restart) require_root; "$SYSTEMCTL" restart "$SERVICE" ;;
-  status) "$SYSTEMCTL" status "$SERVICE" --no-pager ;;
+  start) require_root; service_action start ;;
+  stop) require_root; service_action stop ;;
+  restart) require_root; service_action restart ;;
+  status) service_action status ;;
   version) server_version ;;
   check-update) updater --check ;;
   update) require_root; shift; updater --install "$@" ;;
@@ -168,12 +297,12 @@ PY
       echo "Port must be between 1024 and 49151." >&2
       exit 2
     fi
-    "$SYSTEMCTL" stop "$SERVICE"
+    service_action stop
     if ! "$SERVER" --port "$PORT" --write-connection-info; then
-      "$SYSTEMCTL" start "$SERVICE"
+      service_action start
       exit 1
     fi
-    "$SYSTEMCTL" start "$SERVICE"
+    service_action start
     echo "Clipman Server now uses port $PORT."
     ;;
   token) require_root; "$SERVER" --show-token ;;
@@ -197,24 +326,52 @@ PY
       echo "DatabasePruneDays is 0, so stale database cleanup is disabled." >&2
       exit 2
     fi
-    "$SERVER" --prune-databases-days "$DAYS" --confirm
+    run_offline_maintenance "$SERVER" --prune-databases-days "$DAYS" --confirm
     ;;
   delete)
     require_root
     [ -n "${2:-}" ] || { echo "Usage: clipmanserver delete <database-id>" >&2; exit 2; }
-    "$SERVER" --delete-database "$2" --confirm
+    run_offline_maintenance "$SERVER" --delete-database "$2" --confirm
     ;;
   force-delete)
     require_root
     [ -n "${2:-}" ] || { echo "Usage: clipmanserver force-delete <database-id>" >&2; exit 2; }
-    "$SERVER" --delete-database "$2" --confirm --force-recent
+    run_offline_maintenance "$SERVER" --delete-database "$2" --confirm --force-recent
     ;;
-  cert) require_root; shift; "$SERVER" --create-tls-certificate "$@"; "$SYSTEMCTL" restart "$SERVICE" ;;
+  cert) require_root; shift; "$SERVER" --create-tls-certificate "$@"; service_action restart ;;
   fingerprint) require_root; "$SERVER" --show-ca-fingerprint ;;
   share-ca) require_root; shift; "$SERVER" --share-ca "$@" ;;
-  enable-auto-updates) require_root; "$SYSTEMCTL" daemon-reload; "$SYSTEMCTL" enable --now "${SERVICE%.service}-update.timer" ;;
-  disable-auto-updates) require_root; "$SYSTEMCTL" disable --now "${SERVICE%.service}-update.timer" 2>/dev/null || true ;;
-  update-status) "$SYSTEMCTL" status "${SERVICE%.service}-update.timer" --no-pager ;;
+  enable-auto-updates)
+    require_root
+    if [ "$INIT_SYSTEM" = systemd ]; then
+      "$SYSTEMCTL" daemon-reload
+      "$SYSTEMCTL" enable --now "${SERVICE%.service}-update.timer"
+    else
+      update_name="${SERVICE%.service}-update"
+      update_dir="$RUNIT_SERVICE_DIR/$update_name"
+      rm -f "$update_dir/down"
+      ensure_runit_link "$update_dir" "$update_name"
+      wait_for_runit_supervision "$update_dir"
+      "$SV" -w 15 start "$update_dir"
+    fi
+    ;;
+  disable-auto-updates)
+    require_root
+    if [ "$INIT_SYSTEM" = systemd ]; then
+      "$SYSTEMCTL" disable --now "${SERVICE%.service}-update.timer" 2>/dev/null || true
+    else
+      update_dir="$RUNIT_SERVICE_DIR/${SERVICE%.service}-update"
+      : > "$update_dir/down"
+      "$SV" -w 15 stop "$update_dir" 2>/dev/null || true
+    fi
+    ;;
+  update-status)
+    if [ "$INIT_SYSTEM" = systemd ]; then
+      "$SYSTEMCTL" status "${SERVICE%.service}-update.timer" --no-pager
+    else
+      "$SV" status "$RUNIT_SERVICE_DIR/${SERVICE%.service}-update"
+    fi
+    ;;
   help|-h|--help) usage ;;
   *) usage; exit 2 ;;
 esac
@@ -223,6 +380,7 @@ chmod 755 "$temporary_helper"
 mv -f "$temporary_helper" "$HELPER"
 
 unit_base="${SERVICE%.service}-update"
+if [ "$INIT_SYSTEM" = systemd ]; then
 mkdir -p "$SYSTEMD_DIR"
 cat > "$SYSTEMD_DIR/$unit_base.service" <<EOF
 [Unit]
@@ -250,6 +408,25 @@ WantedBy=timers.target
 EOF
 
 "$SYSTEMCTL" daemon-reload
+else
+  update_dir="$RUNIT_SERVICE_DIR/$unit_base"
+  mkdir -p "$RUNIT_ACTIVE_DIR" "$update_dir"
+  if [ ! -f "$update_dir/run" ]; then
+    : > "$update_dir/down"
+  fi
+  temporary_run="$update_dir/run.new"
+  cat > "$temporary_run" <<EOF
+#!/usr/bin/env sh
+set -eu
+while :; do
+  sleep 900
+  '$HELPER' update --yes || true
+  sleep 85500
+done
+EOF
+  chmod 755 "$temporary_run"
+  mv -f "$temporary_run" "$update_dir/run"
+fi
 
 echo "System management installed without changing the running server, its service, or its data."
 echo "Helper: $HELPER"

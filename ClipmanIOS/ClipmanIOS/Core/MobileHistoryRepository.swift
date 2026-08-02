@@ -7,7 +7,21 @@ struct MobileSyncResult: Sendable {
     var backupError: String?
 }
 
-actor MobileHistoryRepository {
+protocol MobileHistoryRepositoryProtocol: Sendable {
+    func loadLocal(password: String) async throws -> ClipDatabase?
+    func saveLocal(
+        _ database: ClipDatabase,
+        password: String,
+        backupSettings: ClipmanSettings?
+    ) async throws -> String?
+    func synchronize(
+        settings: ClipmanSettings,
+        current: ClipDatabase,
+        localAlreadySaved: Bool
+    ) async throws -> MobileSyncResult
+}
+
+actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     static let shared = MobileHistoryRepository()
 
     private let fileManager = FileManager.default
@@ -15,7 +29,7 @@ actor MobileHistoryRepository {
     func loadLocal(password: String) async throws -> ClipDatabase? {
         let url = try localDatabaseURL(createDirectory: false)
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        let data = try Data(contentsOf: url)
+        let data = try ClipDatabaseFile.readBounded(from: url)
         return try await DatabaseWorker.load(data: data, password: password)
     }
 

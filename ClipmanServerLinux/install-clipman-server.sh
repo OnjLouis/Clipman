@@ -15,8 +15,71 @@ APP_DIR="${CLIPMAN_SERVER_APP_DIR:-$HOME/.local/lib/clipman-server}"
 BIN_DIR="${CLIPMAN_SERVER_BIN_DIR:-$HOME/.local/bin}"
 CONFIG_DIR="${CLIPMAN_SERVER_CONFIG_DIR:-$HOME/.config/clipman-server}"
 CONFIG_FILE="$CONFIG_DIR/clipman-server-settings.json"
-SERVICE_DIR="${CLIPMAN_SERVER_SERVICE_DIR:-$HOME/.config/systemd/user}"
-SERVICE_FILE="$SERVICE_DIR/clipman-server.service"
+
+has_turnstile() {
+  [ -d /etc/sv/turnstiled ] ||
+    [ -e /var/service/turnstiled ] ||
+    { command -v xbps-query >/dev/null 2>&1 && xbps-query -p pkgver turnstile >/dev/null 2>&1; }
+}
+
+TURNSTILE_MISSING=0
+if [ -n "${CLIPMAN_SERVER_INIT_SYSTEM:-}" ]; then
+  INIT_SYSTEM="$CLIPMAN_SERVER_INIT_SYSTEM"
+elif [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  INIT_SYSTEM=systemd
+elif command -v sv >/dev/null 2>&1; then
+  if has_turnstile; then
+    INIT_SYSTEM=runit
+  else
+    INIT_SYSTEM=none
+    TURNSTILE_MISSING=1
+  fi
+else
+  INIT_SYSTEM=none
+fi
+
+case "$INIT_SYSTEM" in
+  systemd)
+    command -v systemctl >/dev/null 2>&1 || { echo "systemctl was not found." >&2; exit 1; }
+    SERVICE_DIR="${CLIPMAN_SERVER_SERVICE_DIR:-$HOME/.config/systemd/user}"
+    SERVICE_FILE="$SERVICE_DIR/clipman-server.service"
+    UPDATE_SERVICE_FILE="$SERVICE_DIR/clipman-server-update.service"
+    ;;
+  runit)
+    command -v sv >/dev/null 2>&1 || { echo "The runit user service requires the sv command." >&2; exit 1; }
+    if ! has_turnstile; then
+      echo "A persistent per-user runit service requires turnstile." >&2
+      echo "Install and enable turnstile, then run this installer again." >&2
+      exit 1
+    fi
+    SERVICE_DIR="${CLIPMAN_SERVER_SERVICE_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/service}"
+    SERVICE_FILE="$SERVICE_DIR/clipman-server"
+    UPDATE_SERVICE_FILE="$SERVICE_DIR/clipman-server-update"
+    ;;
+  none)
+    SERVICE_DIR=""
+    SERVICE_FILE="$CONFIG_DIR/clipman-server.service"
+    UPDATE_SERVICE_FILE=""
+    ;;
+  *)
+    echo "Unsupported CLIPMAN_SERVER_INIT_SYSTEM: $INIT_SYSTEM (use systemd or runit)." >&2
+    exit 2
+    ;;
+esac
+
+for value in "$APP_DIR" "$BIN_DIR" "$CONFIG_DIR" "$SERVICE_FILE" "$UPDATE_SERVICE_FILE"; do
+  case "$value" in
+    *'"'*|*'$'*|*'`'*|*'\'*|*"
+"*)
+      echo "Clipman Server install paths cannot contain quotes, dollar signs, backticks, backslashes, or newlines." >&2
+      exit 2
+      ;;
+  esac
+done
+case "$APP_DIR:$BIN_DIR:$CONFIG_DIR" in
+  /*:/*:/*) ;;
+  *) echo "Clipman Server install paths must be absolute." >&2; exit 2 ;;
+esac
 
 mkdir -p "$APP_DIR" "$BIN_DIR" "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR" 2>/dev/null || true
@@ -47,6 +110,8 @@ LAUNCHER="$BIN_DIR/clipman-server"
 CONFIG_FILE="$CONFIG_FILE"
 APP_DIR="$APP_DIR"
 SERVICE_FILE="$SERVICE_FILE"
+INIT_SYSTEM="$INIT_SYSTEM"
+UPDATE_SERVICE_FILE="$UPDATE_SERVICE_FILE"
 
 usage() {
   cat <<USAGE
@@ -92,14 +157,126 @@ USAGE
 }
 
 has_user_service() {
-  command -v systemctl >/dev/null 2>&1 && systemctl --user list-unit-files "\$SERVICE" --no-legend 2>/dev/null | grep -q "\$SERVICE"
+  case "\$INIT_SYSTEM" in
+    systemd)
+      command -v systemctl >/dev/null 2>&1 &&
+        systemctl --user list-unit-files "\$SERVICE" --no-legend 2>/dev/null | grep -q "\$SERVICE"
+      ;;
+    runit) command -v sv >/dev/null 2>&1 && [ -x "\$SERVICE_FILE/run" ] ;;
+    *) return 1 ;;
+  esac
 }
+
+wait_for_runit_supervision() {
+  path="\$1"
+  seconds=0
+  while [ ! -e "\$path/supervise/ok" ] && [ "\$seconds" -lt 10 ]; do
+    sleep 1
+    seconds=\$((seconds + 1))
+  done
+  if [ ! -e "\$path/supervise/ok" ]; then
+    echo "The runit service is installed but is not supervised by turnstile: \$path" >&2
+    echo "Enable turnstile, sign in again if necessary, then retry." >&2
+    return 1
+  fi
+}
+
+runit_command() {
+  action="\$1"
+  path="\$2"
+  case "\$action" in
+    start) rm -f "\$path/down" ;;
+    stop) : > "\$path/down" ;;
+    restart) rm -f "\$path/down" ;;
+  esac
+  wait_for_runit_supervision "\$path"
+  case "\$action" in
+    start) sv -w 15 start "\$path" ;;
+    stop) sv -w 15 stop "\$path" ;;
+    restart) sv -w 15 restart "\$path" ;;
+    status) sv status "\$path" ;;
+  esac
+}
+
+service_command() {
+  case "\$INIT_SYSTEM:\$1" in
+    systemd:start) systemctl --user daemon-reload; systemctl --user enable --now "\$SERVICE" ;;
+    systemd:stop) systemctl --user stop "\$SERVICE" ;;
+    systemd:status) systemctl --user status "\$SERVICE" --no-pager ;;
+    runit:start) runit_command start "\$SERVICE_FILE" ;;
+    runit:stop) runit_command stop "\$SERVICE_FILE" ;;
+    runit:status) runit_command status "\$SERVICE_FILE" ;;
+  esac
+}
+
+server_is_running() {
+  if has_user_service; then
+    case "\$INIT_SYSTEM" in
+      systemd) systemctl --user is-active --quiet "\$SERVICE" ;;
+      runit) sv status "\$SERVICE_FILE" >/dev/null 2>&1 ;;
+      *) return 1 ;;
+    esac
+  else
+    pgrep -f "clipman_server.py --config \$CONFIG_FILE" >/dev/null 2>&1
+  fi
+}
+
+stop_for_maintenance() {
+  if has_user_service; then
+    service_command stop
+  else
+    pkill -f "clipman_server.py --config \$CONFIG_FILE" 2>/dev/null || true
+    seconds=0
+    while pgrep -f "clipman_server.py --config \$CONFIG_FILE" >/dev/null 2>&1 && [ "\$seconds" -lt 10 ]; do
+      sleep 1
+      seconds=\$((seconds + 1))
+    done
+    if pgrep -f "clipman_server.py --config \$CONFIG_FILE" >/dev/null 2>&1; then
+      echo "Clipman Server did not stop before maintenance." >&2
+      return 1
+    fi
+  fi
+}
+
+start_after_maintenance() {
+  if has_user_service; then
+    case "\$INIT_SYSTEM" in
+      systemd) systemctl --user start "\$SERVICE" ;;
+      runit) runit_command start "\$SERVICE_FILE" ;;
+    esac
+  else
+    nohup "\$LAUNCHER" >/dev/null 2>&1 &
+  fi
+}
+
+run_offline_maintenance() {
+  was_running=0
+  if server_is_running; then
+    stop_for_maintenance
+    was_running=1
+  fi
+
+  if "\$@"; then
+    maintenance_result=0
+  else
+    maintenance_result=\$?
+  fi
+
+  if [ "\$was_running" -eq 1 ]; then
+    if ! start_after_maintenance; then
+      echo "Clipman Server maintenance finished, but the server could not be restarted." >&2
+      [ "\$maintenance_result" -ne 0 ] || maintenance_result=1
+    fi
+  fi
+  return "\$maintenance_result"
+}
+
+export CLIPMAN_SERVER_INIT_SYSTEM="\$INIT_SYSTEM"
 
 case "\${1:-help}" in
   start)
     if has_user_service; then
-      systemctl --user daemon-reload
-      systemctl --user enable --now "\$SERVICE"
+      service_command start
     else
       nohup "\$LAUNCHER" >/dev/null 2>&1 &
       echo "Clipman Server started."
@@ -107,7 +284,7 @@ case "\${1:-help}" in
     ;;
   stop)
     if has_user_service; then
-      systemctl --user stop "\$SERVICE"
+      service_command stop
     else
       pkill -f "clipman_server.py --config \$CONFIG_FILE" 2>/dev/null || true
     fi
@@ -118,7 +295,7 @@ case "\${1:-help}" in
     ;;
   status)
     if has_user_service; then
-      systemctl --user status "\$SERVICE" --no-pager
+      service_command status
     else
       pgrep -af "clipman_server.py --config \$CONFIG_FILE" || echo "Clipman Server is not running."
     fi
@@ -147,7 +324,7 @@ PY
       echo "Run clipmanserver prune <days> to prune manually." >&2
       exit 2
     fi
-    "\$LAUNCHER" --prune-databases-days "\$DAYS" --confirm
+    run_offline_maintenance "\$LAUNCHER" --prune-databases-days "\$DAYS" --confirm
     ;;
   delete)
     if [ -z "\${2:-}" ]; then
@@ -155,7 +332,7 @@ PY
       echo "Tip: run clipmanserver list first, then use --list-databases-json for full IDs." >&2
       exit 2
     fi
-    "\$LAUNCHER" --delete-database "\$2" --confirm
+    run_offline_maintenance "\$LAUNCHER" --delete-database "\$2" --confirm
     ;;
   force-delete)
     if [ -z "\${2:-}" ]; then
@@ -163,7 +340,7 @@ PY
       echo "This bypasses the 24-hour recent-activity safety guard." >&2
       exit 2
     fi
-    "\$LAUNCHER" --delete-database "\$2" --confirm --force-recent
+    run_offline_maintenance "\$LAUNCHER" --delete-database "\$2" --confirm --force-recent
     ;;
   console)
     exec "\$LAUNCHER"
@@ -191,11 +368,13 @@ PY
     if [ -n "\$ADVERTISE_HOST" ]; then
       exec python3 "\$APP_DIR/clipman_server_updater.py" --set-host "\$HOST" --advertise-host "\$ADVERTISE_HOST" \
         --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
-        --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
+        --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE" \
+        --init-system "\$INIT_SYSTEM"
     fi
     exec python3 "\$APP_DIR/clipman_server_updater.py" --set-host "\$HOST" \
       --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
-      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
+      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE" \
+      --init-system "\$INIT_SYSTEM"
     ;;
   port)
     PORT="\${2:-}"
@@ -235,29 +414,47 @@ PY
   check-update)
     exec python3 "\$APP_DIR/clipman_server_updater.py" --check \
       --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
-      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
+      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE" \
+      --init-system "\$INIT_SYSTEM"
     ;;
   update)
     shift 2>/dev/null || true
     exec python3 "\$APP_DIR/clipman_server_updater.py" --install "\$@" \
       --current-version "\$("\$LAUNCHER" --version)" --app-dir "\$APP_DIR" \
-      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE"
+      --bin-dir "$BIN_DIR" --config "\$CONFIG_FILE" --service-file "\$SERVICE_FILE" \
+      --init-system "\$INIT_SYSTEM"
     ;;
   enable-auto-updates)
     if ! has_user_service; then
-      echo "Automatic updates require the installed systemd user service." >&2
+      echo "Automatic updates require an installed user service." >&2
       exit 2
     fi
-    systemctl --user daemon-reload
-    systemctl --user enable --now clipman-server-update.timer
+    if [ "\$INIT_SYSTEM" = systemd ]; then
+      systemctl --user daemon-reload
+      systemctl --user enable --now clipman-server-update.timer
+    else
+      [ -x "\$UPDATE_SERVICE_FILE/run" ] || { echo "The runit update service is not installed." >&2; exit 2; }
+      runit_command start "\$UPDATE_SERVICE_FILE"
+    fi
     echo "Automatic Clipman Server updates enabled."
     ;;
   disable-auto-updates)
-    systemctl --user disable --now clipman-server-update.timer 2>/dev/null || true
+    if [ "\$INIT_SYSTEM" = systemd ]; then
+      systemctl --user disable --now clipman-server-update.timer 2>/dev/null || true
+    elif [ "\$INIT_SYSTEM" = runit ] && [ -d "\$UPDATE_SERVICE_FILE" ]; then
+      runit_command stop "\$UPDATE_SERVICE_FILE" 2>/dev/null || true
+    fi
     echo "Automatic Clipman Server updates disabled."
     ;;
   update-status)
-    systemctl --user status clipman-server-update.timer --no-pager
+    if [ "\$INIT_SYSTEM" = systemd ]; then
+      systemctl --user status clipman-server-update.timer --no-pager
+    elif [ "\$INIT_SYSTEM" = runit ]; then
+      runit_command status "\$UPDATE_SERVICE_FILE"
+    else
+      echo "No persistent user service manager is configured." >&2
+      exit 2
+    fi
     ;;
   help|-h|--help)
     usage
@@ -285,7 +482,7 @@ echo
 echo "Run now with:"
 echo "  clipmanserver start"
 
-if command -v systemctl >/dev/null 2>&1; then
+if [ "$INIT_SYSTEM" = systemd ]; then
   mkdir -p "$SERVICE_DIR"
   cat > "$SERVICE_FILE" <<EOF
 [Unit]
@@ -295,7 +492,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$BIN_DIR/clipman-server
+ExecStart="$BIN_DIR/clipman-server"
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -311,7 +508,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$BIN_DIR/clipmanserver update --yes
+ExecStart="$BIN_DIR/clipmanserver" update --yes
 EOF
   cat > "$SERVICE_DIR/clipman-server-update.timer" <<EOF
 [Unit]
@@ -345,4 +542,53 @@ EOF
     echo "Automatic updates could not be enabled in this session."
     echo "Enable them later with: clipmanserver enable-auto-updates"
   fi
+fi
+
+if [ "$INIT_SYSTEM" = runit ]; then
+  mkdir -p "$SERVICE_FILE" "$UPDATE_SERVICE_FILE"
+  if [ ! -f "$SERVICE_FILE/run" ]; then
+    : > "$SERVICE_FILE/down"
+  fi
+  cat > "$SERVICE_FILE/run.new" <<EOF
+#!/usr/bin/env sh
+set -eu
+exec "$BIN_DIR/clipman-server"
+EOF
+  chmod 700 "$SERVICE_FILE/run.new"
+  mv -f "$SERVICE_FILE/run.new" "$SERVICE_FILE/run"
+
+  if [ ! -f "$UPDATE_SERVICE_FILE/run" ]; then
+    : > "$UPDATE_SERVICE_FILE/down"
+  fi
+  cat > "$UPDATE_SERVICE_FILE/run.new" <<EOF
+#!/usr/bin/env sh
+set -eu
+while :; do
+  sleep 900
+  "$BIN_DIR/clipmanserver" update --yes || true
+  sleep 85500
+done
+EOF
+  chmod 700 "$UPDATE_SERVICE_FILE/run.new"
+  mv -f "$UPDATE_SERVICE_FILE/run.new" "$UPDATE_SERVICE_FILE/run"
+
+  echo
+  echo "Turnstile runit services were written to:"
+  echo "  $SERVICE_FILE"
+  echo "  $UPDATE_SERVICE_FILE"
+  echo
+  echo "Start the server with: clipmanserver start"
+  echo "Enable daily updates with: clipmanserver enable-auto-updates"
+fi
+
+if [ "$TURNSTILE_MISSING" -eq 1 ]; then
+  echo
+  echo "runit was detected, but turnstile is not installed."
+  echo "Clipman Server was installed without a persistent per-user service."
+  if command -v xbps-install >/dev/null 2>&1; then
+    echo "Install it with: sudo xbps-install -S turnstile"
+  else
+    echo "Install turnstile using your distribution's package manager."
+  fi
+  echo "Enable turnstile, then run this installer again."
 fi

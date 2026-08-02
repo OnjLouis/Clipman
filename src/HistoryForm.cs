@@ -72,6 +72,7 @@ namespace Clipman
         private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
         private bool listPositionSaveFailureLogged;
+        private readonly HashSet<string> linkTitleFetches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
@@ -797,6 +798,8 @@ namespace Clipman
             edit.DropDownItems.Add(groupEntryMenuItem);
             edit.DropDownItems.Add("Entry &properties...\tF2", null, (s, e) => ShowEntryProperties());
             edit.DropDownItems.Add("Set as &quick-paste target...", null, (s, e) => ShowEntryProperties(true));
+            var websiteTitle = edit.DropDownItems.Add("Use &website title as name...", null, (s, e) => UseWebsiteTitleAsName());
+            websiteTitle.Enabled = CanUseWebsiteTitleForSelection();
             edit.DropDownItems.Add("P&ush to other devices\tCtrl+P", null, (s, e) => PushSelectedToOtherMachines());
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
             edit.DropDownItems.Add("Pin or unp&in\tShift+Enter", null, (s, e) => TogglePinned());
@@ -833,6 +836,8 @@ namespace Clipman
             menu.Items.Add("&Group entry...\tCtrl+G", null, (sender, args) => GroupSelectedEntries());
             menu.Items.Add("Entry &properties...\tF2", null, (sender, args) => ShowEntryProperties());
             menu.Items.Add("Set as &quick-paste target...", null, (sender, args) => ShowEntryProperties(true));
+            var websiteTitle = menu.Items.Add("Use &website title as name...", null, (sender, args) => UseWebsiteTitleAsName());
+            websiteTitle.Enabled = CanUseWebsiteTitleForSelection();
             menu.Items.Add("P&ush to other devices\tCtrl+P", null, (sender, args) => PushSelectedToOtherMachines());
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
             menu.Items.Add(PinMenuText(), null, (sender, args) => TogglePinned());
@@ -1416,6 +1421,7 @@ namespace Clipman
 
         private List<ClipEntry> SelectedEntries()
         {
+            if (list == null || list.SelectedItems.Count == 0) return new List<ClipEntry>();
             return list.SelectedItems.Cast<ListViewItem>()
                 .OrderBy(i => i.Index)
                 .Select(i => i.Tag as ClipEntry)
@@ -2539,6 +2545,8 @@ namespace Clipman
 
         private void PasteAfterSelected()
         {
+            if (IsRichTextHistoryTabActive() && TryPasteImageFileAfterSelected()) return;
+
             var clipmanEntries = GetClipmanEntriesFromClipboard();
             if (clipmanEntries.Count == 0 && !Clipboard.ContainsText(TextDataFormat.UnicodeText))
             {
@@ -2584,6 +2592,84 @@ namespace Clipman
                 RestoreSelection(inserted.Select(e => e.Id).ToList());
             }
             statusText.Text = inserted.Count == 1 ? "Pasted clipboard text into history." : "Pasted " + inserted.Count + " clipboard entries into history.";
+        }
+
+        private bool TryPasteImageFileAfterSelected()
+        {
+            bool hasFileDrop;
+            try { hasFileDrop = Clipboard.ContainsFileDropList(); }
+            catch { hasFileDrop = false; }
+            if (!hasFileDrop) return false;
+
+            if (!settings.RichTextHistoryEnabled || !settings.IncludeImagesInRichText)
+            {
+                statusText.Text = "Enable copied images in Rich Text preferences before pasting an image file here.";
+                return true;
+            }
+
+            string path;
+            string failureMessage;
+            if (!RichImageData.TryGetSingleClipboardImageFile(out path, out failureMessage))
+            {
+                statusText.Text = string.IsNullOrWhiteSpace(failureMessage)
+                    ? "Copy exactly one PNG or JPEG file before pasting into Rich Text history."
+                    : failureMessage;
+                return true;
+            }
+
+            var selected = SelectedEntry();
+            var afterId = selected == null ? null : selected.Id;
+            var insertAtNormalStart = IsNormalEntriesSeparatorSelected();
+            store.SetManualOrder(entries.Select(e => e.Id).ToList());
+            settings.SortMode = "Manual";
+            saveSettings();
+            statusText.Text = "Adding copied image file to Rich Text history...";
+
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                var capture = RichImageData.CaptureFromFile(path);
+                if (IsDisposed || !IsHandleCreated) return;
+                try
+                {
+                    BeginInvoke(new Action(() => CompleteImageFilePaste(capture, afterId, insertAtNormalStart)));
+                }
+                catch (InvalidOperationException) { }
+            });
+            return true;
+        }
+
+        private void CompleteImageFilePaste(RichImageCapture capture, string afterId, bool insertAtNormalStart)
+        {
+            if (capture == null)
+            {
+                statusText.Text = "The copied file could not be read as a supported PNG or JPEG image.";
+                return;
+            }
+            if (store.EmbeddedImageByteCount() + capture.ImageBytes > RichImageData.MaximumDatabaseImageBytes)
+            {
+                statusText.Text = "The Rich Text image limit is full. Remove an image entry before adding another.";
+                return;
+            }
+
+            var now = TimeUtil.NowUnixMs();
+            var source = new ClipEntry
+            {
+                Text = capture.Text,
+                SourceMachine = settings.DeviceName ?? string.Empty,
+                CreatedUnixMs = now,
+                LastUsedUnixMs = now,
+                ModifiedUnixMs = now,
+                RichText = capture.RichText,
+                RichTextUpdatedUnixMs = now
+            };
+            var inserted = insertAtNormalStart
+                ? store.InsertEntriesAtNormalStart(new[] { source }, settings.RemoveDuplicates)
+                : store.InsertEntriesAfter(new[] { source }, afterId, settings.RemoveDuplicates);
+            Reload();
+            if (inserted.Count > 0) RestoreSelection(inserted.Select(entry => entry.Id).ToList());
+            statusText.Text = inserted.Count == 0
+                ? "The copied image was not added to Rich Text history."
+                : "Pasted copied image file into Rich Text history.";
         }
 
         private List<ClipEntry> GetClipmanEntriesFromClipboard()
@@ -2920,6 +3006,98 @@ namespace Clipman
             }
         }
 
+        private bool CanUseWebsiteTitleForSelection()
+        {
+            var selected = SelectedEntries();
+            if (selected.Count != 1 || !string.IsNullOrWhiteSpace(selected[0].Name) || linkTitleFetches.Contains(selected[0].Id)) return false;
+            Uri uri;
+            if (!LinkPresentation.TryGetUri(selected[0], out uri)) return false;
+            return uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                   uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void UseWebsiteTitleAsName()
+        {
+            var selected = SelectedEntries();
+            if (selected.Count != 1)
+            {
+                statusText.Text = "Select one unnamed website link first.";
+                return;
+            }
+            var entry = selected[0];
+            if (!string.IsNullOrWhiteSpace(entry.Name))
+            {
+                statusText.Text = "This link already has a name. Clipman will not replace it automatically.";
+                return;
+            }
+            Uri uri;
+            if (!LinkPresentation.TryGetUri(entry, out uri))
+            {
+                statusText.Text = "The selected entry is not an HTTP or HTTPS website link.";
+                return;
+            }
+            string reason;
+            if (!LinkTitleFetcher.CanOffer(uri, out reason))
+            {
+                MessageBox.Show(reason, "Website title not retrieved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                statusText.Text = reason;
+                return;
+            }
+            var confirmation = MessageBox.Show(
+                "Clipman will contact " + uri.Host + " once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content.\r\n\r\nContinue?",
+                "Use website title as name",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information,
+                MessageBoxDefaultButton.Button2);
+            if (confirmation != DialogResult.Yes)
+            {
+                statusText.Text = "Website title request cancelled.";
+                return;
+            }
+
+            linkTitleFetches.Add(entry.Id);
+            statusText.Text = "Reading the website title from " + uri.Host + ".";
+            var entryId = entry.Id;
+            var originalText = entry.Text ?? string.Empty;
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                var result = LinkTitleFetcher.Fetch(uri);
+                if (IsDisposed || !IsHandleCreated) return;
+                BeginInvoke(new Action(() =>
+                {
+                    linkTitleFetches.Remove(entryId);
+                    var current = store.GetEntryById(entryId);
+                    if (current == null)
+                    {
+                        statusText.Text = "The link was removed before its website title arrived.";
+                        return;
+                    }
+                    if (!string.IsNullOrWhiteSpace(current.Name))
+                    {
+                        statusText.Text = "The link was named while its website title was being retrieved, so Clipman kept that name.";
+                        return;
+                    }
+                    if (!string.Equals(current.Text ?? string.Empty, originalText, StringComparison.Ordinal))
+                    {
+                        statusText.Text = "The link changed while its website title was being retrieved, so Clipman did not apply the old title.";
+                        return;
+                    }
+                    if (!result.Success)
+                    {
+                        statusText.Text = result.Error;
+                        return;
+                    }
+                    if (!store.TrySetNameIfUnchanged(entryId, originalText, result.Title))
+                    {
+                        statusText.Text = "The link changed while its website title was being retrieved, so Clipman did not apply the old title.";
+                        return;
+                    }
+                    Reload(entryId, -1);
+                    statusText.Text = "Used the website title as the link name.";
+                }));
+            });
+        }
+
         private static List<KeyValuePair<string, string>> ClipboardEntryDetails(ClipEntry entry)
         {
             var details = new List<KeyValuePair<string, string>>();
@@ -2953,6 +3131,11 @@ namespace Clipman
         private static string RichTextFormatDescription(RichTextPayload payload)
         {
             var formats = new List<string>();
+            RichImageInfo image;
+            if (RichImageData.TryDecode(payload, out image))
+            {
+                using (image) return "Image, " + image.MimeType + ", " + image.Width + " by " + image.Height + " pixels, " + image.Data.Length + " bytes";
+            }
             if (!string.IsNullOrEmpty(payload.HtmlFragment)) formats.Add("HTML");
             if (!string.IsNullOrEmpty(payload.RtfBase64)) formats.Add("RTF");
             return formats.Count == 0 ? "Plain text only" : string.Join(" and ", formats);
@@ -3747,7 +3930,7 @@ namespace Clipman
                 {
                     var entry = list.Items[i].Tag as ClipEntry;
                     if (entry == null || string.IsNullOrEmpty(entry.Text)) continue;
-                    var text = entry.Text.TrimStart();
+                    var text = EntryTypeAheadText(entry);
                     if (text.Length == 0) continue;
                     if (text.StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
                     {
@@ -3796,12 +3979,48 @@ namespace Clipman
         {
             if (entry == null || string.IsNullOrEmpty(searchText)) return false;
             if ((entry.Text ?? string.Empty).IndexOf(searchText, StringComparison.CurrentCultureIgnoreCase) >= 0) return true;
-            return (entry.Name ?? string.Empty).IndexOf(searchText, StringComparison.CurrentCultureIgnoreCase) >= 0;
+            if ((entry.Name ?? string.Empty).IndexOf(searchText, StringComparison.CurrentCultureIgnoreCase) >= 0) return true;
+            RichImageInfo image;
+            if (RichImageData.TryDescribe(entry.RichText, out image))
+            {
+                using (image)
+                {
+                    if ((image.FileName ?? string.Empty).IndexOf(searchText, StringComparison.CurrentCultureIgnoreCase) >= 0) return true;
+                }
+            }
+            return LinkPresentation.SearchText(entry).IndexOf(searchText, StringComparison.CurrentCultureIgnoreCase) >= 0;
+        }
+
+        private static string EntryTypeAheadText(ClipEntry entry)
+        {
+            if (entry == null) return string.Empty;
+            RichImageInfo image;
+            if (RichImageData.TryDescribe(entry.RichText, out image))
+            {
+                using (image)
+                {
+                    var name = (entry.Name ?? string.Empty).Trim();
+                    return name.Length > 0 ? name : (image.FileName ?? string.Empty).Trim();
+                }
+            }
+            return LinkPresentation.TypeAheadText(entry);
         }
 
         private static string DisplayText(ClipEntry entry)
         {
             if (entry == null) return string.Empty;
+            RichImageInfo image;
+            if (RichImageData.TryDescribe(entry.RichText, out image))
+            {
+                using (image)
+                {
+                    var imageLabel = "Image: " + (string.IsNullOrWhiteSpace(image.FileName) ? "Clipboard image" : image.FileName);
+                    var imageName = (entry.Name ?? string.Empty).Trim();
+                    return imageName.Length == 0 ? imageLabel : imageName;
+                }
+            }
+            var linkText = LinkPresentation.DisplayText(entry);
+            if (!string.IsNullOrEmpty(linkText)) return linkText;
             var text = Summarize(entry.Text);
             var name = (entry.Name ?? string.Empty).Trim();
             return name.Length == 0 ? text : name + ": " + text;

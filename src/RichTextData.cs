@@ -46,8 +46,25 @@ namespace Clipman
 
         public static void AddToDataObject(DataObject data, RichTextPayload payload)
         {
+            AddToDataObject(data, payload, null);
+        }
+
+        public static void AddToDataObject(DataObject data, RichTextPayload payload, ClipEntry entry)
+        {
+            AddToDataObject(data, payload, entry, string.Empty, DateTime.UtcNow);
+        }
+
+        internal static void AddToDataObject(
+            DataObject data,
+            RichTextPayload payload,
+            ClipEntry entry,
+            string fileDropRoot,
+            DateTime nowUtc)
+        {
             var normalized = Normalize(payload);
             if (data == null || normalized == null) return;
+
+            RichImageData.AddNativeClipboardFormats(data, normalized, entry, fileDropRoot, nowUtc);
 
             if (!string.IsNullOrEmpty(normalized.HtmlFragment))
             {

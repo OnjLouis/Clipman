@@ -649,6 +649,40 @@ namespace Clipman
             }
         }
 
+        public bool TrySetNameIfUnchanged(string id, string expectedText, string name)
+        {
+            if (string.IsNullOrEmpty(id)) return false;
+            lock (sync)
+            {
+                var entry = database.Entries.FirstOrDefault(e => e.Id == id);
+                if (entry == null || !string.IsNullOrWhiteSpace(entry.Name) ||
+                    !string.Equals(entry.Text ?? string.Empty, expectedText ?? string.Empty, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+                entry.Name = (name ?? string.Empty).Trim();
+                entry.ModifiedUnixMs = TimeUtil.NowUnixMs();
+                SaveLocked();
+                OnChanged();
+                return true;
+            }
+        }
+
+        public long EmbeddedImageByteCount()
+        {
+            lock (sync)
+            {
+                long total = 0;
+                foreach (var entry in database.Entries)
+                {
+                    if (entry == null) continue;
+                    total += RichImageData.StoredByteCount(entry.RichText);
+                    if (total >= RichImageData.MaximumDatabaseImageBytes) return total;
+                }
+                return total;
+            }
+        }
+
         public void ReplaceText(string id, string text)
         {
             if (string.IsNullOrEmpty(id)) return;

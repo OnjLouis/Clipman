@@ -2,6 +2,7 @@ param(
     [string]$Configuration = "Release",
     [string]$OutputDirectory = "",
     [string]$GradlePath = "",
+    [string]$ScratchDirectory = "",
     [ValidateRange(30, 900)]
     [int]$GradleNetworkTimeoutSeconds = 600
 )
@@ -9,8 +10,15 @@ param(
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($ScratchDirectory)) {
+    $ScratchDirectory = if (![string]::IsNullOrWhiteSpace($env:CLIPMAN_TEMP_ROOT)) {
+        $env:CLIPMAN_TEMP_ROOT
+    } else {
+        Join-Path ([IO.Path]::GetTempPath()) 'Clipman'
+    }
+}
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path ([IO.Path]::GetTempPath()) 'ClipmanAndroid'
+    $OutputDirectory = Join-Path $ScratchDirectory 'Android-package'
 }
 
 if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
@@ -30,7 +38,7 @@ if ([string]::IsNullOrWhiteSpace($GradlePath)) {
 if (!(Test-Path -LiteralPath $GradlePath)) {
     throw "Gradle was not found at $GradlePath"
 }
-$buildWorkRoot = Join-Path ([IO.Path]::GetTempPath()) ('ClipmanAndroid-build-' + [guid]::NewGuid().ToString('N'))
+$buildWorkRoot = Join-Path $ScratchDirectory ('Android-build-' + [guid]::NewGuid().ToString('N'))
 $projectCache = Join-Path $buildWorkRoot 'project-cache'
 $kotlinCache = Join-Path $buildWorkRoot 'kotlin-cache'
 $externalBuildRoot = Join-Path $buildWorkRoot 'outputs'
@@ -39,9 +47,9 @@ if ([string]::IsNullOrWhiteSpace($env:GRADLE_USER_HOME)) {
     $env:GRADLE_USER_HOME = Join-Path $buildWorkRoot 'gradle-user-home'
 }
 $gradleUserHomeForBuild = [IO.Path]::GetFullPath($env:GRADLE_USER_HOME)
-$windowsTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+$scratchRoot = [IO.Path]::GetFullPath($ScratchDirectory).TrimEnd('\')
 $ownsGradleUserHome = [string]::IsNullOrWhiteSpace($originalGradleUserHome) -or
-    $gradleUserHomeForBuild.StartsWith($windowsTempRoot + '\ClipmanAndroid-build', [StringComparison]::OrdinalIgnoreCase) -or
+    $gradleUserHomeForBuild.StartsWith($scratchRoot + '\Android-build-', [StringComparison]::OrdinalIgnoreCase) -or
     $gradleUserHomeForBuild -match '[\\/]Codex[\\/]temp[\\/]clipman([\\/]|$)'
 
 try {

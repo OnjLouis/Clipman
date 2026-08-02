@@ -10,15 +10,37 @@ data class AndroidClipboardContent(
     val richText: RichTextPayload?
 )
 
+internal data class ClipboardWritePlan(
+    val plainText: String,
+    val html: String?,
+    val embeddedImage: EmbeddedImageData?
+)
+
 object RichTextClipboard {
     private const val maxHtmlBytes = 768 * 1024
     private const val maxRtfBytes = 1024 * 1024
     private const val maxCombinedBytes = 1792 * 1024
 
-    fun read(context: Context, includeRichText: Boolean): AndroidClipboardContent {
+    fun read(
+        context: Context,
+        includeRichText: Boolean,
+        includeImages: Boolean = false,
+        existingEntries: List<ClipEntry> = emptyList(),
+        forHistoryCapture: Boolean = false
+    ): AndroidClipboardContent {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = clipboard.primaryClip ?: return AndroidClipboardContent("", null)
         if (clip.itemCount <= 0) return AndroidClipboardContent("", null)
+        if (AndroidImageClipboard.hasImage(clip)) {
+            if (!includeRichText) {
+                if (forHistoryCapture) throw ImageClipboardException("Enable Rich Text history before adding clipboard images.")
+                return AndroidClipboardContent("", null)
+            }
+            if (!includeImages) {
+                throw ImageClipboardException("Enable Include images in Rich Text history before adding clipboard images.")
+            }
+            return AndroidImageClipboard.read(context, clip, existingEntries)
+        }
         val item = clip.getItemAt(0)
         val text = item.coerceToText(context)?.toString().orEmpty()
         val html = if (includeRichText) item.htmlText.orEmpty() else ""
@@ -33,13 +55,30 @@ object RichTextClipboard {
 
     fun write(context: Context, entry: ClipEntry, includeRichText: Boolean) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val richText = if (includeRichText) normalize(entry.RichText) else null
-        val clip = if (!richText?.HtmlFragment.isNullOrEmpty()) {
-            ClipData.newHtmlText("Clipman entry", entry.Text, richText!!.HtmlFragment)
+        val plan = planWrite(entry, includeRichText)
+        val clip = if (plan.embeddedImage != null) {
+            AndroidImageClipboard.createNativeClip(
+                context,
+                plan.plainText,
+                requireNotNull(plan.html),
+                plan.embeddedImage
+            )
+        } else if (!plan.html.isNullOrEmpty()) {
+            ClipData.newHtmlText("Clipman entry", plan.plainText, plan.html)
         } else {
-            ClipData.newPlainText("Clipman entry", entry.Text)
+            ClipData.newPlainText("Clipman entry", plan.plainText)
         }
         clipboard.setPrimaryClip(clip)
+    }
+
+    internal fun planWrite(entry: ClipEntry, includeRichText: Boolean): ClipboardWritePlan {
+        val storedRichText = normalize(entry.RichText)
+        val embeddedImage = EmbeddedImageRichText.parse(storedRichText)
+        if (embeddedImage != null) {
+            return ClipboardWritePlan(entry.Text, storedRichText!!.HtmlFragment, embeddedImage)
+        }
+        val html = if (includeRichText) storedRichText?.HtmlFragment?.takeIf { it.isNotEmpty() } else null
+        return ClipboardWritePlan(entry.Text, html, null)
     }
 
     fun normalize(payload: RichTextPayload?): RichTextPayload? {

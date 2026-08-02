@@ -34,7 +34,7 @@ class ServerStorageClient(
             throw IllegalStateException("Clipman Server returned HTTP $code.")
         }
         connection.inputStream.use { input ->
-            val data = input.readBytes()
+            val data = ClipDatabaseFile.readDatabaseBlob(input, connection.contentLengthLong)
             return ServerDatabaseDownload(
                 revision = cleanRevision(connection.getHeaderField("X-Clipman-Revision") ?: connection.getHeaderField("ETag")),
                 data = data

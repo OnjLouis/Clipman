@@ -1,5 +1,6 @@
 import Foundation
 import Carbon
+import ClipmanCore
 
 struct ClipmanSettings: Codable, Equatable {
     var machineName: String
@@ -25,6 +26,8 @@ struct ClipmanSettings: Codable, Equatable {
     var historyTabOrder: [String]
     var linksHistoryEnabled: Bool
     var richTextHistoryEnabled: Bool
+    var includeImagesInRichTextHistory: Bool
+    var alsoAddCopiedImageFilesToRichTextHistory: Bool
     var groupFilter: String
     var historyFilterType: String
     var deviceFilter: String
@@ -46,7 +49,7 @@ struct ClipmanSettings: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
-        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, groupFilter, historyFilterType, deviceFilter, confirmDeletions, runAtStartup
+        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, includeImagesInRichTextHistory, alsoAddCopiedImageFilesToRichTextHistory, groupFilter, historyFilterType, deviceFilter, confirmDeletions, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
         case autoCopyLatestRemoteText, pasteAfterEnter, dynamicHistoryMode, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
@@ -82,6 +85,8 @@ struct ClipmanSettings: Codable, Equatable {
         historyTabOrder: [String],
         linksHistoryEnabled: Bool,
         richTextHistoryEnabled: Bool,
+        includeImagesInRichTextHistory: Bool,
+        alsoAddCopiedImageFilesToRichTextHistory: Bool,
         groupFilter: String,
         historyFilterType: String,
         deviceFilter: String,
@@ -124,6 +129,12 @@ struct ClipmanSettings: Codable, Equatable {
         self.historyTabOrder = HistoryTabID.normalizeOrder(historyTabOrder)
         self.linksHistoryEnabled = linksHistoryEnabled
         self.richTextHistoryEnabled = richTextHistoryEnabled
+        self.includeImagesInRichTextHistory = includeImagesInRichTextHistory
+        self.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
+            richTextHistoryEnabled: richTextHistoryEnabled,
+            includeImagesEnabled: includeImagesInRichTextHistory,
+            alsoAddCopiedImageFilesEnabled: alsoAddCopiedImageFilesToRichTextHistory
+        )
         self.groupFilter = groupFilter
         self.historyFilterType = historyFilterType
         self.deviceFilter = deviceFilter
@@ -168,6 +179,14 @@ struct ClipmanSettings: Codable, Equatable {
         lastSelectedTab = try container.decodeIfPresent(Int.self, forKey: .lastSelectedTab) ?? 0
         linksHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .linksHistoryEnabled) ?? false
         richTextHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .richTextHistoryEnabled) ?? false
+        let decodedIncludeImages = try container.decodeIfPresent(Bool.self, forKey: .includeImagesInRichTextHistory) ?? false
+        includeImagesInRichTextHistory = richTextHistoryEnabled && decodedIncludeImages
+        let decodedAddCopiedImageFiles = try container.decodeIfPresent(Bool.self, forKey: .alsoAddCopiedImageFilesToRichTextHistory) ?? false
+        alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
+            richTextHistoryEnabled: richTextHistoryEnabled,
+            includeImagesEnabled: includeImagesInRichTextHistory,
+            alsoAddCopiedImageFilesEnabled: decodedAddCopiedImageFiles
+        )
         lastSelectedHistoryTab = try container.decodeIfPresent(String.self, forKey: .lastSelectedHistoryTab) ?? (lastSelectedTab == 1 ? HistoryTabID.files : HistoryTabID.text)
         historyTabOrder = HistoryTabID.normalizeOrder(try container.decodeIfPresent([String].self, forKey: .historyTabOrder))
         groupFilter = try container.decodeIfPresent(String.self, forKey: .groupFilter) ?? "All"
@@ -229,6 +248,15 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(HistoryTabID.normalizeOrder(historyTabOrder), forKey: .historyTabOrder)
         try container.encode(linksHistoryEnabled, forKey: .linksHistoryEnabled)
         try container.encode(richTextHistoryEnabled, forKey: .richTextHistoryEnabled)
+        try container.encode(richTextHistoryEnabled && includeImagesInRichTextHistory, forKey: .includeImagesInRichTextHistory)
+        try container.encode(
+            EmbeddedImageFileImport.automaticCaptureEnabled(
+                richTextHistoryEnabled: richTextHistoryEnabled,
+                includeImagesEnabled: includeImagesInRichTextHistory,
+                alsoAddCopiedImageFilesEnabled: alsoAddCopiedImageFilesToRichTextHistory
+            ),
+            forKey: .alsoAddCopiedImageFilesToRichTextHistory
+        )
         try container.encode(groupFilter, forKey: .groupFilter)
         try container.encode(historyFilterType, forKey: .historyFilterType)
         try container.encode(deviceFilter, forKey: .deviceFilter)
@@ -275,6 +303,8 @@ struct ClipmanSettings: Codable, Equatable {
             historyTabOrder: HistoryTabID.defaultOrder,
             linksHistoryEnabled: false,
             richTextHistoryEnabled: false,
+            includeImagesInRichTextHistory: false,
+            alsoAddCopiedImageFilesToRichTextHistory: false,
             groupFilter: "All",
             historyFilterType: "Group",
             deviceFilter: "All",

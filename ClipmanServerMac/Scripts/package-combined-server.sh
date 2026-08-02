@@ -7,8 +7,10 @@ if [[ ! "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
   echo "Invalid Clipman Server version: $VERSION" >&2
   exit 1
 fi
-DIST="${CLIPMAN_SERVER_COMBINED_OUTPUT_DIR:-/tmp/ClipmanServer-combined}"
-STAGING="$(mktemp -d /tmp/clipman-server-combined.XXXXXX)"
+TEMP_ROOT="${CLIPMAN_TEMP_ROOT:-$HOME/Projects/Codex/Temp/clipman}"
+DIST="${CLIPMAN_SERVER_COMBINED_OUTPUT_DIR:-$TEMP_ROOT/server-combined-dist}"
+mkdir -p "$TEMP_ROOT"
+STAGING="$(mktemp -d "$TEMP_ROOT/server-combined.XXXXXX")"
 PACKAGE_ROOT="$STAGING/ClipmanServer"
 ZIP="$DIST/ClipmanServer-$VERSION.zip"
 

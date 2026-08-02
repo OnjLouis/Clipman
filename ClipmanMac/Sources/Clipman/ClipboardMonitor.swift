@@ -35,6 +35,8 @@ private struct PasteboardSnapshot {
 protocol ClipboardMonitorDelegate: AnyObject {
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, deliberate: Bool)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, deliberate: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didRejectImage reason: String, deliberate: Bool)
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor)
 }
 
@@ -48,11 +50,18 @@ final class ClipboardMonitor: @unchecked Sendable {
     weak var delegate: ClipboardMonitorDelegate?
     var isEnabled = true
     var ignoredApplications: [String] = []
+    var includeImagesInRichTextHistory = false
+    var alsoAddCopiedImageFilesToRichTextHistory = false
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
+    private var embeddedImagePasteboardFile: EmbeddedImagePasteboardFile?
     private var ignoredChangeCount: Int?
     private var suppressedRemoteTexts: [SuppressedText] = []
     private var lastClipboardDiagnostic = "No clipboard changes have been inspected in this Clipman session."
+
+    init() {
+        EmbeddedImagePasteboardFile.removeStaleFiles()
+    }
 
     func start() {
         stop()
@@ -83,28 +92,52 @@ final class ClipboardMonitor: @unchecked Sendable {
         timer = nil
     }
 
-    func writeInternalText(_ text: String, richText: RichTextPayload? = nil) {
+    func writeInternalText(
+        _ text: String,
+        richText: RichTextPayload? = nil,
+        imageFilename: String? = nil
+    ) {
         suppressRemoteEchoText(text)
         let pasteboard = NSPasteboard.general
+        embeddedImagePasteboardFile = nil
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        RichTextData.write(richText, to: pasteboard)
+        embeddedImagePasteboardFile = RichTextData.write(
+            richText,
+            to: pasteboard,
+            imageFilename: imageFilename
+        )
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
     }
 
-    func writeTemporaryInternalText(_ text: String, richText: RichTextPayload? = nil, restoreAfter delay: TimeInterval, action: () -> Void) {
+    func writeTemporaryInternalText(
+        _ text: String,
+        richText: RichTextPayload? = nil,
+        imageFilename: String? = nil,
+        restoreAfter delay: TimeInterval,
+        action: () -> Void
+    ) {
         let pasteboard = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
+        let previousImagePasteboardFile = embeddedImagePasteboardFile
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        RichTextData.write(richText, to: pasteboard)
+        let promise = RichTextData.write(
+            richText,
+            to: pasteboard,
+            imageFilename: imageFilename
+        )
+        embeddedImagePasteboardFile = promise
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
         action()
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
             snapshot.restore(to: pasteboard)
+            if self.embeddedImagePasteboardFile === promise {
+                self.embeddedImagePasteboardFile = previousImagePasteboardFile
+            }
             self.ignoredChangeCount = pasteboard.changeCount
             self.lastChangeCount = pasteboard.changeCount
         }
@@ -113,6 +146,7 @@ final class ClipboardMonitor: @unchecked Sendable {
     func writeInternalFiles(_ paths: [String], includeText: Bool = true) {
         let urls = paths.map { URL(fileURLWithPath: $0) }
         let pasteboard = NSPasteboard.general
+        embeddedImagePasteboardFile = nil
         pasteboard.clearContents()
         pasteboard.writeObjects(urls as [NSURL])
         if includeText {
@@ -143,6 +177,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             ignoredChangeCount = nil
             return
         }
+        embeddedImagePasteboardFile = nil
         capture(from: pasteboard, playSkipSound: true, deliberate: false)
     }
 
@@ -190,9 +225,39 @@ final class ClipboardMonitor: @unchecked Sendable {
                 pasteboardDiagnostic: pasteboardDiagnostic
             )
             delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, deliberate: deliberate)
+            captureAdditionalRichTextImageIfEnabled(from: fileCapture.files)
             return
         }
-        guard let text = pasteboard.string(forType: .string), !text.isEmpty else {
+        let text = pasteboard.string(forType: .string)
+        let fileReferenceCount = pasteboard.pasteboardItems?.filter {
+            $0.types.contains(.fileURL) || $0.types.contains(NSPasteboard.PasteboardType("public.file-url"))
+        }.count ?? 0
+        if EmbeddedImageFileImport.shouldUsePasteboardImageFallback(
+            fileReferenceCount: fileReferenceCount,
+            plainText: text,
+            automaticCaptureEnabled: alsoAddCopiedImageFilesToRichTextHistory
+        ), let imageInput = RichTextData.standaloneImageInput(from: pasteboard, preferredFilename: text) {
+            captureStandaloneImage(
+                imageInput,
+                deliberate: deliberate,
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic,
+                processingDescription: "Processing a copied Finder image for Rich Text history."
+            )
+            return
+        }
+        guard let text, !text.isEmpty else {
+            if includeImagesInRichTextHistory,
+               let imageInput = RichTextData.standaloneImageInput(from: pasteboard) {
+                captureStandaloneImage(
+                    imageInput,
+                    deliberate: deliberate,
+                    appDiagnostic: appDiagnostic,
+                    pasteboardDiagnostic: pasteboardDiagnostic,
+                    processingDescription: "Processing a standalone image for Rich Text history."
+                )
+                return
+            }
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Ignored because the clipboard did not contain non-empty plain text or restorable files.",
                 appDiagnostic: appDiagnostic,
@@ -217,6 +282,89 @@ final class ClipboardMonitor: @unchecked Sendable {
             pasteboardDiagnostic: pasteboardDiagnostic
         )
         delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), deliberate: deliberate)
+    }
+
+    private func captureStandaloneImage(
+        _ imageInput: Result<StandaloneImageInput, EmbeddedImageError>,
+        deliberate: Bool,
+        appDiagnostic: String,
+        pasteboardDiagnostic: String,
+        processingDescription: String
+    ) {
+        switch imageInput {
+        case .failure(let error):
+            let reason = error.localizedDescription
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Image was not saved: \(reason)",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
+            delegate?.clipboardMonitor(self, didRejectImage: reason, deliberate: deliberate)
+        case .success(let input):
+            let sourceApplication = sourceApplicationName()
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: processingDescription,
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
+            Task { @MainActor [weak self] in
+                do {
+                    let prepared = try await Task.detached(priority: .utility) {
+                        try EmbeddedImageHTML.makePayload(data: input.data, filename: input.filename)
+                    }.value
+                    guard let self else { return }
+                    self.lastClipboardDiagnostic = self.clipboardDiagnostic(
+                        result: "Captured standalone image. Stored size: \(prepared.info.data.count) bytes; dimensions: \(prepared.info.width) by \(prepared.info.height).",
+                        appDiagnostic: appDiagnostic,
+                        pasteboardDiagnostic: pasteboardDiagnostic
+                    )
+                    self.delegate?.clipboardMonitor(
+                        self,
+                        didCapture: prepared.text,
+                        richText: prepared.payload,
+                        sourceApplication: sourceApplication,
+                        deliberate: deliberate
+                    )
+                } catch {
+                    guard let self else { return }
+                    let reason = error.localizedDescription
+                    self.lastClipboardDiagnostic = self.clipboardDiagnostic(
+                        result: "Image was not saved: \(reason)",
+                        appDiagnostic: appDiagnostic,
+                        pasteboardDiagnostic: pasteboardDiagnostic
+                    )
+                    self.delegate?.clipboardMonitor(self, didRejectImage: reason, deliberate: deliberate)
+                }
+            }
+        }
+    }
+
+    private func captureAdditionalRichTextImageIfEnabled(from paths: [String]) {
+        guard alsoAddCopiedImageFilesToRichTextHistory,
+              paths.count == 1,
+              ["png", "jpg", "jpeg"].contains(URL(fileURLWithPath: paths[0]).pathExtension.lowercased())
+        else {
+            return
+        }
+        let urls = paths.map { URL(fileURLWithPath: $0) }
+        let sourceApplication = sourceApplicationName()
+        Task { @MainActor [weak self] in
+            do {
+                let prepared = try await Task.detached(priority: .utility) {
+                    try EmbeddedImageFileImport.prepare(urls: urls)
+                }.value
+                guard let self else { return }
+                self.delegate?.clipboardMonitor(
+                    self,
+                    didCaptureAdditionalImage: prepared.text,
+                    richText: prepared.payload,
+                    sourceApplication: sourceApplication
+                )
+            } catch {
+                guard let self else { return }
+                self.lastClipboardDiagnostic += "\nAdditional Rich Text image: not added (\(error.localizedDescription))"
+            }
+        }
     }
 
     private func shouldSuppressRemoteEcho(_ text: String) -> Bool {

@@ -1,6 +1,7 @@
 import AppKit
 import UniformTypeIdentifiers
 import Carbon
+import ClipmanCore
 
 @MainActor
 protocol PreferencesWindowControllerDelegate: AnyObject {
@@ -57,6 +58,9 @@ private final class PreferencesTabTextView: NSTextView {
     }
 }
 
+private let imageMetadataPrivacyText = "Retained image metadata may contain camera or location information and follows your history encryption and sync choices."
+private let includeImagesEnabledAccessibilityHelp = "When checked, standalone PNG and JPEG clipboard images can be optimized and stored in Rich Text history. \(imageMetadataPrivacyText) Each image is limited to 512 KiB and all embedded images together are limited to 8 MiB. This is off by default."
+
 final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldDelegate {
     weak var preferencesDelegate: PreferencesWindowControllerDelegate?
     private var settings: ClipmanSettings
@@ -80,6 +84,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let dynamicHistoryModeCheckbox = NSButton(checkboxWithTitle: "Open history to the most recent clipboard type", target: nil, action: nil)
     private let linksHistoryCheckbox = NSButton(checkboxWithTitle: "Show Links history tab", target: nil, action: nil)
     private let richTextHistoryCheckbox = NSButton(checkboxWithTitle: "Preserve copied formatting and show Rich Text history", target: nil, action: nil)
+    private let includeImagesCheckbox = NSButton(checkboxWithTitle: "Include images in Rich Text history", target: nil, action: nil)
+    private let alsoAddCopiedImageFilesCheckbox = NSButton(checkboxWithTitle: "Also add copied PNG and JPEG files to Rich Text history", target: nil, action: nil)
+    private let includeImagesPrivacyLabel = NSTextField(wrappingLabelWithString: imageMetadataPrivacyText)
     private let confirmDeletionsCheckbox = NSButton(checkboxWithTitle: "Confirm before deleting entries", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
     private let updateFrequencyPopup = NSPopUpButton()
@@ -224,11 +231,26 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         linksHistoryCheckbox.setAccessibilityHelp("When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.")
         grid.addRow(with: [NSGridCell.emptyContentView, linksHistoryCheckbox])
 
-        richTextHistoryCheckbox.target = nil
-        richTextHistoryCheckbox.action = nil
+        richTextHistoryCheckbox.target = self
+        richTextHistoryCheckbox.action = #selector(richTextHistoryChanged)
         richTextHistoryCheckbox.setAccessibilityLabel("Preserve copied formatting and show Rich Text history")
         richTextHistoryCheckbox.setAccessibilityHelp("When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows the Rich Text history tab. Enable this before copying formatted content. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, richTextHistoryCheckbox])
+
+        includeImagesCheckbox.target = self
+        includeImagesCheckbox.action = #selector(imageHistorySettingChanged)
+        includeImagesCheckbox.setAccessibilityLabel("Include images in Rich Text history")
+        includeImagesCheckbox.setAccessibilityHelp(includeImagesEnabledAccessibilityHelp)
+        grid.addRow(with: [NSGridCell.emptyContentView, includeImagesCheckbox])
+
+        alsoAddCopiedImageFilesCheckbox.target = nil
+        alsoAddCopiedImageFilesCheckbox.action = nil
+        alsoAddCopiedImageFilesCheckbox.setAccessibilityLabel("Also add copied PNG and JPEG files to Rich Text history")
+        alsoAddCopiedImageFilesCheckbox.setAccessibilityHelp("When checked, copying exactly one local PNG or JPEG file keeps the normal File History event and also adds the image to Rich Text history. This is off by default.")
+        grid.addRow(with: [NSGridCell.emptyContentView, alsoAddCopiedImageFilesCheckbox])
+        includeImagesPrivacyLabel.textColor = .secondaryLabelColor
+        includeImagesPrivacyLabel.setAccessibilityLabel("Image metadata privacy")
+        grid.addRow(with: [NSGridCell.emptyContentView, includeImagesPrivacyLabel])
 
         confirmDeletionsCheckbox.target = nil
         confirmDeletionsCheckbox.action = nil
@@ -302,6 +324,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         dynamicHistoryModeCheckbox.state = settings.dynamicHistoryMode ? .on : .off
         linksHistoryCheckbox.state = settings.linksHistoryEnabled ? .on : .off
         richTextHistoryCheckbox.state = settings.richTextHistoryEnabled ? .on : .off
+        includeImagesCheckbox.state = settings.includeImagesInRichTextHistory ? .on : .off
+        alsoAddCopiedImageFilesCheckbox.state = settings.alsoAddCopiedImageFilesToRichTextHistory ? .on : .off
+        updateImageHistoryAvailability()
         confirmDeletionsCheckbox.state = settings.confirmDeletions ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
         updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
@@ -472,6 +497,33 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         return "\n\nThis file configures a private certificate authority only for \(authority.host).\nSubject: \(authority.subject)\nAuthority expires: \(authority.expires.formatted(date: .long, time: .omitted))\nSHA-256 fingerprint: \(authority.fingerprint)"
     }
 
+    @objc private func richTextHistoryChanged() {
+        updateImageHistoryAvailability()
+    }
+
+    @objc private func imageHistorySettingChanged() {
+        updateImageHistoryAvailability()
+    }
+
+    private func updateImageHistoryAvailability() {
+        let enabled = richTextHistoryCheckbox.state == .on
+        if !enabled {
+            includeImagesCheckbox.state = .off
+        }
+        includeImagesCheckbox.isEnabled = enabled
+        includeImagesCheckbox.setAccessibilityHelp(enabled
+            ? includeImagesEnabledAccessibilityHelp
+            : "Enable Preserve copied formatting and show Rich Text history before including images.")
+        let automaticFileCaptureEnabled = enabled && includeImagesCheckbox.state == .on
+        if !automaticFileCaptureEnabled {
+            alsoAddCopiedImageFilesCheckbox.state = .off
+        }
+        alsoAddCopiedImageFilesCheckbox.isEnabled = automaticFileCaptureEnabled
+        alsoAddCopiedImageFilesCheckbox.setAccessibilityHelp(automaticFileCaptureEnabled
+            ? "When checked, copying exactly one local PNG or JPEG file keeps the normal File History event and also adds the image to Rich Text history. This is off by default."
+            : "Enable Rich Text history and Include images in Rich Text history before also adding copied image files.")
+    }
+
     @objc private func saveClicked() {
         guard let show = showHotkeyField.descriptor ?? HotkeyDescriptor.parse(showHotkeyField.stringValue), show.isValid else {
             statusLabel.stringValue = "Show history hotkey must use two modifiers, or one modifier with F1-F12, Grave, Backslash, or ISO section. Escape, Tab, Backspace, Return, Space, and Command+Grave are not available."
@@ -556,6 +608,12 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.dynamicHistoryMode = dynamicHistoryModeCheckbox.state == .on
         settings.linksHistoryEnabled = linksHistoryCheckbox.state == .on
         settings.richTextHistoryEnabled = richTextHistoryCheckbox.state == .on
+        settings.includeImagesInRichTextHistory = settings.richTextHistoryEnabled && includeImagesCheckbox.state == .on
+        settings.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
+            richTextHistoryEnabled: settings.richTextHistoryEnabled,
+            includeImagesEnabled: settings.includeImagesInRichTextHistory,
+            alsoAddCopiedImageFilesEnabled: alsoAddCopiedImageFilesCheckbox.state == .on
+        )
         settings.confirmDeletions = confirmDeletionsCheckbox.state == .on
         settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled, richTextEnabled: settings.richTextHistoryEnabled)
         settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on

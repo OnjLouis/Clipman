@@ -92,6 +92,8 @@
 
   <p>Enable <strong>Preserve copied formatting and show Rich Text history</strong> in Settings before using Paste when you want Clipman to retain HTML supplied by browsers, messaging apps, email clients, and editors. Formatted entries appear in a separate Rich Text section and are copied back with HTML plus the normal plain-text fallback. Android preserves RTF received from Windows, Mac, or iOS, but Android's standard text clipboard does not publish RTF, so RTF-only entries copy as plain text on Android.</p>
 
+  <p>An additional <strong>Include copied images in Rich Text history</strong> setting can store a standalone PNG or JPEG clipboard image. This is also off by default. To add a photo without first copying it, select one photo in Android's Photos, Gallery, or file app, choose Share, and then choose Clipman. Clipman waits for the normal unlock and initial history load, adds the photo to Rich Text history, and reports completion through the status area, sound, and optional haptic feedback. Clipman accepts one shared photo at a time. It preserves an already-compliant image, safely reduces a larger accepted image, and copies the result back as native image data. Retained metadata may contain camera or location information and follows the history's encryption and sync choices.</p>
+
   <p>Your server address, token, and history password remain saved when you switch to Local mode. The token control is disabled until Server mode is selected again. Once configured, the server connection section is collapsed in Settings; use <strong>Show server connection</strong> to open it.</p>
 
   <h2 id="main-screen">Main Screen</h2>
@@ -102,16 +104,16 @@
     <li><strong>Filter</strong>: shows All first, followed by named Groups and Devices in separate sections. Group and device names are not prefixed, so TalkBack can read them directly.</li>
     <li><strong>Settings</strong>: opens the full-screen Settings screen.</li>
     <li><strong>Top</strong>: returns to the beginning of the current history list.</li>
-    <li><strong>Status</strong>: the status message at the bottom of the screen is also a button. Activate it to move to the end of the current history list.</li>
-    <li><strong>Sort</strong>: cycles sort modes.</li>
+    <li><strong>Status</strong>: the status message at the bottom of the screen is also a button. Activate it to move to the end of the current history list. Long-press it to use the next sort order. TalkBack actions can choose Manual order, Newest first, Oldest first, or Text directly.</li>
+    <li><strong>Sort</strong>: cycles the same four sort modes.</li>
 </ul>
 <p>Group names are case-insensitive. Spellings such as <strong>GitHub</strong>, <strong>Github</strong>, and <strong>github</strong> remain one group. If existing entries use several capitalizations, Clipman displays the spelling used most often and uses the newest spelling to resolve a tie.</p>
 
-  <p>Each history row is one accessibility focus target. TalkBack users can move from entry to entry with a single swipe.</p>
+  <p>Each history row is one accessibility focus target. TalkBack users can move from entry to entry with a single swipe. An unnamed website link uses a readable offline label followed by its destination without <code>http://</code> or <code>https://</code>; viewing or copying still uses the full unchanged URL.</p>
 
   <p>Double-tap an entry to copy it to the Android clipboard. Clipman announces <strong>Copied to clipboard</strong> and plays the copy sound when sounds are enabled.</p>
 
-  <p>Long-press, or use TalkBack actions, to open <strong>View entry</strong>. The action order matches iPhone and iPad: <strong>Open link</strong> when the entry contains one link, <strong>View entry</strong>, <strong>Edit entry</strong>, <strong>Pin entry</strong> or <strong>Unpin entry</strong>, then <strong>Delete entry</strong>.</p>
+  <p>Long-press, or use TalkBack actions, to open <strong>View entry</strong>. The action order matches iPhone and iPad: <strong>Open link</strong> when the entry contains one link, <strong>View entry</strong>, <strong>Edit entry</strong>, <strong>Use Website Title as Name</strong> for one unnamed public HTTP or HTTPS link, <strong>Pin entry</strong> or <strong>Unpin entry</strong>, then <strong>Delete entry</strong>. An image entry then adds <strong>Save to Photos</strong> followed by <strong>Share</strong>; ordinary entries do not include those two actions. Website titles are never fetched automatically or in bulk; Clipman asks before contacting the selected site.</p>
 
   <h2 id="view-entry">View Entry</h2>
   <p><strong>View entry</strong> shows the clipboard text line by line so TalkBack can review it naturally.</p>
@@ -127,7 +129,10 @@
     <li><strong>Encrypted history backup</strong>: optionally writes <code>Clipman History.clipdb</code> to a folder selected through Android's system picker. A nonblank history password is required. Use <strong>Restore and merge history backup</strong> to combine its entries and deletions with current history. Server details, tokens, settings, and passwords are not included.</li>
     <li><strong>Copy remote additions to Android clipboard</strong>: when another device adds new text to the shared history, Clipman can place that new text on the Android clipboard while the app is open.</li>
     <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
+    <li><strong>History sort order</strong>: chooses Manual order, Newest first, Oldest first, or Text for normal entries. This per-device display choice does not rewrite shared history or change pinned-entry order.</li>
+    <li>Deleting an entry updates the visible history immediately while encrypted local storage and optional server synchronization continue in the background. If the local save fails, Clipman restores durable history and reports the error.</li>
     <li><strong>Preserve copied formatting and show Rich Text history</strong>: captures and restores Android HTML clipboard formatting and adds Rich Text to the history-section switcher. This is off by default.</li>
+    <li><strong>Include copied images in Rich Text history</strong>: stores bounded standalone PNG and JPEG clipboard images in the existing history database and lets Clipman receive one selected photo through Android's Share sheet. It is available only when Rich Text history is enabled and is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
     <li><strong>Use haptic feedback</strong>: vibrates for supported feedback events.</li>
     <li><strong>Confirm before deleting entries</strong>: asks before removing one history entry. This is on by default and can be turned off.</li>

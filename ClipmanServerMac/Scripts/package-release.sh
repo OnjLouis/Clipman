@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SERVER_ROOT="$ROOT/ClipmanServerMac"
-DIST="${CLIPMAN_SERVER_MAC_DIST_DIR:-/tmp/ClipmanServerMac-dist}"
+TEMP_ROOT="${CLIPMAN_TEMP_ROOT:-$HOME/Projects/Codex/Temp/clipman}"
+DIST="${CLIPMAN_SERVER_MAC_DIST_DIR:-$TEMP_ROOT/server-mac-dist}"
 APP="$DIST/Clipman Server.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"

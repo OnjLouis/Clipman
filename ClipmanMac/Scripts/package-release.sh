@@ -2,8 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRATCH="${CLIPMAN_MAC_RELEASE_BUILD_DIR:-/tmp/ClipmanMac-release-build}"
-DIST="${CLIPMAN_MAC_DIST_DIR:-/tmp/ClipmanMac-dist}"
+TEMP_ROOT="${CLIPMAN_TEMP_ROOT:-$HOME/Projects/Codex/Temp/clipman}"
+SCRATCH="${CLIPMAN_MAC_RELEASE_BUILD_DIR:-$TEMP_ROOT/mac-release-build}"
+DIST="${CLIPMAN_MAC_DIST_DIR:-$TEMP_ROOT/mac-release-dist}"
 APP="$DIST/Clipman.app"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"

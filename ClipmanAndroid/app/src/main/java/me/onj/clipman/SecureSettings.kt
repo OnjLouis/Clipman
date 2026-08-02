@@ -59,9 +59,17 @@ class AndroidSettings(context: Context) {
         get() = preferences.getBoolean("addClipboardOnLaunch", false)
         set(value) = preferences.edit().putBoolean("addClipboardOnLaunch", value).apply()
 
+    var historySort: HistorySort
+        get() = HistorySort.fromStoredValue(preferences.getString("historySort", null))
+        set(value) = preferences.edit().putString("historySort", value.storedValue).apply()
+
     var richTextEnabled: Boolean
         get() = preferences.getBoolean("richTextEnabled", false)
         set(value) = preferences.edit().putBoolean("richTextEnabled", value).apply()
+
+    var richTextImagesEnabled: Boolean
+        get() = preferences.getBoolean("richTextImagesEnabled", false)
+        set(value) = preferences.edit().putBoolean("richTextImagesEnabled", value).apply()
 
     var confirmDeletions: Boolean
         get() = preferences.getBoolean("confirmDeletions", true)
@@ -122,6 +130,25 @@ class AndroidSettings(context: Context) {
         }
     }
 }
+
+enum class HistorySort(
+    val storedValue: String,
+    val label: String,
+    val accessibilityActionLabel: String
+) {
+    Manual("manual", "Manual order", "Set sort to Manual"),
+    Newest("newest", "Newest first", "Set sort to Newest first"),
+    Oldest("oldest", "Oldest first", "Set sort to Oldest first"),
+    Text("text", "Text", "Set sort to Text");
+
+    companion object {
+        fun fromStoredValue(value: String?): HistorySort =
+            entries.firstOrNull { it.storedValue.equals(value?.trim(), ignoreCase = true) } ?: Manual
+    }
+}
+
+internal fun historySortAccessibilityActionLabels(): List<String> =
+    HistorySort.entries.map { it.accessibilityActionLabel }
 
 enum class MobileStorageMode(val storedValue: String, val label: String) {
     Local("local", "Local"),

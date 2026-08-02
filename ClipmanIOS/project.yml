@@ -15,23 +15,70 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: ClipmanIOS
+      - path: Shared
     resources:
       - path: ClipmanIOS/Resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios
         PRODUCT_NAME: Clipman
-        MARKETING_VERSION: "2.5.1"
-        CURRENT_PROJECT_VERSION: "25101"
+        MARKETING_VERSION: "2.6.0"
+        CURRENT_PROJECT_VERSION: "26004"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanIOS/Support/Info.plist
         SDKROOT: iphoneos
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_OBJC_BRIDGING_HEADER: ClipmanIOS/Support/ClipmanIOS-Bridging-Header.h
+        CODE_SIGN_ENTITLEMENTS: ClipmanIOS/Support/ClipmanIOS.entitlements
         ENABLE_USER_SCRIPT_SANDBOXING: "YES"
         ENABLE_DEBUG_DYLIB: "NO"
     dependencies:
+      - target: ClipmanShareExtension
       - sdk: libz.tbd
       - sdk: Security.framework
       - sdk: StoreKit.framework
+  ClipmanShareExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: ClipmanShareExtension
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios.share
+        PRODUCT_NAME: Share to Clipman
+        MARKETING_VERSION: "2.6.0"
+        CURRENT_PROJECT_VERSION: "26004"
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: ClipmanShareExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClipmanShareExtension/ClipmanShareExtension.entitlements
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        SKIP_INSTALL: "YES"
+        SDKROOT: iphoneos
+        TARGETED_DEVICE_FAMILY: "1,2"
+  ClipmanIOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: ClipmanIOSTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Clipman.app/Clipman"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: ClipmanIOS
+schemes:
+  ClipmanIOS:
+    build:
+      targets:
+        ClipmanIOS: all
+        ClipmanIOSTests: [test]
+    test:
+      targets:
+        - ClipmanIOSTests

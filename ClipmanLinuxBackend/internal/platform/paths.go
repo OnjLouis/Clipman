@@ -2,6 +2,8 @@ package platform
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -70,6 +72,39 @@ func ReadPrivate(path string) ([]byte, error) {
 		return nil, err
 	}
 	return os.ReadFile(path)
+}
+
+func ReadPrivateBounded(path string, maximumBytes int64) ([]byte, error) {
+	if err := validatePrivate(path); err != nil {
+		return nil, err
+	}
+	return ReadFileBounded(path, maximumBytes)
+}
+
+func ReadFileBounded(path string, maximumBytes int64) ([]byte, error) {
+	if maximumBytes < 0 {
+		return nil, errors.New("maximum file size cannot be negative")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maximumBytes {
+		return nil, fmt.Errorf("file exceeds %d-byte limit", maximumBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maximumBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maximumBytes {
+		return nil, fmt.Errorf("file exceeds %d-byte limit", maximumBytes)
+	}
+	return data, nil
 }
 func ErrNotSupported(feature string) error {
 	return errors.New(feature + " is not supported on this platform")

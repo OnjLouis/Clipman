@@ -5,6 +5,10 @@ export PYTHONDONTWRITEBYTECODE=1
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$script_dir/.." && pwd)
 output=${1:-"${TMPDIR:-/tmp}/clipman-linux-build"}
+case "$output" in
+    /*) ;;
+    *) output="$(pwd -P)/$output" ;;
+esac
 stage="$output/Clipman-Linux-GUI"
 architecture=$(uname -m)
 version=$(tr -d '\r\n' < "$script_dir/VERSION")
@@ -527,6 +531,8 @@ def harness(capture_on_start):
     )
     value._put_text = lambda text, quiet=False, automatic=False, source="", rich_text=None: value.captured.append((text, quiet, automatic, source))
     value._capture_file_paths = lambda *_args: None
+    value._standalone_image_mime = lambda _clipboard: None
+    value._clear_clipboard_image_file = lambda: None
     value._process_clipboard_text = lambda clipboard, text, rich: module.ClipmanApplication._process_clipboard_text(value, clipboard, text, rich)
     value._read_rich_clipboard = lambda clipboard, text, callback: callback(clipboard, text, None)
     return value
@@ -596,5 +602,13 @@ install -m 0644 Assets/sounds/*.wav "$stage/sounds/"
 
 if command -v appstreamcli >/dev/null 2>&1; then appstreamcli validate --no-net "$stage/me.onj.clipman.linux.metainfo.xml"; fi
 if command -v desktop-file-validate >/dev/null 2>&1; then desktop-file-validate "$stage/me.onj.clipman.linux.desktop"; fi
+if [ ! -x "$stage/libexec/clipman-gui-backend" ]; then
+    printf 'Linux package is missing the executable GUI backend.\n' >&2
+    exit 1
+fi
 tar --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner -C "$output" -czf "$output/$archive" "$(basename "$stage")"
+if ! tar -tzf "$output/$archive" | grep -qx 'Clipman-Linux-GUI/libexec/clipman-gui-backend'; then
+    printf 'Linux archive is missing the GUI backend.\n' >&2
+    exit 1
+fi
 printf 'Built %s\n' "$output/$archive"

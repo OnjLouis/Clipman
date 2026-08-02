@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 from datetime import datetime, timezone
+import errno
 import http.server
 import ipaddress
 import json
@@ -25,12 +26,12 @@ import tempfile
 import time
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.4.3"
+APP_VERSION = "2.5.0"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 METADATA_FILE = "clipman-server-metadata.json"
@@ -38,6 +39,7 @@ METADATA_TOUCH_INTERVAL_MS = 5 * 60 * 1000
 SERVER_PORT_MIN = 20000
 SERVER_PORT_MAX = 49151
 BIND_ERROR_EXIT_CODE = 20
+DATA_ROOT_LOCK_EXIT_CODE = 21
 MAX_CA_CERTIFICATE_BYTES = 32 * 1024
 PEM_CERTIFICATE_PATTERN = re.compile(
     rb"\A\s*(-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----)\s*\Z"
@@ -106,7 +108,6 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     else:
         settings = {}
 
-    base_dir = config_path.parent
     data_dir = default_data_dir()
     settings.setdefault("Host", "127.0.0.1")
     settings.setdefault("AdvertiseHost", "")
@@ -126,7 +127,8 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     settings.setdefault("DatabasePruneDays", 0)
     settings.setdefault("DatabasePruneIntervalHours", 24)
     settings.setdefault("MaxDatabaseBytes", 64 * 1024 * 1024)
-    save_settings(config_path, settings)
+    if created:
+        save_settings(config_path, settings)
     return settings, created
 
 
@@ -263,6 +265,112 @@ def save_settings(config_path: Path, settings: Dict[str, Any]) -> None:
     make_private_file(config_path)
 
 
+class DataRootLockError(RuntimeError):
+    pass
+
+
+def resolved_data_root(settings: Dict[str, Any]) -> Path:
+    return Path(str(settings["DatabasePath"])).resolve(strict=False).parent
+
+
+class DataRootLock:
+    """Hold an OS-enforced exclusive lock for one server data root."""
+
+    def __init__(self, root: Path):
+        self.root = root.expanduser().resolve(strict=False)
+        self.path = self.root / ".clipman-server.lock"
+        self._handle: Any | None = None
+
+    def acquire(self) -> None:
+        if self._handle is not None:
+            return
+        try:
+            make_private_dir(self.root)
+            flags = os.O_RDWR | os.O_CREAT
+            if hasattr(os, "O_BINARY"):
+                flags |= os.O_BINARY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            descriptor = os.open(self.path, flags, 0o600)
+            handle = os.fdopen(descriptor, "r+b", buffering=0)
+            make_private_file(self.path)
+        except OSError as error:
+            raise DataRootLockError(
+                f"Clipman Server could not open its data-root lock at {self.path}: {error}"
+            ) from error
+
+        try:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"0\n")
+                handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            handle.close()
+            collision_codes = {errno.EACCES, errno.EAGAIN, errno.EDEADLK}
+            if isinstance(error, BlockingIOError) or error.errno in collision_codes:
+                raise DataRootLockError(
+                    f"Another Clipman Server process is already using the data root {self.root}. "
+                    "Stop that server before starting another one with the same data root."
+                ) from error
+            raise DataRootLockError(
+                f"Clipman Server could not acquire an exclusive lock for data root {self.root}: {error}"
+            ) from error
+
+        self._handle = handle
+
+    def release(self) -> None:
+        handle = self._handle
+        if handle is None:
+            return
+        try:
+            handle.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        finally:
+            self._handle = None
+            handle.close()
+
+    def __enter__(self) -> "DataRootLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc_value: Any, _traceback: Any) -> None:
+        self.release()
+
+
+def report_data_root_lock_error(error: DataRootLockError) -> int:
+    message = str(error)
+    logging.error(message)
+    print(message, file=sys.stderr)
+    return DATA_ROOT_LOCK_EXIT_CODE
+
+
+def run_with_data_root_lock(settings: Dict[str, Any], action: Callable[[], int]) -> int:
+    try:
+        with DataRootLock(resolved_data_root(settings)):
+            return int(action())
+    except DataRootLockError as error:
+        return report_data_root_lock_error(error)
+
+
 def find_openssl() -> str:
     candidates = [shutil.which("openssl")]
     if os.name == "nt":
@@ -325,6 +433,58 @@ def _openssl_certificate_time(value: str) -> datetime:
         raise RuntimeError(f"OpenSSL returned an unrecognized certificate date: {value}") from error
 
 
+def _dns_certificate_name_matches(pattern: str, host: str) -> bool:
+    certificate_name = pattern.rstrip(".").lower()
+    requested_name = host.rstrip(".").lower()
+    if "*" not in certificate_name:
+        return certificate_name == requested_name
+    certificate_labels = certificate_name.split(".")
+    requested_labels = requested_name.split(".")
+    return (
+        len(certificate_labels) == len(requested_labels)
+        and certificate_labels[0] == "*"
+        and bool(requested_labels[0])
+        and certificate_labels[1:] == requested_labels[1:]
+    )
+
+
+def validate_certificate_host(certificate: Path, host: str) -> None:
+    decoder = getattr(getattr(ssl, "_ssl", None), "_test_decode_cert", None)
+    if decoder is None:
+        raise RuntimeError("Python cannot inspect the configured HTTPS certificate on this system.")
+    try:
+        decoded = decoder(str(certificate))
+    except (OSError, ssl.SSLError, ValueError) as error:
+        raise RuntimeError("The configured HTTPS certificate could not be inspected.") from error
+
+    subject_alt_names = list(decoded.get("subjectAltName", ()))
+    try:
+        requested_ip = ipaddress.ip_address(host)
+    except ValueError:
+        dns_names = [str(value) for kind, value in subject_alt_names if kind == "DNS"]
+        if not dns_names and not subject_alt_names:
+            dns_names = [
+                str(value)
+                for relative_name in decoded.get("subject", ())
+                for kind, value in relative_name
+                if kind == "commonName"
+            ]
+        matched = any(_dns_certificate_name_matches(name, host) for name in dns_names)
+    else:
+        matched = False
+        for kind, value in subject_alt_names:
+            if kind != "IP Address":
+                continue
+            try:
+                if ipaddress.ip_address(str(value)) == requested_ip:
+                    matched = True
+                    break
+            except ValueError:
+                continue
+    if not matched:
+        raise RuntimeError(f"The configured HTTPS certificate is not valid for advertised host {host}.")
+
+
 def inspect_private_ca(settings: Dict[str, Any]) -> Dict[str, str] | None:
     configured = str(settings.get("CaFile", "")).strip()
     if not configured:
@@ -370,12 +530,7 @@ def inspect_private_ca(settings: Dict[str, Any]) -> Dict[str, str] | None:
             raise RuntimeError("The configured authority certificate has expired.")
 
         run_openssl(openssl, ["verify", "-CAfile", str(staged_ca), str(staged_leaf)])
-        try:
-            ipaddress.ip_address(host)
-            host_arguments = ["-checkip", host]
-        except ValueError:
-            host_arguments = ["-checkhost", host]
-        run_openssl(openssl, ["x509", "-in", str(staged_leaf), "-noout"] + host_arguments)
+        validate_certificate_host(staged_leaf, host)
 
         canonical_pem = run_openssl(openssl, ["x509", "-in", str(staged_ca), "-outform", "PEM"]) + "\n"
         fingerprint = run_openssl(
@@ -1417,6 +1572,70 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def run_server(
+    settings: Dict[str, Any],
+    config_path: Path,
+    connection_info: Path | None,
+    connection_config: Path | None,
+) -> int:
+    tls_context = create_tls_context(settings)
+    validate_network_security(settings)
+    warn_if_tls_certificate_expiring(settings)
+    settings["_TlsCertificateExpires"] = tls_certificate_expiry(settings)
+    host = str(settings["Host"])
+    port = int(settings["Port"])
+    try:
+        server = ThreadingServer((host, port), Handler)
+    except OSError as error:
+        message = (
+            f"Clipman Server could not open {host}:{port}: {error}. "
+            "The port may already be in use or reserved by the operating system. "
+            "Choose another listening port, then update the address used by Clipman clients."
+        )
+        logging.error(message)
+        print(message, file=sys.stderr)
+        return BIND_ERROR_EXIT_CODE
+    server.settings = settings  # type: ignore[attr-defined]
+    if tls_context is not None:
+        try:
+            server.socket = tls_context.wrap_socket(server.socket, server_side=True)
+        except Exception:
+            server.server_close()
+            raise
+    stop_reason = "shutdown"
+
+    def request_shutdown(signum: int, _frame: Any) -> None:
+        nonlocal stop_reason
+        name = signal.Signals(signum).name if signum in {sig.value for sig in signal.Signals} else str(signum)
+        stop_reason = name
+        logging.info("Clipman Server received %s.", name)
+        Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(signal.SIGINT, request_shutdown)
+    logging.info("Clipman Server %s listening on %s", APP_VERSION, listen_prefix(settings))
+    logging.info("Settings: %s", config_path)
+    logging.info("Data root: %s", database_root(settings))
+    start_database_prune_thread(settings)
+    print(f"Clipman Server {APP_VERSION} listening on {listen_prefix(settings)}")
+    print("Use --show-token to print the bearer token for client setup.")
+    if connection_info:
+        print(f"Connection details written to {connection_info}")
+    if connection_config:
+        print(f"Importable connection file written to {connection_config}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print()
+        print("Clipman Server stopping.")
+        stop_reason = "keyboard interrupt"
+        logging.info("Clipman Server stopped by keyboard interrupt.")
+    finally:
+        server.log_runtime_summary(stop_reason)
+        server.server_close()
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     if args.version:
@@ -1430,6 +1649,7 @@ def main() -> int:
         return 2
     config_path = Path(args.config).expanduser().resolve()
     settings, settings_created = load_settings(config_path)
+    settings_before_overrides = dict(settings)
     if args.host:
         settings["Host"] = args.host
     if args.advertise_host:
@@ -1446,7 +1666,8 @@ def main() -> int:
         settings["KeyFile"] = str(Path(args.key_file).expanduser().resolve())
     if args.allow_insecure_remote:
         settings["AllowInsecureRemote"] = True
-    save_settings(config_path, settings)
+    if settings != settings_before_overrides:
+        save_settings(config_path, settings)
     try:
         connection_info = maybe_write_connection_info(config_path, settings, settings_created, args.write_connection_info)
         connection_config = maybe_write_connection_config(config_path, settings, settings_created, args.write_connection_info)
@@ -1497,62 +1718,24 @@ def main() -> int:
         print_database_list(settings, args.list_databases_json)
         return 0
     if args.delete_database:
-        return delete_database_bucket(settings, args.delete_database, args.confirm, args.force_recent)
-    if args.prune_databases_days is not None:
-        return prune_database_buckets(settings, args.prune_databases_days, args.confirm)
-
-    tls_context = create_tls_context(settings)
-    validate_network_security(settings)
-    warn_if_tls_certificate_expiring(settings)
-    settings["_TlsCertificateExpires"] = tls_certificate_expiry(settings)
-    host = str(settings["Host"])
-    port = int(settings["Port"])
-    try:
-        server = ThreadingServer((host, port), Handler)
-    except OSError as error:
-        message = (
-            f"Clipman Server could not open {host}:{port}: {error}. "
-            "The port may already be in use or reserved by the operating system. "
-            "Choose another listening port, then update the address used by Clipman clients."
+        if not args.confirm:
+            return delete_database_bucket(settings, args.delete_database, args.confirm, args.force_recent)
+        return run_with_data_root_lock(
+            settings,
+            lambda: delete_database_bucket(settings, args.delete_database, args.confirm, args.force_recent),
         )
-        logging.error(message)
-        print(message, file=sys.stderr)
-        return BIND_ERROR_EXIT_CODE
-    server.settings = settings  # type: ignore[attr-defined]
-    if tls_context is not None:
-        server.socket = tls_context.wrap_socket(server.socket, server_side=True)
-    stop_reason = "shutdown"
+    if args.prune_databases_days is not None:
+        if not args.confirm:
+            return prune_database_buckets(settings, args.prune_databases_days, args.confirm)
+        return run_with_data_root_lock(
+            settings,
+            lambda: prune_database_buckets(settings, args.prune_databases_days, args.confirm),
+        )
 
-    def request_shutdown(signum: int, _frame: Any) -> None:
-        nonlocal stop_reason
-        name = signal.Signals(signum).name if signum in {sig.value for sig in signal.Signals} else str(signum)
-        stop_reason = name
-        logging.info("Clipman Server received %s.", name)
-        Thread(target=server.shutdown, daemon=True).start()
-
-    signal.signal(signal.SIGTERM, request_shutdown)
-    signal.signal(signal.SIGINT, request_shutdown)
-    logging.info("Clipman Server %s listening on %s", APP_VERSION, listen_prefix(settings))
-    logging.info("Settings: %s", config_path)
-    logging.info("Data root: %s", Path(settings["DatabasePath"]).parent / "Databases")
-    start_database_prune_thread(settings)
-    print(f"Clipman Server {APP_VERSION} listening on {listen_prefix(settings)}")
-    print("Use --show-token to print the bearer token for client setup.")
-    if connection_info:
-        print(f"Connection details written to {connection_info}")
-    if connection_config:
-        print(f"Importable connection file written to {connection_config}")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print()
-        print("Clipman Server stopping.")
-        stop_reason = "keyboard interrupt"
-        logging.info("Clipman Server stopped by keyboard interrupt.")
-    finally:
-        server.log_runtime_summary(stop_reason)
-        server.server_close()
-    return 0
+    return run_with_data_root_lock(
+        settings,
+        lambda: run_server(settings, config_path, connection_info, connection_config),
+    )
 
 
 if __name__ == "__main__":

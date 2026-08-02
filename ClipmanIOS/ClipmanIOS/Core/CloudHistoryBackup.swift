@@ -22,7 +22,7 @@ enum CloudHistoryBackupError: LocalizedError {
 
 enum CloudHistoryBackup {
     static let fileName = "Clipman History.clipdb"
-    private static let maximumBackupBytes = 128 * 1024 * 1024
+    static let maximumBackupBytes = ClipDatabaseFile.maximumFileBytes
     private static let encryptedMagic = Data("CLIPDB2".utf8)
 
     static func bookmark(for directory: URL) throws -> Data {
@@ -41,6 +41,7 @@ enum CloudHistoryBackup {
         guard data.starts(with: encryptedMagic) else {
             throw CloudHistoryBackupError.unencryptedBackup
         }
+        guard data.count <= maximumBackupBytes else { throw CloudHistoryBackupError.backupTooLarge }
         let directory = try resolve(bookmark)
         guard directory.startAccessingSecurityScopedResource() else {
             throw CloudHistoryBackupError.folderUnavailable
@@ -64,16 +65,11 @@ enum CloudHistoryBackup {
     static func read(_ url: URL) throws -> Data {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard fileSize <= maximumBackupBytes else { throw CloudHistoryBackupError.backupTooLarge }
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var data = Data()
-        while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
-            guard data.count <= maximumBackupBytes - chunk.count else {
-                throw CloudHistoryBackupError.backupTooLarge
-            }
-            data.append(chunk)
+        let data: Data
+        do {
+            data = try ClipDatabaseFile.readBounded(from: url, maximumBytes: maximumBackupBytes)
+        } catch ClipDatabaseError.databaseFileTooLarge {
+            throw CloudHistoryBackupError.backupTooLarge
         }
         guard data.starts(with: encryptedMagic) else {
             throw CloudHistoryBackupError.unencryptedBackup

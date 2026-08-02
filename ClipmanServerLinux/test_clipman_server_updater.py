@@ -11,6 +11,50 @@ import clipman_server_updater as updater
 
 
 class ClipmanServerUpdaterTests(unittest.TestCase):
+    def test_restore_program_files_supports_runit_service_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "app"
+            helper = root / "bin" / "clipmanserver"
+            launcher = root / "bin" / "clipman-server"
+            service = root / "service" / "clipman-server"
+            backup = root / "backup"
+            update_service = service.parent / "clipman-server-update"
+            for path in (
+                app,
+                service,
+                update_service,
+                backup / "app",
+                backup / "services" / "clipman-server",
+                backup / "services" / "clipman-server-update",
+            ):
+                path.mkdir(parents=True)
+            helper.parent.mkdir(parents=True, exist_ok=True)
+            (app / "clipman_server.py").write_text("changed", encoding="utf-8")
+            helper.write_text("changed helper", encoding="utf-8")
+            launcher.write_text("changed launcher", encoding="utf-8")
+            (service / "run").write_text("changed run", encoding="utf-8")
+            (update_service / "run").write_text("changed update run", encoding="utf-8")
+            (backup / "app" / "clipman_server.py").write_text("original", encoding="utf-8")
+            (backup / "clipmanserver").write_text("original helper", encoding="utf-8")
+            (backup / "clipman-server").write_text("original launcher", encoding="utf-8")
+            (backup / "services" / "clipman-server" / "run").write_text("original run", encoding="utf-8")
+            (backup / "services" / "clipman-server" / "down").touch()
+            (backup / "services" / "clipman-server-update" / "run").write_text(
+                "original update run", encoding="utf-8"
+            )
+            (backup / "services" / "clipman-server-update" / "down").touch()
+
+            updater.restore_program_files(app, helper, launcher, service, backup, "runit")
+
+            self.assertEqual("original", (app / "clipman_server.py").read_text(encoding="utf-8"))
+            self.assertEqual("original helper", helper.read_text(encoding="utf-8"))
+            self.assertEqual("original launcher", launcher.read_text(encoding="utf-8"))
+            self.assertEqual("original run", (service / "run").read_text(encoding="utf-8"))
+            self.assertTrue((service / "down").is_file())
+            self.assertEqual("original update run", (update_service / "run").read_text(encoding="utf-8"))
+            self.assertTrue((update_service / "down").is_file())
+
     def test_versions_and_release_asset_are_selected_numerically(self):
         release = {
             "tag_name": "server-v2.10.0",

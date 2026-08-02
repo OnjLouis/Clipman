@@ -6,6 +6,8 @@ enum ClipDatabaseError: Error, LocalizedError, Equatable {
     case incorrectPassword
     case incompleteEncryptedDatabase
     case unsupportedEncryptedVersion(UInt8)
+    case databaseFileTooLarge
+    case encodedDatabaseTooLarge
     case unsupportedFormat(String)
 
     var errorDescription: String? {
@@ -18,6 +20,10 @@ enum ClipDatabaseError: Error, LocalizedError, Equatable {
             "The encrypted Clipman database is incomplete."
         case .unsupportedEncryptedVersion:
             "This encrypted Clipman database uses an unsupported format."
+        case .databaseFileTooLarge:
+            "The Clipman database exceeds the 272 MiB container safety limit."
+        case .encodedDatabaseTooLarge:
+            "The Clipman database exceeds the 256 MiB decoded safety limit."
         case .unsupportedFormat(let message):
             message
         }
@@ -27,9 +33,13 @@ enum ClipDatabaseError: Error, LocalizedError, Equatable {
 enum ClipDatabaseFile {
     static let compressedMagic = Data("CLIPDB1".utf8)
     static let encryptedMagic = Data("CLIPDB2".utf8)
+    static let maximumFileBytes = 272 * 1024 * 1024
+    static let maximumEncodedJSONBytes = Gzip.maximumDecompressedBytes
+    private static let encryptedEnvelopeBytes = encryptedMagic.count + 1 + 16 + 16 + 32
 
     static func load(_ data: Data, password: String) throws -> ClipDatabase {
         if data.isEmpty { return ClipDatabase() }
+        try validateFileSize(data.count)
 
         let jsonData: Data
         if data.starts(with: encryptedMagic) {
@@ -45,10 +55,52 @@ enum ClipDatabaseFile {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
         let json = try encoder.encode(database)
+        try validateEncodedJSONSize(json.count)
+        let result: Data
         if password.isEmpty {
-            return compressedMagic + (try Gzip.compress(json))
+            do {
+                result = compressedMagic + (try Gzip.compress(
+                    json,
+                    maximumOutputBytes: maximumFileBytes - compressedMagic.count
+                ))
+            } catch GzipError.compressedOutputTooLarge {
+                throw ClipDatabaseError.databaseFileTooLarge
+            }
+        } else {
+            result = try writeEncrypted(json: json, password: password)
         }
-        return try writeEncrypted(json: json, password: password)
+        try validateFileSize(result.count)
+        return result
+    }
+
+    static func validateFileSize(_ byteCount: Int) throws {
+        guard byteCount >= 0, byteCount <= maximumFileBytes else {
+            throw ClipDatabaseError.databaseFileTooLarge
+        }
+    }
+
+    static func validateEncodedJSONSize(_ byteCount: Int) throws {
+        guard byteCount >= 0, byteCount <= maximumEncodedJSONBytes else {
+            throw ClipDatabaseError.encodedDatabaseTooLarge
+        }
+    }
+
+    static func readBounded(from url: URL, maximumBytes: Int = maximumFileBytes) throws -> Data {
+        guard maximumBytes >= 0 else { throw ClipDatabaseError.databaseFileTooLarge }
+        let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard fileSize <= maximumBytes else { throw ClipDatabaseError.databaseFileTooLarge }
+
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var data = Data()
+        data.reserveCapacity(fileSize)
+        while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            guard chunk.count <= maximumBytes - data.count else {
+                throw ClipDatabaseError.databaseFileTooLarge
+            }
+            data.append(chunk)
+        }
+        return data
     }
 
     private static func readEncrypted(_ data: Data, password: String) throws -> Data {
@@ -81,7 +133,13 @@ enum ClipDatabaseFile {
         let salt = randomBytes(count: 16)
         let iv = randomBytes(count: 16)
         let keys = try deriveKeys(password: password, salt: salt)
-        let compressed = Array(try Gzip.compress(json))
+        let maximumCompressedBytes = maximumFileBytes - encryptedEnvelopeBytes - kCCBlockSizeAES128
+        let compressed: [UInt8]
+        do {
+            compressed = Array(try Gzip.compress(json, maximumOutputBytes: maximumCompressedBytes))
+        } catch GzipError.compressedOutputTooLarge {
+            throw ClipDatabaseError.databaseFileTooLarge
+        }
         let cipher = try aesCBC(data: compressed, key: keys.encryptionKey, iv: iv, operation: CCOperation(kCCEncrypt))
         var signed = Data()
         signed.append(encryptedMagic)

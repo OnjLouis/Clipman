@@ -3,6 +3,8 @@ package me.onj.clipman
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.zip.GZIPInputStream
@@ -15,6 +17,8 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 object ClipDatabaseFile {
+    internal const val maxDatabaseBlobBytes = 272 * 1024 * 1024
+    internal const val maxDecompressedDatabaseBytes = 256 * 1024 * 1024
     private val compressedMagic = "CLIPDB1".toByteArray(Charsets.US_ASCII)
     private val encryptedMagic = "CLIPDB2".toByteArray(Charsets.US_ASCII)
     private val json = Json {
@@ -24,6 +28,7 @@ object ClipDatabaseFile {
 
     fun load(bytes: ByteArray, password: String): ClipDatabase {
         if (bytes.isEmpty()) return ClipDatabase()
+        requireDatabaseBlobSize(bytes.size.toLong())
         val text = when {
             bytes.startsWith(encryptedMagic) -> readEncryptedText(bytes, password)
             bytes.startsWith(compressedMagic) -> readCompressedText(bytes.copyOfRange(compressedMagic.size, bytes.size))
@@ -36,17 +41,56 @@ object ClipDatabaseFile {
 
     fun save(database: ClipDatabase, password: String): ByteArray {
         val text = json.encodeToString(ClipDatabase.serializer(), database)
-        return if (password.isNotEmpty()) {
-            writeEncryptedText(text, password)
+        val serialized = text.toByteArray(Charsets.UTF_8)
+        requireSerializedJsonSize(serialized.size.toLong())
+        val encoded = if (password.isNotEmpty()) {
+            writeEncryptedText(serialized, password)
         } else {
-            compressedMagic + compress(text.toByteArray(Charsets.UTF_8))
+            compressedMagic + compress(serialized, maxDatabaseBlobBytes - compressedMagic.size)
         }
+        requireDatabaseBlobSize(encoded.size.toLong())
+        return encoded
     }
 
     private fun readCompressedText(bytes: ByteArray): String {
-        GZIPInputStream(ByteArrayInputStream(bytes)).use { gzip ->
-            return gzip.readBytes().toString(Charsets.UTF_8)
+        try {
+            val length = measureDecompressedSize(bytes)
+            val decoded = ByteArray(length)
+            GZIPInputStream(ByteArrayInputStream(bytes)).use { gzip ->
+                var offset = 0
+                while (offset < decoded.size) {
+                    val count = gzip.read(decoded, offset, decoded.size - offset)
+                    if (count < 0) throw IllegalArgumentException("The compressed Clipman database ended unexpectedly.")
+                    offset += count
+                }
+                if (gzip.read() != -1) {
+                    throw IllegalArgumentException("The Clipman database changed while it was being decompressed.")
+                }
+            }
+            return decoded.toString(Charsets.UTF_8)
+        } catch (error: DatabaseExpansionLimitException) {
+            throw error
+        } catch (error: IOException) {
+            throw IllegalArgumentException("The Clipman database could not be decompressed.", error)
         }
+    }
+
+    private fun measureDecompressedSize(bytes: ByteArray): Int {
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        GZIPInputStream(ByteArrayInputStream(bytes)).use { gzip ->
+            while (true) {
+                val count = gzip.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > maxDecompressedDatabaseBytes) {
+                    throw DatabaseExpansionLimitException(
+                        "The Clipman database exceeds the 256 MiB decompressed size limit."
+                    )
+                }
+            }
+        }
+        return total.toInt()
     }
 
     private fun readEncryptedText(bytes: ByteArray, password: String): String {
@@ -82,11 +126,13 @@ object ClipDatabaseFile {
         return readCompressedText(compressed)
     }
 
-    private fun writeEncryptedText(text: String, password: String): ByteArray {
+    private fun writeEncryptedText(serialized: ByteArray, password: String): ByteArray {
         val salt = randomBytes(16)
         val iv = randomBytes(16)
         val keys = deriveKeys(password, salt)
-        val compressed = compress(text.toByteArray(Charsets.UTF_8))
+        val maximumCompressedBytes = maxDatabaseBlobBytes -
+            encryptedMagic.size - 1 - 16 - 16 - 32 - CipherBlockBytes
+        val compressed = compress(serialized, maximumCompressedBytes)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keys.encryptionKey, "AES"), IvParameterSpec(iv))
         val cipherText = cipher.doFinal(compressed)
@@ -106,13 +152,57 @@ object ClipDatabaseFile {
         }
     }
 
-    private fun compress(bytes: ByteArray): ByteArray =
-        ByteArrayOutputStream().use { output ->
+    private fun compress(bytes: ByteArray, maximumBytes: Int): ByteArray =
+        SizeLimitedByteArrayOutputStream(maximumBytes).use { output ->
             GZIPOutputStream(output).use { gzip ->
                 gzip.write(bytes)
             }
             output.toByteArray()
         }
+
+    internal fun requireDatabaseBlobSize(byteCount: Long) {
+        if (byteCount > maxDatabaseBlobBytes) {
+            throw DatabaseSizeLimitException("The Clipman database exceeds the 272 MiB container size limit.")
+        }
+    }
+
+    internal fun requireSerializedJsonSize(byteCount: Long) {
+        if (byteCount > maxDecompressedDatabaseBytes) {
+            throw DatabaseExpansionLimitException(
+                "The Clipman database exceeds the 256 MiB decompressed size limit."
+            )
+        }
+    }
+
+    internal fun readDatabaseBlob(
+        input: InputStream,
+        declaredLength: Long = -1L,
+        maximumBytes: Int = maxDatabaseBlobBytes
+    ): ByteArray {
+        require(maximumBytes >= 0) { "The database read limit cannot be negative." }
+        if (declaredLength > maximumBytes.toLong()) {
+            throw DatabaseSizeLimitException("The Clipman database exceeds the 272 MiB container size limit.")
+        }
+
+        val initialCapacity = when {
+            declaredLength in 0..maximumBytes.toLong() -> declaredLength.toInt()
+            else -> minOf(maximumBytes, 64 * 1024)
+        }
+        val output = ByteArrayOutputStream(initialCapacity)
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            if (count == 0) continue
+            total += count.toLong()
+            if (total > maximumBytes.toLong()) {
+                throw DatabaseSizeLimitException("The Clipman database exceeds the 272 MiB container size limit.")
+            }
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
+    }
 
     private fun randomBytes(length: Int): ByteArray {
         val bytes = ByteArray(length)
@@ -144,6 +234,30 @@ object ClipDatabaseFile {
     }
 
     private data class KeyPair(val encryptionKey: ByteArray, val macKey: ByteArray)
+
+    private class SizeLimitedByteArrayOutputStream(private val maximumBytes: Int) : ByteArrayOutputStream() {
+        override fun write(value: Int) {
+            requireCapacity(1)
+            super.write(value)
+        }
+
+        override fun write(bytes: ByteArray, offset: Int, length: Int) {
+            requireCapacity(length)
+            super.write(bytes, offset, length)
+        }
+
+        private fun requireCapacity(additionalBytes: Int) {
+            if (count.toLong() + additionalBytes > maximumBytes) {
+                throw DatabaseSizeLimitException("The Clipman database exceeds the 272 MiB container size limit.")
+            }
+        }
+    }
+
+    private const val CipherBlockBytes = 16
 }
 
 class DatabasePasswordRequiredException(message: String) : Exception(message)
+
+class DatabaseExpansionLimitException(message: String) : IllegalArgumentException(message)
+
+class DatabaseSizeLimitException(message: String) : IllegalArgumentException(message)

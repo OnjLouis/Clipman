@@ -58,11 +58,13 @@
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true />
     <key>ClipmanBuildStampUtcMs</key>
-    <string>1785483898828</string>
+    <string>1785702468630</string>
     <key>LSRequiresIPhoneOS</key>
     <true />
     <key>NSFaceIDUsageDescription</key>
     <string>Clipman uses Face ID to protect access to clipboard history stored on this device.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Clipman saves an image entry to your photo library only when you choose Save to Photos.</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false />
     <key>NSLocalNetworkUsageDescription</key>

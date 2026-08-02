@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/clipdb"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/platform"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/server"
 )
@@ -22,7 +23,7 @@ type Config struct {
 }
 
 func Default() Config {
-	return Config{Renderer: "line", DefaultKind: "history", PasswordMode: "prompt", Limits: Limits{MaxBlobBytes: 64 << 20, MaxJSONBytes: 256 << 20, MaxEntries: 100000, MaxTextBytes: 64 << 20}}
+	return Config{Renderer: "line", DefaultKind: "history", PasswordMode: "prompt", Limits: Limits{MaxBlobBytes: clipdb.DefaultMaxBlobBytes, MaxJSONBytes: clipdb.DefaultMaxJSONBytes, MaxEntries: 100000, MaxTextBytes: 64 << 20}}
 }
 
 func Load(path string) (Config, error) {
@@ -59,6 +60,9 @@ func Load(path string) (Config, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return result, err
+	}
+	if result.Limits.MaxBlobBytes == 64<<20 {
+		result.Limits.MaxBlobBytes = clipdb.DefaultMaxBlobBytes
 	}
 	if err := Validate(result); err != nil {
 		return result, err
@@ -161,8 +165,8 @@ func Validate(value Config) error {
 		name       string
 		value, max int64
 	}{
-		{"max_blob_bytes", value.Limits.MaxBlobBytes, 1 << 30},
-		{"max_json_bytes", value.Limits.MaxJSONBytes, 2 << 30},
+		{"max_blob_bytes", value.Limits.MaxBlobBytes, clipdb.DefaultMaxBlobBytes},
+		{"max_json_bytes", value.Limits.MaxJSONBytes, clipdb.DefaultMaxJSONBytes},
 		{"max_entries", value.Limits.MaxEntries, 1000000},
 		{"max_text_bytes", value.Limits.MaxTextBytes, 256 << 20},
 	}

@@ -24,7 +24,7 @@ var compressedMagic = []byte("CLIPDB1")
 var encryptedMagic = []byte("CLIPDB2")
 
 const (
-	DefaultMaxBlobBytes = 64 << 20
+	DefaultMaxBlobBytes = 272 << 20
 	DefaultMaxJSONBytes = 256 << 20
 	DefaultMaxEntries   = 100000
 	DefaultMaxTextBytes = 64 << 20
@@ -103,21 +103,7 @@ func DecodeFileHistory(blob []byte, password string, limits Limits) (model.FileD
 }
 
 func decodeJSON(blob []byte, password string, limits Limits) ([]byte, Limits, error) {
-	if limits.MaxBlobBytes <= 0 {
-		limits.MaxBlobBytes = DefaultMaxBlobBytes
-	}
-	if limits.MaxJSONBytes <= 0 {
-		limits.MaxJSONBytes = DefaultMaxJSONBytes
-	}
-	if limits.MaxEntries <= 0 {
-		limits.MaxEntries = DefaultMaxEntries
-	}
-	if limits.MaxTextBytes <= 0 {
-		limits.MaxTextBytes = DefaultMaxTextBytes
-	}
-	if limits.MaxJSONDepth <= 0 {
-		limits.MaxJSONDepth = DefaultMaxJSONDepth
-	}
+	limits = normalizedLimits(limits)
 	if int64(len(blob)) > limits.MaxBlobBytes {
 		return nil, limits, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
 	}
@@ -155,21 +141,41 @@ func Encode(database model.Database, password string, existing []byte) ([]byte, 
 	return encodeJSON(database, password, existing)
 }
 
+func EncodeWithLimits(database model.Database, password string, existing []byte, limits Limits) ([]byte, error) {
+	return encodeJSONWithLimits(database, password, existing, limits)
+}
+
 func EncodeFileHistory(database model.FileDatabase, password string, existing []byte) ([]byte, error) {
 	return encodeJSON(database, password, existing)
 }
 
+func EncodeFileHistoryWithLimits(database model.FileDatabase, password string, existing []byte, limits Limits) ([]byte, error) {
+	return encodeJSONWithLimits(database, password, existing, limits)
+}
+
 func encodeJSON(value any, password string, existing []byte) ([]byte, error) {
+	return encodeJSONWithLimits(value, password, existing, DefaultLimits())
+}
+
+func encodeJSONWithLimits(value any, password string, existing []byte, limits Limits) ([]byte, error) {
+	limits = normalizedLimits(limits)
 	jsonBytes, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(jsonBytes)) > limits.MaxJSONBytes {
+		return nil, fmt.Errorf("database JSON exceeds %d-byte limit", limits.MaxJSONBytes)
 	}
 	compressed, err := gzipBytes(jsonBytes)
 	if err != nil {
 		return nil, err
 	}
 	if password == "" {
-		return append(append([]byte(nil), compressedMagic...), compressed...), nil
+		out := append(append([]byte(nil), compressedMagic...), compressed...)
+		if int64(len(out)) > limits.MaxBlobBytes {
+			return nil, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
+		}
+		return out, nil
 	}
 	var salt []byte
 	if len(existing) >= len(encryptedMagic)+1+16 && bytes.HasPrefix(existing, encryptedMagic) && existing[len(encryptedMagic)] == 1 {
@@ -202,7 +208,29 @@ func encodeJSON(value any, password string, existing []byte) ([]byte, error) {
 	mac := hmac.New(sha256.New, macKey)
 	_, _ = mac.Write(out)
 	out = append(out, mac.Sum(nil)...)
+	if int64(len(out)) > limits.MaxBlobBytes {
+		return nil, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
+	}
 	return out, nil
+}
+
+func normalizedLimits(limits Limits) Limits {
+	if limits.MaxBlobBytes <= 0 || limits.MaxBlobBytes > DefaultMaxBlobBytes {
+		limits.MaxBlobBytes = DefaultMaxBlobBytes
+	}
+	if limits.MaxJSONBytes <= 0 || limits.MaxJSONBytes > DefaultMaxJSONBytes {
+		limits.MaxJSONBytes = DefaultMaxJSONBytes
+	}
+	if limits.MaxEntries <= 0 {
+		limits.MaxEntries = DefaultMaxEntries
+	}
+	if limits.MaxTextBytes <= 0 {
+		limits.MaxTextBytes = DefaultMaxTextBytes
+	}
+	if limits.MaxJSONDepth <= 0 {
+		limits.MaxJSONDepth = DefaultMaxJSONDepth
+	}
+	return limits
 }
 
 func decrypt(blob []byte, password string) ([]byte, error) {

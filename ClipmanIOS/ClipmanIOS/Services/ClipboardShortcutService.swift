@@ -15,13 +15,31 @@ enum ClipboardShortcutService {
         guard await authenticateIfNeeded(settings, reason: "Add the current clipboard to Clipman.") else {
             return ClipboardShortcutOutcome(succeeded: false, message: "Clipman was not unlocked.")
         }
-        guard let payload = MobileRichTextClipboard.readCurrent() else {
-            return failure("The clipboard does not contain text.", settings: settings)
+        let includeImages = settings.richTextEnabled && settings.includeImagesInRichText
+        guard let payload = MobileRichTextClipboard.readCurrent(includeImages: includeImages) else {
+            return failure(includeImages ? "The clipboard does not contain supported text or an image." : "The clipboard does not contain text.", settings: settings)
+        }
+        if let importError = payload.importError {
+            return failure(importError, settings: settings)
         }
 
         do {
             let existing = try await currentDatabase(settings: settings)
             let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                return failure("The clipboard does not contain text.", settings: settings)
+            }
+            if let image = payload.embeddedImage {
+                guard includeImages else {
+                    return failure("Image history is off. Enable Rich Text history and Include images in Settings.", settings: settings)
+                }
+                let replacedBytes = existing.Entries.first(where: { $0.Text == text })
+                    .flatMap { EmbeddedImageCodec.recognize($0.RichText)?.data.count } ?? 0
+                let projected = EmbeddedImageCodec.totalStoredBytes(in: existing) - replacedBytes + image.data.count
+                guard projected <= EmbeddedImageCodec.totalDatabaseBudget else {
+                    return failure("Image not added. Embedded images have reached Clipman's 8 MiB history limit.", settings: settings)
+                }
+            }
             let alreadyExists = existing.Entries.contains { $0.Text == text }
             let updated = SyncConflictResolver.addText(
                 database: existing,
@@ -30,9 +48,12 @@ enum ClipboardShortcutService {
                 richText: settings.richTextEnabled ? payload.richText : nil
             )
             try await persist(updated, settings: settings)
-            let message = alreadyExists
-                ? "The clipboard text already exists in Clipman history."
-                : "Clipboard text added to Clipman."
+            let message: String
+            if payload.embeddedImage != nil {
+                message = alreadyExists ? "The image already exists in Clipman history." : "Image added to Clipman Rich Text history."
+            } else {
+                message = alreadyExists ? "The clipboard text already exists in Clipman history." : "Clipboard text added to Clipman."
+            }
             postCompletion(message)
             return ClipboardShortcutOutcome(succeeded: true, message: message)
         } catch {

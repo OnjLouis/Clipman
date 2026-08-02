@@ -159,13 +159,38 @@ def remove_path(path: Path) -> None:
         path.unlink()
 
 
-def restore_program_files(app_dir: Path, helper: Path, launcher: Path, service_file: Path, backup: Path) -> None:
-    for path in (app_dir, helper, launcher, service_file):
+def service_artifact_paths(service_file: Path, init_system: str = "") -> List[Path]:
+    manager = (init_system or "").strip().lower()
+    if not manager:
+        manager = "runit" if service_file.is_dir() else "systemd"
+    base_name = service_file.name[:-8] if service_file.name.endswith(".service") else service_file.name
+    if manager == "runit":
+        return [service_file, service_file.parent / f"{base_name}-update"]
+    if manager == "systemd":
+        return [
+            service_file,
+            service_file.parent / f"{base_name}-update.service",
+            service_file.parent / f"{base_name}-update.timer",
+        ]
+    return [service_file]
+
+
+def restore_program_files(
+    app_dir: Path,
+    helper: Path,
+    launcher: Path,
+    service_file: Path,
+    backup: Path,
+    init_system: str = "",
+) -> None:
+    service_paths = service_artifact_paths(service_file, init_system)
+    for path in (app_dir, helper, launcher, *service_paths):
         remove_path(path)
     copy_path(backup / "app", app_dir)
     copy_path(backup / "clipmanserver", helper)
     copy_path(backup / "clipman-server", launcher)
-    copy_path(backup / "clipman-server.service", service_file)
+    for path in service_paths:
+        copy_path(backup / "services" / path.name, path)
 
 
 def snapshot_managed_program_files(app_dir: Path) -> Dict[Path, Optional[Tuple[bytes, int, int, int]]]:
@@ -415,6 +440,7 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
     bin_dir = Path(args.bin_dir).expanduser().resolve()
     config_file = Path(args.config).expanduser().resolve()
     service_file = Path(args.service_file).expanduser().resolve()
+    init_system = str(getattr(args, "init_system", "") or os.environ.get("CLIPMAN_SERVER_INIT_SYSTEM", "")).strip().lower()
     helper_path = getattr(args, "helper_path", None)
     helper = Path(helper_path).expanduser().resolve() if helper_path else bin_dir / "clipmanserver"
     launcher = bin_dir / "clipman-server"
@@ -433,7 +459,8 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
             copy_path(app_dir, backup / "app")
             copy_path(helper, backup / "clipmanserver")
             copy_path(launcher, backup / "clipman-server")
-            copy_path(service_file, backup / "clipman-server.service")
+            for path in service_artifact_paths(service_file, init_system):
+                copy_path(path, backup / "services" / path.name)
 
         run([str(helper), "stop"], check=False)
         try:
@@ -448,6 +475,8 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
                         "CLIPMAN_SERVER_CONFIG_DIR": str(config_file.parent),
                     }
                 )
+                if init_system in {"systemd", "runit"}:
+                    environment["CLIPMAN_SERVER_INIT_SYSTEM"] = init_system
                 run(["sh", str(package_root / "Linux" / "install-clipman-server.sh")], env=environment)
             run([str(helper), "start"])
             wait_for_health(config_file)
@@ -457,7 +486,7 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
             if managed_snapshots is not None:
                 restore_managed_program_files(managed_snapshots)
             else:
-                restore_program_files(app_dir, helper, launcher, service_file, backup)
+                restore_program_files(app_dir, helper, launcher, service_file, backup, init_system)
             run([str(helper), "start"], check=False)
             raise RuntimeError(f"{error}\nService status before rollback:\n{diagnostics}") from error
     print(f"Clipman Server updated to {version} and passed its health check.")
@@ -476,6 +505,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bin-dir", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--service-file", required=True)
+    parser.add_argument("--init-system", choices=("systemd", "runit", "none"), default="")
     parser.add_argument("--helper-path", help="Installed management helper used to stop, start, and inspect the server.")
     parser.add_argument("--launcher-path", help="Installed server launcher used for a listening-host change.")
     parser.add_argument(

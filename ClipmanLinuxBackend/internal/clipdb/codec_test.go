@@ -109,6 +109,63 @@ func TestDecodeLimitsDecompression(t *testing.T) {
 	}
 }
 
+func TestEncodeRejectsJSONThatWouldExceedReadLimit(t *testing.T) {
+	database := model.NewDatabase(1)
+	database.Entries = []model.Entry{{ID: "1", Text: string(bytes.Repeat([]byte("x"), 512))}}
+	limits := DefaultLimits()
+	limits.MaxJSONBytes = 128
+	if _, err := encodeJSONWithLimits(database, "", nil, limits); err == nil {
+		t.Fatal("encoder saved JSON larger than its read limit")
+	}
+}
+
+func TestCodecBlobLimitCountsEntireCompressedBlob(t *testing.T) {
+	database := model.NewDatabase(1)
+	database.Entries = []model.Entry{{ID: "1", Text: "one"}}
+	blob, err := Encode(database, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := DefaultLimits()
+	limits.MaxBlobBytes = int64(len(blob))
+	if _, err := encodeJSONWithLimits(database, "", nil, limits); err != nil {
+		t.Fatalf("encoder rejected a blob exactly at the total limit: %v", err)
+	}
+	if _, err := Decode(blob, "", limits); err != nil {
+		t.Fatalf("decoder rejected a blob exactly at the total limit: %v", err)
+	}
+	limits.MaxBlobBytes--
+	if _, err := encodeJSONWithLimits(database, "", nil, limits); err == nil {
+		t.Fatal("encoder ignored the magic header when enforcing the total blob limit")
+	}
+	if _, err := Decode(blob, "", limits); err == nil {
+		t.Fatal("decoder ignored the magic header when enforcing the total blob limit")
+	}
+}
+
+func TestEncodeRejectsEncryptedBlobLargerThanReadLimit(t *testing.T) {
+	database := model.NewDatabase(1)
+	database.Entries = []model.Entry{{ID: "1", Text: "one"}}
+	limits := DefaultLimits()
+	limits.MaxBlobBytes = 64
+	if _, err := encodeJSONWithLimits(database, "secret", nil, limits); err == nil {
+		t.Fatal("encoder saved an encrypted blob larger than its read limit")
+	}
+}
+
+func TestCodecHardLimitsCannotBeRaised(t *testing.T) {
+	if DefaultMaxBlobBytes != 272<<20 || DefaultMaxJSONBytes != 256<<20 {
+		t.Fatalf("unexpected client compatibility limits: blob=%d JSON=%d", DefaultMaxBlobBytes, DefaultMaxJSONBytes)
+	}
+	limits := normalizedLimits(Limits{
+		MaxBlobBytes: DefaultMaxBlobBytes + 1,
+		MaxJSONBytes: DefaultMaxJSONBytes + 1,
+	})
+	if limits.MaxBlobBytes != DefaultMaxBlobBytes || limits.MaxJSONBytes != DefaultMaxJSONBytes {
+		t.Fatalf("hard codec limits were raised: %+v", limits)
+	}
+}
+
 func TestDecodeRejectsTooManyEntries(t *testing.T) {
 	database := model.NewDatabase(1)
 	database.Entries = []model.Entry{{ID: "1", Text: "one"}, {ID: "2", Text: "two"}}

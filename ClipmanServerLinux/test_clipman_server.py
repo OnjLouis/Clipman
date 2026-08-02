@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import http.server
 import json
 import io
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -20,6 +23,46 @@ import clipman_server
 
 
 class ServerStartupTests(unittest.TestCase):
+    def write_test_settings(self, root: Path) -> tuple[Path, dict[str, object]]:
+        config = root / "settings.json"
+        settings, _ = clipman_server.load_settings(config)
+        settings["DatabasePath"] = str(root / "data" / "clipman-history.clipdb")
+        settings["LogPath"] = str(root / "logs" / "clipman-server.log")
+        clipman_server.save_settings(config, settings)
+        return config, settings
+
+    def start_lock_holder(self, root: Path) -> subprocess.Popen[str]:
+        script = (
+            "from pathlib import Path\n"
+            "import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import clipman_server\n"
+            "with clipman_server.DataRootLock(Path(sys.argv[2])):\n"
+            "    print('locked', flush=True)\n"
+            "    sys.stdin.readline()\n"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-u", "-c", script, str(Path(__file__).resolve().parent), str(root)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert process.stdout is not None
+        ready = process.stdout.readline().strip()
+        if ready != "locked":
+            _stdout, stderr = process.communicate(timeout=5)
+            self.fail(f"Lock holder did not start: {stderr}")
+        return process
+
+    def stop_lock_holder(self, process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        assert process.stdin is not None
+        process.stdin.write("\n")
+        process.stdin.flush()
+        process.communicate(timeout=5)
+
     def test_docker_entrypoint_writes_connection_files_then_runs_server(self) -> None:
         entrypoint = (Path(__file__).resolve().parent.parent / "ClipmanServerDocker" / "docker-entrypoint.sh").read_text(encoding="utf-8")
         write_command = 'python3 "$@" --write-connection-info >/dev/null'
@@ -33,11 +76,139 @@ class ServerStartupTests(unittest.TestCase):
 
     def test_new_settings_use_persistent_port_range(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
-            settings, created = clipman_server.load_settings(Path(folder) / "settings.json")
+            config = Path(folder) / "settings.json"
+            settings, created = clipman_server.load_settings(config)
+            config_exists = config.is_file()
 
         self.assertTrue(created)
+        self.assertTrue(config_exists)
         self.assertGreaterEqual(settings["Port"], clipman_server.SERVER_PORT_MIN)
         self.assertLessEqual(settings["Port"], clipman_server.SERVER_PORT_MAX)
+
+    def test_sparse_existing_settings_use_in_memory_defaults_without_save(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "settings.json"
+            original = b'{\n  "Host": "127.0.0.1"\n}\n'
+            config.write_bytes(original)
+            old_ns = 946684800 * 1_000_000_000
+            os.utime(config, ns=(old_ns, old_ns))
+            config.chmod(0o400)
+            before_hash = hashlib.sha256(original).hexdigest()
+            before_mtime = config.stat().st_mtime_ns
+            try:
+                settings, created = clipman_server.load_settings(config)
+
+                self.assertFalse(created)
+                self.assertIn("AuthToken", settings)
+                self.assertIn("DatabasePath", settings)
+                self.assertIn("MaxDatabaseBytes", settings)
+                self.assertEqual(original, config.read_bytes())
+                self.assertEqual(before_hash, hashlib.sha256(config.read_bytes()).hexdigest())
+                self.assertEqual(before_mtime, config.stat().st_mtime_ns)
+            finally:
+                config.chmod(0o600)
+
+    def test_plain_start_keeps_existing_settings_bytes_and_mtime(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root / "settings.json"
+            data_root = root / "data"
+            original = (
+                "{\n"
+                '  "Host": "127.0.0.1",\n'
+                f'  "DatabasePath": {json.dumps(str(data_root / "clipman-history.clipdb"))},\n'
+                f'  "LogPath": {json.dumps(str(root / "logs" / "clipman-server.log"))}\n'
+                "}\n"
+            ).encode("utf-8")
+            config.write_bytes(original)
+            old_ns = 946684800 * 1_000_000_000
+            os.utime(config, ns=(old_ns, old_ns))
+            config.chmod(0o400)
+            before_hash = hashlib.sha256(original).hexdigest()
+            before_mtime = config.stat().st_mtime_ns
+            error_output = io.StringIO()
+            args = ["clipman_server.py", "--config", str(config)]
+
+            try:
+                with mock.patch("sys.argv", args), \
+                     mock.patch.object(clipman_server, "ThreadingServer", side_effect=OSError(10013, "Permission denied")), \
+                     mock.patch.object(clipman_server, "configure_logging"), \
+                     redirect_stderr(error_output):
+                    result = clipman_server.main()
+
+                self.assertEqual(clipman_server.BIND_ERROR_EXIT_CODE, result)
+                self.assertEqual(original, config.read_bytes())
+                self.assertEqual(before_hash, hashlib.sha256(config.read_bytes()).hexdigest())
+                self.assertEqual(before_mtime, config.stat().st_mtime_ns)
+            finally:
+                config.chmod(0o600)
+            with clipman_server.DataRootLock(data_root):
+                pass
+
+    def test_explicit_command_line_mutation_is_saved(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config, _settings = self.write_test_settings(root)
+            before_hash = hashlib.sha256(config.read_bytes()).hexdigest()
+            args = [
+                "clipman_server.py",
+                "--config",
+                str(config),
+                "--port",
+                "34567",
+                "--write-connection-info",
+            ]
+
+            with mock.patch("sys.argv", args), \
+                 mock.patch.object(clipman_server, "configure_logging"), \
+                 redirect_stdout(io.StringIO()):
+                result = clipman_server.main()
+
+            saved = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual(0, result)
+            self.assertEqual(34567, saved["Port"])
+            self.assertNotEqual(before_hash, hashlib.sha256(config.read_bytes()).hexdigest())
+
+    def test_server_start_refuses_locked_root_and_allows_other_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            locked_root = root / "shared-data"
+            other_root = root / "other-data"
+            holder = self.start_lock_holder(locked_root)
+            try:
+                config, settings = self.write_test_settings(root / "second-server")
+                settings["DatabasePath"] = str(locked_root / "clipman-history.clipdb")
+                settings["AuthToken"] = "must-not-appear-in-errors"
+                clipman_server.save_settings(config, settings)
+                error_output = io.StringIO()
+                args = ["clipman_server.py", "--config", str(config)]
+                with mock.patch("sys.argv", args), \
+                     mock.patch.object(clipman_server, "configure_logging"), \
+                     redirect_stderr(error_output):
+                    result = clipman_server.main()
+
+                message = error_output.getvalue()
+                self.assertEqual(clipman_server.DATA_ROOT_LOCK_EXIT_CODE, result)
+                self.assertIn("already using the data root", message)
+                self.assertNotIn("must-not-appear-in-errors", message)
+                with clipman_server.DataRootLock(other_root):
+                    pass
+            finally:
+                self.stop_lock_holder(holder)
+
+            with clipman_server.DataRootLock(locked_root):
+                pass
+            self.assertEqual(b"0\n", (locked_root / ".clipman-server.lock").read_bytes())
+
+    def test_killed_lock_holder_does_not_block_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / "shared-data"
+            holder = self.start_lock_holder(root)
+            holder.kill()
+            holder.communicate(timeout=5)
+
+            with clipman_server.DataRootLock(root):
+                pass
 
     def test_suggest_port_prints_available_persistent_port(self) -> None:
         output = io.StringIO()
@@ -255,7 +426,7 @@ class CertificateTests(unittest.TestCase):
             self.assertIn("clipman-server-ca.crt", response.getheader("Content-Disposition"))
             self.assertEqual("no-store", response.getheader("Cache-Control"))
             self.assertEqual(server.certificate_data, data)
-            self.assertTrue(server.downloaded.is_set())
+            self.assertTrue(server.downloaded.wait(1))
             connection.close()
         finally:
             server.shutdown()
@@ -343,7 +514,7 @@ class ConditionalCreateTests(unittest.TestCase):
 
         self.assertEqual(200, response.status)
         self.assertTrue(response.getheader("X-Clipman-Revision", ""))
-        self.assertIn(b'"Version": "2.4.3"', data)
+        self.assertIn(b'"Version": "2.5.0"', data)
         database = clipman_server.database_path(self.settings, database_id)
         self.assertEqual(b"expect-continue", database.read_bytes())
 

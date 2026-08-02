@@ -12,7 +12,6 @@ data class CloudBackupOptions(
 object CloudHistoryBackup {
     const val fileName = "Clipman History.clipdb"
     private const val mimeType = "application/octet-stream"
-    private const val maximumBackupBytes = 128 * 1024 * 1024
 
     fun write(context: Context, bytes: ByteArray, options: CloudBackupOptions): String? {
         if (!options.enabled) return null
@@ -36,17 +35,7 @@ object CloudHistoryBackup {
     fun read(context: Context, uri: Uri, password: String): ClipDatabase {
         require(password.isNotEmpty()) { "Set and save a history password before restoring a cloud backup." }
         val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-            val output = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(16 * 1024)
-            var total = 0
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                total += count
-                require(total <= maximumBackupBytes) { "This history backup is too large." }
-                output.write(buffer, 0, count)
-            }
-            output.toByteArray()
+            ClipDatabaseFile.readDatabaseBlob(input)
         } ?: error("The selected history backup could not be read.")
         require(ClipDatabaseFile.isEncrypted(bytes)) {
             "Cloud history backups must be encrypted with a nonblank history password."

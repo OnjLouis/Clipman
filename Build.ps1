@@ -89,6 +89,7 @@ $references = @(
     'System.IO.Compression.FileSystem.dll',
     'System.Security.dll',
     'System.Windows.Forms.dll',
+    'System.Web.dll',
     'System.Web.Extensions.dll'
 ) -join ','
 
@@ -129,11 +130,21 @@ if (!$DesktopOnly) {
     [IO.File]::WriteAllText($iOSInfoPath, $iOSInfoText, [Text.UTF8Encoding]::new($false))
 }
 try {
+    $iOSInfoReaderSettings = [Xml.XmlReaderSettings]::new()
+    $iOSInfoReaderSettings.DtdProcessing = [Xml.DtdProcessing]::Ignore
+    $iOSInfoReaderSettings.XmlResolver = $null
+    $iOSInfoReader = [Xml.XmlReader]::Create($iOSInfoPath, $iOSInfoReaderSettings)
     $validatedIOSInfo = [Xml.XmlDocument]::new()
-    $validatedIOSInfo.Load($iOSInfoPath)
+    $validatedIOSInfo.XmlResolver = $null
+    $validatedIOSInfo.Load($iOSInfoReader)
 }
 catch {
     throw "The updated iOS Info.plist is invalid: $($_.Exception.Message)"
+}
+finally {
+    if ($null -ne $iOSInfoReader) {
+        $iOSInfoReader.Dispose()
+    }
 }
 
 $sources = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' | Sort-Object Name | ForEach-Object { $_.FullName }

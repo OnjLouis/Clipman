@@ -62,7 +62,7 @@ func (e *Engine) Mutate(ctx context.Context, mutation Mutation) (any, error) {
 			return result, nil
 		}
 		merge.Normalize(&state.Database, mutationTime)
-		encoded, err := clipdb.Encode(state.Database, e.Password, state.Blob)
+		encoded, err := clipdb.EncodeWithLimits(state.Database, e.Password, state.Blob, e.Limits)
 		if err != nil {
 			return nil, err
 		}

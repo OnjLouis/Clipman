@@ -21,6 +21,7 @@ func TestSectionClassification(t *testing.T) {
 		"example.org/path":               "links",
 		"See https://example.com":        "text",
 		"two words":                      "text",
+		"https://example.com/" + strings.Repeat("a", websiteTitleURLLimit): "text",
 	}
 	for input, want := range tests {
 		if got := section(input); got != want {
@@ -245,5 +246,25 @@ func TestConfiguredSessionMutationRoundTrip(t *testing.T) {
 	}
 	if len(s.database.Entries) != 0 || len(s.database.Deleted) != 3 {
 		t.Fatalf("bulk deletion result: entries=%d tombstones=%d", len(s.database.Entries), len(s.database.Deleted))
+	}
+
+	if _, err = s.put(json.RawMessage(`{"text":"https://example.com/article","name":"","group":"","pinned":false,"is_template":false,"duplicate":"move"}`)); err != nil {
+		t.Fatalf("put unnamed link: %v", err)
+	}
+	linkID := s.database.Entries[0].ID
+	titleRequest, _ := json.Marshal(map[string]string{
+		"id": linkID, "expected_text": "https://example.com/article", "name": "Example article",
+	})
+	if _, err = s.setNameIfBlank(titleRequest); err != nil {
+		t.Fatalf("set blank link name: %v", err)
+	}
+	if s.database.Entries[0].Name != "Example article" {
+		t.Fatalf("website title name was not persisted: %#v", s.database.Entries[0])
+	}
+	secondTitleRequest, _ := json.Marshal(map[string]string{
+		"id": linkID, "expected_text": "https://example.com/article", "name": "Overwritten title",
+	})
+	if _, err = s.setNameIfBlank(secondTitleRequest); err == nil {
+		t.Fatal("website title overwrote a name already supplied by another operation")
 	}
 }

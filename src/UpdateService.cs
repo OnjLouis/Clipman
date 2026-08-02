@@ -28,13 +28,13 @@ namespace Clipman
                     !Version.TryParse(currentVersion, out current) ||
                     !Version.TryParse(latestVersionText, out remote))
                 {
-                    MessageBox.Show(owner, "Could not read the latest Clipman release version.", "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(owner, "Could not read the latest Clipman release version.", "Clipman Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 
                 if (remote <= current)
                 {
-                    MessageBox.Show(owner, "Clipman is up to date. Current version: " + currentVersion + ".", "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(owner, "Clipman is up to date. Current version: " + currentVersion + ".", "Clipman Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 
@@ -42,11 +42,11 @@ namespace Clipman
             }
             catch (WebException ex)
             {
-                MessageBox.Show(owner, "Could not check for updates. GitHub releases may not exist yet, or the network request failed." + Environment.NewLine + Environment.NewLine + ex.Message, "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(owner, "Could not check for updates. GitHub releases may not exist yet, or the network request failed." + Environment.NewLine + Environment.NewLine + ex.Message, "Clipman Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(owner, ex.Message, "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(owner, ex.Message, "Clipman Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -185,7 +185,7 @@ namespace Clipman
 
             using (var dialog = new Form())
             {
-                dialog.Text = "Update available";
+                dialog.Text = "Clipman Update";
                 dialog.StartPosition = FormStartPosition.CenterParent;
                 dialog.Width = 720;
                 dialog.Height = 520;
@@ -266,7 +266,7 @@ namespace Clipman
                 MessageBox.Show(
                         owner,
                         "Clipman will close, download the update, replace the files in this folder, and restart. Your Settings folder will be kept." + Environment.NewLine + Environment.NewLine + "Do you want to continue?",
-                        "Download and install",
+                        "Clipman Update",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Question,
                         MessageBoxDefaultButton.Button2) != DialogResult.Yes)
@@ -302,7 +302,7 @@ namespace Clipman
             catch (Exception ex)
             {
                 if (silent) return;
-                MessageBox.Show(owner, ex.Message, "Could not start updater", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(owner, ex.Message, "Clipman Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

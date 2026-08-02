@@ -1,6 +1,41 @@
 import CryptoKit
 import Foundation
 
+struct OptimisticEntryDeletion: Sendable {
+    let previousDatabase: ClipDatabase
+    let optimisticDatabase: ClipDatabase
+
+    init?(database: ClipDatabase, entryID: String, machineName: String) {
+        guard let entryIndex = database.Entries.firstIndex(where: { $0.Id == entryID }) else { return nil }
+        previousDatabase = database
+        var updated = database
+        let entry = updated.Entries.remove(at: entryIndex)
+        let now = TimeUtil.nowUnixMs()
+        let marker = DeletedClipEntry(
+            Id: entry.Id,
+            TextHash: SyncConflictResolver.textHash(entry.Text),
+            DeletedUnixMs: now,
+            SourceMachine: machineName
+        )
+        if let markerIndex = updated.DeletedEntries.firstIndex(where: { $0.Id == entry.Id }) {
+            updated.DeletedEntries[markerIndex] = marker
+        } else {
+            updated.DeletedEntries.append(marker)
+        }
+        updated.Version = max(1, updated.Version)
+        updated.UpdatedUnixMs = now
+        for index in updated.Entries.indices {
+            updated.Entries[index].ManualOrder = Int64(index + 1)
+        }
+        optimisticDatabase = updated
+    }
+
+    func restoredDatabase(ifCurrentMatches current: ClipDatabase) -> ClipDatabase? {
+        guard SyncConflictResolver.hasSameContent(current, optimisticDatabase) else { return nil }
+        return previousDatabase
+    }
+}
+
 enum SyncConflictResolver {
     static func hasSameContent(_ left: ClipDatabase, _ right: ClipDatabase) -> Bool {
         left.Entries == right.Entries && left.DeletedEntries == right.DeletedEntries

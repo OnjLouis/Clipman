@@ -36,7 +36,7 @@ type fileEventJSON struct {
 
 func (s *session) loadFileHistory(previousPassword ...string) error {
 	s.filePath = filepath.Join(filepath.Dir(s.configPath), safeDeviceName(s.cfg.Machine)+"-file-history.clipdb")
-	blob, err := platform.ReadPrivate(s.filePath)
+	blob, err := platform.ReadPrivateBounded(s.filePath, s.codecLimits().MaxBlobBytes)
 	if os.IsNotExist(err) {
 		s.fileDB = model.NewFileDatabase(time.Now().UnixMilli())
 		s.fileLoaded = true
@@ -45,11 +45,11 @@ func (s *session) loadFileHistory(previousPassword ...string) error {
 	if err != nil {
 		return err
 	}
-	database, err := clipdb.DecodeFileHistory(blob, s.password, s.engine.Limits)
+	database, err := clipdb.DecodeFileHistory(blob, s.password, s.codecLimits())
 	if err != nil && len(previousPassword) > 0 && previousPassword[0] != "" && previousPassword[0] != s.password {
-		database, err = clipdb.DecodeFileHistory(blob, previousPassword[0], s.engine.Limits)
+		database, err = clipdb.DecodeFileHistory(blob, previousPassword[0], s.codecLimits())
 		if err == nil {
-			rekeyed, encodeErr := clipdb.EncodeFileHistory(database, s.password, blob)
+			rekeyed, encodeErr := clipdb.EncodeFileHistoryWithLimits(database, s.password, blob, s.codecLimits())
 			if encodeErr != nil {
 				return encodeErr
 			}
@@ -72,15 +72,22 @@ func (s *session) saveFileHistory() error {
 		return errors.New("file history is not available")
 	}
 	s.fileDB.UpdatedUnixMs = time.Now().UnixMilli()
-	existing, err := os.ReadFile(s.filePath)
+	existing, err := platform.ReadPrivateBounded(s.filePath, s.codecLimits().MaxBlobBytes)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	blob, err := clipdb.EncodeFileHistory(s.fileDB, s.password, existing)
+	blob, err := clipdb.EncodeFileHistoryWithLimits(s.fileDB, s.password, existing, s.codecLimits())
 	if err != nil {
 		return err
 	}
 	return platform.SavePrivate(s.filePath, blob)
+}
+
+func (s *session) codecLimits() clipdb.Limits {
+	if s.engine == nil {
+		return clipdb.DefaultLimits()
+	}
+	return s.engine.Limits
 }
 
 func (s *session) addFileEvent(raw json.RawMessage) (any, error) {

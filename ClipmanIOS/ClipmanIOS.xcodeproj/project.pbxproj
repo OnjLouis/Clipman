@@ -7,14 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0185B2A16A035663AFE45D68 /* PendingSharedImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CCB3D15B8FB599156B1E20 /* PendingSharedImageStore.swift */; };
+		05EA2EAD81ABF61AD07F9704 /* PendingSharedImageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE80C6C473747E57E01F38BD /* PendingSharedImageStoreTests.swift */; };
 		06F7ECFE0C7AC99C48782BD3 /* ClipmanIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5920DDD96B393F506A33F30 /* ClipmanIOSApp.swift */; };
+		086BAA1E9EE5D69DFD7806E2 /* EmbeddedImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ACB54CFA7EECAFD185EE92D /* EmbeddedImageTests.swift */; };
+		0D9E71F12365D0E883798075 /* PendingSharedImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CCB3D15B8FB599156B1E20 /* PendingSharedImageStore.swift */; };
 		0F57F06D81A59E00DE56EDD6 /* ServerSettingsSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 721C35A41DED299959E74C8A /* ServerSettingsSanitizer.swift */; };
 		11F918FE112D3FCF183D6587 /* Gzip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93D166EC7141EE64B5371FD2 /* Gzip.swift */; };
 		13862ADA8F07D75AA2DEE6F9 /* remote.wav in Resources */ = {isa = PBXBuildFile; fileRef = B4692DDB07E68892AA422492 /* remote.wav */; };
+		17D24F4160AF41A3AEE92FD4 /* WebsiteTitleFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C3A7208086EFE0482CCD9C /* WebsiteTitleFetcher.swift */; };
+		1BAEBADFE1BDC253F23D88AC /* EmbeddedImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB3C049A1958230E5EAFCBCC /* EmbeddedImage.swift */; };
+		210E0E853E14D1545E4E9F9B /* EmbeddedImageActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2DD45D61DAC284441E87117 /* EmbeddedImageActionTests.swift */; };
 		27F6E1A23D45B312371BFEDC /* ClipmanAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E70064E80A3EF247968D286 /* ClipmanAppModel.swift */; };
 		2C4499D2744D363D0FDAA807 /* copy.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2B73540DCE1C118E33B75CAF /* copy.wav */; };
 		31DF1873E5EA0F7A2A225723 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 283C9770D01F5E67699D4EAC /* SettingsView.swift */; };
 		33522F9AEA675F6478D6ED15 /* ClipmanAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */; };
+		3644C1291732B31AE8044E12 /* DeletionUXTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706E33429FE88528D3BEAAE0 /* DeletionUXTests.swift */; };
+		3853E72967534A420918CBF6 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05CA47DBCD9B9B962169510E /* ShareViewController.swift */; };
 		3B2AEA8F73EDC017F8F34FAC /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */; };
 		40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */; };
 		49026C38259E970B438B4E54 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CD05FE0E19C7744ACFD87B4 /* Security.framework */; };
@@ -29,16 +38,21 @@
 		6A857283F950DB08ABE7CB53 /* CloudHistoryBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */; };
 		7E92FC7E32A65B8890DAA492 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 3EE36547BC3684AF103A3821 /* libz.tbd */; };
 		80DF3940EAE12616EAA0047D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642C84289DC631AC184C2C31 /* Models.swift */; };
+		811C3C8A52CA33E287A66E3D /* EmbeddedImageActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB3337F4B5D8DCE696C3B0F /* EmbeddedImageActions.swift */; };
+		907ECD326B3CCBAA44AD4DEC /* LinkDisplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20DAD07A69EEC91C4A73C6E6 /* LinkDisplayTests.swift */; };
 		9C4809F93BC5717D1C1645DD /* SyncConflictResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */; };
 		9CB65E177B9339DBD77296DE /* skip.wav in Resources */ = {isa = PBXBuildFile; fileRef = B93930D01A31ABF77524F78C /* skip.wav */; };
 		A8912F558B14C788063B7A9B /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 032F062DF28E39F5953D7824 /* RootView.swift */; };
 		AD65480F3E929702A805262F /* DatabaseWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3757E95599655BFEB3101654 /* DatabaseWorker.swift */; };
 		B247FCD5A811CC35140C9A58 /* exclude.wav in Resources */ = {isa = PBXBuildFile; fileRef = B2CD34934E3F13399B8433EE /* exclude.wav */; };
 		B361AA587CED2A97ABD2F636 /* ClipmanSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */; };
+		B5D1D758FCE7614E543A5108 /* LinkDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCE0C638D22648BD22C7867 /* LinkDisplay.swift */; };
 		B66FC9F132546C30E3E29127 /* EntryEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C075089BD6891E606C98F3 /* EntryEditView.swift */; };
 		C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */; };
+		C2341AB4F664244178963CC5 /* HistorySortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9330DEB559F71A2DF6CF2E1F /* HistorySortTests.swift */; };
 		C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02D9422349D165D345B5D71 /* KeychainStore.swift */; };
 		C676E48CA1A7CDAA51D4C9B5 /* EntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E9160FA444DB6E3A61314E /* EntryView.swift */; };
+		C92ECA74DBEDB66CF34E1FEF /* ClipmanShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5978B390B6A5DBF6049D600A /* ClipmanShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */; };
 		CA66F823CB2FBC5F09963CC6 /* ClipDatabaseFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */; };
 		DAEF726015B46A423C800015 /* ClipmanQuickActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00F18B48633E261F19EA0703 /* ClipmanQuickActions.swift */; };
@@ -50,35 +64,75 @@
 		FD5B299F7F13570E50D93B8D /* TipJarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFA70C5093FAAF9882B23D9 /* TipJarStore.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		367F9DA552D1AD6CDB175010 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A9CF6560C744B7E6000CD2F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6B733D235F1729AFCAFEBD77;
+			remoteInfo = ClipmanShareExtension;
+		};
+		F5738BF333A460C343155BF7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A9CF6560C744B7E6000CD2F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C44DC1B4AEA20F27D754E558;
+			remoteInfo = ClipmanIOS;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A9B193F53DC1E9BDEB94415D /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C92ECA74DBEDB66CF34E1FEF /* ClipmanShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		00F18B48633E261F19EA0703 /* ClipmanQuickActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanQuickActions.swift; sourceTree = "<group>"; };
 		02004FB0D767D5C8C6F4A4FB /* ClipmanIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ClipmanIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		032F062DF28E39F5953D7824 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDatabaseIdentity.swift; sourceTree = "<group>"; };
+		05CA47DBCD9B9B962169510E /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		15C075089BD6891E606C98F3 /* EntryEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEditView.swift; sourceTree = "<group>"; };
 		1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectionDocument.swift; sourceTree = "<group>"; };
 		1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStorageClient.swift; sourceTree = "<group>"; };
+		20DAD07A69EEC91C4A73C6E6 /* LinkDisplayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkDisplayTests.swift; sourceTree = "<group>"; };
 		283C9770D01F5E67699D4EAC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		2B73540DCE1C118E33B75CAF /* copy.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = copy.wav; sourceTree = "<group>"; };
 		2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudHistoryBackup.swift; sourceTree = "<group>"; };
 		32D231A3045AB33B818FACE0 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationService.swift; sourceTree = "<group>"; };
 		3757E95599655BFEB3101654 /* DatabaseWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseWorker.swift; sourceTree = "<group>"; };
+		39E4BCC43D5765330B2E45A2 /* ClipmanIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClipmanIOS.entitlements; sourceTree = "<group>"; };
 		3AFA70C5093FAAF9882B23D9 /* TipJarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarStore.swift; sourceTree = "<group>"; };
 		3EE36547BC3684AF103A3821 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
+		3FB3337F4B5D8DCE696C3B0F /* EmbeddedImageActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedImageActions.swift; sourceTree = "<group>"; };
 		547D70B9E063E942FA55D88D /* ConnectionShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionShareSheet.swift; sourceTree = "<group>"; };
+		5978B390B6A5DBF6049D600A /* ClipmanShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ClipmanShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncConflictResolver.swift; sourceTree = "<group>"; };
 		5E70064E80A3EF247968D286 /* ClipmanAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanAppModel.swift; sourceTree = "<group>"; };
 		60F380468EAD667D829F4D30 /* off.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = off.wav; sourceTree = "<group>"; };
 		642C84289DC631AC184C2C31 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		706E33429FE88528D3BEAAE0 /* DeletionUXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionUXTests.swift; sourceTree = "<group>"; };
 		70E9160FA444DB6E3A61314E /* EntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryView.swift; sourceTree = "<group>"; };
 		721C35A41DED299959E74C8A /* ServerSettingsSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsSanitizer.swift; sourceTree = "<group>"; };
 		73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipDatabaseFile.swift; sourceTree = "<group>"; };
+		75CCB3D15B8FB599156B1E20 /* PendingSharedImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSharedImageStore.swift; sourceTree = "<group>"; };
 		76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRichTextClipboard.swift; sourceTree = "<group>"; };
 		7CD05FE0E19C7744ACFD87B4 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		89C5029F5D137A6D4490F765 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		9330DEB559F71A2DF6CF2E1F /* HistorySortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySortTests.swift; sourceTree = "<group>"; };
 		93D166EC7141EE64B5371FD2 /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
 		98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileHistoryRepository.swift; sourceTree = "<group>"; };
+		9ACB54CFA7EECAFD185EE92D /* EmbeddedImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedImageTests.swift; sourceTree = "<group>"; };
 		9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanSettings.swift; sourceTree = "<group>"; };
 		9FF7A7A080F18D87A7A2A55F /* ClipmanIOS-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ClipmanIOS-Bridging-Header.h"; sourceTree = "<group>"; };
 		A7DBCAA25A35FD37F0B90E75 /* ClipboardShortcutService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardShortcutService.swift; sourceTree = "<group>"; };
@@ -87,13 +141,21 @@
 		B4692DDB07E68892AA422492 /* remote.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = remote.wav; sourceTree = "<group>"; };
 		B93930D01A31ABF77524F78C /* skip.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = skip.wav; sourceTree = "<group>"; };
 		C02D9422349D165D345B5D71 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		C897A28F494E2398E450EF72 /* ClipmanShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClipmanShareExtension.entitlements; sourceTree = "<group>"; };
 		C98DD96F176CD3DE6A07D271 /* SoundService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundService.swift; sourceTree = "<group>"; };
 		CAABFD55C652686EDC417F83 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		CB3C049A1958230E5EAFCBCC /* EmbeddedImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedImage.swift; sourceTree = "<group>"; };
+		CFF8D8C5ED8D543DEDFE7385 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		D2DD45D61DAC284441E87117 /* EmbeddedImageActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedImageActionTests.swift; sourceTree = "<group>"; };
 		D4195FBB5149532BA117A9B8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DE80C6C473747E57E01F38BD /* PendingSharedImageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSharedImageStoreTests.swift; sourceTree = "<group>"; };
 		E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanAppIntents.swift; sourceTree = "<group>"; };
 		E794D8E5ABCF25641147F7F3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		EE24A8535EA9BC2E20E5A203 /* BackupFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFolderPicker.swift; sourceTree = "<group>"; };
+		EFCE0C638D22648BD22C7867 /* LinkDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkDisplay.swift; sourceTree = "<group>"; };
+		F4C3A7208086EFE0482CCD9C /* WebsiteTitleFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteTitleFetcher.swift; sourceTree = "<group>"; };
 		F5920DDD96B393F506A33F30 /* ClipmanIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanIOSApp.swift; sourceTree = "<group>"; };
+		F65C86632F475E92A20913C8 /* ClipmanIOSTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ClipmanIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkExtractor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -129,6 +191,7 @@
 			isa = PBXGroup;
 			children = (
 				9FF7A7A080F18D87A7A2A55F /* ClipmanIOS-Bridging-Header.h */,
+				39E4BCC43D5765330B2E45A2 /* ClipmanIOS.entitlements */,
 				E794D8E5ABCF25641147F7F3 /* Info.plist */,
 			);
 			path = Support;
@@ -138,9 +201,25 @@
 			isa = PBXGroup;
 			children = (
 				293636768EFE3E58E33246E0 /* ClipmanIOS */,
+				5A07D528D25A269FC8FB0FB7 /* ClipmanIOSTests */,
+				B84BADAC25D52B4E8E786353 /* ClipmanShareExtension */,
+				885119A7137074CF88BD56DB /* Shared */,
 				A5141E60B2E7E725CCE72ABC /* Frameworks */,
 				BCB5958E95794FE1CC7BB4B9 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		5A07D528D25A269FC8FB0FB7 /* ClipmanIOSTests */ = {
+			isa = PBXGroup;
+			children = (
+				706E33429FE88528D3BEAAE0 /* DeletionUXTests.swift */,
+				D2DD45D61DAC284441E87117 /* EmbeddedImageActionTests.swift */,
+				9ACB54CFA7EECAFD185EE92D /* EmbeddedImageTests.swift */,
+				9330DEB559F71A2DF6CF2E1F /* HistorySortTests.swift */,
+				20DAD07A69EEC91C4A73C6E6 /* LinkDisplayTests.swift */,
+				DE80C6C473747E57E01F38BD /* PendingSharedImageStoreTests.swift */,
+			);
+			path = ClipmanIOSTests;
 			sourceTree = "<group>";
 		};
 		723A466E9097D9B3C314A8D1 /* Views */ = {
@@ -170,6 +249,14 @@
 			path = sounds;
 			sourceTree = "<group>";
 		};
+		885119A7137074CF88BD56DB /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				75CCB3D15B8FB599156B1E20 /* PendingSharedImageStore.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		A5141E60B2E7E725CCE72ABC /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -190,10 +277,22 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		B84BADAC25D52B4E8E786353 /* ClipmanShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				C897A28F494E2398E450EF72 /* ClipmanShareExtension.entitlements */,
+				CFF8D8C5ED8D543DEDFE7385 /* Info.plist */,
+				05CA47DBCD9B9B962169510E /* ShareViewController.swift */,
+			);
+			path = ClipmanShareExtension;
+			sourceTree = "<group>";
+		};
 		BCB5958E95794FE1CC7BB4B9 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				02004FB0D767D5C8C6F4A4FB /* ClipmanIOS.app */,
+				F65C86632F475E92A20913C8 /* ClipmanIOSTests.xctest */,
+				5978B390B6A5DBF6049D600A /* ClipmanShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -204,6 +303,7 @@
 				73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */,
 				2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */,
 				3757E95599655BFEB3101654 /* DatabaseWorker.swift */,
+				CB3C049A1958230E5EAFCBCC /* EmbeddedImage.swift */,
 				93D166EC7141EE64B5371FD2 /* Gzip.swift */,
 				98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */,
 				76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */,
@@ -222,13 +322,16 @@
 				E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */,
 				00F18B48633E261F19EA0703 /* ClipmanQuickActions.swift */,
 				9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */,
+				3FB3337F4B5D8DCE696C3B0F /* EmbeddedImageActions.swift */,
 				C02D9422349D165D345B5D71 /* KeychainStore.swift */,
+				EFCE0C638D22648BD22C7867 /* LinkDisplay.swift */,
 				FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */,
 				1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */,
 				721C35A41DED299959E74C8A /* ServerSettingsSanitizer.swift */,
 				1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */,
 				C98DD96F176CD3DE6A07D271 /* SoundService.swift */,
 				3AFA70C5093FAAF9882B23D9 /* TipJarStore.swift */,
+				F4C3A7208086EFE0482CCD9C /* WebsiteTitleFetcher.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -236,6 +339,41 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		434286D56B26FB137798DD6A /* ClipmanIOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 618086DB4CFD945220A4200A /* Build configuration list for PBXNativeTarget "ClipmanIOSTests" */;
+			buildPhases = (
+				F90D49CBC302E3FF68366A1F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				60B94942D57E76E94F7FC777 /* PBXTargetDependency */,
+			);
+			name = ClipmanIOSTests;
+			packageProductDependencies = (
+			);
+			productName = ClipmanIOSTests;
+			productReference = F65C86632F475E92A20913C8 /* ClipmanIOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		6B733D235F1729AFCAFEBD77 /* ClipmanShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 32D09AA7C4B02AC7A4535488 /* Build configuration list for PBXNativeTarget "ClipmanShareExtension" */;
+			buildPhases = (
+				E9F8AA6C11A7F7BAB5BFD1EC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ClipmanShareExtension;
+			packageProductDependencies = (
+			);
+			productName = ClipmanShareExtension;
+			productReference = 5978B390B6A5DBF6049D600A /* ClipmanShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		C44DC1B4AEA20F27D754E558 /* ClipmanIOS */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5EE47898BE559DAA135FA443 /* Build configuration list for PBXNativeTarget "ClipmanIOS" */;
@@ -243,10 +381,12 @@
 				0EA49C23BA6DFCAA7E5AFE44 /* Sources */,
 				811B78F1597ED58720FD1B51 /* Resources */,
 				38ED8B145460D1A7A5A06CF6 /* Frameworks */,
+				A9B193F53DC1E9BDEB94415D /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				92AFE3DEE086A24452775E1A /* PBXTargetDependency */,
 			);
 			name = ClipmanIOS;
 			packageProductDependencies = (
@@ -264,6 +404,14 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					434286D56B26FB137798DD6A = {
+						DevelopmentTeam = 83NN3HS237;
+						ProvisioningStyle = Automatic;
+					};
+					6B733D235F1729AFCAFEBD77 = {
+						DevelopmentTeam = 83NN3HS237;
+						ProvisioningStyle = Automatic;
+					};
 					C44DC1B4AEA20F27D754E558 = {
 						DevelopmentTeam = 83NN3HS237;
 						ProvisioningStyle = Automatic;
@@ -285,6 +433,8 @@
 			projectRoot = "";
 			targets = (
 				C44DC1B4AEA20F27D754E558 /* ClipmanIOS */,
+				6B733D235F1729AFCAFEBD77 /* ClipmanShareExtension */,
+				434286D56B26FB137798DD6A /* ClipmanIOSTests */,
 			);
 		};
 /* End PBXProject section */
@@ -324,15 +474,19 @@
 				6A857283F950DB08ABE7CB53 /* CloudHistoryBackup.swift in Sources */,
 				F0230D7D8994D5C780B3A02F /* ConnectionShareSheet.swift in Sources */,
 				AD65480F3E929702A805262F /* DatabaseWorker.swift in Sources */,
+				1BAEBADFE1BDC253F23D88AC /* EmbeddedImage.swift in Sources */,
+				811C3C8A52CA33E287A66E3D /* EmbeddedImageActions.swift in Sources */,
 				B66FC9F132546C30E3E29127 /* EntryEditView.swift in Sources */,
 				C676E48CA1A7CDAA51D4C9B5 /* EntryView.swift in Sources */,
 				11F918FE112D3FCF183D6587 /* Gzip.swift in Sources */,
 				5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */,
 				C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */,
+				B5D1D758FCE7614E543A5108 /* LinkDisplay.swift in Sources */,
 				40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */,
 				C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */,
 				5750CF7FAE9FBA004D4FD2FB /* MobileRichTextClipboard.swift in Sources */,
 				80DF3940EAE12616EAA0047D /* Models.swift in Sources */,
+				0D9E71F12365D0E883798075 /* PendingSharedImageStore.swift in Sources */,
 				A8912F558B14C788063B7A9B /* RootView.swift in Sources */,
 				C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */,
 				55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */,
@@ -342,18 +496,78 @@
 				5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */,
 				9C4809F93BC5717D1C1645DD /* SyncConflictResolver.swift in Sources */,
 				FD5B299F7F13570E50D93B8D /* TipJarStore.swift in Sources */,
+				17D24F4160AF41A3AEE92FD4 /* WebsiteTitleFetcher.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E9F8AA6C11A7F7BAB5BFD1EC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0185B2A16A035663AFE45D68 /* PendingSharedImageStore.swift in Sources */,
+				3853E72967534A420918CBF6 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F90D49CBC302E3FF68366A1F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3644C1291732B31AE8044E12 /* DeletionUXTests.swift in Sources */,
+				210E0E853E14D1545E4E9F9B /* EmbeddedImageActionTests.swift in Sources */,
+				086BAA1E9EE5D69DFD7806E2 /* EmbeddedImageTests.swift in Sources */,
+				C2341AB4F664244178963CC5 /* HistorySortTests.swift in Sources */,
+				907ECD326B3CCBAA44AD4DEC /* LinkDisplayTests.swift in Sources */,
+				05EA2EAD81ABF61AD07F9704 /* PendingSharedImageStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		60B94942D57E76E94F7FC777 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C44DC1B4AEA20F27D754E558 /* ClipmanIOS */;
+			targetProxy = F5738BF333A460C343155BF7 /* PBXContainerItemProxy */;
+		};
+		92AFE3DEE086A24452775E1A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6B733D235F1729AFCAFEBD77 /* ClipmanShareExtension */;
+			targetProxy = 367F9DA552D1AD6CDB175010 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		0D6A44BA5F03EDD37C2D8F14 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 26004;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.6.0;
+				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.share;
+				PRODUCT_NAME = "Share to Clipman";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		13EA4171C6739C0E8BD896A7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 25101;
+				CURRENT_PROJECT_VERSION = 26004;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -363,7 +577,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.5.1;
+				MARKETING_VERSION = 2.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -431,12 +645,32 @@
 			};
 			name = Release;
 		};
+		5840E58044FE1C72EEA4F8A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Clipman.app/Clipman";
+			};
+			name = Debug;
+		};
 		6DF7F05C4E88F9A411EDFD17 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 25101;
+				CURRENT_PROJECT_VERSION = 26004;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -446,13 +680,32 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.5.1;
+				MARKETING_VERSION = 2.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_OBJC_BRIDGING_HEADER = "ClipmanIOS/Support/ClipmanIOS-Bridging-Header.h";
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AC94E6EF67A09DA432C078D6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Clipman.app/Clipman";
 			};
 			name = Release;
 		};
@@ -521,14 +774,55 @@
 			};
 			name = Debug;
 		};
+		C7EA17FD14822AA641A459E3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 26004;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.6.0;
+				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.share;
+				PRODUCT_NAME = "Share to Clipman";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		32D09AA7C4B02AC7A4535488 /* Build configuration list for PBXNativeTarget "ClipmanShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C7EA17FD14822AA641A459E3 /* Debug */,
+				0D6A44BA5F03EDD37C2D8F14 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		5EE47898BE559DAA135FA443 /* Build configuration list for PBXNativeTarget "ClipmanIOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				13EA4171C6739C0E8BD896A7 /* Debug */,
 				6DF7F05C4E88F9A411EDFD17 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		618086DB4CFD945220A4200A /* Build configuration list for PBXNativeTarget "ClipmanIOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5840E58044FE1C72EEA4F8A1 /* Debug */,
+				AC94E6EF67A09DA432C078D6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

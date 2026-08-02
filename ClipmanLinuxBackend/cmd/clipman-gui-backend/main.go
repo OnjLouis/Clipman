@@ -152,6 +152,30 @@ func main() {
 }
 
 func (s *session) handle(action string, raw json.RawMessage) (any, error) {
+	switch action {
+	case "fetch_website_title":
+		var p struct {
+			URL string `json:"url"`
+		}
+		if err := decode(raw, &p); err != nil {
+			return nil, err
+		}
+		title, err := fetchWebsiteTitle(p.URL)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"title": title}, nil
+	case "prepare_image":
+		var p struct {
+			MIME       string `json:"mime"`
+			Filename   string `json:"filename"`
+			DataBase64 string `json:"data_base64"`
+		}
+		if err := decode(raw, &p); err != nil {
+			return nil, err
+		}
+		return prepareEmbeddedImage(p.MIME, p.Filename, p.DataBase64)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch action {
@@ -238,6 +262,8 @@ func (s *session) handle(action string, raw json.RawMessage) (any, error) {
 		return s.putAfter(raw)
 	case "update":
 		return s.update(raw)
+	case "set_name_if_blank":
+		return s.setNameIfBlank(raw)
 	case "update_many":
 		return s.updateMany(raw)
 	case "delete":
@@ -450,6 +476,7 @@ func (s *session) activate(cfg config.Config, password string) error {
 		return err
 	}
 	limits := clipdb.Limits{MaxBlobBytes: cfg.Limits.MaxBlobBytes, MaxJSONBytes: cfg.Limits.MaxJSONBytes, MaxEntries: cfg.Limits.MaxEntries, MaxTextBytes: cfg.Limits.MaxTextBytes}
+	client.MaxBlobBytes = limits.MaxBlobBytes
 	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -495,7 +522,7 @@ func (s *session) refresh(force bool) (any, error) {
 			s.offline = true
 			return s.historyResult(false), nil
 		}
-		if cache, cacheErr := platform.ReadPrivate(s.cachePath); cacheErr == nil {
+		if cache, cacheErr := platform.ReadPrivateBounded(s.cachePath, s.engine.Limits.MaxBlobBytes); cacheErr == nil {
 			db, decodeErr := clipdb.Decode(cache, s.password, s.engine.Limits)
 			if decodeErr == nil {
 				s.database, s.loaded, s.offline = db, true, true
@@ -648,6 +675,9 @@ func (s *session) put(raw json.RawMessage) (any, error) {
 	richText := normalizeRichText(p.RichText)
 	id := merge.NewID()
 	return s.mutate(func(db *model.Database, now int64) (bool, any, error) {
+		if err := validateEmbeddedImageBudget(db, p.Text, p.IsTemplate, p.Duplicate, richText); err != nil {
+			return false, nil, err
+		}
 		entry, outcome := operation.Put(db, p.Text, p.Name, p.Group, s.cfg.Machine, p.Duplicate, id, p.Pinned, p.IsTemplate, now)
 		if richText != nil && outcome != "ignored" {
 			for index := range db.Entries {
@@ -659,6 +689,39 @@ func (s *session) put(raw json.RawMessage) (any, error) {
 			}
 		}
 		return outcome != "ignored", map[string]any{"entry": exportEntry(entry), "outcome": outcome}, nil
+	})
+}
+
+func (s *session) setNameIfBlank(raw json.RawMessage) (any, error) {
+	var p struct {
+		ID           string `json:"id"`
+		ExpectedText string `json:"expected_text"`
+		Name         string `json:"name"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, err
+	}
+	name := sanitizeWebsiteTitle(p.Name)
+	if name == "" {
+		return nil, errors.New("the website did not provide a usable title")
+	}
+	return s.mutate(func(db *model.Database, now int64) (bool, any, error) {
+		for index := range db.Entries {
+			entry := &db.Entries[index]
+			if !strings.EqualFold(entry.ID, p.ID) {
+				continue
+			}
+			if entry.Text != p.ExpectedText {
+				return false, nil, errors.New("the link changed while its website title was being requested")
+			}
+			if strings.TrimSpace(entry.Name) != "" {
+				return false, nil, errors.New("the link was named by another client while its website title was being requested")
+			}
+			entry.Name, entry.LastUsedUnixMs, entry.ModifiedUnixMs, entry.SourceMachine = name, now, now, s.cfg.Machine
+			db.UpdatedUnixMs = now
+			return true, exportEntry(*entry), nil
+		}
+		return false, nil, errors.New("the link was changed or deleted while its website title was being requested")
 	})
 }
 
@@ -983,6 +1046,11 @@ func normalizeRichText(value *richTextJSON) *richTextJSON {
 	if len([]byte(html)) > maxRichHTMLBytes {
 		html = ""
 	}
+	if strings.Contains(html, `data-clipman-image=`) {
+		if _, err := parseEmbeddedImageWrapper(html); err != nil {
+			html = ""
+		}
+	}
 	rtf := value.RTFBase64
 	rtfBytes, err := base64.StdEncoding.DecodeString(rtf)
 	if err != nil || len(rtfBytes) > maxRichRTFBytes {
@@ -1047,7 +1115,7 @@ func clearRichText(entry *model.Entry, now int64) {
 
 func section(text string) string {
 	trimmed := strings.TrimSpace(text)
-	if strings.ContainsAny(trimmed, " \t\r\n") || !standaloneURL.MatchString(trimmed) {
+	if !websiteTitleURLWithinLimit(trimmed) || strings.ContainsAny(trimmed, " \t\r\n") || !standaloneURL.MatchString(trimmed) {
 		return "text"
 	}
 	value := trimmed
