@@ -422,6 +422,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didPushToOtherMachines entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didMove entries: [ClipEntry], direction: Int)
     func historyWindowDidRequestPaste(_ controller: HistoryWindowController, after entry: ClipEntry?)
+    func historyWindowDidRequestSaveCurrentClipboard(_ controller: HistoryWindowController)
     func historyWindowDidRequestImport(_ controller: HistoryWindowController)
     func historyWindowDidRequestExport(_ controller: HistoryWindowController)
     func historyWindow(_ controller: HistoryWindowController, didCleanURLTracking entries: [ClipEntry])
@@ -799,6 +800,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private var rememberedFileSelectionRow: Int?
     private var showHistoryHotkey: HotkeyDescriptor?
     private var toggleMonitoringHotkey: HotkeyDescriptor?
+    private var saveCurrentClipboardHotkey: HotkeyDescriptor?
     private var quickCopyHotkeys: [String: HotkeyDescriptor] = [:]
     private var quickPasteModes: [String: String] = [:]
     private var keyMonitor: Any?
@@ -939,9 +941,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         applyFilter(preferredSelectedID: rememberedSelectionID(for: mode))
     }
 
-    func configureQuickCopy(showHistoryHotkey: HotkeyDescriptor, toggleMonitoringHotkey: HotkeyDescriptor, quickCopyHotkeys: [String: HotkeyDescriptor], quickPasteModes: [String: String]) {
+    func configureQuickCopy(showHistoryHotkey: HotkeyDescriptor, toggleMonitoringHotkey: HotkeyDescriptor, saveCurrentClipboardHotkey: HotkeyDescriptor?, quickCopyHotkeys: [String: HotkeyDescriptor], quickPasteModes: [String: String]) {
         self.showHistoryHotkey = showHistoryHotkey
         self.toggleMonitoringHotkey = toggleMonitoringHotkey
+        self.saveCurrentClipboardHotkey = saveCurrentClipboardHotkey
         self.quickCopyHotkeys = quickCopyHotkeys
         self.quickPasteModes = quickPasteModes
     }
@@ -1537,6 +1540,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         menu.addItem(.separator())
         addMenuItem("Import Clipboard Entries...", action: #selector(menuImport), to: menu, shortcut: "Command+I")
         addMenuItem("Export Clipboard Entries...", action: #selector(menuExport), to: menu, shortcut: "Command+E")
+        addMenuItem("Save Current Clipboard to History", action: #selector(menuSaveCurrentClipboard), to: menu)
         if mode == .files {
             addMenuItem("Go To File", action: #selector(menuGoToFile), to: menu, shortcut: "Command+Enter")
         }
@@ -1741,6 +1745,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuCopySelected() { copySelectedEntries() }
     @objc private func menuCutSelected() { cutSelectedEntries() }
     @objc private func menuPasteAfterSelected() { pasteAfterSelectedEntry() }
+    @objc private func menuSaveCurrentClipboard() { historyDelegate?.historyWindowDidRequestSaveCurrentClipboard(self) }
     @objc private func menuImport() { requestImport() }
     @objc private func menuExport() { requestExport() }
     @objc private func menuCleanTracking() { cleanSelectedEntriesForTracking() }
@@ -2193,8 +2198,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 showPropertyError("Quick Paste needs a valid hotkey.")
                 return
             }
-            if capturedHotkey == showHistoryHotkey || capturedHotkey == toggleMonitoringHotkey {
-                showPropertyError("Quick Paste must use a different hotkey from Show History and Toggle Monitoring.")
+            if capturedHotkey == showHistoryHotkey || capturedHotkey == toggleMonitoringHotkey || capturedHotkey == saveCurrentClipboardHotkey {
+                showPropertyError("Quick Paste must use a different hotkey from Show History, Toggle Monitoring, and Save Current Clipboard.")
                 return
             }
             if quickCopyHotkeys.contains(where: { $0.key != entry.Id && $0.value == capturedHotkey }) {

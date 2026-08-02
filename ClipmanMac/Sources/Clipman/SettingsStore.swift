@@ -85,12 +85,18 @@ final class SettingsStore {
             settings.toggleMonitoringHotkey = defaults.toggleMonitoringHotkey
             changed = true
         }
+        if let saveHotkey = settings.saveCurrentClipboardHotkey,
+           !saveHotkey.isValid || saveHotkey == settings.showHistoryHotkey || saveHotkey == settings.toggleMonitoringHotkey {
+            settings.saveCurrentClipboardHotkey = nil
+            changed = true
+        }
         var seenQuickCopyHotkeys = Set<HotkeyDescriptor>()
         for (entryID, hotkey) in Array(settings.quickCopyHotkeys) {
             if entryID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !hotkey.isValid
                 || hotkey == settings.showHistoryHotkey
                 || hotkey == settings.toggleMonitoringHotkey
+                || hotkey == settings.saveCurrentClipboardHotkey
                 || seenQuickCopyHotkeys.contains(hotkey) {
                 settings.quickCopyHotkeys.removeValue(forKey: entryID)
                 settings.quickPasteModes.removeValue(forKey: entryID)

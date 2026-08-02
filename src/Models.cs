@@ -191,6 +191,7 @@ namespace Clipman
         public string DeviceName { get; set; }
         public string ShowHistoryHotkey { get; set; }
         public string ToggleActiveHotkey { get; set; }
+        public string SaveCurrentClipboardHotkey { get; set; }
         public List<QuickCopyBinding> QuickCopyHotkeys { get; set; }
         public bool AutoCopyLatestRemoteText { get; set; }
         public bool PasteAfterEnter { get; set; }
@@ -252,6 +253,7 @@ namespace Clipman
             DeviceName = Environment.MachineName ?? string.Empty;
             ShowHistoryHotkey = "Ctrl+Alt+\\";
             ToggleActiveHotkey = "Ctrl+Alt+`";
+            SaveCurrentClipboardHotkey = string.Empty;
             QuickCopyHotkeys = new List<QuickCopyBinding>();
             AutoCopyLatestRemoteText = false;
             PasteAfterEnter = false;

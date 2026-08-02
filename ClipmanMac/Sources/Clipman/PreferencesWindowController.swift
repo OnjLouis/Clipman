@@ -87,6 +87,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private var sensitiveDataPresetCheckboxes: [String: NSButton] = [:]
     private let showHotkeyField = HotkeyCaptureField()
     private let toggleHotkeyField = HotkeyCaptureField()
+    private let saveCurrentClipboardHotkeyField = HotkeyCaptureField()
     private let passwordField = NSSecureTextField()
     private let ignoredApplicationsView = PreferencesTabTextView()
     private let statusLabel = NSTextField(labelWithString: "")
@@ -167,6 +168,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         addRow("Authority fingerprint", serverAuthorityFingerprint)
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
+        addRow("Save current clipboard hotkey, optional", saveCurrentClipboardHotkeyField)
         addRow("History password", passwordField)
         rememberPasswordCheckbox.setAccessibilityLabel("Remember history password in Keychain")
         rememberPasswordCheckbox.setAccessibilityHelp("When checked, Clipman stores the history password in this Mac user's Keychain. When unchecked, Clipman asks for the password each app session and keeps it only in memory.")
@@ -174,6 +176,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         addIgnoredApplicationsRow(to: grid)
         showHotkeyField.hotkeyDelegate = self
         toggleHotkeyField.hotkeyDelegate = self
+        saveCurrentClipboardHotkeyField.hotkeyDelegate = self
 
         monitoringCheckbox.target = nil
         monitoringCheckbox.action = nil
@@ -309,6 +312,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         }
         showHotkeyField.descriptor = settings.showHistoryHotkey
         toggleHotkeyField.descriptor = settings.toggleMonitoringHotkey
+        saveCurrentClipboardHotkeyField.descriptor = settings.saveCurrentClipboardHotkey
         passwordField.stringValue = ""
         ignoredApplicationsView.string = settings.ignoredApplications.joined(separator: "\n")
         statusLabel.stringValue = passwordStatusText()
@@ -481,7 +485,25 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             statusLabel.stringValue = "Show history and toggle monitoring cannot use the same hotkey."
             return
         }
-        guard confirmSingleModifierHotkeys(show: show, toggle: toggle) else {
+        let saveHotkeyText = saveCurrentClipboardHotkeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let saveCurrentClipboardHotkey: HotkeyDescriptor?
+        if saveHotkeyText.isEmpty {
+            saveCurrentClipboardHotkey = nil
+        } else if let captured = saveCurrentClipboardHotkeyField.descriptor ?? HotkeyDescriptor.parse(saveHotkeyText), captured.isValid {
+            saveCurrentClipboardHotkey = captured
+        } else {
+            statusLabel.stringValue = "Save current clipboard hotkey must be blank or use a valid global hotkey."
+            return
+        }
+        guard saveCurrentClipboardHotkey != show, saveCurrentClipboardHotkey != toggle else {
+            statusLabel.stringValue = "Save current clipboard must use a different hotkey from Show History and Toggle Monitoring."
+            return
+        }
+        guard saveCurrentClipboardHotkey == nil || !settings.quickCopyHotkeys.values.contains(saveCurrentClipboardHotkey!) else {
+            statusLabel.stringValue = "Save current clipboard cannot use a hotkey already assigned to Quick Paste."
+            return
+        }
+        guard confirmSingleModifierHotkeys(show: show, toggle: toggle, saveCurrentClipboard: saveCurrentClipboardHotkey) else {
             return
         }
         let selectedStorageMode = storedStorageMode(storageModePopup.titleOfSelectedItem ?? "")
@@ -545,6 +567,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             .sorted()
         settings.showHistoryHotkey = show
         settings.toggleMonitoringHotkey = toggle
+        settings.saveCurrentClipboardHotkey = saveCurrentClipboardHotkey
         settings.ignoredApplications = normalizedIgnoredApplications(ignoredApplicationsView.string)
         let password = enteredPassword.isEmpty ? nil : enteredPassword
         guard preferencesDelegate?.preferencesWindow(self, didUpdate: settings, passwordToSave: password) != false else {
@@ -554,8 +577,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         window?.close()
     }
 
-    private func confirmSingleModifierHotkeys(show: HotkeyDescriptor, toggle: HotkeyDescriptor) -> Bool {
-        guard show.usesSingleModifier || toggle.usesSingleModifier else {
+    private func confirmSingleModifierHotkeys(show: HotkeyDescriptor, toggle: HotkeyDescriptor, saveCurrentClipboard: HotkeyDescriptor?) -> Bool {
+        guard show.usesSingleModifier || toggle.usesSingleModifier || saveCurrentClipboard?.usesSingleModifier == true else {
             return true
         }
 

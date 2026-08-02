@@ -14,6 +14,7 @@ struct ClipmanSettings: Codable, Equatable {
     var soundsEnabled: Bool
     var showHistoryHotkey: HotkeyDescriptor
     var toggleMonitoringHotkey: HotkeyDescriptor
+    var saveCurrentClipboardHotkey: HotkeyDescriptor?
     var windowFrame: String
     var sortMode: String
     var sortDescending: Bool
@@ -44,7 +45,7 @@ struct ClipmanSettings: Codable, Equatable {
     var sensitiveDataPresetIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, windowFrame
+        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, groupFilter, historyFilterType, deviceFilter, confirmDeletions, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
@@ -70,6 +71,7 @@ struct ClipmanSettings: Codable, Equatable {
         soundsEnabled: Bool,
         showHistoryHotkey: HotkeyDescriptor,
         toggleMonitoringHotkey: HotkeyDescriptor,
+        saveCurrentClipboardHotkey: HotkeyDescriptor?,
         windowFrame: String,
         sortMode: String,
         sortDescending: Bool,
@@ -111,6 +113,7 @@ struct ClipmanSettings: Codable, Equatable {
         self.soundsEnabled = soundsEnabled
         self.showHistoryHotkey = showHistoryHotkey
         self.toggleMonitoringHotkey = toggleMonitoringHotkey
+        self.saveCurrentClipboardHotkey = saveCurrentClipboardHotkey
         self.windowFrame = windowFrame
         self.sortMode = sortMode
         self.sortDescending = sortDescending
@@ -156,6 +159,7 @@ struct ClipmanSettings: Codable, Equatable {
         soundsEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundsEnabled) ?? true
         showHistoryHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .showHistoryHotkey) ?? fallback.showHistoryHotkey
         toggleMonitoringHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .toggleMonitoringHotkey) ?? fallback.toggleMonitoringHotkey
+        saveCurrentClipboardHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .saveCurrentClipboardHotkey)
         windowFrame = try container.decodeIfPresent(String.self, forKey: .windowFrame) ?? ""
         sortMode = try container.decodeIfPresent(String.self, forKey: .sortMode) ?? "LastUsed"
         sortDescending = try container.decodeIfPresent(Bool.self, forKey: .sortDescending) ?? true
@@ -214,6 +218,7 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(soundsEnabled, forKey: .soundsEnabled)
         try container.encode(showHistoryHotkey, forKey: .showHistoryHotkey)
         try container.encode(toggleMonitoringHotkey, forKey: .toggleMonitoringHotkey)
+        try container.encodeIfPresent(saveCurrentClipboardHotkey, forKey: .saveCurrentClipboardHotkey)
         try container.encode(windowFrame, forKey: .windowFrame)
         try container.encode(sortMode, forKey: .sortMode)
         try container.encode(sortDescending, forKey: .sortDescending)
@@ -259,6 +264,7 @@ struct ClipmanSettings: Codable, Equatable {
             soundsEnabled: true,
             showHistoryHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ANSI_Grave), modifiers: [.option, .shift]),
             toggleMonitoringHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ISO_Section), modifiers: [.option, .shift]),
+            saveCurrentClipboardHotkey: nil,
             windowFrame: "",
             sortMode: "LastUsed",
             sortDescending: true,

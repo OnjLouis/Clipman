@@ -61,7 +61,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 
 <h2 id="privacy">Privacy controls</h2>
 <p>Ignored Applications accepts one X11 process or application name per line. Automatic text capture from a matching foreground application is skipped. Automatically Group by Source Application uses the same source information to place new entries into app-named groups. Desktop environments do not expose this information consistently under Wayland, so both features are best supported under X11.</p>
-<p>Sensitive Data exclusions are off by default. When enabled, selected presets can exclude valid credit-card numbers, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys and approximate US driver-license shapes from automatic history. Credit-card detection includes a Luhn checksum, and complete HTTP or HTTPS URLs are not treated as tokens. Exclusions do not alter the system clipboard and do not block <strong>Add Clipboard</strong>, allowing an intentional override.</p>
+<p>Sensitive Data exclusions are off by default. When enabled, selected presets can exclude valid credit-card numbers, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys and approximate US driver-license shapes from automatic history. Credit-card detection includes a Luhn checksum, and complete HTTP or HTTPS URLs are not treated as tokens. Exclusions do not alter the system clipboard and do not block <strong>Save Current Clipboard to History</strong>, allowing an intentional override.</p>
 
 <h2 id="actions">Text actions</h2>
 <p>The Actions menu changes selected Text, Links or Rich Text entries and puts the result on the clipboard. It provides plain text copy, whitespace trimming, single-line conversion, blank-line removal, URL tracking removal, cleaner sharing links, line-ending conversion, uppercase/lowercase, HTML encode/decode/to-text and URL encode/decode. Changing stored text clears any previous rich formatting; Copy as Plain Text leaves the stored entry unchanged. These commands are omitted from the File History Edit menu because they do not apply to files.</p>
@@ -76,7 +76,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <table><thead><tr><th>Tab</th><th>Contents</th></tr></thead><tbody>
 <tr><td>General</td><td>Clipboard monitoring, sounds, source-application grouping, remote clipboard receipt, optional paste after Enter, dynamic history section, automatic URL cleanup, optional Links and Rich Text history, saved list position and duplicate handling.</td></tr>
 <tr><td>File History</td><td>Automatic removal of unavailable unpinned file events.</td></tr>
-<tr><td>Hotkeys</td><td>Global Show History and Toggle Monitoring shortcuts.</td></tr>
+<tr><td>Hotkeys</td><td>Global Show History and Toggle Monitoring shortcuts, plus an optional Save Current Clipboard shortcut that is unset by default.</td></tr>
 <tr><td>Storage and Password</td><td>Server connection changes, ignored applications and the Linux display-server compatibility note.</td></tr>
 <tr><td>Startup and Updates</td><td>Desktop-session startup, optional capture of the existing clipboard at startup, update frequency and silent automatic installation.</td></tr>
 <tr><td>Sensitive Data</td><td>Opt-in automatic-capture exclusions and their individual presets.</td></tr>
@@ -114,6 +114,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <tr><td>Hide Clipman</td><td><kbd>Escape</kbd></td></tr>
 <tr><td>Show or hide globally</td><td><kbd>Ctrl+Alt+Backslash</kbd> by default</td></tr>
 <tr><td>Turn monitoring on/off globally</td><td><kbd>Ctrl+Alt+Grave</kbd> by default</td></tr>
+<tr><td>Save current clipboard to history globally</td><td>User-assigned in Preferences; unset by default</td></tr>
 <tr><td>Preferences</td><td><kbd>Ctrl+,</kbd></td></tr>
 <tr><td>Secrets</td><td><kbd>Ctrl+Shift+E</kbd></td></tr>
 <tr><td>Assigned Quick Paste or secret</td><td>User-assigned global hotkey</td></tr>
@@ -124,7 +125,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <h2 id="accessibility">Accessibility</h2>
 <p>The interface uses native GTK 4 controls exposed through AT-SPI. A conventional menu bar exposes commands and shortcuts. Tab and Shift+Tab move between controls; Up and Down move one history entry. Every history row is one focus stop. Its accessible text includes relevant state, group, device and list position without duplicating visible content.</p>
 <p>History polling does not reconstruct unchanged rows, so Orca focus and braille position remain stable. Status changes are announced without taking keyboard focus. Tab and Shift+Tab leave multiline editors instead of inserting tab characters.</p>
-<p>Global shortcuts and background clipboard monitoring work normally under X11. Wayland compositors control those capabilities and support varies. Use <strong>Add Clipboard</strong> when a compositor prevents automatic capture.</p>
+<p>Global shortcuts and background clipboard monitoring work normally under X11. Wayland compositors control those capabilities and support varies. Use <strong>Save Current Clipboard to History</strong> when a compositor prevents automatic capture.</p>
 
 <h2 id="updates">Updates</h2>
 <p>Choose <strong>Help, Check for Updates</strong> or press <kbd>Shift+F1</kbd>. Preferences can check at startup, hourly or daily. Automatic checks and silent installation are both opt-in.</p>

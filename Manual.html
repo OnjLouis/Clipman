@@ -114,6 +114,7 @@
     <tbody>
       <tr><td>Show or hide clipboard history</td><td><code>Ctrl+Alt+\</code></td><td><code>Option+Shift+`</code></td></tr>
       <tr><td>Toggle monitoring on or off</td><td><code>Ctrl+Alt+`</code></td><td><code>Option+Shift+\</code></td></tr>
+      <tr><td>Save the current clipboard to history, even while monitoring is off</td><td>User-assigned in Preferences; unset by default</td><td>User-assigned in Preferences; unset by default</td></tr>
       <tr><td>Paste an entry assigned to Quick Paste</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
       <tr><td>Paste a saved secret</td><td>User-assigned in Secrets</td><td>User-assigned in Secrets</td></tr>
       <tr><td>Open Secrets</td><td><code>Ctrl+Shift+E</code></td><td><code>Command+Shift+E</code></td></tr>
@@ -175,6 +176,8 @@
   <p><strong>Open history to the most recent clipboard type</strong> is also off by default. When enabled, a newly accepted clipboard event selects Text, Links, Rich Text, or Files the next time history opens. That automatic selection is used once; afterward, a section you choose manually remains selected until another new clipboard event arrives. Ignored, excluded, or failed captures do not change the destination. If an optional history view is disabled, its entries open through their plain-text fallback in Text history.</p>
 
   <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
+
+  <p><strong>Save Current Clipboard to History</strong> is another deliberate command that works while monitoring is off. Use it from the Clipman menu, or assign its optional global hotkey in Preferences. It reads the clipboard once and sends supported text, links, rich text, or files through normal duplicate, storage, and synchronization handling without turning monitoring on. Ignored-application and sensitive-pattern rules apply to automatic capture, so they do not block this explicit save; cooperative private-clipboard markers and concealed pasteboard data remain protected.</p>
 
   <p>Each Quick Paste target has a mode. <strong>Paste and restore previous clipboard</strong> temporarily places the entry on the system clipboard, sends the normal paste command to the active app, and then restores the previous clipboard contents where possible. <strong>Paste and keep target on clipboard</strong> pastes the entry and leaves that entry on the clipboard. <strong>Copy to clipboard only</strong> places the entry on the clipboard without sending a paste command.</p>
 
@@ -595,6 +598,11 @@
   </table>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.5.2</h3>
+  <ul>
+    <li>Added an optional, unassigned <strong>Save Current Clipboard to History</strong> global hotkey on Windows, Mac and Linux. The matching menu command performs one deliberate save while monitoring remains off, preserves explicit clipboard privacy markers, and handles supported text, links, rich text and files through the normal history rules. This closes <a href="https://github.com/OnjLouis/Clipman/issues/49">issue #49</a>.</li>
+  </ul>
+
   <h3>2.5.1</h3>
   <ul>
     <li>Corrected iOS VoiceOver entry actions to match Android in the order Open when available, View, Edit, Pin or Unpin, then Delete.</li>

@@ -6,6 +6,7 @@ final class HotkeyManager {
     enum Action {
         case showHistory
         case toggleMonitoring
+        case saveCurrentClipboard
         case quickCopy(entryID: String)
         case secret(entryID: String)
     }
@@ -33,9 +34,10 @@ final class HotkeyManager {
         }, 1, &eventType, nil, nil)
     }
 
-    func register(showHistory: HotkeyDescriptor, toggleMonitoring: HotkeyDescriptor, quickCopies: [String: HotkeyDescriptor], secrets: [String: HotkeyDescriptor] = [:]) {
+    func register(showHistory: HotkeyDescriptor, toggleMonitoring: HotkeyDescriptor, saveCurrentClipboard: HotkeyDescriptor?, quickCopies: [String: HotkeyDescriptor], secrets: [String: HotkeyDescriptor] = [:]) {
         unregisterAll()
-        let reserved = Set(quickCopies.values).union(Set(secrets.values))
+        var reserved = Set(quickCopies.values).union(Set(secrets.values))
+        if let saveCurrentClipboard { reserved.insert(saveCurrentClipboard) }
         register(showHistory, action: .showHistory, id: 1)
         for alias in showHistory.layoutFallbacks {
             if alias != showHistory && alias != toggleMonitoring && !reserved.contains(alias) {
@@ -56,10 +58,14 @@ final class HotkeyManager {
             register(descriptor, action: .quickCopy(entryID: entryID), id: nextQuickCopyID)
             nextQuickCopyID += 1
         }
+        if let saveCurrentClipboard, saveCurrentClipboard.isValid {
+            register(saveCurrentClipboard, action: .saveCurrentClipboard, id: 3)
+        }
         var nextSecretID: UInt32 = 3000
         var usedHotkeys = Set(quickCopies.values)
         usedHotkeys.insert(showHistory)
         usedHotkeys.insert(toggleMonitoring)
+        if let saveCurrentClipboard { usedHotkeys.insert(saveCurrentClipboard) }
         for (entryID, descriptor) in secrets.sorted(by: { $0.key < $1.key }) where descriptor.isValid {
             guard !usedHotkeys.contains(descriptor) else { continue }
             usedHotkeys.insert(descriptor)

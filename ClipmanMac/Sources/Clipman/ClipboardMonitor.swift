@@ -33,8 +33,8 @@ private struct PasteboardSnapshot {
 
 @MainActor
 protocol ClipboardMonitorDelegate: AnyObject {
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String)
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, deliberate: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, deliberate: Bool)
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor)
 }
 
@@ -68,7 +68,14 @@ final class ClipboardMonitor: @unchecked Sendable {
         let pasteboard = NSPasteboard.general
         lastChangeCount = pasteboard.changeCount
         ignoredChangeCount = nil
-        capture(from: pasteboard, playSkipSound: false)
+        capture(from: pasteboard, playSkipSound: false, deliberate: false)
+    }
+
+    func saveCurrentContents() {
+        let pasteboard = NSPasteboard.general
+        lastChangeCount = pasteboard.changeCount
+        ignoredChangeCount = nil
+        capture(from: pasteboard, playSkipSound: true, deliberate: true)
     }
 
     func stop() {
@@ -136,14 +143,14 @@ final class ClipboardMonitor: @unchecked Sendable {
             ignoredChangeCount = nil
             return
         }
-        capture(from: pasteboard, playSkipSound: true)
+        capture(from: pasteboard, playSkipSound: true, deliberate: false)
     }
 
-    private func capture(from pasteboard: NSPasteboard, playSkipSound: Bool) {
-        guard isEnabled else { return }
+    private func capture(from pasteboard: NSPasteboard, playSkipSound: Bool, deliberate: Bool) {
+        guard isEnabled || deliberate else { return }
         let appDiagnostic = foregroundApplicationDiagnostic()
         let pasteboardDiagnostic = pasteboardTypesDiagnostic(from: pasteboard)
-        if isClipmanForegroundApplication() {
+        if !deliberate && isClipmanForegroundApplication() {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Skipped because Clipman itself was the foreground application.",
                 appDiagnostic: appDiagnostic,
@@ -154,7 +161,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             }
             return
         }
-        guard !isIgnoredForegroundApplication() else {
+        guard deliberate || !isIgnoredForegroundApplication() else {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Skipped because the foreground application matched the ignored-applications list.",
                 appDiagnostic: appDiagnostic,
@@ -165,7 +172,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             }
             return
         }
-        if shouldSkipPasteboardTypes(pasteboard) {
+        if shouldSkipPasteboardTypes(pasteboard, includeIgnoredApplications: !deliberate) {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Skipped because pasteboard types indicate concealed or ignored-application data.",
                 appDiagnostic: appDiagnostic,
@@ -182,7 +189,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic
             )
-            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil)
+            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, deliberate: deliberate)
             return
         }
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else {
@@ -191,9 +198,12 @@ final class ClipboardMonitor: @unchecked Sendable {
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic
             )
+            if playSkipSound {
+                delegate?.clipboardMonitorDidSkipIgnoredApplication(self)
+            }
             return
         }
-        if shouldSuppressRemoteEcho(text) {
+        if !deliberate && shouldSuppressRemoteEcho(text) {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Skipped because this text matches a recently auto-copied remote entry.",
                 appDiagnostic: appDiagnostic,
@@ -206,7 +216,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             appDiagnostic: appDiagnostic,
             pasteboardDiagnostic: pasteboardDiagnostic
         )
-        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName())
+        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), deliberate: deliberate)
     }
 
     private func shouldSuppressRemoteEcho(_ text: String) -> Bool {
@@ -312,12 +322,13 @@ final class ClipboardMonitor: @unchecked Sendable {
         NSWorkspace.shared.frontmostApplication?.processIdentifier == NSRunningApplication.current.processIdentifier
     }
 
-    private func shouldSkipPasteboardTypes(_ pasteboard: NSPasteboard) -> Bool {
+    private func shouldSkipPasteboardTypes(_ pasteboard: NSPasteboard, includeIgnoredApplications: Bool = true) -> Bool {
         let types = allPasteboardTypeNames(from: pasteboard)
         if types.contains(where: isConcealedPasteboardType) {
             return true
         }
 
+        guard includeIgnoredApplications else { return false }
         let ignored = ignoredApplications
             .map { normalizeIgnoredApplicationName($0) }
             .filter { !$0.isEmpty }

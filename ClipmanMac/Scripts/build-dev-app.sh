@@ -3,10 +3,22 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRATCH="${CLIPMAN_MAC_BUILD_DIR:-/tmp/ClipmanMac-build}"
-APP="${CLIPMAN_MAC_APP:-$ROOT/build/Clipman.app}"
+APP="${CLIPMAN_MAC_APP:-/tmp/ClipmanMac-dev/Clipman.app}"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
 BUILD_STAMP="$(zsh "$ROOT/Scripts/shared-version.sh" stamp)"
+
+cleanup_build() {
+  local exit_code=$?
+  trap - EXIT
+  if [[ -z "$SCRATCH" || "$SCRATCH" == "/" || "$SCRATCH" == "$HOME" || "$SCRATCH" == "$ROOT" ]]; then
+    echo "Refusing to clean unsafe Clipman build path: $SCRATCH" >&2
+    exit 1
+  fi
+  rm -rf "$SCRATCH"
+  exit "$exit_code"
+}
+trap cleanup_build EXIT
 
 swift build --package-path "$ROOT" --scratch-path "$SCRATCH"
 swift run --package-path "$ROOT" --scratch-path "$SCRATCH" ClipmanCodecSmoke

@@ -14,6 +14,27 @@ EXPECTED_TEAM_ID="83NN3HS237"
 NOTARY_PROFILE="${CLIPMAN_MAC_NOTARY_PROFILE:-ClipmanNotary}"
 NOTARY_KEYCHAIN="${CLIPMAN_MAC_NOTARY_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 NOTARIZE="${CLIPMAN_MAC_NOTARIZE:-1}"
+completed=false
+
+remove_owned_tree() {
+  local tree="$1"
+  if [[ -z "$tree" || "$tree" == "/" || "$tree" == "$HOME" || "$tree" == "$ROOT" ]]; then
+    echo "Refusing to clean unsafe Clipman build path: $tree" >&2
+    return 1
+  fi
+  /bin/rm -rf "$tree"
+}
+
+cleanup_build() {
+  local exit_code=$?
+  trap - EXIT
+  remove_owned_tree "$SCRATCH" || exit_code=1
+  if [[ "$completed" != true ]]; then
+    remove_owned_tree "$DIST" || exit_code=1
+  fi
+  exit "$exit_code"
+}
+trap cleanup_build EXIT
 
 if [[ "$NOTARIZE" == "1" ]]; then
   if ! xcrun notarytool history \
@@ -117,4 +138,5 @@ else
   echo "Warning: Mac test package was not notarized because CLIPMAN_MAC_NOTARIZE=$NOTARIZE." >&2
 fi
 
+completed=true
 echo "$ZIP"

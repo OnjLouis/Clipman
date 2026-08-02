@@ -122,6 +122,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             switch action {
             case .showHistory: self?.toggleHistoryFromHotkey()
             case .toggleMonitoring: self?.toggleMonitoring(nil)
+            case .saveCurrentClipboard: self?.saveCurrentClipboard(nil)
             case .quickCopy(let entryID): self?.quickPasteEntry(id: entryID)
             case .secret(let entryID): self?.quickPasteSecret(id: entryID)
             }
@@ -219,6 +220,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         appMenu.addItem(NSMenuItem(title: "Show History", action: #selector(showHistory(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Toggle Monitoring", action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Save Current Clipboard to History", action: #selector(saveCurrentClipboard(_:)), keyEquivalent: ""))
         let appSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
         appSecretsItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(appSecretsItem)
@@ -266,6 +268,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             ? (settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On")
             : "Monitoring Paused Until Storage Returns"
         menu.addItem(NSMenuItem(title: monitorTitle, action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Save Current Clipboard to History", action: #selector(saveCurrentClipboard(_:)), keyEquivalent: ""))
         let statusSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
         statusSecretsItem.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(statusSecretsItem)
@@ -699,15 +702,19 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         NSApp.terminate(nil)
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String) {
+    @objc private func saveCurrentClipboard(_ sender: Any?) {
+        monitor.saveCurrentContents()
+    }
+
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, deliberate: Bool) {
         guard storageUnavailableReason.isEmpty else {
             sounds.play(.skip)
             return
         }
-        if store.hasRecentlyTouchedRemoteText(text, excluding: settings.deviceName) {
+        if !deliberate && store.hasRecentlyTouchedRemoteText(text, excluding: settings.deviceName) {
             return
         }
-        if SensitiveDataExclusion.matchName(in: text, mode: settings.sensitiveDataMode, presetIds: settings.sensitiveDataPresetIds) != nil {
+        if !deliberate && SensitiveDataExclusion.matchName(in: text, mode: settings.sensitiveDataMode, presetIds: settings.sensitiveDataPresetIds) != nil {
             sounds.play(.exclude)
             return
         }
@@ -723,7 +730,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, deliberate: Bool) {
         guard storageUnavailableReason.isEmpty else {
             sounds.play(.skip)
             return
@@ -1052,6 +1059,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             .filter { !$0.isEmpty }
             .map { ClipEntry(Text: $0, SourceMachine: settings.deviceName) }
         store.insertTextsAfterSelected(pasted, afterID: entry?.Id)
+    }
+
+    func historyWindowDidRequestSaveCurrentClipboard(_ controller: HistoryWindowController) {
+        saveCurrentClipboard(nil)
     }
 
     func historyWindowDidRequestImport(_ controller: HistoryWindowController) {
@@ -1609,6 +1620,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         historyWindow?.configureQuickCopy(
             showHistoryHotkey: settings.showHistoryHotkey,
             toggleMonitoringHotkey: settings.toggleMonitoringHotkey,
+            saveCurrentClipboardHotkey: settings.saveCurrentClipboardHotkey,
             quickCopyHotkeys: settings.quickCopyHotkeys,
             quickPasteModes: settings.quickPasteModes
         )
@@ -1618,6 +1630,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         hotkeys.register(
             showHistory: settings.showHistoryHotkey,
             toggleMonitoring: settings.toggleMonitoringHotkey,
+            saveCurrentClipboard: settings.saveCurrentClipboardHotkey,
             quickCopies: settings.quickCopyHotkeys,
             secrets: secretHotkeys()
         )

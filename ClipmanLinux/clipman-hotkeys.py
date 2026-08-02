@@ -20,6 +20,7 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--show", required=True)
     parser.add_argument("--toggle", required=True)
+    parser.add_argument("--save", default="")
     parser.add_argument("--binding", action="append", default=[])
     args = parser.parse_args()
 
@@ -31,6 +32,8 @@ def main():
         emit({"event": "activated", "action": action})
 
     requested = [("show", args.show), ("toggle", args.toggle)]
+    if args.save:
+        requested.append(("save", args.save))
     for value in args.binding:
         try:
             action, accelerator = value.split("\t", 1)

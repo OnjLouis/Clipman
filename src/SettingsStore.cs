@@ -146,6 +146,7 @@ namespace Clipman
             {
                 settings.ToggleActiveHotkey = "Ctrl+Alt+`";
             }
+            settings.SaveCurrentClipboardHotkey = (settings.SaveCurrentClipboardHotkey ?? string.Empty).Trim();
             if (settings.QuickCopyHotkeys == null)
             {
                 settings.QuickCopyHotkeys = new List<QuickCopyBinding>();

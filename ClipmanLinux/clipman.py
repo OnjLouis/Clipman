@@ -566,6 +566,7 @@ class Preferences:
             "run_at_startup": False,
             "show_history_hotkey": DEFAULT_SHOW_HOTKEY,
             "toggle_monitoring_hotkey": DEFAULT_TOGGLE_HOTKEY,
+            "save_current_clipboard_hotkey": "",
             "update_check_frequency": "never",
             "install_updates_silently": False,
             "last_update_check_unix_ms": 0,
@@ -629,6 +630,12 @@ class Preferences:
             valid, _keyval, _modifiers = Gtk.accelerator_parse(self.values[key]) if isinstance(self.values[key], str) else (False, 0, 0)
             if not valid:
                 self.values[key] = defaults[key]
+        save_hotkey = self.values["save_current_clipboard_hotkey"]
+        if not isinstance(save_hotkey, str):
+            self.values["save_current_clipboard_hotkey"] = ""
+        elif save_hotkey:
+            valid, keyval, modifiers = Gtk.accelerator_parse(save_hotkey)
+            self.values["save_current_clipboard_hotkey"] = Gtk.accelerator_name(keyval, modifiers) if valid and HotkeyEntry.is_safe(keyval, modifiers) else ""
 
     def save(self):
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -718,14 +725,19 @@ class GlobalHotkeys:
         self.generation = 0
         self.show_registered = False
         self.toggle_registered = False
+        self.save_registered = False
+        self.save_configured = False
         self.quick_registered = {}
 
-    def register(self, show_accelerator, toggle_accelerator, quick_bindings=None, secret_bindings=None):
+    def register(self, show_accelerator, toggle_accelerator, save_accelerator="", quick_bindings=None, secret_bindings=None):
         self.stop()
         self.generation += 1
         generation = self.generation
         helper = pathlib.Path(__file__).resolve().parent / "clipman-hotkeys.py"
         command = [sys.executable, str(helper), "--show", show_accelerator, "--toggle", toggle_accelerator]
+        self.save_configured = bool(save_accelerator)
+        if save_accelerator:
+            command.extend(["--save", save_accelerator])
         for entry_id, accelerator in (quick_bindings or {}).items():
             command.extend(["--binding", "quick:" + entry_id + "\t" + accelerator])
         for secret_id, accelerator in (secret_bindings or {}).items():
@@ -766,6 +778,7 @@ class GlobalHotkeys:
             registered = message.get("registered", {})
             self.show_registered = bool(registered.get("show"))
             self.toggle_registered = bool(registered.get("toggle"))
+            self.save_registered = bool(registered.get("save")) if self.save_configured else False
             self.quick_registered = {key[6:]: bool(value) for key, value in registered.items() if key.startswith("quick:")}
             self.application.hotkey_registration_changed()
         elif event == "activated":
@@ -773,17 +786,20 @@ class GlobalHotkeys:
         return False
 
     def summary(self):
-        if self.show_registered and self.toggle_registered:
-            return "Both global hotkeys are registered."
+        if self.show_registered and self.toggle_registered and (not self.save_configured or self.save_registered):
+            return "All configured global hotkeys are registered."
         missing = []
         if not self.show_registered: missing.append("Show History")
         if not self.toggle_registered: missing.append("Toggle Monitoring")
+        if self.save_configured and not self.save_registered: missing.append("Save Current Clipboard")
         return "Not registered: " + ", ".join(missing) + "."
 
     def stop(self):
         self.generation += 1
         self.show_registered = False
         self.toggle_registered = False
+        self.save_registered = False
+        self.save_configured = False
         self.quick_registered = {}
         process, self.process = self.process, None
         if process and process.poll() is None:
@@ -1089,7 +1105,7 @@ class ClipmanApplication(Gtk.Application):
 
     def _menu_model(self):
         menu = Gio.Menu()
-        file_menu = Gio.Menu(); file_menu.append("_Import...", "app.import"); file_menu.append("Import and _replace...", "app.import-replace"); file_menu.append("_Export...", "app.export"); file_menu.append("_Add Clipboard", "app.add-clipboard"); file_menu.append("_New Entry", "app.new"); file_menu.append("Clear text _history...", "app.clear-history"); file_menu.append("_Close", "app.close"); file_menu.append("_Quit", "app.quit")
+        file_menu = Gio.Menu(); file_menu.append("_Import...", "app.import"); file_menu.append("Import and _replace...", "app.import-replace"); file_menu.append("_Export...", "app.export"); file_menu.append("Save Current Clip_board to History", "app.add-clipboard"); file_menu.append("_New Entry", "app.new"); file_menu.append("Clear text _history...", "app.clear-history"); file_menu.append("_Close", "app.close"); file_menu.append("_Quit", "app.quit")
         self.edit_menu = Gio.Menu()
         self.groups_menu = Gio.Menu()
         self.actions_menu = Gio.Menu()
@@ -2578,7 +2594,7 @@ class ClipmanApplication(Gtk.Application):
                     accelerator = quick_hotkey.get_accelerator()
                     if not accelerator:
                         self.set_status("Choose a valid Quick Paste hotkey before saving.", True); return
-                    reserved = {self.preferences.values["show_history_hotkey"], self.preferences.values["toggle_monitoring_hotkey"]}
+                    reserved = {self.preferences.values["show_history_hotkey"], self.preferences.values["toggle_monitoring_hotkey"], self.preferences.values["save_current_clipboard_hotkey"]}
                     used = {binding.get("hotkey") for entry_id, binding in self.preferences.values["quick_paste_bindings"].items() if entry_id != entry.get("id")}
                     if accelerator in reserved or accelerator in used:
                         self.set_status("That hotkey is already assigned.", True); return
@@ -2850,7 +2866,7 @@ class ClipmanApplication(Gtk.Application):
             if not name.get_text().strip() or not value.get_text(): error.set_text("Name and secret value are required."); return
             if value.get_text() != confirm.get_text(): error.set_text("Secret values do not match."); return
             accelerator = hotkey.get_accelerator()
-            used = {self.preferences.values["show_history_hotkey"], self.preferences.values["toggle_monitoring_hotkey"]}
+            used = {self.preferences.values["show_history_hotkey"], self.preferences.values["toggle_monitoring_hotkey"], self.preferences.values["save_current_clipboard_hotkey"]}
             used.update(binding.get("hotkey") for binding in self.preferences.values["quick_paste_bindings"].values())
             used.update(value for secret_id, value in self.preferences.values["secret_hotkeys"].items() if not secret or secret_id != secret.get("id"))
             if accelerator and accelerator in used: error.set_text("That hotkey is already assigned."); return
@@ -3133,17 +3149,19 @@ class ClipmanApplication(Gtk.Application):
         self.hotkeys.register(
             self.preferences.values["show_history_hotkey"],
             self.preferences.values["toggle_monitoring_hotkey"],
+            self.preferences.values["save_current_clipboard_hotkey"],
             quick_bindings,
             self.preferences.values["secret_hotkeys"],
         )
 
     def hotkey_registration_changed(self):
-        if not self.hotkeys.show_registered or not self.hotkeys.toggle_registered:
+        if not self.hotkeys.show_registered or not self.hotkeys.toggle_registered or (self.hotkeys.save_configured and not self.hotkeys.save_registered):
             self.set_status(self.hotkeys.summary(), True)
 
     def hotkey_service_failed(self, message):
         self.hotkeys.show_registered = False
         self.hotkeys.toggle_registered = False
+        self.hotkeys.save_registered = False
         self.set_status(message, True)
         return False
 
@@ -3152,6 +3170,8 @@ class ClipmanApplication(Gtk.Application):
             self.toggle_history_window()
         elif action == "toggle":
             self.toggle_monitoring()
+        elif action == "save":
+            self.add_clipboard()
         elif isinstance(action, str) and action.startswith("quick:"):
             self._run_quick_paste(action[6:])
         elif isinstance(action, str) and action.startswith("secret:"):
@@ -3311,12 +3331,14 @@ class ClipmanApplication(Gtk.Application):
 
         show_hotkey = HotkeyEntry(self.preferences.values["show_history_hotkey"], "Show history hotkey")
         toggle_hotkey = HotkeyEntry(self.preferences.values["toggle_monitoring_hotkey"], "Toggle monitoring hotkey")
-        for label, field in (("Show history hotkey", show_hotkey), ("Toggle monitoring hotkey", toggle_hotkey)):
+        save_clipboard_hotkey = HotkeyEntry(self.preferences.values["save_current_clipboard_hotkey"], "Save current clipboard hotkey, optional")
+        for label, field in (("Show history hotkey", show_hotkey), ("Toggle monitoring hotkey", toggle_hotkey), ("Save current clipboard hotkey, optional", save_clipboard_hotkey)):
             visible_label = Gtk.Label(label=label, xalign=0)
             visible_label.set_mnemonic_widget(field)
             hotkeys.append(visible_label); hotkeys.append(field)
         hotkey_status = Gtk.Label(label=self.hotkeys.summary(), wrap=True, xalign=0, accessible_role=Gtk.AccessibleRole.STATUS)
         hotkeys.append(hotkey_status)
+        hotkeys.append(Gtk.Label(label="Save Current Clipboard is a deliberate one-shot save that works even when monitoring is off. Leave its hotkey blank if you do not want one.", wrap=True, xalign=0))
         hotkeys.append(Gtk.Label(label="Most global hotkeys should use at least two modifiers. One modifier is allowed only with F1 through F12, Grave, or Backslash.", wrap=True, xalign=0))
 
         startup_updates.append(startup_run)
@@ -3370,11 +3392,20 @@ class ClipmanApplication(Gtk.Application):
             if code == Gtk.ResponseType.OK:
                 show_accelerator = show_hotkey.get_accelerator()
                 toggle_accelerator = toggle_hotkey.get_accelerator()
+                save_clipboard_accelerator = save_clipboard_hotkey.get_accelerator()
                 if not show_accelerator or not toggle_accelerator:
                     hotkey_status.set_text("Both global hotkeys are required.")
                     return
                 if show_accelerator == toggle_accelerator:
                     hotkey_status.set_text("Show History and Toggle Monitoring must use different hotkeys.")
+                    return
+                configured_hotkeys = [value for value in (show_accelerator, toggle_accelerator, save_clipboard_accelerator) if value]
+                if len(configured_hotkeys) != len(set(configured_hotkeys)):
+                    hotkey_status.set_text("Each configured global hotkey must be different.")
+                    return
+                quick_paste_hotkeys = {binding.get("hotkey") for binding in self.preferences.values["quick_paste_bindings"].values()}
+                if save_clipboard_accelerator and save_clipboard_accelerator in quick_paste_hotkeys:
+                    hotkey_status.set_text("Save Current Clipboard cannot use a hotkey already assigned to Quick Paste.")
                     return
                 self._set_monitoring(monitor.get_active())
                 self.preferences.values.update({
@@ -3386,6 +3417,7 @@ class ClipmanApplication(Gtk.Application):
                     "links_history_enabled": links_enabled.get_active(), "rich_text_history_enabled": rich_enabled.get_active(), "save_list_position": save_position.get_active(),
                     "run_at_startup": startup_run.get_active(), "show_history_hotkey": show_accelerator,
                     "toggle_monitoring_hotkey": toggle_accelerator,
+                    "save_current_clipboard_hotkey": save_clipboard_accelerator,
                     "update_check_frequency": update_keys[update_frequency.get_selected()],
                     "install_updates_silently": install_silently.get_active(),
                     "auto_remove_unavailable_file_history": remove_unavailable.get_active(),

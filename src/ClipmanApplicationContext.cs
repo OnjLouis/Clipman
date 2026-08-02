@@ -15,6 +15,7 @@ namespace Clipman
     {
         private const int ShowHotkeyId = 1001;
         private const int ToggleHotkeyId = 1002;
+        private const int SaveCurrentClipboardHotkeyId = 1003;
         private const int ToggleHotkeyAlternateId = 1004;
         private const int QuickCopyHotkeyBaseId = 2000;
         private const int SecretHotkeyBaseId = 3000;
@@ -51,6 +52,7 @@ namespace Clipman
         private int ignoredClipboardChangeCount;
         private bool showHotkeyRegistered;
         private bool toggleHotkeyRegistered;
+        private bool saveCurrentClipboardHotkeyRegistered;
         private bool toggleAlternateHotkeyRegistered;
         private readonly Dictionary<int, string> quickCopyHotkeyEntryIds = new Dictionary<int, string>();
         private readonly Dictionary<int, string> secretHotkeyEntryIds = new Dictionary<int, string>();
@@ -166,7 +168,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, PasteClipboardIntoPreviousApplication, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, PasteClipboardIntoPreviousApplication, SaveCurrentClipboardToHistory, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, BuildDiagnosticsText);
                 created = true;
             }
 
@@ -381,6 +383,7 @@ namespace Clipman
             databasePassword = nextDatabasePassword;
             settings.ShowHistoryHotkey = updated.ShowHistoryHotkey;
             settings.ToggleActiveHotkey = updated.ToggleActiveHotkey;
+            settings.SaveCurrentClipboardHotkey = updated.SaveCurrentClipboardHotkey;
             settings.QuickCopyHotkeys = updated.QuickCopyHotkeys == null
                 ? new List<QuickCopyBinding>()
                 : updated.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey, Mode = QuickPasteModes.Normalize(b.Mode) }).ToList();
@@ -603,6 +606,10 @@ namespace Clipman
             {
                 ToggleActive();
             }
+            else if (id == SaveCurrentClipboardHotkeyId)
+            {
+                SaveCurrentClipboardToHistory();
+            }
             else if (quickCopyHotkeyEntryIds.ContainsKey(id))
             {
                 QuickPasteEntry(quickCopyHotkeyEntryIds[id]);
@@ -613,9 +620,14 @@ namespace Clipman
             }
         }
 
-        internal void HandleClipboardUpdate()
+        private void SaveCurrentClipboardToHistory()
         {
-            if (ignoredClipboardChangeCount > 0)
+            HandleClipboardUpdate(true);
+        }
+
+        internal void HandleClipboardUpdate(bool deliberate = false)
+        {
+            if (!deliberate && ignoredClipboardChangeCount > 0)
             {
                 ignoredClipboardChangeCount--;
                 return;
@@ -627,29 +639,32 @@ namespace Clipman
                 sourceProcessName = ForegroundProcessName();
             }
 
-            if (IsClipmanProcess(sourceProcessName))
+            if (!deliberate && IsClipmanProcess(sourceProcessName))
             {
                 return;
             }
 
-            var floodDecision = clipboardFloodGuards.Observe(
-                NormalizeProcessName(sourceProcessName),
-                ClipboardFloodGuard.MonotonicMilliseconds());
-            if (floodDecision != ClipboardFloodDecision.Allow)
+            if (!deliberate)
             {
+                var floodDecision = clipboardFloodGuards.Observe(
+                    NormalizeProcessName(sourceProcessName),
+                    ClipboardFloodGuard.MonotonicMilliseconds());
+                if (floodDecision != ClipboardFloodDecision.Allow)
+                {
+                    clipboardFloodRecoveryTimer.Stop();
+                    clipboardFloodRecoveryTimer.Start();
+                    return;
+                }
                 clipboardFloodRecoveryTimer.Stop();
-                clipboardFloodRecoveryTimer.Start();
-                return;
             }
-            clipboardFloodRecoveryTimer.Stop();
 
-            if (!settings.Active)
+            if (!deliberate && !settings.Active)
             {
                 sounds.Skip(settings.SoundsEnabled);
                 return;
             }
 
-            if (IsIgnoredProcess(sourceProcessName))
+            if (!deliberate && IsIgnoredProcess(sourceProcessName))
             {
                 sounds.Skip(settings.SoundsEnabled);
                 return;
@@ -696,24 +711,28 @@ namespace Clipman
 
             if (string.IsNullOrEmpty(text))
             {
+                if (deliberate)
+                {
+                    sounds.Skip(settings.SoundsEnabled);
+                }
                 return;
             }
 
             var richText = settings.RichTextHistoryEnabled ? RichTextData.CaptureFromClipboard() : null;
 
-            if (store.HasRecentlyTouchedRemoteText(text, CurrentDeviceName(), 90000))
+            if (!deliberate && store.HasRecentlyTouchedRemoteText(text, CurrentDeviceName(), 90000))
             {
                 return;
             }
 
-            var sensitiveMatch = SensitiveDataExclusion.FindMatch(text, settings);
+            var sensitiveMatch = deliberate ? null : SensitiveDataExclusion.FindMatch(text, settings);
             if (sensitiveMatch != null)
             {
                 sounds.Exclude(settings.SoundsEnabled);
                 return;
             }
 
-            if (settings.AutoRemoveUrlTracking)
+            if (!deliberate && settings.AutoRemoveUrlTracking)
             {
                 var cleaned = UrlTrackingCleaner.CleanText(text);
                 if (!string.Equals(cleaned, text, StringComparison.Ordinal))
@@ -964,6 +983,12 @@ namespace Clipman
 
             menu.Items.Add("&Show or hide history\t" + settings.ShowHistoryHotkey, null, (s, e) => ToggleHistoryWindow());
             menu.Items.Add((settings.Active ? "Turn &off" : "Turn &on") + "\t" + settings.ToggleActiveHotkey, null, (s, e) => ToggleActive());
+            var saveClipboardText = "Save current &clipboard to history";
+            if (!string.IsNullOrWhiteSpace(settings.SaveCurrentClipboardHotkey))
+            {
+                saveClipboardText += "\t" + settings.SaveCurrentClipboardHotkey;
+            }
+            menu.Items.Add(saveClipboardText, null, (s, e) => SaveCurrentClipboardToHistory());
             menu.Items.Add("&Secrets...\tCtrl+Shift+E", null, (s, e) => ShowSecrets());
             menu.Items.Add("&Preferences...", null, (s, e) => ShowPreferencesFromTray());
             menu.Items.Add("Open &settings folder", null, (s, e) => OpenSettingsFolder());
@@ -1000,6 +1025,7 @@ namespace Clipman
         {
             NativeMethods.UnregisterHotKey(messageWindow.Handle, ShowHotkeyId);
             NativeMethods.UnregisterHotKey(messageWindow.Handle, ToggleHotkeyId);
+            NativeMethods.UnregisterHotKey(messageWindow.Handle, SaveCurrentClipboardHotkeyId);
             NativeMethods.UnregisterHotKey(messageWindow.Handle, ToggleHotkeyAlternateId);
             foreach (var hotkeyId in quickCopyHotkeyEntryIds.Keys.ToList())
             {
@@ -1013,6 +1039,7 @@ namespace Clipman
             secretHotkeyEntryIds.Clear();
             showHotkeyRegistered = false;
             toggleHotkeyRegistered = false;
+            saveCurrentClipboardHotkeyRegistered = false;
             toggleAlternateHotkeyRegistered = false;
             quickCopyHotkeysRegistered = 0;
             secretHotkeysRegistered = 0;
@@ -1034,8 +1061,20 @@ namespace Clipman
                 }
             }
 
+            HotkeyDefinition saveCurrentClipboard;
+            if (HotkeyDefinition.TryParse(settings.SaveCurrentClipboardHotkey, out saveCurrentClipboard))
+            {
+                saveCurrentClipboardHotkeyRegistered = NativeMethods.RegisterHotKey(messageWindow.Handle, SaveCurrentClipboardHotkeyId, GlobalHotkeyModifiers(saveCurrentClipboard.Modifiers), saveCurrentClipboard.Key);
+            }
+
             var quickCopyId = QuickCopyHotkeyBaseId;
             var usedHotkeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            usedHotkeys.Add((settings.ShowHistoryHotkey ?? string.Empty).Trim());
+            usedHotkeys.Add((settings.ToggleActiveHotkey ?? string.Empty).Trim());
+            if (!string.IsNullOrWhiteSpace(settings.SaveCurrentClipboardHotkey))
+            {
+                usedHotkeys.Add(settings.SaveCurrentClipboardHotkey.Trim());
+            }
             foreach (var binding in (settings.QuickCopyHotkeys ?? new List<QuickCopyBinding>())
                 .Where(b => b != null && !string.IsNullOrWhiteSpace(b.EntryId) && !string.IsNullOrWhiteSpace(b.Hotkey))
                 .OrderBy(b => b.EntryId, StringComparer.OrdinalIgnoreCase))
@@ -1290,6 +1329,7 @@ namespace Clipman
                 "Auto remove unavailable file history events: " + settings.AutoRemoveUnavailableFileHistoryEvents + "\r\n" +
                 "Show history hotkey: " + settings.ShowHistoryHotkey + " (" + (showHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
                 "Toggle hotkey: " + settings.ToggleActiveHotkey + " (" + (toggleHotkeyRegistered ? "registered" : "not registered") + ")\r\n" +
+                "Save current clipboard hotkey: " + (string.IsNullOrWhiteSpace(settings.SaveCurrentClipboardHotkey) ? "Not assigned" : settings.SaveCurrentClipboardHotkey + " (" + (saveCurrentClipboardHotkeyRegistered ? "registered" : "not registered") + ")") + "\r\n" +
                 "Toggle alternate UK key: " + (toggleAlternateHotkeyRegistered ? "registered" : "not registered or not needed") + "\r\n" +
                 "Quick Paste bindings: " + ((settings.QuickCopyHotkeys == null ? 0 : settings.QuickCopyHotkeys.Count) + " configured, " + quickCopyHotkeysRegistered + " registered") + "\r\n" +
                 "Secrets: " + (GetSecretEntriesSafe().Count + " configured, " + secretHotkeysRegistered + " hotkeys registered") + "\r\n" +

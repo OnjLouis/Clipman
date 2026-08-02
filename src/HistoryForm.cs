@@ -20,6 +20,7 @@ namespace Clipman
         private readonly Action<ClipEntry> copyEntry;
         private readonly Action<List<ClipEntry>> copyEntries;
         private readonly Action pasteIntoPreviousApplication;
+        private readonly Action saveCurrentClipboard;
         private readonly Func<List<ClipboardEventSummary>> recentClipboardEvents;
         private readonly Func<List<string>, int> deleteRecentClipboardEvents;
         private readonly Func<int> clearRecentClipboardEvents;
@@ -72,7 +73,7 @@ namespace Clipman
         private bool updatingGroupFilter;
         private bool listPositionSaveFailureLogged;
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
@@ -81,6 +82,7 @@ namespace Clipman
             this.copyEntry = copyEntry;
             this.copyEntries = copyEntries;
             this.pasteIntoPreviousApplication = pasteIntoPreviousApplication;
+            this.saveCurrentClipboard = saveCurrentClipboard;
             this.recentClipboardEvents = recentClipboardEvents;
             this.deleteRecentClipboardEvents = deleteRecentClipboardEvents;
             this.clearRecentClipboardEvents = clearRecentClipboardEvents;
@@ -468,6 +470,7 @@ namespace Clipman
             file.DropDownItems.Add("&Import...\tCtrl+I", null, (s, e) => Import(false));
             file.DropDownItems.Add("Import and &replace...", null, (s, e) => Import(true));
             file.DropDownItems.Add("&Export...\tCtrl+E", null, (s, e) => Export());
+            file.DropDownItems.Add("Save current clip&board to history", null, (s, e) => saveCurrentClipboard());
             file.DropDownItems.Add("-");
             file.DropDownItems.Add("Clear text &history...", null, (s, e) => ClearTextClipboardHistory());
             file.DropDownItems.Add("-");
@@ -2738,9 +2741,10 @@ namespace Clipman
             }
 
             if (string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ShowHistoryHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
-                string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ToggleActiveHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase))
+                string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ToggleActiveHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(settings.SaveCurrentClipboardHotkey) && string.Equals((quickCopyHotkey ?? string.Empty).Trim(), settings.SaveCurrentClipboardHotkey.Trim(), StringComparison.OrdinalIgnoreCase)))
             {
-                MessageBox.Show(this, "The Quick Paste hotkey must be different from the Show History and Toggle Monitoring hotkeys.", "Clipman Quick Paste", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "The Quick Paste hotkey must be different from the Show History, Toggle Monitoring, and Save Current Clipboard hotkeys.", "Clipman Quick Paste", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 

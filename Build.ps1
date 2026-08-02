@@ -1,5 +1,5 @@
 param(
-    [string]$OutputPath = "$PSScriptRoot\portable\clipman.exe",
+    [string]$OutputPath = $(Join-Path ([IO.Path]::GetTempPath()) 'Clipman-portable\clipman.exe'),
     [switch]$DesktopOnly,
     [switch]$PreserveBuildStamp
 )

@@ -68,6 +68,10 @@ assert "not formats.get_mime_types() and not formats.get_gtypes()" in source
 assert "poll_seconds" not in source
 assert '"last_group"' not in source
 assert '"app.refresh"' not in source
+assert '"save_current_clipboard_hotkey": ""' in source
+assert 'elif action == "save":\n            self.add_clipboard()' in source
+assert 'Save Current Clip_board to History' in source
+assert 'self.preferences.values["save_current_clipboard_hotkey"]' in source
 assert "self.status.set_selectable(True)" not in source
 assert "controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)" in source
 assert "self.cycle_section(-1 if state & Gdk.ModifierType.SHIFT_MASK else 1)" in source
@@ -390,11 +394,12 @@ hotkey_application = types.SimpleNamespace(
 )
 hotkey_manager = types.SimpleNamespace(
     generation=7, show_registered=False, toggle_registered=False,
-    quick_registered={},
+    save_configured=True, save_registered=False, quick_registered={},
     application=hotkey_application,
 )
-assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "ready", "registered": {"show": True, "toggle": True, "quick:entry": True}}, 7) is False
+assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "ready", "registered": {"show": True, "toggle": True, "save": True, "quick:entry": True}}, 7) is False
 assert hotkey_manager.show_registered and hotkey_manager.toggle_registered
+assert hotkey_manager.save_registered
 assert hotkey_manager.quick_registered == {"entry": True}
 assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "activated", "action": "show"}, 7) is False
 assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "activated", "action": "toggle"}, 7) is False

@@ -96,8 +96,10 @@ Scripts/build-dev-app.sh
 The app is created at:
 
 ```text
-build/Clipman.app
+/tmp/ClipmanMac-dev/Clipman.app
 ```
+
+Compiler intermediates are removed after each build so the source tree remains clean.
 
 To rebuild and restart it after changes:
 
