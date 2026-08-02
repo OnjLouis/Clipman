@@ -114,7 +114,9 @@ Settings:           ~/.config/clipman-server/clipman-server-settings.json
 Importable connection: ~/.config/clipman-server/clipman-server-connection.clpconf
 Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</code></pre>
 
-  <p>If user systemd is available, the installer also writes a user service file and prints the commands needed to enable it. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
+  <p>The installer supports systemd and runit. With user systemd, it writes a service and update timer under <code>~/.config/systemd/user</code>. On a runit system such as Void Linux, a persistent per-user service requires turnstile; when turnstile is installed, the installer writes native runit service directories under <code>~/.config/service</code>. The installer detects the service manager automatically, or it can be selected explicitly with <code>CLIPMAN_SERVER_INIT_SYSTEM=systemd</code> or <code>CLIPMAN_SERVER_INIT_SYSTEM=runit</code>. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
+
+  <p>If Void Linux has runit but not turnstile, the server program and command-line helpers are still installed, but no persistent per-user service is created. Install turnstile with <code>sudo xbps-install -S turnstile</code>, enable the <code>turnstiled</code> system service, and run the Clipman Server installer again.</p>
 
   <h3>Existing System Services</h3>
   <p>Administrators who already run Clipman Server as a hardened system service can add the same management and update commands without replacing that service or moving its settings and data. From the extracted package, set the existing paths and service name explicitly:</p>
@@ -125,7 +127,17 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
   CLIPMAN_SERVER_SERVICE=your-service.service \
   sh Linux/install-clipman-server-system-helper.sh</code></pre>
 
-  <p>The installer validates every required existing file, adds a system <code>clipmanserver</code> helper and an optional disabled update timer, and leaves the running service untouched. Future updates replace only packaged program and documentation files. The existing service definition, token-bearing settings, database buckets, certificates, logs, backups, ownership, and listening configuration remain in their current locations.</p>
+  <p>For an existing native runit service, set <code>CLIPMAN_SERVER_INIT_SYSTEM=runit</code>, use its directory name without a <code>.service</code> suffix, and pass its service directory if it is not the normal <code>/etc/sv/&lt;name&gt;</code> location:</p>
+
+  <pre><code>sudo env \
+  CLIPMAN_SERVER_INIT_SYSTEM=runit \
+  CLIPMAN_SERVER_APP_DIR=/path/to/server/program \
+  CLIPMAN_SERVER_CONFIG_FILE=/path/to/server-settings.json \
+  CLIPMAN_SERVER_SERVICE=your-service \
+  CLIPMAN_SERVER_SERVICE_FILE=/etc/sv/your-service \
+  sh Linux/install-clipman-server-system-helper.sh</code></pre>
+
+  <p>The installer validates every required existing file, adds a system <code>clipmanserver</code> helper and an optional disabled update service, and leaves the running service untouched. System-wide runit services use native service directories under <code>/etc/sv</code> and are enabled through <code>/var/service</code>; they do not require turnstile. Future updates replace only packaged program and documentation files. The existing service definition, token-bearing settings, database buckets, certificates, logs, backups, ownership, and listening configuration remain in their current locations.</p>
 
   <h2 id="docker">Docker and GHCR</h2>
   <p>Clipman Server can also run as a container. This is useful for NAS, VPS, homelab, or reverse-proxy setups where services are managed as containers instead of directly installed programs.</p>
@@ -242,11 +254,15 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
   <p>The macOS wrapper creates a per-user LaunchAgent that starts the menu-bar server app at login. If you later move the app, turn Run at Login off and back on so the LaunchAgent points to the new location.</p>
 
   <h3>Linux Startup</h3>
-  <p>The Linux installer writes a user systemd service when user systemd is available. Enable it with:</p>
+  <p>The Linux installer writes a user service for systemd or, with turnstile, runit. The portable helper starts the correct service type:</p>
+
+  <pre><code>clipmanserver start</code></pre>
+
+  <p>On systemd, the equivalent direct command is:</p>
 
   <pre><code>systemctl --user enable --now clipman-server.service</code></pre>
 
-  <p>After that, use <code>clipmanserver status</code>, <code>clipmanserver restart</code>, and <code>clipmanserver stop</code> for everyday service control.</p>
+  <p>On runit, the service is supervised from <code>~/.config/service/clipman-server</code>. Use <code>clipmanserver status</code>, <code>clipmanserver restart</code>, and <code>clipmanserver stop</code> for everyday service control on either init system.</p>
 
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
@@ -282,13 +298,13 @@ clipmanserver update</code></pre>
 
   <p>Every server updater downloads the exact versioned server ZIP over HTTPS and requires its GitHub SHA-256 digest before replacing program files. Linux additionally rejects unsafe archive paths, checks the package manifest, and stages the replacement. A normal per-user update backs up its installed program, launcher, helper, and service files. A system-managed update snapshots only the program files it is permitted to replace. Neither mode includes settings, databases, logs, backups, certificates, or tokens. After installation it restarts the server and checks the health endpoint. If the updated service does not become healthy, the previous program files are restored and restarted automatically.</p>
 
-  <p>New Linux installations enable automatic daily updates when a systemd user service is available. Use these commands to inspect, enable or disable them:</p>
+  <p>New Linux installations support automatic daily updates with either the systemd user timer or a supervised runit update service. Use these commands to inspect, enable or disable them:</p>
 
   <pre><code>clipmanserver enable-auto-updates
 clipmanserver update-status
 clipmanserver disable-auto-updates</code></pre>
 
-  <p>The systemd timer waits at least 15 minutes after boot, runs at most once per day with a randomized delay, and remembers a missed run. Container installations should continue updating by pulling a newer container image rather than modifying a running container.</p>
+  <p>The systemd timer waits at least 15 minutes after boot, runs at most once per day with a randomized delay, and remembers a missed run. The runit update service waits 15 minutes after it starts and checks once per day while it remains supervised. Container installations should continue updating by pulling a newer container image rather than modifying a running container.</p>
 
   <h3>Unavailable Listening Port</h3>
   <p>If another program or the operating system reserves the saved listening port, Clipman Server reports <strong>port unavailable</strong> and stops instead of repeatedly restarting. Settings, tokens, certificates, databases, and backups remain unchanged. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/37">issue #37</a>.</p>
@@ -381,7 +397,7 @@ clipmanserver enable-auto-updates
 clipmanserver disable-auto-updates
 clipmanserver update-status</code></pre>
 
-  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the user systemd service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>host</code> without an address reports the current listener; with an address it updates the setting, refreshes the connection files, restarts, and verifies the server. If it fails, the previous configuration is restored. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>prune</code> moves buckets inactive for the configured number of days, or for the number you type after the command. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully. The update commands use the safe update and rollback process described above.</p>
+  <p><code>start</code>, <code>stop</code>, <code>restart</code>, and <code>status</code> use the installed user systemd or turnstile-managed runit service when available. <code>console</code> runs the server in the current terminal so you can see messages directly. Pressing Ctrl+C in console mode stops the server cleanly. <code>host</code> without an address reports the current listener; with an address it updates the setting, refreshes the connection files, restarts, and verifies the server. If it fails, the previous configuration is restored. <code>list</code> shows shortened IDs for easy reading; <code>list-json</code> shows full IDs for maintenance. <code>prune</code> moves buckets inactive for the configured number of days, or for the number you type after the command. <code>delete</code> refuses buckets touched in the last 24 hours; <code>force-delete</code> is the deliberate override for a bucket you have checked carefully. The update commands use the safe update and rollback process described above.</p>
 
   <h2 id="existing-history">Starting With Existing History</h2>
   <p>Do not manually copy an existing <code>.clipdb</code> into the server's database folders. Server database buckets are derived by Clipman clients from the server token and the Clipman history password. The server deliberately does not know that history password, so it cannot safely decide which bucket an imported file belongs in.</p>
