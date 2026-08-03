@@ -14,6 +14,9 @@ func TestWebsiteTitleURLSafety(t *testing.T) {
 	exactLimit := prefix + strings.Repeat("a", websiteTitleURLLimit-utf8.RuneCountInString(prefix))
 	allowed := []string{
 		"https://example.com/articles/useful-page",
+		"https://example.com/login",
+		"https://example.com/reset-password#instructions",
+		"https://www.youtube.com/watch?v=6-fvja4UXJk&pp=ygUbU29uaWNjb3V0dXJlIEJhbGluZXNlIGZsdXRl",
 		"http://example.com:80/path",
 		"https://example.com:443/path?language=en",
 		exactLimit,
@@ -26,12 +29,9 @@ func TestWebsiteTitleURLSafety(t *testing.T) {
 	blocked := []string{
 		"file:///tmp/example", "clipman://example:1234", "https://user@example.com/",
 		"https://localhost/page", "https://printer.local/page", "https://example.com:8443/page",
-		"https://example.com/password-reset/abc", "https://example.com/page?token=secret",
-		"https://example.com/page?X-Amz-Signature=value", "https://example.com/invite/person",
+		"https://example.com/page?token=secret",
+		"https://example.com/page?X-Amz-Signature=value",
 		"https://example.com/download/aB91kLm302PQrsTUvWxyZ678abcdEFGH",
-		"https://example.com/page?value=aB91kLm302PQrsTUvWxyZ678abcdEFGH",
-		"https://example.com/passwordreset/abc", "https://example.com/%2572eset/abc",
-		"https://example.com/page?value=%2561B91kLm302PQrsTUvWxyZ678abcdEFGH",
 		"https://[::ffff:8.8.8.8]/",
 		exactLimit + "a",
 		string([]byte("https://example.com/bad\xffpath")),
@@ -149,10 +149,10 @@ func TestWebsiteTitlePrecedenceAndSanitization(t *testing.T) {
 		<meta name="twitter:title" content="Twitter Title">
 		<meta content="  Preferred&#10; Open Graph ‮Title  " property="og:title">
 	</head></html>`)
-	if got := extractWebsiteTitle(body); got != "Preferred Open Graph Title" {
+	if got := extractWebsiteTitle(body, "example.com"); got != "Preferred Open Graph Title" {
 		t.Fatalf("title = %q", got)
 	}
-	if got := extractWebsiteTitle([]byte(`<title>Document &amp; Title</title>`)); got != "Document & Title" {
+	if got := extractWebsiteTitle([]byte(`<title>Document &amp; Title</title>`), "example.com"); got != "Document & Title" {
 		t.Fatalf("document title = %q", got)
 	}
 	unsafe := "Alpha\nBeta\u200dGamma\ufffdDelta\u2028Epsilon\u2029Zeta\u00a0 Eta"
@@ -165,5 +165,25 @@ func TestWebsiteTitlePrecedenceAndSanitization(t *testing.T) {
 	long := sanitizeWebsiteTitle(strings.Repeat("x", 250))
 	if len([]rune(long)) != 200 {
 		t.Fatalf("sanitized title length = %d", len([]rune(long)))
+	}
+}
+
+func TestWebsiteTitleRetainsMetadataAfterLargeScripts(t *testing.T) {
+	body := []byte(`<html><head><script>` + strings.Repeat("x", 180*1024) +
+		`</script><meta property="og:title" content="Useful video title"></head></html>`)
+	if got := extractWebsiteTitle(body, "youtube.com"); got != "Useful video title" {
+		t.Fatalf("script-heavy title = %q", got)
+	}
+}
+
+func TestWebsiteTitleRejectsMisleadingCandidatesAndUsesSafeH1Fallback(t *testing.T) {
+	if got := extractWebsiteTitle([]byte(`<svg><title>Decorative icon</title></svg><h1>Article heading</h1>`), "example.com"); got != "Article heading" {
+		t.Fatalf("SVG title was not ignored: %q", got)
+	}
+	if got := extractWebsiteTitle([]byte(`<title>Reddit - Dive into anything</title>`), "reddit.com"); got != "" {
+		t.Fatalf("challenge title was accepted: %q", got)
+	}
+	if got := extractWebsiteTitle([]byte(`<title>example.com</title>`), "example.com"); got != "" {
+		t.Fatalf("host-only title was accepted: %q", got)
 	}
 }

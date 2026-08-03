@@ -32,6 +32,7 @@ namespace Clipman
         private readonly Action showSecrets;
         private readonly Action toggleActive;
         private readonly Action exitApp;
+        private readonly Action playSkipSound;
         private readonly Func<string> diagnosticsText;
         private readonly TabControl tabs;
         private readonly TabPage textTab;
@@ -74,7 +75,7 @@ namespace Clipman
         private bool listPositionSaveFailureLogged;
         private readonly HashSet<string> linkTitleFetches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Action playSkipSound, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
@@ -95,6 +96,7 @@ namespace Clipman
             this.showSecrets = showSecrets;
             this.toggleActive = toggleActive;
             this.exitApp = exitApp;
+            this.playSkipSound = playSkipSound;
             this.diagnosticsText = diagnosticsText;
 
             Text = "Clipman";
@@ -3039,6 +3041,7 @@ namespace Clipman
             string reason;
             if (!LinkTitleFetcher.CanOffer(uri, out reason))
             {
+                playSkipSound();
                 MessageBox.Show(reason, "Website title not retrieved", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 statusText.Text = reason;
                 return;
@@ -3069,26 +3072,31 @@ namespace Clipman
                     var current = store.GetEntryById(entryId);
                     if (current == null)
                     {
+                        playSkipSound();
                         statusText.Text = "The link was removed before its website title arrived.";
                         return;
                     }
                     if (!string.IsNullOrWhiteSpace(current.Name))
                     {
+                        playSkipSound();
                         statusText.Text = "The link was named while its website title was being retrieved, so Clipman kept that name.";
                         return;
                     }
                     if (!string.Equals(current.Text ?? string.Empty, originalText, StringComparison.Ordinal))
                     {
+                        playSkipSound();
                         statusText.Text = "The link changed while its website title was being retrieved, so Clipman did not apply the old title.";
                         return;
                     }
                     if (!result.Success)
                     {
+                        playSkipSound();
                         statusText.Text = result.Error;
                         return;
                     }
                     if (!store.TrySetNameIfUnchanged(entryId, originalText, result.Title))
                     {
+                        playSkipSound();
                         statusText.Text = "The link changed while its website title was being retrieved, so Clipman did not apply the old title.";
                         return;
                     }

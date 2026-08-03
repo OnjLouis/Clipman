@@ -5,20 +5,21 @@ import java.util.UUID
 
 object SyncConflictResolver {
     fun merge(target: ClipDatabase, source: ClipDatabase): ClipDatabase {
-        val deletedById = (target.DeletedEntries + source.DeletedEntries)
+        val deletedById = normalizeDeletedEntries(target.DeletedEntries + source.DeletedEntries)
             .filter { it.Id.isNotBlank() }
             .groupBy { it.Id }
             .mapValues { (_, markers) -> markers.maxBy { it.DeletedUnixMs } }
             .values
             .toList()
-        val retainedTarget = target.Entries.filterNot { isDeleted(it, deletedById) }
+        val deletionIndex = DeletionIndex(deletedById)
+        val retainedTarget = target.Entries.filterNot { deletionIndex.contains(it) }
         val byId = retainedTarget.associateBy { it.Id }.toMutableMap()
         val byText = retainedTarget.associateBy { it.Text }.toMutableMap()
         val merged = retainedTarget.toMutableList()
 
         for (incoming in source.Entries) {
             if (incoming.Text.isEmpty()) continue
-            if (isDeleted(incoming, deletedById)) continue
+            if (deletionIndex.contains(incoming)) continue
             val existing = byId[incoming.Id].takeUnless { incoming.Id.isBlank() } ?: byText[incoming.Text]
             if (existing == null) {
                 val normalized = incoming.normalized()
@@ -139,15 +140,41 @@ object SyncConflictResolver {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    private fun isDeleted(entry: ClipEntry, deletedEntries: List<DeletedClipEntry>): Boolean {
-        val hash = textHash(entry.Text)
-        val entryChangedUnixMs = maxOf(entry.CreatedUnixMs, entry.LastUsedUnixMs)
-        return deletedEntries.any {
-            it.Id == entry.Id ||
-                (it.TextHash.isNotBlank() &&
-                    it.TextHash == hash &&
-                    (it.DeletedUnixMs <= 0 || entryChangedUnixMs <= it.DeletedUnixMs))
+    private class DeletionIndex(deletedEntries: List<DeletedClipEntry>) {
+        private val deletedIds = deletedEntries.mapNotNullTo(mutableSetOf()) { marker ->
+            marker.Id.takeIf { it.isNotBlank() }
         }
+        private val latestDeletionByTextHash = buildMap {
+            deletedEntries.forEach { marker ->
+                if (marker.TextHash.isNotBlank()) {
+                    put(marker.TextHash, maxOf(get(marker.TextHash) ?: Long.MIN_VALUE, marker.DeletedUnixMs))
+                }
+            }
+        }
+
+        fun contains(entry: ClipEntry): Boolean {
+            if (entry.Id in deletedIds) return true
+            if (entry.Text.isEmpty()) return false
+            val deletedUnixMs = latestDeletionByTextHash[textHash(entry.Text)] ?: return false
+            val entryChangedUnixMs = maxOf(entry.CreatedUnixMs, entry.LastUsedUnixMs)
+            return deletedUnixMs <= 0 || entryChangedUnixMs <= deletedUnixMs
+        }
+    }
+
+    private fun normalizeDeletedEntries(markers: List<DeletedClipEntry>): List<DeletedClipEntry> {
+        val now = TimeUtil.nowUnixMs()
+        val cutoff = now - 90L * 24 * 60 * 60 * 1_000
+        return markers
+            .asSequence()
+            .map { marker ->
+                marker.copy(
+                    Id = marker.Id.trim(),
+                    TextHash = marker.TextHash.trim(),
+                    DeletedUnixMs = if (marker.DeletedUnixMs == 0L) now else marker.DeletedUnixMs
+                )
+            }
+            .filter { it.Id.isNotEmpty() && it.DeletedUnixMs >= cutoff }
+            .toList()
     }
 
     private fun mergeEntry(existing: ClipEntry, incoming: ClipEntry): ClipEntry {
@@ -213,7 +240,8 @@ object SyncConflictResolver {
         return database.copy(
             Version = maxOf(1, database.Version),
             UpdatedUnixMs = TimeUtil.nowUnixMs(),
-            Entries = normalized
+            Entries = normalized,
+            DeletedEntries = normalizeDeletedEntries(database.DeletedEntries)
         )
     }
 

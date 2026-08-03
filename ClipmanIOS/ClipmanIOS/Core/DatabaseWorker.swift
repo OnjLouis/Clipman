@@ -7,9 +7,13 @@ enum DatabaseWorker {
         }.value
     }
 
-    static func save(_ database: ClipDatabase, password: String) async throws -> Data {
+    static func save(
+        _ database: ClipDatabase,
+        password: String,
+        preferredSalt: [UInt8]? = nil
+    ) async throws -> Data {
         try await Task.detached(priority: .userInitiated) {
-            try ClipDatabaseFile.save(database, password: password)
+            try ClipDatabaseFile.save(database, password: password, preferredSalt: preferredSalt)
         }.value
     }
 }

@@ -31,10 +31,7 @@ namespace Clipman
         {
             uri = null;
             if (string.IsNullOrEmpty(text) || text.Length > MaximumUrlCharacters) return false;
-            var value = text.Trim();
-            if (value.Length == 0 || value.Length > MaximumUrlCharacters) return false;
-            if (!LinkClassifier.IsLinkOnlyText(value)) return false;
-            return Uri.TryCreate(value, UriKind.Absolute, out uri);
+            return LinkClassifier.TryGetLinkOnlyUri(text, out uri) && IsUrlWithinLimit(uri);
         }
 
         internal static bool IsUrlWithinLimit(Uri uri)

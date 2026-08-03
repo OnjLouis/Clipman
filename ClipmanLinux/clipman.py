@@ -190,8 +190,12 @@ def _clean_link_text(value, limit=None):
 
 def _web_link(text):
     value = str(text or "").strip()
-    if (not value or not _url_within_link_limit(value)
-            or any(character.isspace() for character in value)):
+    if not value or not _url_within_link_limit(value) or "\n" in value or "\r" in value:
+        return None
+    role_match = re.search(r"(?i)\s+link$", value)
+    if role_match:
+        value = value[:role_match.start()]
+    if not value or any(character.isspace() for character in value):
         return None
     candidate = value if "://" in value else "https://" + value
     if not _url_within_link_limit(candidate):
@@ -804,6 +808,9 @@ def should_import_file_as_rich_image(settings, section, explicit):
 
 def is_standalone_link(text):
     value = str(text or "").strip()
+    role_match = re.search(r"(?i)\s+link$", value)
+    if role_match:
+        value = value[:role_match.start()]
     if (not value or not _url_within_link_limit(value)
             or any(character.isspace() for character in value)):
         return False

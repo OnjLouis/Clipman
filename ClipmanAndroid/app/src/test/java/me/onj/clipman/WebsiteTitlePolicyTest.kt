@@ -3,6 +3,7 @@ package me.onj.clipman
 import java.net.InetAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,7 +19,7 @@ class WebsiteTitlePolicyTest {
             </head></html>
         """.trimIndent()
 
-        assertEquals("Open & Graph title", WebsiteTitleDocument.extract(html))
+        assertEquals("Open & Graph title", WebsiteTitleDocument.extract(html, "example.org"))
     }
 
     @Test
@@ -30,20 +31,23 @@ class WebsiteTitlePolicyTest {
             WebsiteTitlePolicy.validate("https://example.org:8443/page")
         }
         assertThrows(IllegalArgumentException::class.java) {
-            WebsiteTitlePolicy.validate("https://example.org/reset-password?token=secret")
+            WebsiteTitlePolicy.validate("https://example.org/page?token=secret")
         }
         assertThrows(IllegalArgumentException::class.java) {
-            WebsiteTitlePolicy.validate("https://example.org/path/Az19Qw82Er73Ty64Ui50Op21Lm98")
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            WebsiteTitlePolicy.validate("https://example.org/login.php")
+            WebsiteTitlePolicy.validate("https://example.org/path/Az19Qw82Er73Ty64Ui50Op21Lm98Qr76")
         }
         assertThrows(IllegalArgumentException::class.java) {
             WebsiteTitlePolicy.validate("https://example.org/page?reset_token=value")
         }
+        assertThrows(IllegalArgumentException::class.java) {
+            WebsiteTitlePolicy.validate("https://example.org/page?oauth_access_token=value")
+        }
         assertFalse(LinkPresentation.isFetchableHttpUrl("https://user:pass@example.org/page"))
-        assertFalse(LinkPresentation.isFetchableHttpUrl("https://example.org/reset-password?token=secret"))
+        assertFalse(LinkPresentation.isFetchableHttpUrl("https://example.org/page?token=secret"))
         assertTrue(LinkPresentation.isFetchableHttpUrl("https://example.org/articles/accessible-clipboard"))
+        assertTrue(LinkPresentation.isFetchableHttpUrl("https://example.org/login"))
+        assertTrue(LinkPresentation.isFetchableHttpUrl("https://example.org/reset-password#instructions"))
+        assertTrue(LinkPresentation.isFetchableHttpUrl("https://www.youtube.com/watch?v=6-fvja4UXJk&pp=ygUbU29uaWNjb3V0dXJlIEJhbGluZXNlIGZsdXRl"))
     }
 
     @Test
@@ -71,8 +75,24 @@ class WebsiteTitlePolicyTest {
         assertEquals("Café 日本語", WebsiteTitleDocument.sanitize(unsafe))
         assertEquals(
             "Résumé 日本語",
-            WebsiteTitleDocument.extract("<title>Résumé&#x202E;&#65533; 日本語</title>")
+            WebsiteTitleDocument.extract("<title>Résumé&#x202E;&#65533; 日本語</title>", "example.org")
         )
+    }
+
+    @Test
+    fun scriptHeavyPagesRetainMetadataAndIgnoreUnsafeFallbacks() {
+        val html = "<script>" + "x".repeat(180 * 1024) +
+            "</script><meta property=\"og:title\" content=\"Useful video title\">"
+        assertEquals("Useful video title", WebsiteTitleDocument.extract(html, "youtube.com"))
+        assertEquals(
+            "Article heading",
+            WebsiteTitleDocument.extract(
+                "<svg><title>Decorative icon</title></svg><h1>Article heading</h1>",
+                "example.org"
+            )
+        )
+        assertNull(WebsiteTitleDocument.extract("<title>Reddit - Dive into anything</title>", "reddit.com"))
+        assertNull(WebsiteTitleDocument.extract("<title>example.org</title>", "example.org"))
     }
 
     @Test

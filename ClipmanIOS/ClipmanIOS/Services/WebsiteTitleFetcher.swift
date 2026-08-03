@@ -22,7 +22,7 @@ enum WebsiteTitleError: LocalizedError, Equatable {
         case .nonHTML:
             return "The link did not return an HTML page."
         case .responseTooLarge:
-            return "The page did not provide a title within Clipman's 128 KiB reading limit."
+            return "The page did not provide a useful title within Clipman's bounded reading limits."
         case .missingTitle:
             return "The page did not provide a usable website title."
         }
@@ -30,16 +30,10 @@ enum WebsiteTitleError: LocalizedError, Equatable {
 }
 
 enum WebsiteTitlePolicy {
-    private static let blockedPathTerms = [
-        "account-recovery", "activate", "auth", "claim", "confirm", "confirmation", "forgot-password",
-        "invite", "login", "magic-link", "oauth", "password-reset", "redeem", "reset-password",
-        "signin", "sign-in", "sso", "unsubscribe", "verification", "verify"
-    ]
     private static let blockedQueryNames: Set<String> = [
-        "access_token", "auth", "authorization", "code", "credential", "expires", "id_token", "jwt",
-        "key", "magic", "nonce", "one_time", "otp", "password", "secret", "session", "sig",
-        "signature", "signed", "sso", "state", "ticket", "token", "x-amz-credential",
-        "x-amz-signature", "x-goog-credential", "x-goog-signature"
+        "access_token", "apikey", "api_key", "auth", "authorization", "challenge", "code", "confirmation", "credential", "hmac", "id_token",
+        "invite", "jwt", "key", "nonce", "one_time", "otp", "passcode", "password", "reset", "secret", "session", "sig",
+        "signature", "signed", "sso", "state", "ticket", "token", "verification", "awsaccesskeyid", "googleaccessid", "key-pair-id"
     ]
 
     static func validate(_ url: URL) throws {
@@ -64,23 +58,13 @@ enum WebsiteTitlePolicy {
            !((scheme == "http" && port == 80) || (scheme == "https" && port == 443)) {
             throw WebsiteTitleError.unsupportedURL
         }
-        guard components.fragment?.isEmpty != false else {
-            throw WebsiteTitleError.unsafeURL("the address contains a private fragment")
-        }
-
         let pathSegments = components.percentEncodedPath.split(separator: "/").map {
             (String($0).removingPercentEncoding ?? String($0)).lowercased()
-        }
-        if pathSegments.contains(where: isBlockedPathSegment) {
-            throw WebsiteTitleError.unsafeURL("the address resembles a login, reset, invitation, or confirmation link")
         }
         for item in components.queryItems ?? [] {
             let name = item.name.lowercased()
             if isBlockedQueryName(name) {
                 throw WebsiteTitleError.unsafeURL("the address contains a credential-like parameter")
-            }
-            if let value = item.value, looksLikeSecret(value) {
-                throw WebsiteTitleError.unsafeURL("the address contains a token-like value")
             }
         }
         for segment in pathSegments where looksLikeSecret(segment) {
@@ -92,27 +76,14 @@ enum WebsiteTitlePolicy {
 
     private static func looksLikeSecret(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 24,
-              !trimmed.contains(" "),
-              !trimmed.contains("-word-") else { return false }
-        let scalars = trimmed.unicodeScalars
-        guard scalars.allSatisfy({
-            CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" || $0 == "." || $0 == "~" || $0 == "+" || $0 == "/" || $0 == "="
-        }) else { return false }
-        let distinct = Set(scalars).count
-        return Double(distinct) / Double(scalars.count) >= 0.35
-    }
-
-    private static func isBlockedPathSegment(_ segment: String) -> Bool {
-        if blockedPathTerms.contains(segment) { return true }
-        return ["confirm-", "invite-", "magic-", "recover-", "reset-", "verify-"].contains {
-            segment.hasPrefix($0)
-        }
+        guard trimmed.count >= 32, !trimmed.contains(where: \.isWhitespace) else { return false }
+        return trimmed.filter(\.isLetter).count >= 8 && trimmed.filter(\.isNumber).count >= 4
     }
 
     private static func isBlockedQueryName(_ name: String) -> Bool {
         if blockedQueryNames.contains(name) { return true }
-        return ["credential", "secret", "signature", "ticket", "token"].contains {
+        if name.hasPrefix("x-amz-") || name.hasPrefix("x-goog-") { return true }
+        return blockedQueryNames.contains {
             name.hasSuffix("_\($0)") || name.hasSuffix("-\($0)") || name.hasSuffix(".\($0)")
         }
     }
@@ -300,7 +271,7 @@ enum WebsiteTitleRequestBuilder {
             "GET \(target) HTTP/1.1",
             "Host: \(hostValue)",
             "Accept: text/html,application/xhtml+xml;q=0.9",
-            "Accept-Encoding: identity",
+            "Accept-Encoding: gzip",
             "User-Agent: Clipman/WebsiteTitle",
             "Connection: close",
             "",
@@ -325,8 +296,9 @@ private enum WebsiteTitleParseResult {
 
 private enum WebsiteTitleHTTPParser {
     static let maximumHeaderBytes = 32 * 1024
-    static let maximumBodyBytes = 128 * 1024
-    static let maximumWireBytes = 512 * 1024
+    static let maximumWireBodyBytes = 1024 * 1024
+    static let maximumDecodedBodyBytes = 2 * 1024 * 1024
+    static let maximumWireBytes = maximumHeaderBytes + maximumWireBodyBytes + 4
     private static let headerTerminator = Data([13, 10, 13, 10])
     private static let lineTerminator = Data([13, 10])
 
@@ -351,15 +323,12 @@ private enum WebsiteTitleHTTPParser {
             let name = line[..<separator].trimmingCharacters(in: .whitespaces).lowercased()
             let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { throw WebsiteTitleError.unavailable }
-            guard headers[name] == nil else { throw WebsiteTitleError.unavailable }
-            headers[name] = value
+            headers[name] = headers[name].map { "\($0), \(value)" } ?? value
         }
         if (300...399).contains(status) || !(200...299).contains(status) {
             return .response(WebsiteTitleWireResponse(statusCode: status, headers: headers, body: Data(), bodyWasTruncated: false))
         }
         let body = Data(data[headerRange.upperBound...])
-        let encoding = headers["content-encoding"]?.lowercased().trimmingCharacters(in: .whitespaces) ?? "identity"
-        guard encoding == "identity" else { throw WebsiteTitleError.nonHTML }
         if let transfer = headers["transfer-encoding"]?.lowercased(), transfer != "identity" {
             guard transfer.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) == ["chunked"] else {
                 throw WebsiteTitleError.unavailable
@@ -368,30 +337,40 @@ private enum WebsiteTitleHTTPParser {
             case .needMore:
                 return .needMore
             case .response(let decoded):
-                return .response(WebsiteTitleWireResponse(statusCode: status, headers: headers, body: decoded.body, bodyWasTruncated: decoded.bodyWasTruncated))
+                return .response(try decodedResponse(
+                    statusCode: status,
+                    headers: headers,
+                    encodedBody: decoded.body,
+                    wireWasTruncated: decoded.bodyWasTruncated
+                ))
             }
         }
         if let rawLength = headers["content-length"] {
             guard !rawLength.contains(","), let length = Int(rawLength), length >= 0 else {
                 throw WebsiteTitleError.unavailable
             }
-            if body.count >= min(length, maximumBodyBytes + 1) {
-                let truncated = length > maximumBodyBytes
-                return .response(WebsiteTitleWireResponse(
+            if body.count >= min(length, maximumWireBodyBytes + 1) {
+                let truncated = length > maximumWireBodyBytes
+                return .response(try decodedResponse(
                     statusCode: status,
                     headers: headers,
-                    body: Data(body.prefix(maximumBodyBytes)),
-                    bodyWasTruncated: truncated
+                    encodedBody: Data(body.prefix(maximumWireBodyBytes)),
+                    wireWasTruncated: truncated
                 ))
             }
             if reachedEOF { throw WebsiteTitleError.unavailable }
             return .needMore
         }
-        if body.count > maximumBodyBytes {
-            return .response(WebsiteTitleWireResponse(statusCode: status, headers: headers, body: Data(body.prefix(maximumBodyBytes)), bodyWasTruncated: true))
+        if body.count > maximumWireBodyBytes {
+            return .response(try decodedResponse(
+                statusCode: status,
+                headers: headers,
+                encodedBody: Data(body.prefix(maximumWireBodyBytes)),
+                wireWasTruncated: true
+            ))
         }
         if reachedEOF {
-            return .response(WebsiteTitleWireResponse(statusCode: status, headers: headers, body: body, bodyWasTruncated: false))
+            return .response(try decodedResponse(statusCode: status, headers: headers, encodedBody: body, wireWasTruncated: false))
         }
         return .needMore
     }
@@ -399,7 +378,7 @@ private enum WebsiteTitleHTTPParser {
     private static func decodeChunked(_ data: Data, reachedEOF: Bool) throws -> WebsiteTitleParseResult {
         var cursor = data.startIndex
         var output = Data()
-        output.reserveCapacity(maximumBodyBytes)
+        output.reserveCapacity(maximumWireBodyBytes)
         while true {
             guard let lineRange = data.range(of: lineTerminator, in: cursor..<data.endIndex) else {
                 if reachedEOF { throw WebsiteTitleError.unavailable }
@@ -417,18 +396,18 @@ private enum WebsiteTitleHTTPParser {
                 return .response(WebsiteTitleWireResponse(statusCode: 200, headers: [:], body: output, bodyWasTruncated: false))
             }
             let available = data.endIndex - cursor
-            let bytesNeededForLimit = maximumBodyBytes + 1 - output.count
+            let bytesNeededForLimit = maximumWireBodyBytes + 1 - output.count
             if chunkSize > available {
                 if available >= bytesNeededForLimit {
                     output.append(data[cursor..<(cursor + bytesNeededForLimit)])
-                    return .response(WebsiteTitleWireResponse(statusCode: 200, headers: [:], body: Data(output.prefix(maximumBodyBytes)), bodyWasTruncated: true))
+                    return .response(WebsiteTitleWireResponse(statusCode: 200, headers: [:], body: Data(output.prefix(maximumWireBodyBytes)), bodyWasTruncated: true))
                 }
                 if reachedEOF { throw WebsiteTitleError.unavailable }
                 return .needMore
             }
             output.append(data[cursor..<(cursor + min(chunkSize, bytesNeededForLimit))])
-            if output.count > maximumBodyBytes {
-                return .response(WebsiteTitleWireResponse(statusCode: 200, headers: [:], body: Data(output.prefix(maximumBodyBytes)), bodyWasTruncated: true))
+            if output.count > maximumWireBodyBytes {
+                return .response(WebsiteTitleWireResponse(statusCode: 200, headers: [:], body: Data(output.prefix(maximumWireBodyBytes)), bodyWasTruncated: true))
             }
             cursor += chunkSize
             guard data.distance(from: cursor, to: data.endIndex) >= 2 else {
@@ -438,6 +417,32 @@ private enum WebsiteTitleHTTPParser {
             guard data[cursor] == 13, data[data.index(after: cursor)] == 10 else { throw WebsiteTitleError.unavailable }
             cursor += 2
         }
+    }
+
+    private static func decodedResponse(
+        statusCode: Int,
+        headers: [String: String],
+        encodedBody: Data,
+        wireWasTruncated: Bool
+    ) throws -> WebsiteTitleWireResponse {
+        let encoding = headers["content-encoding"]?.lowercased().trimmingCharacters(in: .whitespaces) ?? "identity"
+        if encoding.isEmpty || encoding == "identity" {
+            let truncated = wireWasTruncated || encodedBody.count > maximumDecodedBodyBytes
+            return WebsiteTitleWireResponse(
+                statusCode: statusCode,
+                headers: headers,
+                body: Data(encodedBody.prefix(maximumDecodedBodyBytes)),
+                bodyWasTruncated: truncated
+            )
+        }
+        guard encoding == "gzip" || encoding == "x-gzip" else { throw WebsiteTitleError.nonHTML }
+        let decompressed = try Gzip.decompressPrefix(encodedBody, maximumOutputBytes: maximumDecodedBodyBytes)
+        return WebsiteTitleWireResponse(
+            statusCode: statusCode,
+            headers: headers,
+            body: decompressed.data,
+            bodyWasTruncated: wireWasTruncated || decompressed.reachedLimit
+        )
     }
 }
 
@@ -638,7 +643,7 @@ enum WebsiteTitleFetcher {
                     ?? String(data: response.body, encoding: .isoLatin1) else {
                 throw response.bodyWasTruncated ? WebsiteTitleError.responseTooLarge : WebsiteTitleError.missingTitle
             }
-            if let title = WebsiteTitleParser.title(from: source) { return title }
+            if let title = WebsiteTitleParser.title(from: source, host: host) { return title }
             throw response.bodyWasTruncated ? WebsiteTitleError.responseTooLarge : WebsiteTitleError.missingTitle
         }
     }
@@ -688,26 +693,146 @@ enum WebsiteTitleFetcher {
 }
 
 enum WebsiteTitleParser {
-    static func title(from html: String) -> String? {
-        for key in ["og:title", "twitter:title"] {
-            if let value = metaContent(named: key, in: html), let cleaned = sanitized(value) {
-                return cleaned
+    private static let maximumMetadataCharacters = 128 * 1024
+    private static let nonMetadataElements = ["script", "style", "template", "noscript", "svg", "iframe"]
+    private static let exactJunkTitles = Set([
+        "just a moment", "attention required", "access denied", "access to this page has been denied",
+        "are you a robot", "are you a human", "please wait", "javascript is disabled",
+        "javascript is required", "enable javascript", "security check", "checking your browser",
+        "verify you are human", "human verification", "bot verification", "one moment please", "loading",
+        "redirecting", "error", "page not found", "not found", "404", "403 forbidden", "forbidden",
+        "site maintenance", "under construction", "untitled", "untitled document", "log in", "login",
+        "sign in", "signin", "log in or sign up", "robot check", "captcha", "request blocked", "blocked",
+        "reddit - dive into anything"
+    ])
+    private static let junkTitleFragments = [
+        "please wait for verification", "checking if the site connection is secure",
+        "enable javascript and cookies to continue", "verify you are a human",
+        "your request has been blocked", "unusual traffic"
+    ]
+
+    static func title(from html: String, host: String = "") -> String? {
+        let metadata = retainedMetadata(from: html)
+        var openGraph: String?
+        var twitter: String?
+        if let regex = try? NSRegularExpression(pattern: #"<meta\b[^>]{0,4096}>"#, options: .caseInsensitive) {
+            for match in regex.matches(in: metadata, range: NSRange(metadata.startIndex..<metadata.endIndex, in: metadata)) {
+                guard let range = Range(match.range, in: metadata) else { continue }
+                let attributes = parsedAttributes(String(metadata[range]))
+                let key = (attributes["property"] ?? attributes["name"] ?? attributes["itemprop"] ?? "").lowercased()
+                guard let content = attributes["content"], !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    continue
+                }
+                if key == "og:title", openGraph == nil { openGraph = content }
+                if key == "twitter:title", twitter == nil { twitter = content }
             }
         }
-        if let raw = firstCapture("<title\\b[^>]*>([\\s\\S]*?)</title\\s*>", in: html),
-           let cleaned = sanitized(raw.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)) {
+        let documentTitle = firstCapture(#"<title\b[^>]{0,1024}>(.*?)</title\s*>"#, in: metadata)
+        let heading = firstCapture(#"<h1\b[^>]{0,4096}>(.*?)</h1\s*>"#, in: metadata)
+        for candidate in [openGraph, twitter, documentTitle, heading] {
+            guard let candidate,
+                  let cleaned = sanitized(candidate.replacingOccurrences(of: "<[^>]{0,4096}>", with: " ", options: .regularExpression)),
+                  !isJunkTitle(cleaned),
+                  host.isEmpty || cleaned.caseInsensitiveCompare(host) != .orderedSame
+            else { continue }
             return cleaned
         }
         return nil
     }
 
-    private static func metaContent(named name: String, in html: String) -> String? {
-        let escaped = NSRegularExpression.escapedPattern(for: name)
-        let patterns = [
-            "<meta\\b[^>]*(?:property|name)\\s*=\\s*['\"]\(escaped)['\"][^>]*content\\s*=\\s*['\"]([^'\"]*)['\"][^>]*>",
-            "<meta\\b[^>]*content\\s*=\\s*['\"]([^'\"]*)['\"][^>]*(?:property|name)\\s*=\\s*['\"]\(escaped)['\"][^>]*>"
-        ]
-        return patterns.lazy.compactMap { firstCapture($0, in: html) }.first
+    private static func retainedMetadata(from html: String) -> String {
+        let source = html as NSString
+        let output = NSMutableString()
+        var index = 0
+        while index < source.length, output.length < maximumMetadataCharacters {
+            if source.length - index >= 4, source.substring(with: NSRange(location: index, length: 4)) == "<!--" {
+                let end = source.range(
+                    of: "-->",
+                    options: [],
+                    range: NSRange(location: index + 4, length: source.length - index - 4)
+                )
+                index = end.location == NSNotFound ? source.length : NSMaxRange(end)
+                continue
+            }
+            if source.character(at: index) != 60 {
+                let next = source.range(
+                    of: "<",
+                    options: [],
+                    range: NSRange(location: index, length: source.length - index)
+                )
+                let end = next.location == NSNotFound ? source.length : next.location
+                append(source, range: NSRange(location: index, length: end - index), to: output)
+                index = end
+                continue
+            }
+            guard let tagEnd = findTagEnd(source, start: index) else { break }
+            let tagRange = NSRange(location: index, length: tagEnd - index + 1)
+            let tag = source.substring(with: tagRange)
+            let parsed = parsedTagName(tag)
+            if !parsed.closing,
+               nonMetadataElements.contains(parsed.name),
+               !tag.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/>") {
+                let close = source.range(
+                    of: "</\(parsed.name)",
+                    options: .caseInsensitive,
+                    range: NSRange(location: tagEnd + 1, length: source.length - tagEnd - 1)
+                )
+                if close.location == NSNotFound { break }
+                guard let closeEnd = findTagEnd(source, start: close.location) else { break }
+                index = closeEnd + 1
+                continue
+            }
+            append(source, range: tagRange, to: output)
+            index = tagEnd + 1
+        }
+        return output as String
+    }
+
+    private static func append(_ source: NSString, range: NSRange, to output: NSMutableString) {
+        let remaining = maximumMetadataCharacters - output.length
+        guard remaining > 0, range.length > 0 else { return }
+        output.append(source.substring(with: NSRange(location: range.location, length: min(range.length, remaining))))
+    }
+
+    private static func findTagEnd(_ source: NSString, start: Int) -> Int? {
+        var quote: unichar = 0
+        guard start + 1 < source.length else { return nil }
+        for index in (start + 1)..<source.length {
+            let character = source.character(at: index)
+            if quote != 0 {
+                if character == quote { quote = 0 }
+            } else if character == 34 || character == 39 {
+                quote = character
+            } else if character == 62 {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private static func parsedTagName(_ tag: String) -> (name: String, closing: Bool) {
+        var value = tag.dropFirst().drop(while: \.isWhitespace)
+        let closing = value.first == "/"
+        if closing { value = value.dropFirst().drop(while: \.isWhitespace) }
+        return (value.prefix { $0.isLetter || $0.isNumber || $0 == ":" || $0 == "-" }.lowercased(), closing)
+    }
+
+    private static func parsedAttributes(_ tag: String) -> [String: String] {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))"#
+        ) else { return [:] }
+        var result: [String: String] = [:]
+        for match in regex.matches(in: tag, range: NSRange(tag.startIndex..<tag.endIndex, in: tag)) {
+            guard let nameRange = Range(match.range(at: 1), in: tag) else { continue }
+            let name = tag[nameRange].lowercased()
+            for index in 2...4 where match.range(at: index).location != NSNotFound {
+                if let valueRange = Range(match.range(at: index), in: tag) {
+                    result[name] = String(tag[valueRange])
+                    break
+                }
+            }
+        }
+        return result
     }
 
     private static func firstCapture(_ pattern: String, in value: String) -> String? {
@@ -720,8 +845,17 @@ enum WebsiteTitleParser {
 
     private static func sanitized(_ raw: String) -> String? {
         let decoded = HTMLEntityDecoder.decode(raw)
+        let separators = CharacterSet(charactersIn: " |-\u{2013}\u{2014}\u{00B7}\u{00BB}<")
         let value = LinkPresentationSafety.cleanedText(decoded, maximumScalars: 200)
+            .trimmingCharacters(in: separators)
         return value.isEmpty ? nil : value
+    }
+
+    private static func isJunkTitle(_ title: String) -> Bool {
+        let trim = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!|-\u{2013}\u{2014}"))
+        let normalized = title.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .trimmingCharacters(in: trim)
+        return exactJunkTitles.contains(normalized) || junkTitleFragments.contains { normalized.contains($0) }
     }
 }
 

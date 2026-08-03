@@ -480,6 +480,7 @@ private fun ClipmanApp(
     var attemptedInitialLoad by remember { mutableStateOf(false) }
     var currentRevision by remember { mutableStateOf("") }
     var isLoadingHistory by remember { mutableStateOf(false) }
+    var isSavingHistory by remember { mutableStateOf(false) }
     var announcedFirstPage by remember { mutableStateOf(false) }
     var launchClipboardHandled by remember { mutableStateOf(false) }
     var addClipboardAfterLoad by remember { mutableStateOf(false) }
@@ -773,7 +774,7 @@ private fun ClipmanApp(
             showConnectionSettings = true
             return
         }
-        if (isLoadingHistory) return
+        if (isLoadingHistory || isSavingHistory) return
         val generation = loadGeneration + 1
         loadGeneration = generation
         val requestedMode = storageMode
@@ -913,6 +914,7 @@ private fun ClipmanApp(
         isLoadingHistory = false
         val generation = changeGeneration + 1
         changeGeneration = generation
+        isSavingHistory = true
         val previousDatabase = database
         val previousPendingLocalChanges = hasPendingLocalChanges
         val requestedMode = storageMode
@@ -922,12 +924,16 @@ private fun ClipmanApp(
         val requestedCaHost = serverCaHost
         val requestedPassword = password
         val requestedBackup = backupOptions()
+        val requestedRevision = currentRevision
         val updatedLocal = mutation(database)
         database = updatedLocal
         entries = updatedLocal.Entries
         hasLoadedHistory = true
         if (requestedMode == MobileStorageMode.Server) hasPendingLocalChanges = true
-        setTransientStatus(completionStatus)
+        setSteadyStatus(
+            if (requestedMode == MobileStorageMode.Server) "$actionText; server sync in progress."
+            else "Saving change."
+        )
         if (playCopyFeedback) {
             playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
         }
@@ -935,47 +941,69 @@ private fun ClipmanApp(
             val result = withContext(Dispatchers.IO) {
                 storageMutex.withLock {
                     runCatching {
-                        val backupError = try {
-                            historyRepository.saveLocal(updatedLocal, requestedPassword, requestedBackup)
-                        } catch (error: Exception) {
-                            val reloaded = try {
-                                historyRepository.loadLocalOrNull(requestedPassword)
-                            } catch (_: Exception) {
-                                null
-                            }
-                            throw LocalHistoryWriteException(error, reloaded)
-                        }
                         if (requestedMode == MobileStorageMode.Local) {
+                            val backupError = try {
+                                historyRepository.saveLocal(updatedLocal, requestedPassword, requestedBackup)
+                            } catch (error: Exception) {
+                                val reloaded = try {
+                                    historyRepository.loadLocalOrNull(requestedPassword)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                                throw LocalHistoryWriteException(error, reloaded)
+                            }
                             MobileSyncResult(updatedLocal, "", false, backupError = backupError)
                         } else {
-                            val sync = historyRepository.synchronize(
-                                requestedServerUrl,
-                                requestedToken,
-                                requestedPassword,
-                                requestedCaCertPem,
-                                requestedCaHost,
-                                updatedLocal,
-                                requestedBackup,
-                                localAlreadySaved = true
+                            historyRepository.persistMutation(
+                                serverUrl = requestedServerUrl,
+                                token = requestedToken,
+                                password = requestedPassword,
+                                serverCaCertPem = requestedCaCertPem,
+                                serverCaHost = requestedCaHost,
+                                current = updatedLocal,
+                                expectedRevision = requestedRevision,
+                                backupOptions = requestedBackup
                             )
-                            if (sync.backupError == null && backupError != null) sync.copy(backupError = backupError) else sync
                         }
                     }
                 }
             }
             if (generation != changeGeneration) return@launch
+            isSavingHistory = false
             result.onSuccess { sync ->
                 database = sync.database
                 entries = sync.database.Entries
                 currentRevision = sync.revision
                 hasPendingLocalChanges = false
                 pollingFailureCount = 0
+                val completed = if (requestedMode == MobileStorageMode.Server) {
+                    "${completionStatus.trim().trimEnd('.')} and synced with Clipman Server."
+                } else {
+                    completionStatus
+                }
                 if (sync.backupError != null) {
-                    setSteadyStatus("$actionText complete, but cloud backup failed: ${sync.backupError}")
+                    setSteadyStatus("${completed.trimEnd('.')} but cloud backup failed: ${sync.backupError}")
+                } else {
+                    setTransientStatus(completed)
+                    setSteadyStatus(
+                        if (requestedMode == MobileStorageMode.Server) "Ready. Server sync connected."
+                        else "Ready. Using local history.",
+                        revealImmediately = false
+                    )
                 }
             }.onFailure { error ->
                 if (error is LocalHistoryWriteException) {
                     val restored = recoverHistoryAfterLocalWriteFailure(previousDatabase, error.reloadedDatabase)
+                    database = restored
+                    entries = restored.Entries
+                    hasLoadedHistory = true
+                    hasPendingLocalChanges = previousPendingLocalChanges
+                    setSteadyStatus(localHistoryWriteFailureStatus(actionText, error.cause ?: error))
+                } else if (error is MobileMutationException && !error.localSaved) {
+                    val reloaded = withContext(Dispatchers.IO) {
+                        runCatching { historyRepository.loadLocalOrNull(requestedPassword) }.getOrNull()
+                    }
+                    val restored = recoverHistoryAfterLocalWriteFailure(previousDatabase, reloaded)
                     database = restored
                     entries = restored.Entries
                     hasLoadedHistory = true
@@ -1136,6 +1164,7 @@ private fun ClipmanApp(
             result.onSuccess { title ->
                 val currentEntry = database.Entries.firstOrNull { it.Id == entry.Id }
                 if (currentEntry == null || currentEntry.Text != entry.Text || currentEntry.Name.isNotBlank()) {
+                    playFeedback(context, ClipmanSound.Skip, playSounds, useHaptics)
                     setTransientStatus("The entry changed before its website title was applied.")
                     return@onSuccess
                 }
@@ -1148,6 +1177,7 @@ private fun ClipmanApp(
                     }
                 }
             }.onFailure { error ->
+                playFeedback(context, ClipmanSound.Skip, playSounds, useHaptics)
                 setTransientStatus(error.message ?: "The website title could not be retrieved.")
             }
         }
@@ -1241,7 +1271,7 @@ private fun ClipmanApp(
 
     LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings, appIsForeground, pollingFailureCount) {
         while (appIsForeground && storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
-            val delaySeconds = minOf(60L, 15L * (1L shl pollingFailureCount.coerceIn(0, 2)))
+            val delaySeconds = minOf(60L, 5L * (1L shl pollingFailureCount.coerceIn(0, 3)))
             delay(delaySeconds * 1_000L)
             loadHistory(announceResult = false, checkRevisionFirst = true)
         }
@@ -1582,6 +1612,16 @@ private fun ClipmanApp(
                         }
                     }.onFailure {
                         status = "Could not open the tip jar."
+                        announce(view, status)
+                    }
+                },
+                onOpenManual = {
+                    runCatching {
+                        launchTrustedExternalActivity {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://onjlouis.github.io/clipman/manual.html")))
+                        }
+                    }.onFailure {
+                        status = "Could not open the Clipman manual."
                         announce(view, status)
                     }
                 },
@@ -2147,6 +2187,7 @@ private fun ConnectionSettingsScreen(
     onChooseBackupFolder: () -> Unit,
     onRestoreHistoryBackup: () -> Unit,
     onOpenTipJar: () -> Unit,
+    onOpenManual: () -> Unit,
     onCancel: () -> Unit,
     onSave: () -> Unit
 ) {
@@ -2386,6 +2427,12 @@ private fun ConnectionSettingsScreen(
             }
         }
         Text(
+            text = "Help",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        TextButton(onClick = onOpenManual, enabled = !isSaving) { Text("Open Manual") }
+        Text(
             text = "Build information",
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.semantics { heading() }
@@ -2604,7 +2651,15 @@ private fun ClipEntryCard(
             true
         }
     }
-    val accessibilityText = (listOf(rowText) + labelParts).joinToString("; ")
+    val accessibilityText = clipEntryAccessibilityText(
+        rowText = rowText,
+        pinned = entry.Pinned,
+        imageDescription = embeddedImage?.let { "Image, ${it.width} by ${it.height} pixels" },
+        group = entry.Group,
+        device = entry.SourceMachine,
+        index = index,
+        total = total
+    )
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -2635,6 +2690,23 @@ private fun ClipEntryCard(
         }
     }
 }
+
+internal fun clipEntryAccessibilityText(
+    rowText: String,
+    pinned: Boolean,
+    imageDescription: String?,
+    group: String,
+    device: String,
+    index: Int,
+    total: Int
+): String = buildList {
+    if (pinned) add("Pinned")
+    add(rowText)
+    if (!imageDescription.isNullOrBlank()) add(imageDescription)
+    if (group.isNotBlank()) add("Group: $group")
+    if (device.isNotBlank()) add("Device: $device")
+    add("${index + 1} of $total")
+}.joinToString("; ")
 
 internal enum class ClipEntryActionKind {
     Open,

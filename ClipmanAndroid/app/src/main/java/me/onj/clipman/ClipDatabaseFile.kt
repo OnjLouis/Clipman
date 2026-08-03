@@ -39,12 +39,27 @@ object ClipDatabaseFile {
 
     fun isEncrypted(bytes: ByteArray): Boolean = bytes.startsWith(encryptedMagic)
 
-    fun save(database: ClipDatabase, password: String): ByteArray {
+    fun encryptedSalt(bytes: ByteArray): ByteArray? {
+        val saltOffset = encryptedMagic.size + 1
+        if (!bytes.startsWith(encryptedMagic) ||
+            bytes.size < saltOffset + 16 ||
+            bytes[encryptedMagic.size].toInt() != 1
+        ) {
+            return null
+        }
+        return bytes.copyOfRange(saltOffset, saltOffset + 16)
+    }
+
+    fun save(
+        database: ClipDatabase,
+        password: String,
+        preferredSalt: ByteArray? = null
+    ): ByteArray {
         val text = json.encodeToString(ClipDatabase.serializer(), database)
         val serialized = text.toByteArray(Charsets.UTF_8)
         requireSerializedJsonSize(serialized.size.toLong())
         val encoded = if (password.isNotEmpty()) {
-            writeEncryptedText(serialized, password)
+            writeEncryptedText(serialized, password, preferredSalt)
         } else {
             compressedMagic + compress(serialized, maxDatabaseBlobBytes - compressedMagic.size)
         }
@@ -126,8 +141,12 @@ object ClipDatabaseFile {
         return readCompressedText(compressed)
     }
 
-    private fun writeEncryptedText(serialized: ByteArray, password: String): ByteArray {
-        val salt = randomBytes(16)
+    private fun writeEncryptedText(
+        serialized: ByteArray,
+        password: String,
+        preferredSalt: ByteArray?
+    ): ByteArray {
+        val salt = preferredSalt?.takeIf { it.size == 16 }?.copyOf() ?: randomBytes(16)
         val iv = randomBytes(16)
         val keys = deriveKeys(password, salt)
         val maximumCompressedBytes = maxDatabaseBlobBytes -
@@ -211,12 +230,33 @@ object ClipDatabaseFile {
     }
 
     private fun deriveKeys(password: String, salt: ByteArray): KeyPair {
+        val cacheId = derivedKeyCacheId(password, salt)
+        synchronized(derivedKeyCache) {
+            derivedKeyCache[cacheId]?.let { return it }
+        }
         val spec = PBEKeySpec(password.toCharArray(), salt, 150_000, 512)
-        val keyBytes = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).encoded
-        return KeyPair(
+        val keyBytes = try {
+            SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
+        val keys = KeyPair(
             encryptionKey = keyBytes.copyOfRange(0, 32),
             macKey = keyBytes.copyOfRange(32, 64)
         )
+        synchronized(derivedKeyCache) {
+            derivedKeyCache[cacheId] = keys
+        }
+        keyBytes.fill(0)
+        return keys
+    }
+
+    private fun derivedKeyCacheId(password: String, salt: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(password.toByteArray(Charsets.UTF_8))
+        digest.update(0)
+        digest.update(salt)
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
     }
 
     private fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {
@@ -234,6 +274,11 @@ object ClipDatabaseFile {
     }
 
     private data class KeyPair(val encryptionKey: ByteArray, val macKey: ByteArray)
+
+    private val derivedKeyCache = object : LinkedHashMap<String, KeyPair>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, KeyPair>?): Boolean =
+            size > 8
+    }
 
     private class SizeLimitedByteArrayOutputStream(private val maximumBytes: Int) : ByteArrayOutputStream() {
         override fun write(value: Int) {

@@ -109,11 +109,11 @@
 </ul>
 <p>Group names are case-insensitive. Spellings such as <strong>GitHub</strong>, <strong>Github</strong>, and <strong>github</strong> remain one group. If existing entries use several capitalizations, Clipman displays the spelling used most often and uses the newest spelling to resolve a tie.</p>
 
-  <p>Each history row is one accessibility focus target. TalkBack users can move from entry to entry with a single swipe. An unnamed website link uses a readable offline label followed by its destination without <code>http://</code> or <code>https://</code>; viewing or copying still uses the full unchanged URL.</p>
+  <p>Each history row is one accessibility focus target. TalkBack users can move from entry to entry with a single swipe. An unnamed website link uses a readable offline label followed by its destination without <code>http://</code> or <code>https://</code>; viewing or copying still uses the full unchanged URL. A URL copied with only a trailing screen-reader role word, such as <code>https://example.com&nbsp; link</code>, remains in Links history while Clipman preserves the original stored text.</p>
 
   <p>Double-tap an entry to copy it to the Android clipboard. Clipman announces <strong>Copied to clipboard</strong> and plays the copy sound when sounds are enabled.</p>
 
-  <p>Long-press, or use TalkBack actions, to open <strong>View entry</strong>. The action order matches iPhone and iPad: <strong>Open link</strong> when the entry contains one link, <strong>View entry</strong>, <strong>Edit entry</strong>, <strong>Use Website Title as Name</strong> for one unnamed public HTTP or HTTPS link, <strong>Pin entry</strong> or <strong>Unpin entry</strong>, then <strong>Delete entry</strong>. An image entry then adds <strong>Save to Photos</strong> followed by <strong>Share</strong>; ordinary entries do not include those two actions. Website titles are never fetched automatically or in bulk; Clipman asks before contacting the selected site.</p>
+  <p>Long-press, or use TalkBack actions, to open <strong>View entry</strong>. The action order matches iPhone and iPad: <strong>Open link</strong> when the entry contains one link, <strong>View entry</strong>, <strong>Edit entry</strong>, <strong>Use Website Title as Name</strong> for one unnamed public HTTP or HTTPS link, <strong>Pin entry</strong> or <strong>Unpin entry</strong>, then <strong>Delete entry</strong>. An image entry then adds <strong>Save to Photos</strong> followed by <strong>Share</strong>; ordinary entries do not include those two actions. Clipman asks before contacting the selected site, can find useful titles on modern script-heavy pages, ignores misleading bot-check titles, and stores a successful result in the ordinary Name field. Local or private destinations, non-standard ports, credential-related parameters, signed requests and token-like paths are refused. Website titles are never fetched automatically or in bulk.</p>
 
   <h2 id="view-entry">View Entry</h2>
   <p><strong>View entry</strong> shows the clipboard text line by line so TalkBack can review it naturally.</p>
@@ -130,7 +130,7 @@
     <li><strong>Copy remote additions to Android clipboard</strong>: when another device adds new text to the shared history, Clipman can place that new text on the Android clipboard while the app is open.</li>
     <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
     <li><strong>History sort order</strong>: chooses Manual order, Newest first, Oldest first, or Text for normal entries. This per-device display choice does not rewrite shared history or change pinned-entry order.</li>
-    <li>Deleting an entry updates the visible history immediately while encrypted local storage and optional server synchronization continue in the background. If the local save fails, Clipman restores durable history and reports the error.</li>
+    <li>Deleting an entry updates the visible history immediately while encrypted local storage and optional server synchronization continue in the background. Clipman reports synchronization in progress and reports completion only after the server accepts the deletion. If the local save fails, Clipman restores durable history and reports the error.</li>
     <li><strong>Preserve copied formatting and show Rich Text history</strong>: captures and restores Android HTML clipboard formatting and adds Rich Text to the history-section switcher. This is off by default.</li>
     <li><strong>Include copied images in Rich Text history</strong>: stores bounded standalone PNG and JPEG clipboard images in the existing history database and lets Clipman receive one selected photo through Android's Share sheet. It is available only when Rich Text history is enabled and is off by default.</li>
     <li><strong>Play sounds</strong>: enables Clipman sounds.</li>
@@ -141,6 +141,7 @@
     <li><strong>Check Now</strong>: checks immediately and reports whether this Android build is current.</li>
     <li><strong>Server connection</strong>: imports or exports a private <code>.clpconf</code> server file, or shows server address, server token, history password, and show-password controls for manual setup.</li>
     <li><strong>Support Clipman</strong>: opens the optional Tip Jar. Tips do not unlock features or change Clipman's free functionality.</li>
+    <li><strong>Help</strong>: <strong>Open Manual</strong> opens the rendered Clipman manual in the default browser without saving or discarding Settings changes.</li>
     <li><strong>Build information</strong>: shows the app version, readable UTC build time, and exact build stamp so a tester can identify the installed build unambiguously.</li>
   </ul>
 
@@ -148,7 +149,9 @@
 
   <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a private-CA HTTPS server generated the file, it can also contain the public authority. Clipman validates that certificate and trusts it only for this server profile and reviewed HTTPS host; it does not install a device-wide Android CA. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. Export offers <strong>Save to Files</strong> and <strong>Share</strong> for the address, token, and matching private authority currently shown in Settings. Share opens Android's native share chooser with temporary read-only access to the file. Every <code>.clpconf</code> file contains the private server token; store and share it securely, never keep it beside an exported clipboard history, and delete it or move it to a password manager after configuring your devices.</p>
 
-  <p>When Clipman starts in Server mode, it displays the encrypted local cache before contacting the server. While Clipman is in the foreground and Settings is closed, it then checks the server revision every five seconds. It downloads history only when the revision changes, pauses checks in the background, and progressively slows retries during an outage. Returning to Clipman or closing Settings triggers an immediate refresh.</p>
+  <p>When Clipman starts in Server mode, it displays the encrypted local cache before contacting the server. While Clipman is in the foreground and Settings is closed, it then checks the server revision every fifteen seconds. It downloads history only when the revision changes, pauses checks in the background, and progressively slows retries during an outage. Returning to Clipman or closing Settings triggers an immediate refresh.</p>
+
+  <p>After a normal addition, edit, pin, title change, or deletion, Clipman saves and encrypts the local database once and uploads it against the known server revision. It downloads, decrypts, merges, and retries the complete history only when another client changed the server first. The status area reports server sync in progress and does not report the change as synced until Clipman Server accepts it.</p>
 
   <p>If only some custom sounds are available, Clipman uses those and falls back to bundled defaults for the rest.</p>
 

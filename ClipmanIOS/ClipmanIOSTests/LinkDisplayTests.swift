@@ -64,6 +64,16 @@ final class LinkDisplayTests: XCTestCase {
         XCTAssertEqual(richTextEntry.displayText, "Article; example.com/article")
     }
 
+    func testTrailingScreenReaderLinkRoleStillClassifiesAsOneNamedLink() throws {
+        let stored = "https://youtu.be/Mu1gjX5fMA4  link"
+        let entry = ClipEntry(Text: stored, Name: "Wooden Flute")
+
+        XCTAssertTrue(LinkExtractor.isPureLinkEntry(entry))
+        XCTAssertEqual(LinkExtractor.exactHTTPURL(in: entry)?.absoluteString, "https://youtu.be/Mu1gjX5fMA4")
+        XCTAssertEqual(entry.Text, stored)
+        XCTAssertFalse(LinkExtractor.isPureLinkEntry(ClipEntry(Text: "Read \(stored)")))
+    }
+
     func testWebsiteTitleParserPrefersOpenGraphAndSanitizesOutput() {
         let html = """
         <html><head>
@@ -73,7 +83,22 @@ final class LinkDisplayTests: XCTestCase {
         </head></html>
         """
 
-        XCTAssertEqual(WebsiteTitleParser.title(from: html), "Better & safer title")
+        XCTAssertEqual(WebsiteTitleParser.title(from: html, host: "example.com"), "Better & safer title")
+    }
+
+    func testWebsiteTitleParserHandlesScriptHeavyAndMisleadingPages() {
+        let scriptHeavy = "<script>" + String(repeating: "x", count: 180 * 1024) +
+            "</script><meta property=\"og:title\" content=\"Useful video title\">"
+        XCTAssertEqual(WebsiteTitleParser.title(from: scriptHeavy, host: "youtube.com"), "Useful video title")
+        XCTAssertEqual(
+            WebsiteTitleParser.title(
+                from: "<svg><title>Decorative icon</title></svg><h1>Article heading</h1>",
+                host: "example.com"
+            ),
+            "Article heading"
+        )
+        XCTAssertNil(WebsiteTitleParser.title(from: "<title>Reddit - Dive into anything</title>", host: "reddit.com"))
+        XCTAssertNil(WebsiteTitleParser.title(from: "<title>example.com</title>", host: "example.com"))
     }
 
     func testOfflineLabelsAndFetchedTitlesStripUnsafeUnicodeConsistently() throws {
@@ -84,7 +109,7 @@ final class LinkDisplayTests: XCTestCase {
         )
 
         let html = "<title>Alpha\u{000A}Beta\u{200D}Gamma\u{FFFD}Delta\u{2028}Epsilon\u{2029}Zeta\u{00A0} Eta</title>"
-        XCTAssertEqual(WebsiteTitleParser.title(from: html), "AlphaBetaGammaDeltaEpsilonZeta Eta")
+        XCTAssertEqual(WebsiteTitleParser.title(from: html, host: "example.com"), "AlphaBetaGammaDeltaEpsilonZeta Eta")
     }
 
     func testOverlongURLsAreRejectedBeforeExtractionOrWebsiteWork() async throws {
@@ -169,7 +194,9 @@ final class LinkDisplayTests: XCTestCase {
         XCTAssertThrowsError(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://192.31.196.1/page"))))
         XCTAssertThrowsError(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://[2001:db8::1]/page"))))
         XCTAssertThrowsError(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://example.com:8443/page"))))
-        XCTAssertThrowsError(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://example.com/reset-password"))))
+        XCTAssertNoThrow(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://example.com/reset-password#instructions"))))
+        XCTAssertNoThrow(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://example.com/login"))))
+        XCTAssertNoThrow(try WebsiteTitlePolicy.validateStructure(try XCTUnwrap(URL(string: "https://www.youtube.com/watch?v=6-fvja4UXJk&pp=ygUbU29uaWNjb3V0dXJlIEJhbGluZXNlIGZsdXRl"))))
         XCTAssertThrowsError(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://example.com/page?token=abc"))))
         XCTAssertThrowsError(try WebsiteTitlePolicy.validate(try XCTUnwrap(URL(string: "https://example.com/page?session_token=abc"))))
     }
@@ -207,7 +234,7 @@ final class LinkDisplayTests: XCTestCase {
         let request = try XCTUnwrap(String(data: WebsiteTitleRequestBuilder.request(for: url), encoding: .utf8))
         XCTAssertTrue(request.hasPrefix("GET /path?q=plain HTTP/1.1\r\n"))
         XCTAssertTrue(request.contains("\r\nHost: www.example.com\r\n"))
-        XCTAssertTrue(request.contains("\r\nAccept-Encoding: identity\r\n"))
+        XCTAssertTrue(request.contains("\r\nAccept-Encoding: gzip\r\n"))
         XCTAssertFalse(request.localizedCaseInsensitiveContains("cookie:"))
         XCTAssertFalse(request.localizedCaseInsensitiveContains("authorization:"))
         XCTAssertFalse(request.localizedCaseInsensitiveContains("referer:"))

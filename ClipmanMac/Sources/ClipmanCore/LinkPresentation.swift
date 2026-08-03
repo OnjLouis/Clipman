@@ -19,8 +19,8 @@ public struct LinkPresentation: Equatable, Sendable {
 
     public static func make(urlText: String, assignedName: String = "") -> LinkPresentation? {
         guard isURLTextWithinLimit(urlText) else { return nil }
-        let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let components = URLComponents(string: trimmed),
+        guard let candidate = linkOnlyURLText(urlText),
+              let components = URLComponents(string: candidate),
               let scheme = components.scheme?.lowercased(),
               ["http", "https", "clipman"].contains(scheme),
               let rawHost = components.host,
@@ -146,6 +146,29 @@ public struct LinkPresentation: Equatable, Sendable {
 
     package static func isURLTextWithinLimit(_ value: String) -> Bool {
         value.utf8.count <= maximumURLCharacters
+    }
+
+    public static func linkOnlyURLText(_ value: String) -> String? {
+        guard isURLTextWithinLimit(value) else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.rangeOfCharacter(from: .newlines) == nil else { return nil }
+        let candidate: String
+        if let match = trimmed.range(
+            of: #"\s+link$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) {
+            candidate = String(trimmed[..<match.lowerBound])
+        } else {
+            candidate = trimmed
+        }
+        guard !candidate.isEmpty,
+              candidate.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              let components = URLComponents(string: candidate),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https", "clipman"].contains(scheme),
+              components.host?.isEmpty == false else { return nil }
+        return candidate
     }
 
     private static func isUUID(_ value: String) -> Bool {

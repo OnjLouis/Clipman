@@ -38,6 +38,7 @@ enum ServerStorageError: Error, LocalizedError {
 
 final class ServerStorageClient {
     let isConfigured: Bool
+    let syncCacheIdentity: String
     private let baseURL: URL?
     private let token: String
     private let databaseID: String
@@ -53,6 +54,7 @@ final class ServerStorageClient {
         self.baseURL = URL(string: cleanedURL)
         self.token = cleanedToken
         self.databaseID = ServerDatabaseIdentity.fromTokenAndPassword(token: cleanedToken, password: settings.historyPassword)
+        self.syncCacheIdentity = cleanedURL + "|" + self.databaseID
         let authority = try? ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPEM, address: settings.serverURL)
         let normalizedAuthority = authority ?? nil
         let authorityMatches = normalizedAuthority == nil || settings.serverCaHost.isEmpty || normalizedAuthority?.host.caseInsensitiveCompare(settings.serverCaHost) == .orderedSame

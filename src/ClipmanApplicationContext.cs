@@ -169,7 +169,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, PasteClipboardIntoPreviousApplication, SaveCurrentClipboardToHistory, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, PasteClipboardIntoPreviousApplication, SaveCurrentClipboardToHistory, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, () => sounds.Skip(settings.SoundsEnabled), BuildDiagnosticsText);
                 created = true;
             }
 

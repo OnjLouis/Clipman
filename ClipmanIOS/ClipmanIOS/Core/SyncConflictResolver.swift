@@ -45,18 +45,47 @@ enum SyncConflictResolver {
         var merged = target
         mergeDeletedEntries(into: &merged, source: source)
         applyDeletedEntries(&merged)
+        let deletionIndex = DeletionIndex(merged.DeletedEntries)
+        var entryIndexesByID: [String: Int] = [:]
+        var entryIndexesByText: [String: Int] = [:]
+        for index in merged.Entries.indices {
+            let entry = merged.Entries[index]
+            if !entry.Id.isEmpty, entryIndexesByID[entry.Id.lowercased()] == nil {
+                entryIndexesByID[entry.Id.lowercased()] = index
+            }
+            if entryIndexesByText[entry.Text] == nil {
+                entryIndexesByText[entry.Text] = index
+            }
+        }
 
         for incoming in source.Entries where !incoming.Text.isEmpty {
-            if isDeleted(incoming, in: merged) { continue }
-            if let idIndex = merged.Entries.firstIndex(where: { !$0.Id.isEmpty && $0.Id.caseInsensitiveCompare(incoming.Id) == .orderedSame }) {
+            if deletionIndex.contains(incoming) { continue }
+            if !incoming.Id.isEmpty, let idIndex = entryIndexesByID[incoming.Id.lowercased()] {
+                let previousText = merged.Entries[idIndex].Text
                 mergeEntry(existing: &merged.Entries[idIndex], incoming: incoming)
+                if previousText != merged.Entries[idIndex].Text {
+                    entryIndexesByText.removeValue(forKey: previousText)
+                }
+                if entryIndexesByText[merged.Entries[idIndex].Text] == nil {
+                    entryIndexesByText[merged.Entries[idIndex].Text] = idIndex
+                }
                 continue
             }
-            if let textIndex = merged.Entries.firstIndex(where: { $0.Text == incoming.Text }) {
+            if let textIndex = entryIndexesByText[incoming.Text] {
                 mergeEntry(existing: &merged.Entries[textIndex], incoming: incoming)
+                if !merged.Entries[textIndex].Id.isEmpty,
+                   entryIndexesByID[merged.Entries[textIndex].Id.lowercased()] == nil {
+                    entryIndexesByID[merged.Entries[textIndex].Id.lowercased()] = textIndex
+                }
+                entryIndexesByText[merged.Entries[textIndex].Text] = textIndex
                 continue
             }
             merged.Entries.append(incoming)
+            let index = merged.Entries.count - 1
+            if !incoming.Id.isEmpty {
+                entryIndexesByID[incoming.Id.lowercased()] = index
+            }
+            entryIndexesByText[incoming.Text] = index
         }
         applyDeletedEntries(&merged)
         normalize(&merged)
@@ -145,39 +174,36 @@ enum SyncConflictResolver {
     }
 
     private static func mergeDeletedEntries(into target: inout ClipDatabase, source: ClipDatabase) {
-        for deleted in source.DeletedEntries where !deleted.Id.isEmpty {
-            if let index = target.DeletedEntries.firstIndex(where: { $0.Id == deleted.Id }) {
-                if deleted.DeletedUnixMs > target.DeletedEntries[index].DeletedUnixMs {
-                    target.DeletedEntries[index] = deleted
+        normalizeDeletedEntries(&target)
+        var normalizedSource = source
+        normalizeDeletedEntries(&normalizedSource)
+        var byID = Dictionary(uniqueKeysWithValues: target.DeletedEntries.map { ($0.Id, $0) })
+        for deleted in normalizedSource.DeletedEntries where !deleted.Id.isEmpty {
+            if var existing = byID[deleted.Id] {
+                if deleted.DeletedUnixMs > existing.DeletedUnixMs {
+                    byID[deleted.Id] = deleted
+                } else if existing.TextHash.isEmpty && !deleted.TextHash.isEmpty {
+                    existing.TextHash = deleted.TextHash
+                    byID[deleted.Id] = existing
                 }
             } else {
-                target.DeletedEntries.append(deleted)
+                byID[deleted.Id] = deleted
             }
         }
-    }
-
-    private static func isDeleted(_ entry: ClipEntry, in database: ClipDatabase) -> Bool {
-        isDeleted(entry, deletedEntries: database.DeletedEntries)
-    }
-
-    private static func isDeleted(_ entry: ClipEntry, deletedEntries: [DeletedClipEntry]) -> Bool {
-        let entryChangedUnixMs = max(entry.CreatedUnixMs, entry.LastUsedUnixMs)
-        return deletedEntries.contains {
-            $0.Id == entry.Id
-                || (!$0.TextHash.isEmpty
-                    && $0.TextHash == textHash(entry.Text)
-                    && ($0.DeletedUnixMs <= 0 || entryChangedUnixMs <= $0.DeletedUnixMs))
-        }
+        target.DeletedEntries = Array(byID.values)
+        normalizeDeletedEntries(&target)
     }
 
     private static func applyDeletedEntries(_ database: inout ClipDatabase) {
-        let deletedEntries = database.DeletedEntries
-        database.Entries.removeAll { isDeleted($0, deletedEntries: deletedEntries) }
+        guard !database.DeletedEntries.isEmpty else { return }
+        let deletionIndex = DeletionIndex(database.DeletedEntries)
+        database.Entries.removeAll { deletionIndex.contains($0) }
     }
 
     private static func normalize(_ database: inout ClipDatabase) {
         database.Version = max(1, database.Version)
         database.UpdatedUnixMs = TimeUtil.nowUnixMs()
+        normalizeDeletedEntries(&database)
         applyDeletedEntries(&database)
         database.Entries = database.Entries
             .filter { !$0.Text.isEmpty }
@@ -192,6 +218,58 @@ enum SyncConflictResolver {
                 database.Entries[index].Id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
             }
             database.Entries[index].ManualOrder = Int64(index + 1)
+        }
+    }
+
+    private static func normalizeDeletedEntries(_ database: inout ClipDatabase) {
+        let cutoff = TimeUtil.nowUnixMs() - Int64(90 * 24 * 60 * 60 * 1_000)
+        var byID: [String: DeletedClipEntry] = [:]
+        for marker in database.DeletedEntries {
+            let id = marker.Id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { continue }
+            guard marker.DeletedUnixMs == 0 || marker.DeletedUnixMs >= cutoff else { continue }
+            var normalized = marker
+            normalized.Id = id
+            normalized.TextHash = normalized.TextHash.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalized.DeletedUnixMs == 0 {
+                normalized.DeletedUnixMs = TimeUtil.nowUnixMs()
+            }
+            if let existing = byID[id], existing.DeletedUnixMs >= normalized.DeletedUnixMs {
+                if existing.TextHash.isEmpty && !normalized.TextHash.isEmpty {
+                    var repaired = existing
+                    repaired.TextHash = normalized.TextHash
+                    byID[id] = repaired
+                }
+                continue
+            }
+            byID[id] = normalized
+        }
+        database.DeletedEntries = byID.values.sorted {
+            if $0.DeletedUnixMs == $1.DeletedUnixMs { return $0.Id < $1.Id }
+            return $0.DeletedUnixMs > $1.DeletedUnixMs
+        }
+    }
+
+    private struct DeletionIndex {
+        private let deletedIDs: Set<String>
+        private let latestDeletionByTextHash: [String: Int64]
+
+        init(_ deletedEntries: [DeletedClipEntry]) {
+            deletedIDs = Set(deletedEntries.lazy.map(\.Id).filter { !$0.isEmpty })
+            var byHash: [String: Int64] = [:]
+            for marker in deletedEntries where !marker.TextHash.isEmpty {
+                byHash[marker.TextHash] = max(byHash[marker.TextHash] ?? Int64.min, marker.DeletedUnixMs)
+            }
+            latestDeletionByTextHash = byHash
+        }
+
+        func contains(_ entry: ClipEntry) -> Bool {
+            if deletedIDs.contains(entry.Id) { return true }
+            guard !entry.Text.isEmpty else { return false }
+            let hash = SyncConflictResolver.textHash(entry.Text)
+            guard let deletedUnixMs = latestDeletionByTextHash[hash] else { return false }
+            let entryChangedUnixMs = max(entry.CreatedUnixMs, entry.LastUsedUnixMs)
+            return deletedUnixMs <= 0 || entryChangedUnixMs <= deletedUnixMs
         }
     }
 

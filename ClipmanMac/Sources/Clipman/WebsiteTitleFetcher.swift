@@ -28,14 +28,14 @@ enum WebsiteTitleFetchError: Error, LocalizedError, Sendable {
         case .userInfo: return "Links containing a user name or password cannot be contacted."
         case .nonDefaultPort: return "Website titles can be read only from the standard HTTP or HTTPS port."
         case .localDestination: return "Local, private, link-local, and other non-public destinations cannot be contacted."
-        case .capabilityURL: return "This looks like a sign-in, reset, confirmation, token, secret, or signed link, so Clipman will not contact it."
+        case .capabilityURL: return "This link contains a token-like path or a credential-related parameter, so Clipman will not contact it."
         case .cannotResolve: return "The website address could not be resolved to a validated public destination."
         case .redirectLimit: return "The website redirected more than three times."
         case .insecureRedirect: return "The website tried to redirect from HTTPS to insecure HTTP."
         case .authenticationRequired: return "The website requires authentication, so Clipman did not use its title."
         case .responseStatus(let status): return "The website returned HTTP status \(status)."
         case .nonHTML: return "The link did not return an HTML page."
-        case .bodyTooLarge: return "The website title was not found within the 128 KiB response limit."
+        case .bodyTooLarge: return "The website did not provide a useful title within Clipman's bounded reading limits."
         case .timedOut: return "The website did not respond within eight seconds."
         case .noUsefulTitle: return "The website did not provide a useful page title."
         case .transport(let message): return message
@@ -132,44 +132,31 @@ enum LinkFetchSafety {
     }
 
     private static func looksLikeCapabilityURL(_ components: URLComponents) -> Bool {
-        let sensitiveWords = [
-            "activate", "authorization", "authorize", "callback", "confirm", "credential",
-            "invite", "login", "logout", "magic", "oauth", "password", "recover", "recovery",
-            "reset", "secret", "session", "signin", "sign-in", "signed", "sso", "token",
-            "unsubscribe", "verify"
-        ]
-        let pathAndFragment = [components.percentEncodedPath, components.percentEncodedFragment ?? ""]
-            .joined(separator: "/")
-            .removingPercentEncoding?
-            .lowercased() ?? components.percentEncodedPath.lowercased()
-        let pathTokens = pathAndFragment.split { !$0.isLetter && !$0.isNumber }.map(String.init)
-        if pathTokens.contains(where: { sensitiveWords.contains($0) }) { return true }
-        if pathTokens.contains(where: isOpaqueToken) { return true }
+        let decodedPath = components.percentEncodedPath.removingPercentEncoding ?? components.percentEncodedPath
+        if decodedPath.split(separator: "/").contains(where: { isOpaqueToken(String($0)) }) { return true }
 
         let sensitiveQueryNames = [
-            "access_token", "apikey", "api_key", "auth", "code", "credential", "jwt", "key",
-            "nonce", "otp", "passcode", "password", "secret", "session", "sig", "signature",
-            "sso", "ticket", "token"
+            "access_token", "apikey", "api_key", "auth", "authorization", "challenge", "code", "confirmation", "credential", "hmac",
+            "id_token", "invite", "jwt", "key", "nonce", "one_time", "otp", "passcode", "password", "reset",
+            "secret", "session", "sig", "signature", "signed", "sso", "state", "ticket", "token", "verification",
+            "awsaccesskeyid", "googleaccessid", "key-pair-id"
         ]
         for item in components.queryItems ?? [] {
             let name = item.name.lowercased()
-            if sensitiveQueryNames.contains(where: { name == $0 || name.hasSuffix("_\($0)") || name.hasSuffix("-\($0)") }) {
+            if sensitiveQueryNames.contains(where: {
+                name == $0 || name.hasSuffix("_\($0)") || name.hasSuffix("-\($0)") || name.hasSuffix(".\($0)")
+            }) {
                 return true
             }
             if name.hasPrefix("x-amz-") || name.hasPrefix("x-goog-") { return true }
-            if let value = item.value, isOpaqueToken(value) { return true }
         }
         return false
     }
 
     private static func isOpaqueToken(_ value: String) -> Bool {
         let compact = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard compact.count >= 24 else { return false }
-        if compact.range(of: #"^[0-9a-f]{24,}$"#, options: [.regularExpression, .caseInsensitive]) != nil {
-            return true
-        }
-        guard compact.range(of: #"^[A-Za-z0-9_\-+/=]+$"#, options: .regularExpression) != nil else { return false }
-        return compact.contains(where: \.isLetter) && compact.contains(where: \.isNumber)
+        guard compact.count >= 32, !compact.contains(where: \.isWhitespace) else { return false }
+        return compact.filter(\.isLetter).count >= 8 && compact.filter(\.isNumber).count >= 4
     }
 
     private static func resolvedPublicAddresses(_ host: String, deadline: MonotonicDeadline?) throws -> [ValidatedNumericAddress] {
@@ -245,140 +232,8 @@ enum LinkFetchSafety {
 
 }
 
-enum WebsiteTitleParser {
-    static func title(from data: Data, response: URLResponse) -> String? {
-        guard let html = decode(data, response: response) else { return nil }
-        let cleaned = removingNonMetadataBlocks(html)
-        var openGraph: String?
-        var twitter: String?
-
-        if let metaRegex = try? NSRegularExpression(pattern: #"<meta\b[^>]{0,4096}>"#, options: [.caseInsensitive]) {
-            let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
-            for match in metaRegex.matches(in: cleaned, range: range) {
-                guard let tagRange = Range(match.range, in: cleaned) else { continue }
-                let attributes = parsedAttributes(String(cleaned[tagRange]))
-                let key = (attributes["property"] ?? attributes["name"] ?? "").lowercased()
-                guard let content = attributes["content"] else { continue }
-                if key == "og:title", openGraph == nil { openGraph = content }
-                if key == "twitter:title", twitter == nil { twitter = content }
-            }
-        }
-
-        var documentTitle: String?
-        if let titleRegex = try? NSRegularExpression(
-            pattern: #"<title\b[^>]{0,1024}>(.*?)</title\s*>"#,
-            options: [.caseInsensitive, .dotMatchesLineSeparators]
-        ) {
-            let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
-            if let match = titleRegex.firstMatch(in: cleaned, range: range),
-               let titleRange = Range(match.range(at: 1), in: cleaned) {
-                documentTitle = String(cleaned[titleRange])
-            }
-        }
-
-        for candidate in [openGraph, twitter, documentTitle] {
-            if let value = candidate.flatMap(sanitizedRemoteText), !isMisleadingLoginTitle(value) {
-                return value
-            }
-        }
-        return nil
-    }
-
-    private static func decode(_ data: Data, response: URLResponse) -> String? {
-        if data.starts(with: [0xef, 0xbb, 0xbf]) {
-            return String(data: data.dropFirst(3), encoding: .utf8)
-        }
-        if data.starts(with: [0xff, 0xfe]) { return String(data: data, encoding: .utf16LittleEndian) }
-        if data.starts(with: [0xfe, 0xff]) { return String(data: data, encoding: .utf16BigEndian) }
-        if let name = response.textEncodingName,
-           let encoding = stringEncoding(ianaName: name),
-           let decoded = String(data: data, encoding: encoding) {
-            return decoded
-        }
-        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252)
-    }
-
-    private static func stringEncoding(ianaName: String) -> String.Encoding? {
-        let cfEncoding = CFStringConvertIANACharSetNameToEncoding(ianaName as CFString)
-        guard cfEncoding != kCFStringEncodingInvalidId else { return nil }
-        return String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(cfEncoding))
-    }
-
-    private static func removingNonMetadataBlocks(_ html: String) -> String {
-        var value = html
-        for pattern in [#"<!--[\s\S]*?-->"#, #"<script\b[\s\S]*?</script\s*>"#, #"<style\b[\s\S]*?</style\s*>"#] {
-            value = value.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
-        }
-        return value
-    }
-
-    private static func parsedAttributes(_ tag: String) -> [String: String] {
-        guard let regex = try? NSRegularExpression(
-            pattern: #"([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))"#
-        ) else { return [:] }
-        let range = NSRange(tag.startIndex..<tag.endIndex, in: tag)
-        var result: [String: String] = [:]
-        for match in regex.matches(in: tag, range: range) {
-            guard let nameRange = Range(match.range(at: 1), in: tag) else { continue }
-            let name = tag[nameRange].lowercased()
-            for index in 2...4 where match.range(at: index).location != NSNotFound {
-                if let valueRange = Range(match.range(at: index), in: tag) {
-                    result[name] = String(tag[valueRange])
-                    break
-                }
-            }
-        }
-        return result
-    }
-
-    private static func sanitizedRemoteText(_ source: String) -> String? {
-        let withoutTags = source.replacingOccurrences(of: #"<[^>]{0,1024}>"#, with: " ", options: .regularExpression)
-        let decoded = decodeEntities(withoutTags)
-        return LinkDisplayTextSanitizer.normalizedTitle(decoded)
-    }
-
-    private static func decodeEntities(_ value: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: #"&(#x[0-9a-f]+|#[0-9]+|amp|apos|gt|lt|nbsp|quot);"#, options: .caseInsensitive) else {
-            return value
-        }
-        var output = value
-        let matches = regex.matches(in: value, range: NSRange(value.startIndex..<value.endIndex, in: value)).reversed()
-        for match in matches {
-            guard let whole = Range(match.range(at: 0), in: output),
-                  let tokenRange = Range(match.range(at: 1), in: output)
-            else { continue }
-            let token = output[tokenRange].lowercased()
-            let replacement: String
-            switch token {
-            case "amp": replacement = "&"
-            case "apos": replacement = "'"
-            case "gt": replacement = ">"
-            case "lt": replacement = "<"
-            case "nbsp": replacement = " "
-            case "quot": replacement = "\""
-            default:
-                let numberText = token.hasPrefix("#x") ? String(token.dropFirst(2)) : String(token.dropFirst())
-                let radix = token.hasPrefix("#x") ? 16 : 10
-                if let number = UInt32(numberText, radix: radix), let scalar = UnicodeScalar(number) {
-                    replacement = String(scalar)
-                } else {
-                    replacement = ""
-                }
-            }
-            output.replaceSubrange(whole, with: replacement)
-        }
-        return output
-    }
-
-    private static func isMisleadingLoginTitle(_ title: String) -> Bool {
-        let normalized = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return ["access denied", "authentication required", "just a moment", "log in", "login", "sign in", "signin"]
-            .contains(normalized)
-    }
-}
-
 final class WebsiteTitleFetcher: @unchecked Sendable {
-    private static let maxBodyBytes = 128 * 1024
+    private static let maxBodyBytes = 2 * 1024 * 1024
 
     static func fetch(urlText: String, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .utility).async {
@@ -425,7 +280,7 @@ final class WebsiteTitleFetcher: @unchecked Sendable {
             guard mime == "text/html" || mime == "application/xhtml+xml" else {
                 throw WebsiteTitleFetchError.nonHTML
             }
-            if let title = WebsiteTitleParser.title(from: received.body, response: received.response) {
+            if let title = WebsiteMetadataParser.title(from: received.body, response: received.response, host: target.originalHost) {
                 return title
             }
             throw received.prefixLimitReached

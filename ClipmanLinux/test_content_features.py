@@ -132,6 +132,15 @@ class LinkLabelTests(unittest.TestCase):
         self.assertFalse(clipman.can_use_website_title({"section": "text", "text": "Read https://example.com", "name": ""}))
         self.assertFalse(clipman.can_use_website_title({"section": "links", "text": "https://example.com", "name": "Existing"}))
 
+    def test_trailing_screen_reader_link_role_is_still_one_link(self):
+        stored = "https://youtu.be/Mu1gjX5fMA4  link"
+        self.assertTrue(clipman.is_standalone_link(stored))
+        self.assertEqual(
+            clipman.link_row_text(stored, "Wooden Flute"),
+            "Wooden Flute; youtu.be/Mu1gjX5fMA4",
+        )
+        self.assertFalse(clipman.is_standalone_link("Read " + stored))
+
     def test_overlong_urls_are_rejected_before_link_parsing_or_unescaping(self):
         prefix = "https://example.com/"
         exact = prefix + "a" * (clipman.MAX_LINK_URL_CHARACTERS - len(prefix))

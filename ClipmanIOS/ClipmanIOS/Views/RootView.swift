@@ -42,10 +42,6 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .clipmanQuickActionRequested)) { _ in
             app.processPendingQuickAction()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .clipmanShortcutCompleted)) { notification in
-            guard let message = notification.object as? String else { return }
-            app.shortcutCompleted(message)
-        }
     }
 }
 

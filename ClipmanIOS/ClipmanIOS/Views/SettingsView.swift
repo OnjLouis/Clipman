@@ -79,6 +79,10 @@ struct SettingsView: View {
                     TipJarSettingsSection(tipJar: tipJar)
                 }
 
+                Section("Help") {
+                    Link("Open Manual", destination: URL(string: "https://onjlouis.github.io/clipman/manual.html")!)
+                }
+
                 Section("Build information") {
                     LabeledContent("Version", value: appVersion)
                     LabeledContent("Build", value: buildStamp)

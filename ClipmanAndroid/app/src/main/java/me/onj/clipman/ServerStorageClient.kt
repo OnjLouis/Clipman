@@ -61,6 +61,9 @@ class ServerStorageClient(
         connection.setRequestProperty("Content-Type", "application/octet-stream")
         connection.outputStream.use { output -> output.write(data) }
         val code = connection.responseCode
+        if (code == HttpURLConnection.HTTP_NOT_FOUND) {
+            throw ServerDatabaseNotFoundException("The Clipman Server database no longer exists.")
+        }
         if (code == HttpURLConnection.HTTP_CONFLICT || code == HttpURLConnection.HTTP_PRECON_FAILED) {
             throw ServerConflictException("Clipman Server reported a revision conflict.")
         }

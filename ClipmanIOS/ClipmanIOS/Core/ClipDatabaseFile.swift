@@ -31,11 +31,105 @@ enum ClipDatabaseError: Error, LocalizedError, Equatable {
 }
 
 enum ClipDatabaseFile {
+    private typealias DerivedKeys = (encryptionKey: [UInt8], macKey: [UInt8])
+
+    private final class DerivedKeyCache: @unchecked Sendable {
+        private struct PersistedEntry: Codable {
+            var id: Data
+            var keyMaterial: Data
+        }
+
+        private struct PersistedCache: Codable {
+            var entries: [PersistedEntry]
+        }
+
+        private let lock = NSLock()
+        private var order: [Data] = []
+        private var values: [Data: DerivedKeys] = [:]
+        private let capacity = 8
+        private let keychainService = "me.onj.clipman.ios.database-derived-keys"
+        private let keychainAccount = "cache-v1"
+
+        init() {
+            loadPersistedValues()
+        }
+
+        func value(for id: Data) -> DerivedKeys? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let value = values[id] else { return nil }
+            order.removeAll { $0 == id }
+            order.append(id)
+            return value
+        }
+
+        func insert(_ value: DerivedKeys, for id: Data) {
+            lock.lock()
+            defer { lock.unlock() }
+            order.removeAll { $0 == id }
+            order.append(id)
+            values[id] = value
+            while order.count > capacity {
+                values.removeValue(forKey: order.removeFirst())
+            }
+            persistLocked()
+        }
+
+        private func loadPersistedValues() {
+            var query = keychainQuery()
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+                  let data = result as? Data,
+                  data.count <= 16_384,
+                  let persisted = try? PropertyListDecoder().decode(PersistedCache.self, from: data) else {
+                return
+            }
+            for entry in persisted.entries.suffix(capacity) where entry.id.count == 32 && entry.keyMaterial.count == 64 {
+                order.append(entry.id)
+                values[entry.id] = (
+                    Array(entry.keyMaterial.prefix(32)),
+                    Array(entry.keyMaterial.suffix(32))
+                )
+            }
+        }
+
+        private func persistLocked() {
+            let entries = order.compactMap { id -> PersistedEntry? in
+                guard let value = values[id] else { return nil }
+                return PersistedEntry(id: id, keyMaterial: Data(value.encryptionKey + value.macKey))
+            }
+            guard let data = try? PropertyListEncoder().encode(PersistedCache(entries: entries)) else { return }
+            let query = keychainQuery()
+            let attributes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
+            let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+            if status == errSecItemNotFound {
+                var add = query
+                add[kSecValueData as String] = data
+                add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                SecItemAdd(add as CFDictionary, nil)
+            }
+        }
+
+        private func keychainQuery() -> [String: Any] {
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: keychainService,
+                kSecAttrAccount as String: keychainAccount
+            ]
+        }
+    }
+
     static let compressedMagic = Data("CLIPDB1".utf8)
     static let encryptedMagic = Data("CLIPDB2".utf8)
     static let maximumFileBytes = 272 * 1024 * 1024
     static let maximumEncodedJSONBytes = Gzip.maximumDecompressedBytes
     private static let encryptedEnvelopeBytes = encryptedMagic.count + 1 + 16 + 16 + 32
+    private static let derivedKeyCache = DerivedKeyCache()
 
     static func load(_ data: Data, password: String) throws -> ClipDatabase {
         if data.isEmpty { return ClipDatabase() }
@@ -51,7 +145,11 @@ enum ClipDatabaseFile {
         return try JSONDecoder().decode(ClipDatabase.self, from: jsonData)
     }
 
-    static func save(_ database: ClipDatabase, password: String) throws -> Data {
+    static func save(
+        _ database: ClipDatabase,
+        password: String,
+        preferredSalt: [UInt8]? = nil
+    ) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
         let json = try encoder.encode(database)
@@ -67,7 +165,7 @@ enum ClipDatabaseFile {
                 throw ClipDatabaseError.databaseFileTooLarge
             }
         } else {
-            result = try writeEncrypted(json: json, password: password)
+            result = try writeEncrypted(json: json, password: password, preferredSalt: preferredSalt)
         }
         try validateFileSize(result.count)
         return result
@@ -103,6 +201,16 @@ enum ClipDatabaseFile {
         return data
     }
 
+    static func encryptedSalt(from data: Data) -> [UInt8]? {
+        let saltOffset = encryptedMagic.count + 1
+        guard data.starts(with: encryptedMagic),
+              data.count >= saltOffset + 16,
+              data[encryptedMagic.count] == 1 else {
+            return nil
+        }
+        return Array(data[saltOffset..<saltOffset + 16])
+    }
+
     private static func readEncrypted(_ data: Data, password: String) throws -> Data {
         guard !password.isEmpty else { throw ClipDatabaseError.passwordRequired }
         guard data.count >= encryptedMagic.count + 1 + 16 + 16 + 32 else {
@@ -129,8 +237,8 @@ enum ClipDatabaseFile {
         return try Gzip.decompress(Data(decrypted))
     }
 
-    private static func writeEncrypted(json: Data, password: String) throws -> Data {
-        let salt = randomBytes(count: 16)
+    private static func writeEncrypted(json: Data, password: String, preferredSalt: [UInt8]?) throws -> Data {
+        let salt = preferredSalt.flatMap { $0.count == 16 ? $0 : nil } ?? randomBytes(count: 16)
         let iv = randomBytes(count: 16)
         let keys = try deriveKeys(password: password, salt: salt)
         let maximumCompressedBytes = maximumFileBytes - encryptedEnvelopeBytes - kCCBlockSizeAES128
@@ -152,7 +260,11 @@ enum ClipDatabaseFile {
         return signed
     }
 
-    private static func deriveKeys(password: String, salt: [UInt8]) throws -> (encryptionKey: [UInt8], macKey: [UInt8]) {
+    private static func deriveKeys(password: String, salt: [UInt8]) throws -> DerivedKeys {
+        let cacheID = derivedKeyCacheID(password: password, salt: salt)
+        if let cached = derivedKeyCache.value(for: cacheID) {
+            return cached
+        }
         var derived = [UInt8](repeating: 0, count: 64)
         let status = password.withCString { passwordPointer in
             CCKeyDerivationPBKDF(
@@ -170,7 +282,20 @@ enum ClipDatabaseFile {
         guard status == kCCSuccess else {
             throw ClipDatabaseError.unsupportedFormat("Could not derive encryption keys.")
         }
-        return (Array(derived[0..<32]), Array(derived[32..<64]))
+        let keys: DerivedKeys = (Array(derived[0..<32]), Array(derived[32..<64]))
+        derivedKeyCache.insert(keys, for: cacheID)
+        return keys
+    }
+
+    private static func derivedKeyCacheID(password: String, salt: [UInt8]) -> Data {
+        var material = Data(password.utf8)
+        material.append(0)
+        material.append(contentsOf: salt)
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        material.withUnsafeBytes { bytes in
+            _ = CC_SHA256(bytes.baseAddress, CC_LONG(bytes.count), &digest)
+        }
+        return Data(digest)
     }
 
     private static func hmacSHA256(key: [UInt8], data: [UInt8]) -> [UInt8] {

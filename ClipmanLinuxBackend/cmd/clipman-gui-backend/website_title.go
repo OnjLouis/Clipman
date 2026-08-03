@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -19,21 +18,43 @@ import (
 )
 
 const (
-	websiteTitleBodyLimit = 128 * 1024
-	websiteTitleTimeout   = 8 * time.Second
-	websiteTitleURLLimit  = 8192
+	websiteTitleMetadataLimit = 128 * 1024
+	websiteTitleDecodedLimit  = 2 * 1024 * 1024
+	websiteTitleTimeout       = 8 * time.Second
+	websiteTitleURLLimit      = 8192
 )
 
-var capabilityWord = regexp.MustCompile(`(?i)(?:^|[-_.~/])(auth|confirm|confirmation|invite|login|magic|oauth|password(?:[-_]?reset)?|recover|recovery|reset|secret|sign[-_]?in|signed|token|verify|verification)(?:$|[-_.~/])`)
-var capabilityValueCharacters = regexp.MustCompile(`^[A-Za-z0-9_~.=-]+$`)
-
 var sensitiveQueryNames = map[string]bool{
-	"access_token": true, "auth": true, "authorization": true, "code": true,
-	"credential": true, "expires": true, "key": true, "magic": true,
-	"hmac": true, "jwt": true, "password": true, "policy": true, "reset": true,
-	"secret": true, "session": true, "sig": true, "signature": true,
-	"signed": true, "ticket": true, "token": true, "awsaccesskeyid": true,
-	"googleaccessid": true, "key-pair-id": true,
+	"access_token": true, "apikey": true, "api_key": true, "auth": true,
+	"authorization": true, "challenge": true, "code": true, "confirmation": true, "credential": true, "hmac": true, "id_token": true,
+	"invite": true, "jwt": true, "key": true, "nonce": true, "one_time": true, "otp": true,
+	"passcode": true, "password": true, "reset": true, "secret": true, "session": true,
+	"sig": true, "signature": true, "signed": true, "sso": true, "state": true, "ticket": true, "verification": true,
+	"token": true, "awsaccesskeyid": true, "googleaccessid": true, "key-pair-id": true,
+}
+
+var nonMetadataElements = map[string]bool{
+	"script": true, "style": true, "template": true, "noscript": true, "svg": true, "iframe": true,
+}
+
+var exactJunkTitles = map[string]bool{
+	"just a moment": true, "attention required": true, "access denied": true,
+	"access to this page has been denied": true, "are you a robot": true, "are you a human": true,
+	"please wait": true, "javascript is disabled": true, "javascript is required": true,
+	"enable javascript": true, "security check": true, "checking your browser": true,
+	"verify you are human": true, "human verification": true, "bot verification": true,
+	"one moment please": true, "loading": true, "redirecting": true, "error": true,
+	"page not found": true, "not found": true, "404": true, "403 forbidden": true,
+	"forbidden": true, "site maintenance": true, "under construction": true, "untitled": true,
+	"untitled document": true, "log in": true, "login": true, "sign in": true, "signin": true,
+	"log in or sign up": true, "robot check": true, "captcha": true, "request blocked": true, "blocked": true,
+	"reddit - dive into anything": true,
+}
+
+var junkTitleFragments = []string{
+	"please wait for verification", "checking if the site connection is secure",
+	"enable javascript and cookies to continue", "verify you are a human",
+	"your request has been blocked", "unusual traffic",
 }
 
 var nonGlobalNetworks = mustPrefixes(
@@ -100,24 +121,15 @@ func validateWebsiteTitleURL(raw string) (*url.URL, error) {
 		}
 	}
 	decodedPath := repeatedlyUnescapeURLComponent(parsed.EscapedPath())
-	if capabilityWord.MatchString(strings.ToLower(decodedPath)) {
-		return nil, errors.New("this link appears to contain a login, reset, invitation, or other private capability")
-	}
 	for _, segment := range strings.Split(decodedPath, "/") {
 		if looksLikeCapabilityValue(segment) {
 			return nil, errors.New("this link appears to contain a private capability value")
 		}
 	}
-	for name, values := range parsed.Query() {
+	for name := range parsed.Query() {
 		key := strings.ToLower(strings.TrimSpace(repeatedlyUnescapeURLComponent(name)))
-		if sensitiveQueryNames[key] || strings.HasPrefix(key, "x-amz-") || strings.HasPrefix(key, "x-goog-") || capabilityWord.MatchString(key) {
+		if sensitiveQueryName(key) {
 			return nil, errors.New("this link appears to contain a token, signature, or other private capability")
-		}
-		for _, value := range values {
-			value = repeatedlyUnescapeURLComponent(value)
-			if looksLikeCapabilityValue(value) {
-				return nil, errors.New("this link appears to contain a private capability value")
-			}
 		}
 	}
 	parsed.Fragment = ""
@@ -148,27 +160,32 @@ func repeatedlyUnescapeURLComponent(value string) string {
 
 func looksLikeCapabilityValue(value string) bool {
 	value = strings.TrimSpace(value)
-	if len(value) < 32 || !capabilityValueCharacters.MatchString(value) {
+	if utf8.RuneCountInString(value) < 32 || strings.IndexFunc(value, unicode.IsSpace) >= 0 {
 		return false
 	}
-	classes := 0
-	if strings.IndexFunc(value, func(character rune) bool { return character >= 'a' && character <= 'z' }) >= 0 {
-		classes++
-	}
-	if strings.IndexFunc(value, func(character rune) bool { return character >= 'A' && character <= 'Z' }) >= 0 {
-		classes++
-	}
-	if strings.IndexFunc(value, func(character rune) bool { return character >= '0' && character <= '9' }) >= 0 {
-		classes++
-	}
-	if strings.ContainsAny(value, "_~.=-") {
-		classes++
-	}
-	unique := map[rune]bool{}
+	letters, digits := 0, 0
 	for _, character := range value {
-		unique[character] = true
+		if unicode.IsLetter(character) {
+			letters++
+		}
+		if unicode.IsDigit(character) {
+			digits++
+		}
 	}
-	return classes >= 3 && len(unique)*100/len([]rune(value)) >= 25
+	return letters >= 8 && digits >= 4
+}
+
+func sensitiveQueryName(value string) bool {
+	key := strings.ToLower(strings.TrimSpace(value))
+	if strings.HasPrefix(key, "x-amz-") || strings.HasPrefix(key, "x-goog-") {
+		return true
+	}
+	for name := range sensitiveQueryNames {
+		if key == name || strings.HasSuffix(key, "_"+name) || strings.HasSuffix(key, "-"+name) || strings.HasSuffix(key, "."+name) {
+			return true
+		}
+	}
+	return false
 }
 
 func publicAddress(ip net.IP) bool {
@@ -277,12 +294,15 @@ func fetchWebsiteTitle(raw string) (string, error) {
 			response.Body.Close()
 			return "", errors.New("the website response was not HTML")
 		}
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, websiteTitleBodyLimit))
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, websiteTitleDecodedLimit+1))
 		response.Body.Close()
 		if readErr != nil {
 			return "", errors.New("the website title could not be read")
 		}
-		title := extractWebsiteTitle(body)
+		if len(body) > websiteTitleDecodedLimit {
+			body = body[:websiteTitleDecodedLimit]
+		}
+		title := extractWebsiteTitle(body, current.Hostname())
 		if title == "" {
 			return "", errors.New("the website did not provide a usable title")
 		}
@@ -311,29 +331,43 @@ func resolveWebsiteTitleRedirect(current *url.URL, rawLocation string, redirectC
 	return validated, nil
 }
 
-func extractWebsiteTitle(body []byte) string {
+func extractWebsiteTitle(body []byte, host string) string {
 	if !utf8.Valid(body) {
 		body = []byte(strings.ToValidUTF8(string(body), ""))
 	}
 	tokenizer := xhtml.NewTokenizer(strings.NewReader(string(body)))
-	var openGraph, twitter, document strings.Builder
-	inTitle := false
+	var openGraph, twitter, document, heading strings.Builder
+	inTitle, inHeading := false, false
+	skipName, skipDepth, retainedBytes := "", 0, 0
 	for {
 		switch tokenType := tokenizer.Next(); tokenType {
 		case xhtml.ErrorToken:
 			if tokenizer.Err() != nil && tokenizer.Err() != io.EOF {
 				return ""
 			}
-			for _, candidate := range []string{openGraph.String(), twitter.String(), document.String()} {
-				if title := sanitizeWebsiteTitle(candidate); title != "" {
-					return title
-				}
-			}
-			return ""
+			return selectWebsiteTitle(host, openGraph.String(), twitter.String(), document.String(), heading.String())
 		case xhtml.StartTagToken, xhtml.SelfClosingTagToken:
 			token := tokenizer.Token()
+			if skipName != "" {
+				if tokenType == xhtml.StartTagToken && token.Data == skipName {
+					skipDepth++
+				}
+				continue
+			}
+			if nonMetadataElements[token.Data] && tokenType == xhtml.StartTagToken {
+				skipName, skipDepth = token.Data, 1
+				continue
+			}
+			retainedBytes += len(tokenizer.Raw())
+			if retainedBytes > websiteTitleMetadataLimit {
+				return selectWebsiteTitle(host, openGraph.String(), twitter.String(), document.String(), heading.String())
+			}
 			if token.Data == "title" {
-				inTitle = true
+				inTitle = document.Len() == 0
+				continue
+			}
+			if token.Data == "h1" {
+				inHeading = heading.Len() == 0
 				continue
 			}
 			if token.Data != "meta" {
@@ -347,22 +381,79 @@ func extractWebsiteTitle(body []byte) string {
 			if kind == "" {
 				kind = strings.ToLower(strings.TrimSpace(attributes["name"]))
 			}
+			if kind == "" {
+				kind = strings.ToLower(strings.TrimSpace(attributes["itemprop"]))
+			}
 			content := attributes["content"]
-			if kind == "og:title" && openGraph.Len() == 0 {
+			if strings.TrimSpace(content) != "" && kind == "og:title" && openGraph.Len() == 0 {
 				openGraph.WriteString(content)
-			} else if kind == "twitter:title" && twitter.Len() == 0 {
+			} else if strings.TrimSpace(content) != "" && kind == "twitter:title" && twitter.Len() == 0 {
 				twitter.WriteString(content)
 			}
 		case xhtml.EndTagToken:
-			if tokenizer.Token().Data == "title" {
+			token := tokenizer.Token()
+			if skipName != "" {
+				if token.Data == skipName {
+					skipDepth--
+					if skipDepth == 0 {
+						skipName = ""
+					}
+				}
+				continue
+			}
+			retainedBytes += len(tokenizer.Raw())
+			if retainedBytes > websiteTitleMetadataLimit {
+				return selectWebsiteTitle(host, openGraph.String(), twitter.String(), document.String(), heading.String())
+			}
+			if token.Data == "title" {
 				inTitle = false
 			}
+			if token.Data == "h1" {
+				inHeading = false
+			}
+			if token.Data == "head" && openGraph.Len() > 0 && document.Len() > 0 {
+				return selectWebsiteTitle(host, openGraph.String(), twitter.String(), document.String(), heading.String())
+			}
 		case xhtml.TextToken:
+			if skipName != "" {
+				continue
+			}
+			retainedBytes += len(tokenizer.Raw())
+			if retainedBytes > websiteTitleMetadataLimit {
+				return selectWebsiteTitle(host, openGraph.String(), twitter.String(), document.String(), heading.String())
+			}
 			if inTitle {
 				document.Write(tokenizer.Text())
 			}
+			if inHeading {
+				heading.Write(tokenizer.Text())
+			}
 		}
 	}
+}
+
+func selectWebsiteTitle(host string, candidates ...string) string {
+	for _, candidate := range candidates {
+		title := sanitizeWebsiteTitle(candidate)
+		if title != "" && !junkWebsiteTitle(title) && !strings.EqualFold(title, host) {
+			return title
+		}
+	}
+	return ""
+}
+
+func junkWebsiteTitle(title string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(title), " "))
+	normalized = strings.TrimSpace(strings.Trim(normalized, ".!|-\u2013\u2014"))
+	if exactJunkTitles[normalized] {
+		return true
+	}
+	for _, fragment := range junkTitleFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeWebsiteTitle(value string) string {
@@ -374,6 +465,9 @@ func sanitizeWebsiteTitle(value string) string {
 		return character
 	}, value)
 	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	cleaned = strings.TrimFunc(cleaned, func(character rune) bool {
+		return unicode.IsSpace(character) || strings.ContainsRune("|-\u2013\u2014\u00b7\u00bb<", character)
+	})
 	runes := []rune(cleaned)
 	if len(runes) > 200 {
 		cleaned = strings.TrimSpace(string(runes[:200]))

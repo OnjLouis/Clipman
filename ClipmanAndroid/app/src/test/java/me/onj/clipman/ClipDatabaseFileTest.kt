@@ -19,6 +19,33 @@ class ClipDatabaseFileTest {
     }
 
     @Test
+    fun encryptedRewriteCanPreserveSaltWithoutReusingCiphertext() {
+        val password = "test-history-password"
+        val first = ClipDatabaseFile.save(
+            ClipDatabase(Entries = listOf(ClipEntry(Text = "Original"))),
+            password
+        )
+        val salt = requireNotNull(ClipDatabaseFile.encryptedSalt(first))
+        val updated = ClipDatabase(Entries = listOf(ClipEntry(Text = "Updated")))
+        val second = ClipDatabaseFile.save(updated, password, preferredSalt = salt)
+
+        assertArrayEquals(salt, ClipDatabaseFile.encryptedSalt(second))
+        assertTrue(!first.contentEquals(second))
+        assertEquals(updated, ClipDatabaseFile.load(second, password))
+    }
+
+    @Test
+    fun invalidPreferredSaltIsReplacedWithAValidSalt() {
+        val encoded = ClipDatabaseFile.save(
+            ClipDatabase(Entries = listOf(ClipEntry(Text = "Entry"))),
+            "test-history-password",
+            preferredSalt = byteArrayOf(1, 2, 3)
+        )
+
+        assertEquals(16, ClipDatabaseFile.encryptedSalt(encoded)?.size)
+    }
+
+    @Test
     fun databaseContainerLimitIs272MiBAndAcceptsExactThenRejectsOneByteOver() {
         assertEquals(272 * 1024 * 1024, ClipDatabaseFile.maxDatabaseBlobBytes)
         ClipDatabaseFile.requireDatabaseBlobSize(ClipDatabaseFile.maxDatabaseBlobBytes.toLong())

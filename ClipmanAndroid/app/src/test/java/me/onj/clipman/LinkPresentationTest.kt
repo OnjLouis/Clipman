@@ -44,6 +44,18 @@ class LinkPresentationTest {
     }
 
     @Test
+    fun trailingScreenReaderLinkRoleDoesNotMoveANamedUrlIntoTextHistory() {
+        val stored = "https://youtu.be/Mu1gjX5fMA4  link"
+        val entry = ClipEntry(Text = stored, Name = "Wooden Flute")
+
+        assertTrue(LinkPresentation.isStandaloneLink(stored))
+        assertEquals("https://youtu.be/Mu1gjX5fMA4", LinkPresentation.standaloneUrlText(stored))
+        assertEquals("Wooden Flute; youtu.be/Mu1gjX5fMA4", LinkPresentation.rowText(entry))
+        assertEquals(stored, entry.Text)
+        assertFalse(LinkPresentation.isStandaloneLink("Read https://youtu.be/Mu1gjX5fMA4 link"))
+    }
+
+    @Test
     fun bareWebAddressesRemainLinkEntries() {
         assertTrue(LinkPresentation.isStandaloneLink("example.org/path"))
         assertEquals("Path; example.org/path", LinkPresentation.rowText(ClipEntry(Text = "example.org/path")))

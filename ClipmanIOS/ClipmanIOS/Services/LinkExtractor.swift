@@ -56,11 +56,19 @@ enum LinkExtractor {
 
     private static func pureHTTPURL(in text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              !trimmed.contains("\n"),
-              !trimmed.contains("\r"),
-              LinkPresentationSafety.isWithinURLLimit(trimmed),
-              let components = URLComponents(string: trimmed),
+        guard !trimmed.isEmpty, !trimmed.contains("\n"), !trimmed.contains("\r") else { return nil }
+        let candidate: String
+        if let range = trimmed.range(
+            of: #"\s+link$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) {
+            candidate = String(trimmed[..<range.lowerBound])
+        } else {
+            candidate = trimmed
+        }
+        guard !candidate.contains(where: \.isWhitespace),
+              LinkPresentationSafety.isWithinURLLimit(candidate),
+              let components = URLComponents(string: candidate),
               let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https" || scheme == "clipman",
               components.host?.isEmpty == false else {

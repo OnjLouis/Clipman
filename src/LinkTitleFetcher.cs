@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
@@ -25,7 +26,9 @@ namespace Clipman
 
     internal static class LinkTitleFetcher
     {
-        private const int MaximumBodyBytes = 128 * 1024;
+        private const int MaximumMetadataCharacters = 128 * 1024;
+        private const int MaximumWireBodyBytes = 1024 * 1024;
+        private const int MaximumDecodedBodyBytes = 2 * 1024 * 1024;
         private const int MaximumHeaderBytes = 32 * 1024;
         private const int FetchDeadlineMilliseconds = 15000;
 
@@ -65,16 +68,36 @@ namespace Clipman
             public override void SetLength(long value) { inner.SetLength(value); }
             public override void Write(byte[] buffer, int offset, int count) { SetWriteTimeout(inner, deadline); inner.Write(buffer, offset, count); }
         }
-        private static readonly string[] CapabilityWords =
-        {
-            "reset", "confirm", "verify", "activate", "unsubscribe", "magic", "signin", "login",
-            "invite", "oauth", "callback", "logout"
-        };
-
         private static readonly string[] CapabilityParameters =
         {
-            "token", "code", "key", "secret", "signature", "sig", "auth", "session", "otp",
-            "x-amz-signature", "x-goog-signature"
+            "access_token", "apikey", "api_key", "auth", "authorization", "challenge", "code", "confirmation", "credential", "hmac",
+            "id_token", "invite", "jwt", "key", "nonce", "one_time", "otp", "passcode", "password", "reset", "secret",
+            "session", "sig", "signature", "signed", "sso", "state", "ticket", "token", "verification", "awsaccesskeyid",
+            "googleaccessid", "key-pair-id"
+        };
+
+        private static readonly string[] JunkTitleExactMatches =
+        {
+            "just a moment", "attention required", "access denied", "access to this page has been denied",
+            "are you a robot", "are you a human", "please wait", "javascript is disabled",
+            "javascript is required", "enable javascript", "security check", "checking your browser",
+            "verify you are human", "human verification", "bot verification", "one moment please", "loading",
+            "redirecting", "error", "page not found", "not found", "404", "403 forbidden", "forbidden",
+            "site maintenance", "under construction", "untitled", "untitled document", "log in", "login",
+            "sign in", "signin", "log in or sign up", "robot check", "captcha", "request blocked", "blocked",
+            "reddit - dive into anything"
+        };
+
+        private static readonly string[] JunkTitleSubstrings =
+        {
+            "please wait for verification", "checking if the site connection is secure",
+            "enable javascript and cookies to continue", "verify you are a human",
+            "your request has been blocked", "unusual traffic"
+        };
+
+        private static readonly string[] NonMetadataElements =
+        {
+            "script", "style", "template", "noscript", "svg", "iframe"
         };
 
         public static bool CanFetch(Uri uri, out string reason)
@@ -113,7 +136,7 @@ namespace Clipman
             }
             if (IsCapabilityUrl(uri))
             {
-                reason = "This link resembles a sign-in, confirmation, reset or other private capability link, so Clipman will not contact it.";
+                reason = "This link contains a token-like path or a credential-related parameter, so Clipman will not contact it.";
                 return false;
             }
             if (resolveHost)
@@ -167,7 +190,7 @@ namespace Clipman
                         return Failure(result, "The link did not return an HTML page.");
                     }
                     var html = Decode(response.Body, CharacterSet(contentType));
-                    var title = ExtractTitle(html);
+                    var title = ExtractTitle(html, current.Host);
                     if (string.IsNullOrWhiteSpace(title)) return Failure(result, "The website did not provide a useful title.");
                     result.Success = true;
                     result.Title = title;
@@ -257,9 +280,9 @@ namespace Clipman
             var target = string.IsNullOrEmpty(uri.PathAndQuery) ? "/" : uri.PathAndQuery;
             var request = "GET " + target + " HTTP/1.1\r\n" +
                           "Host: " + host + "\r\n" +
-                          "User-Agent: Clipman link title (+https://github.com/OnjLouis/Clipman)\r\n" +
-                          "Accept: text/html,application/xhtml+xml\r\n" +
-                          "Accept-Encoding: identity\r\n" +
+                          "User-Agent: Clipman/WebsiteTitle\r\n" +
+                          "Accept: text/html,application/xhtml+xml;q=0.9\r\n" +
+                          "Accept-Encoding: gzip\r\n" +
                           "Connection: close\r\n\r\n";
             var requestBytes = Encoding.ASCII.GetBytes(request);
             stream.Write(requestBytes, 0, requestBytes.Length);
@@ -282,18 +305,11 @@ namespace Clipman
                 string existing;
                 headers[name] = headers.TryGetValue(name, out existing) ? existing + ", " + value : value;
             }
-            string contentEncoding;
-            if (headers.TryGetValue("Content-Encoding", out contentEncoding) &&
-                !string.IsNullOrWhiteSpace(contentEncoding) && !contentEncoding.Equals("identity", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException("The website returned an unsupported compressed response.");
-            }
-
             byte[] body;
             string transferEncoding;
             if (headers.TryGetValue("Transfer-Encoding", out transferEncoding) && transferEncoding.IndexOf("chunked", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                body = ReadChunked(stream, MaximumBodyBytes);
+                body = ReadChunked(stream, MaximumWireBodyBytes);
             }
             else
             {
@@ -304,7 +320,25 @@ namespace Clipman
                 {
                     throw new InvalidDataException("The website returned an invalid content length.");
                 }
-                body = headers.ContainsKey("Content-Length") ? ReadExact(stream, Math.Min(contentLength, MaximumBodyBytes)) : ReadPrefix(stream, MaximumBodyBytes);
+                body = headers.ContainsKey("Content-Length") ? ReadExact(stream, Math.Min(contentLength, MaximumWireBodyBytes)) : ReadPrefix(stream, MaximumWireBodyBytes);
+            }
+
+            string contentEncoding;
+            if (headers.TryGetValue("Content-Encoding", out contentEncoding))
+            {
+                contentEncoding = contentEncoding.Trim();
+            }
+            if (string.IsNullOrWhiteSpace(contentEncoding) || contentEncoding.Equals("identity", StringComparison.OrdinalIgnoreCase))
+            {
+                if (body.Length > MaximumDecodedBodyBytes) body = body.Take(MaximumDecodedBodyBytes).ToArray();
+            }
+            else if (contentEncoding.Equals("gzip", StringComparison.OrdinalIgnoreCase) || contentEncoding.Equals("x-gzip", StringComparison.OrdinalIgnoreCase))
+            {
+                body = DecompressGzip(body, MaximumDecodedBodyBytes);
+            }
+            else
+            {
+                throw new InvalidDataException("The website returned an unsupported content encoding.");
             }
             return new PinnedHttpResponse
             {
@@ -314,10 +348,9 @@ namespace Clipman
             };
         }
 
-        private static bool IsCapabilityUrl(Uri uri)
+        internal static bool IsCapabilityUrl(Uri uri)
         {
-            var path = (uri.AbsolutePath ?? string.Empty).ToLowerInvariant();
-            if (CapabilityWords.Any(word => Regex.IsMatch(path, @"(^|[/_.-])" + Regex.Escape(word) + @"($|[/_.-])", RegexOptions.CultureInvariant))) return true;
+            var path = HttpUtility.UrlDecode(uri.AbsolutePath ?? string.Empty) ?? string.Empty;
             if (path.Split('/').Any(segment => LooksOpaque(segment))) return true;
             NameValueCollection query;
             try { query = HttpUtility.ParseQueryString(uri.Query ?? string.Empty); }
@@ -325,9 +358,7 @@ namespace Clipman
             foreach (var keyObject in query.AllKeys)
             {
                 var key = keyObject ?? string.Empty;
-                if (CapabilityParameters.Any(value => key.Equals(value, StringComparison.OrdinalIgnoreCase))) return true;
-                var valueText = query[key] ?? string.Empty;
-                if (LooksOpaque(valueText)) return true;
+                if (IsSensitiveParameterName(key)) return true;
             }
             return false;
         }
@@ -338,6 +369,16 @@ namespace Clipman
             var letters = value.Count(char.IsLetter);
             var digits = value.Count(char.IsDigit);
             return letters >= 8 && digits >= 4 && !value.Contains(" ");
+        }
+
+        private static bool IsSensitiveParameterName(string value)
+        {
+            var key = (value ?? string.Empty).Trim().ToLowerInvariant();
+            if (key.StartsWith("x-amz-", StringComparison.Ordinal) || key.StartsWith("x-goog-", StringComparison.Ordinal)) return true;
+            return CapabilityParameters.Any(name => key.Equals(name, StringComparison.Ordinal) ||
+                key.EndsWith("_" + name, StringComparison.Ordinal) ||
+                key.EndsWith("-" + name, StringComparison.Ordinal) ||
+                key.EndsWith("." + name, StringComparison.Ordinal));
         }
 
         private static bool HasOnlyPublicAddresses(string host, out string reason)
@@ -500,6 +541,25 @@ namespace Clipman
             }
         }
 
+        private static byte[] DecompressGzip(byte[] input, int maximum)
+        {
+            using (var source = new MemoryStream(input ?? new byte[0], false))
+            using (var gzip = new GZipStream(source, CompressionMode.Decompress, false))
+            using (var output = new MemoryStream())
+            {
+                var buffer = new byte[8192];
+                while (true)
+                {
+                    var read = gzip.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+                    if (output.Length + read > maximum)
+                        throw new InvalidDataException("The website response exceeded Clipman's decompression safety limit.");
+                    output.Write(buffer, 0, read);
+                }
+                return output.ToArray();
+            }
+        }
+
         private static byte[] ReadExact(Stream stream, int count)
         {
             var output = new byte[count];
@@ -592,22 +652,126 @@ namespace Clipman
             return Encoding.UTF8.GetString(bytes);
         }
 
-        private static string ExtractTitle(string html)
+        internal static string ExtractTitle(string html, string host)
         {
             if (string.IsNullOrEmpty(html)) return string.Empty;
-            foreach (Match match in Regex.Matches(html, @"<meta\b[^>]{0,2048}>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            var metadata = RetainMetadata(html, MaximumMetadataCharacters);
+            string openGraph = null;
+            string twitter = null;
+            foreach (Match match in Regex.Matches(metadata, @"<meta\b[^>]{0,4096}>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             {
                 var tag = match.Value;
-                var property = Attribute(tag, "property");
-                var name = Attribute(tag, "name");
-                if (property.Equals("og:title", StringComparison.OrdinalIgnoreCase) || name.Equals("twitter:title", StringComparison.OrdinalIgnoreCase))
-                {
-                    var content = SanitizeTitle(Attribute(tag, "content"));
-                    if (content.Length > 0) return content;
-                }
+                var key = Attribute(tag, "property");
+                if (key.Length == 0) key = Attribute(tag, "name");
+                if (key.Length == 0) key = Attribute(tag, "itemprop");
+                var content = Attribute(tag, "content");
+                if (key.Equals("og:title", StringComparison.OrdinalIgnoreCase) && openGraph == null && !string.IsNullOrWhiteSpace(content)) openGraph = content;
+                if (key.Equals("twitter:title", StringComparison.OrdinalIgnoreCase) && twitter == null && !string.IsNullOrWhiteSpace(content)) twitter = content;
             }
-            var titleMatch = Regex.Match(html, @"<title\b[^>]*>(.*?)</title\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
-            return titleMatch.Success ? SanitizeTitle(titleMatch.Groups[1].Value) : string.Empty;
+            var titleMatch = Regex.Match(metadata, @"<title\b[^>]*>(.*?)</title\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+            var headingMatch = Regex.Match(metadata, @"<h1\b[^>]*>(.*?)</h1\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+            var candidates = new[]
+            {
+                openGraph,
+                twitter,
+                titleMatch.Success ? titleMatch.Groups[1].Value : null,
+                headingMatch.Success ? headingMatch.Groups[1].Value : null
+            };
+            foreach (var candidate in candidates)
+            {
+                var title = SanitizeTitle(candidate);
+                if (title.Length == 0 || IsJunkTitle(title) || title.Equals(host ?? string.Empty, StringComparison.OrdinalIgnoreCase)) continue;
+                return title;
+            }
+            return string.Empty;
+        }
+
+        private static string RetainMetadata(string html, int maximumCharacters)
+        {
+            var output = new StringBuilder(Math.Min(maximumCharacters, html.Length));
+            var index = 0;
+            while (index < html.Length && output.Length < maximumCharacters)
+            {
+                if (StartsWith(html, index, "<!--"))
+                {
+                    var commentEnd = html.IndexOf("-->", index + 4, StringComparison.Ordinal);
+                    index = commentEnd < 0 ? html.Length : commentEnd + 3;
+                    continue;
+                }
+                if (html[index] != '<')
+                {
+                    var nextTag = html.IndexOf('<', index);
+                    if (nextTag < 0) nextTag = html.Length;
+                    AppendWithinLimit(output, html, index, nextTag - index, maximumCharacters);
+                    index = nextTag;
+                    continue;
+                }
+                var tagEnd = FindTagEnd(html, index);
+                if (tagEnd < 0) break;
+                var tag = html.Substring(index, tagEnd - index + 1);
+                var closing = false;
+                var tagName = TagName(tag, out closing);
+                if (!closing && NonMetadataElements.Contains(tagName, StringComparer.OrdinalIgnoreCase) && !tag.TrimEnd().EndsWith("/>", StringComparison.Ordinal))
+                {
+                    var closeStart = html.IndexOf("</" + tagName, tagEnd + 1, StringComparison.OrdinalIgnoreCase);
+                    if (closeStart < 0) break;
+                    var closeEnd = FindTagEnd(html, closeStart);
+                    index = closeEnd < 0 ? html.Length : closeEnd + 1;
+                    continue;
+                }
+                AppendWithinLimit(output, tag, 0, tag.Length, maximumCharacters);
+                index = tagEnd + 1;
+                if (closing && tagName.Equals("head", StringComparison.OrdinalIgnoreCase) &&
+                    output.ToString().IndexOf("og:title", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    output.ToString().IndexOf("<title", StringComparison.OrdinalIgnoreCase) >= 0) break;
+            }
+            return output.ToString();
+        }
+
+        private static bool StartsWith(string value, int index, string prefix)
+        {
+            return index >= 0 && index + prefix.Length <= value.Length &&
+                string.Compare(value, index, prefix, 0, prefix.Length, StringComparison.Ordinal) == 0;
+        }
+
+        private static int FindTagEnd(string value, int start)
+        {
+            var quote = '\0';
+            for (var index = start + 1; index < value.Length; index++)
+            {
+                var current = value[index];
+                if (quote != '\0')
+                {
+                    if (current == quote) quote = '\0';
+                }
+                else if (current == '\'' || current == '"') quote = current;
+                else if (current == '>') return index;
+            }
+            return -1;
+        }
+
+        private static string TagName(string tag, out bool closing)
+        {
+            closing = false;
+            if (string.IsNullOrEmpty(tag) || tag[0] != '<') return string.Empty;
+            var index = 1;
+            while (index < tag.Length && char.IsWhiteSpace(tag[index])) index++;
+            if (index < tag.Length && tag[index] == '/')
+            {
+                closing = true;
+                index++;
+            }
+            while (index < tag.Length && char.IsWhiteSpace(tag[index])) index++;
+            var start = index;
+            while (index < tag.Length && (char.IsLetterOrDigit(tag[index]) || tag[index] == ':' || tag[index] == '-')) index++;
+            return index > start ? tag.Substring(start, index - start).ToLowerInvariant() : string.Empty;
+        }
+
+        private static void AppendWithinLimit(StringBuilder output, string value, int start, int count, int maximum)
+        {
+            var remaining = maximum - output.Length;
+            if (remaining <= 0 || count <= 0) return;
+            output.Append(value, start, Math.Min(count, remaining));
         }
 
         private static string Attribute(string tag, string name)
@@ -621,7 +785,19 @@ namespace Clipman
         {
             var decoded = HttpUtility.HtmlDecode(value ?? string.Empty);
             decoded = Regex.Replace(decoded, @"<[^>]+>", " ", RegexOptions.CultureInvariant);
-            return LinkPresentation.SanitizeLabel(decoded, 200);
+            var sanitized = LinkPresentation.SanitizeLabel(decoded, 200);
+            return sanitized.Trim(' ', '|', '-', '\u2013', '\u2014', '\u00b7', '\u00bb', '<');
+        }
+
+        private static bool IsJunkTitle(string title)
+        {
+            var normalized = Regex.Replace(title ?? string.Empty, @"\s+", " ", RegexOptions.CultureInvariant)
+                .Trim()
+                .Trim('.', '!', '|', '-', '\u2013', '\u2014')
+                .Trim()
+                .ToLowerInvariant();
+            return JunkTitleExactMatches.Contains(normalized, StringComparer.Ordinal) ||
+                JunkTitleSubstrings.Any(value => normalized.IndexOf(value, StringComparison.Ordinal) >= 0);
         }
 
         private static LinkTitleFetchResult Failure(LinkTitleFetchResult result, string error)

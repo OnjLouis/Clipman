@@ -1394,10 +1394,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         do {
             validatedURL = try LinkFetchSafety.validatedURL(current.Text, resolveHost: false)
         } catch {
+            sounds.play(.skip)
             showInformationalAlert(title: "Website Title Not Available", message: error.localizedDescription)
             return
         }
         guard !websiteTitleFetches.contains(current.Id) else {
+            sounds.play(.skip)
             showInformationalAlert(title: "Website Title", message: "Clipman is already requesting a title for this link.")
             return
         }
@@ -1418,12 +1420,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 self.websiteTitleFetches.remove(current.Id)
                 switch result {
                 case .failure(let error):
+                    self.sounds.play(.skip)
                     self.showInformationalAlert(title: "Website Title Not Available", message: error.localizedDescription)
                 case .success(let title):
                     guard let latest = self.store.entry(id: current.Id),
                           latest.Text == current.Text,
                           latest.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     else {
+                        self.sounds.play(.skip)
                         self.showInformationalAlert(title: "Website Title Not Applied", message: "The entry changed while Clipman was reading the website title, so its Name was left unchanged.")
                         return
                     }
@@ -1432,6 +1436,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                         if saved {
                             self.sounds.play(.copy)
                         } else {
+                            self.sounds.play(.skip)
                             self.showInformationalAlert(title: "Website Title Not Applied", message: "The entry changed before the title could be saved, so its Name was left unchanged.")
                         }
                     }

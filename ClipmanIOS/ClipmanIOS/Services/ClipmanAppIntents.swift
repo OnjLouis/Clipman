@@ -3,26 +3,29 @@ import AppIntents
 struct AddClipboardToClipmanIntent: AppIntent {
     static let title: LocalizedStringResource = "Add Clipboard to Clipman"
     static let description = IntentDescription("Adds the current iOS clipboard text to Clipman history.")
-    static let openAppWhenRun = false
+    static let openAppWhenRun = true
 
+    @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let outcome = await ClipboardShortcutService.addClipboard()
-        return .result(dialog: IntentDialog(stringLiteral: outcome.message))
+        ClipmanQuickActionCenter.shared.request(.addClipboard)
+        return .result(dialog: "Opening Clipman to add the clipboard.")
     }
 }
 
 struct CopyLatestClipmanEntryIntent: AppIntent {
     static let title: LocalizedStringResource = "Copy Latest Clip"
     static let description = IntentDescription("Copies the newest Clipman history entry to the iOS clipboard.")
-    static let openAppWhenRun = false
+    static let openAppWhenRun = true
 
+    @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let outcome = await ClipboardShortcutService.copyLatest()
-        return .result(dialog: IntentDialog(stringLiteral: outcome.message))
+        ClipmanQuickActionCenter.shared.request(.copyLatest)
+        return .result(dialog: "Opening Clipman to copy the latest entry.")
     }
 }
 
 struct ClipmanAppShortcuts: AppShortcutsProvider {
+    @AppShortcutsBuilder
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: AddClipboardToClipmanIntent(),

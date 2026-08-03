@@ -287,6 +287,10 @@ do {
     }
     let namedLink = LinkPresentation.make(urlText: "https://example.com/article", assignedName: "Doug proposal")
     expect(namedLink?.rowText == "Doug proposal; example.com/article", "assigned Name should win and retain the destination")
+    let roleSuffixedLink = "https://youtu.be/Mu1gjX5fMA4  link"
+    expect(LinkPresentation.linkOnlyURLText(roleSuffixedLink) == "https://youtu.be/Mu1gjX5fMA4", "a trailing screen-reader link role should still identify one URL")
+    expect(LinkPresentation.make(urlText: roleSuffixedLink, assignedName: "Wooden Flute")?.rowText == "Wooden Flute; youtu.be/Mu1gjX5fMA4", "a named role-suffixed URL should retain Links presentation")
+    expect(LinkPresentation.linkOnlyURLText("Read \(roleSuffixedLink)") == nil, "ordinary surrounding text must not be classified as one URL")
     expect(LinkPresentation.searchableText(urlText: "https://example.com/how-to-test", assignedName: "").contains("How to test"), "search text should contain the generated label")
     expect(LinkPresentation.searchableText(urlText: "https://example.com/how-to-test", assignedName: "Doug proposal").contains("How to test"), "custom Name should not hide the generated label from search")
     let sanitizedLink = LinkPresentation.make(urlText: "https://example.com/folder/%E2%80%AEreport%0A")
@@ -404,8 +408,8 @@ do {
         "pinned HTTPS transport must validate TLS using the original hostname"
     )
     expect(
-        pinnedTransportSource.contains("Accept-Encoding: identity") && pinnedTransportSource.contains("Connection: close"),
-        "website-title requests should use bounded identity responses and close the direct connection"
+        pinnedTransportSource.contains("Accept-Encoding: gzip") && pinnedTransportSource.contains("Connection: close"),
+        "website-title requests should negotiate bounded gzip responses and close the direct connection"
     )
     expect(
         !pinnedTransportSource.contains("Cookie:") && !pinnedTransportSource.contains("Authorization:"),
@@ -421,9 +425,35 @@ do {
         "fetched titles should remove replacement characters produced by invalid input"
     )
     expect(
-        titleFetcherSource.contains("replacement = \"\"")
-            && titleFetcherSource.contains("return LinkDisplayTextSanitizer.normalizedTitle(decoded)"),
+        WebsiteMetadataParser.title(from: "<title>Safe&#x110000;Title</title>", host: "example.com") == "SafeTitle",
         "website-title entity decoding should drop invalid scalar entities before applying the shared title sanitizer"
+    )
+    let titleResponse = URLResponse(
+        url: URL(string: "https://example.com/")!,
+        mimeType: "text/html",
+        expectedContentLength: -1,
+        textEncodingName: "utf-8"
+    )
+    let scriptHeavyHTML = "<html><head><script>" + String(repeating: "x", count: 160 * 1024)
+        + "</script><meta property=\"og:title\" content=\"Useful &amp; Title\"><title>Fallback</title></head></html>"
+    expect(
+        WebsiteMetadataParser.title(from: Data(scriptHeavyHTML.utf8), response: titleResponse, host: "example.com") == "Useful & Title",
+        "website-title parsing should ignore large inline scripts without consuming the metadata budget"
+    )
+    expect(
+        WebsiteMetadataParser.title(
+            from: "<html><head><title>Real title</title></head><body><svg><title>Icon title</title></svg></body></html>",
+            host: "example.com"
+        ) == "Real title",
+        "website-title parsing should ignore SVG title elements"
+    )
+    expect(
+        WebsiteMetadataParser.title(from: "<title>Reddit - Please wait for verification</title>", host: "reddit.com") == nil,
+        "website-title parsing should reject bot-challenge titles"
+    )
+    expect(
+        WebsiteMetadataParser.title(from: "<main><h1>Hand-written page</h1></main>", host: "example.com") == "Hand-written page",
+        "website-title parsing should use a useful first heading only as a final fallback"
     )
 
     let onePixelPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")!

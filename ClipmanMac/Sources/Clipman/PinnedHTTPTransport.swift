@@ -27,7 +27,7 @@ struct PinnedHTTPResponse: Sendable {
 
 enum PinnedHTTPTransport {
     private static let maximumHeaderBytes = 64 * 1024
-    private static let maximumWireBodyBytes = 512 * 1024
+    private static let maximumWireBodyBytes = 1024 * 1024
 
     static func get(target: ValidatedLinkTarget, deadline: MonotonicDeadline, maximumDecodedBodyBytes: Int) throws -> PinnedHTTPResponse {
         guard !target.numericAddresses.isEmpty else { throw WebsiteTitleFetchError.cannotResolve }
@@ -76,7 +76,7 @@ enum PinnedHTTPTransport {
             "GET \(requestTarget) HTTP/1.1",
             "Host: \(hostHeader)",
             "Accept: text/html,application/xhtml+xml",
-            "Accept-Encoding: identity",
+            "Accept-Encoding: gzip",
             "User-Agent: Clipman (+https://github.com/OnjLouis/Clipman; website title request)",
             "Connection: close",
             "",

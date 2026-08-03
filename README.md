@@ -8,7 +8,7 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 
 - [Download the latest Windows, macOS, Linux, Android, and server builds](https://github.com/OnjLouis/Clipman/releases/latest).
 - [Join the public iPhone and iPad beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
-- [Read the complete Clipman manual](https://github.com/OnjLouis/Clipman/blob/main/Manual.html).
+- [Read the complete Clipman manual](https://onjlouis.github.io/clipman/manual.html).
 - [Read the Clipman Server manual](https://github.com/OnjLouis/Clipman/blob/main/ClipmanServer/Manual.html).
 
 Windows is portable, macOS uses a signed and notarized app, Linux includes a per-user installer, and the mobile apps use the normal platform installation flow. Clipman Server is a separate, optional download; ordinary Clipman does not require it.
@@ -31,7 +31,7 @@ Windows is portable, macOS uses a signed and notarized app, Linux includes a per
 3. Press Enter or activate an entry to return it to the clipboard.
 4. Open Preferences or Settings when you want to enable optional views, encryption, synchronization, sounds, or other behavior.
 
-That is enough for ordinary local use. The [full manual](https://github.com/OnjLouis/Clipman/blob/main/Manual.html) covers every command, platform shortcut, accessibility behavior, import and export option, privacy control, and synchronization workflow.
+That is enough for ordinary local use. The [full manual](https://onjlouis.github.io/clipman/manual.html) covers every command, platform shortcut, accessibility behavior, import and export option, privacy control, and synchronization workflow.
 
 ## Choose How To Store History
 

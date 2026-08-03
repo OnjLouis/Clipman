@@ -33,13 +33,14 @@ class SyncConflictResolverTest {
 
     @Test
     fun mergeAppliesDeletionMarkersInsteadOfResurrectingEntries() {
+        val now = TimeUtil.nowUnixMs()
         val removed = entry("removed", "Remove me", 1)
         val local = database().copy(
             DeletedEntries = listOf(
                 DeletedClipEntry(
                     Id = removed.Id,
                     TextHash = SyncConflictResolver.textHash(removed.Text),
-                    DeletedUnixMs = 100,
+                    DeletedUnixMs = now,
                     SourceMachine = "Phone"
                 )
             )
@@ -63,10 +64,11 @@ class SyncConflictResolverTest {
 
     @Test
     fun sameTextEntryRecreatedAfterDeletionSurvives() {
+        val now = TimeUtil.nowUnixMs()
         val text = "https://example.com/recreated"
-        val marker = DeletedClipEntry("deleted-original", SyncConflictResolver.textHash(text), 100, "Desktop")
+        val marker = DeletedClipEntry("deleted-original", SyncConflictResolver.textHash(text), now - 1, "Desktop")
         val local = database().copy(DeletedEntries = listOf(marker))
-        val server = database(entry("new-copy", text, 101))
+        val server = database(entry("new-copy", text, now))
 
         val merged = SyncConflictResolver.merge(local, server)
 
@@ -75,10 +77,11 @@ class SyncConflictResolverTest {
 
     @Test
     fun sameTextEntryOlderThanDeletionStaysDeleted() {
+        val now = TimeUtil.nowUnixMs()
         val text = "https://example.com/stale"
-        val marker = DeletedClipEntry("deleted-original", SyncConflictResolver.textHash(text), 100, "Desktop")
+        val marker = DeletedClipEntry("deleted-original", SyncConflictResolver.textHash(text), now, "Desktop")
         val local = database().copy(DeletedEntries = listOf(marker))
-        val server = database(entry("stale-copy", text, 99))
+        val server = database(entry("stale-copy", text, now - 1))
 
         val merged = SyncConflictResolver.merge(local, server)
 
@@ -87,14 +90,55 @@ class SyncConflictResolverTest {
 
     @Test
     fun exactDeletedIdentityCannotBeRecreated() {
+        val now = TimeUtil.nowUnixMs()
         val text = "https://example.com/deleted-id"
-        val marker = DeletedClipEntry("same-id", SyncConflictResolver.textHash(text), 100, "Desktop")
+        val marker = DeletedClipEntry("same-id", SyncConflictResolver.textHash(text), now, "Desktop")
         val local = database().copy(DeletedEntries = listOf(marker))
-        val server = database(entry("same-id", text, 101))
+        val server = database(entry("same-id", text, now + 1))
 
         val merged = SyncConflictResolver.merge(local, server)
 
         assertFalse(merged.Entries.any { it.Id == "same-id" })
+    }
+
+    @Test
+    fun expiredDeletionMarkerIsPruned() {
+        val old = TimeUtil.nowUnixMs() - 91L * 24 * 60 * 60 * 1_000
+        val text = "https://example.com/returned"
+        val marker = DeletedClipEntry("returned", SyncConflictResolver.textHash(text), old, "Desktop")
+        val local = database().copy(DeletedEntries = listOf(marker))
+        val server = database(entry("returned", text, old - 1))
+
+        val merged = SyncConflictResolver.merge(local, server)
+
+        assertTrue(merged.Entries.any { it.Id == "returned" })
+        assertTrue(merged.DeletedEntries.isEmpty())
+    }
+
+    @Test
+    fun largeMergePreservesLiveEntriesAndRecentDeletions() {
+        val now = TimeUtil.nowUnixMs()
+        val entries = (0 until 400).map { index -> entry("entry-$index", "Text $index", index + 1L).copy(
+            CreatedUnixMs = now - 10_000,
+            LastUsedUnixMs = now - 10_000
+        ) }
+        val markers = (0 until 200).map { index ->
+            DeletedClipEntry(
+                Id = "marker-$index",
+                TextHash = SyncConflictResolver.textHash("Text $index"),
+                DeletedUnixMs = now,
+                SourceMachine = "Desktop"
+            )
+        }
+
+        val merged = SyncConflictResolver.merge(
+            database().copy(DeletedEntries = markers),
+            database(*entries.toTypedArray())
+        )
+
+        assertEquals(200, merged.Entries.size)
+        assertEquals("Text 200", merged.Entries.first().Text)
+        assertEquals("Text 399", merged.Entries.last().Text)
     }
 
     @Test

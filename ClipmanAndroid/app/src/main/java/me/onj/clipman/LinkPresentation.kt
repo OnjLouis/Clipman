@@ -22,8 +22,9 @@ object LinkPresentation {
     )
 
     fun rowText(entry: ClipEntry): String {
-        val destination = shortenedDestination(entry.Text) ?: return entry.displayText
-        val label = entry.Name.trim().ifBlank { offlineLabel(entry.Text).orEmpty() }
+        val linkText = standaloneUrlText(entry.Text) ?: return entry.displayText
+        val destination = shortenedDestination(linkText) ?: return entry.displayText
+        val label = entry.Name.trim().ifBlank { offlineLabel(linkText).orEmpty() }
         return when {
             label.isBlank() -> destination
             label.equals(destination, ignoreCase = true) -> label
@@ -68,11 +69,18 @@ object LinkPresentation {
     }
 
     fun isStandaloneLink(value: String): Boolean {
-        if (!WebsiteTitlePolicy.isWithinUrlLength(value)) return false
+        return standaloneUrlText(value) != null
+    }
+
+    fun standaloneUrlText(value: String): String? {
+        if (!WebsiteTitlePolicy.isWithinUrlLength(value)) return null
         val trimmed = value.trim()
-        if (trimmed.isBlank() || trimmed.any(Char::isWhitespace)) return false
-        val uri = parseDisplayUri(trimmed) ?: return false
-        return !uri.host.isNullOrBlank()
+        if (trimmed.isBlank() || trimmed.contains('\n') || trimmed.contains('\r')) return null
+        val candidate = Regex("""(?i)\s+link$""").find(trimmed)?.let { match ->
+            trimmed.substring(0, match.range.first)
+        } ?: trimmed
+        if (candidate.isBlank() || candidate.any(Char::isWhitespace)) return null
+        return candidate.takeIf { parseDisplayUri(it)?.host?.isNotBlank() == true }
     }
 
     fun isFetchableHttpUrl(value: String): Boolean {
