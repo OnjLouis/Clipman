@@ -67,6 +67,13 @@
   // Strongly discouraged. Prefer a VPN, firewall, direct HTTPS, or reverse proxy.
   "AllowInsecureRemote": false,
 
+  // Optional browser address used for temporary client-onboarding links.
+  //
+  // Leave blank when AdvertiseHost and Port are directly reachable. Set this
+  // to the public HTTPS root when a reverse proxy provides HTTPS in front of
+  // the server, for example "https://clipman.example". Public HTTP is refused.
+  "SetupBaseUrl": "",
+
   // Backup behavior.
   //
   // Before writes, Clipman Server creates rolling backups under:

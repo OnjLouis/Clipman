@@ -7,6 +7,9 @@ import argparse
 import base64
 from datetime import datetime, timezone
 import errno
+import hashlib
+import hmac
+import html
 import http.server
 import ipaddress
 import json
@@ -31,9 +34,16 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.6.0"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
+SETUP_LOG_PATTERN = re.compile(r"(/setup/)[A-Za-z0-9_-]+")
+SETUP_PATH_PATTERN = re.compile(r"\A/setup/([A-Za-z0-9_-]{32,128})(?:/(connection\.clpconf))?\Z")
+SETUP_STATE_FILE = "clipman-server-setup-link.json"
+SETUP_DEFAULT_MINUTES = 30
+SETUP_DEFAULT_DOWNLOADS = 5
+SETUP_MAX_MINUTES = 24 * 60
+SETUP_MAX_DOWNLOADS = 50
 METADATA_FILE = "clipman-server-metadata.json"
 METADATA_TOUCH_INTERVAL_MS = 5 * 60 * 1000
 SERVER_PORT_MIN = 20000
@@ -120,6 +130,7 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     settings.setdefault("KeyFile", "")
     settings.setdefault("CaFile", "")
     settings.setdefault("AllowInsecureRemote", False)
+    settings.setdefault("SetupBaseUrl", "")
     settings.setdefault("BackupIntervalMinutes", 60)
     settings.setdefault("BackupRetentionHours", 24)
     settings.setdefault("MaxBackups", 48)
@@ -221,6 +232,123 @@ def is_local_or_private_host(host: str) -> bool:
     if isinstance(address, ipaddress.IPv4Address) and address in ipaddress.ip_network("100.64.0.0/10"):
         return True
     return False
+
+
+def is_local_or_private_setup_host(host: str) -> bool:
+    if is_local_or_private_host(host):
+        return True
+    try:
+        addresses = {
+            item[4][0].split("%", 1)[0]
+            for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        }
+    except (OSError, socket.gaierror):
+        return False
+    return bool(addresses) and all(is_local_or_private_host(address) for address in addresses)
+
+
+def setup_state_path(config_path: Path) -> Path:
+    return config_path.parent / SETUP_STATE_FILE
+
+
+def setup_base_url(settings: Dict[str, Any], override: str = "") -> str:
+    configured = (override or str(settings.get("SetupBaseUrl", ""))).strip()
+    if configured:
+        parsed = urlparse(configured)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("SetupBaseUrl must be an HTTP or HTTPS URL with a host name.")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("SetupBaseUrl cannot contain credentials, a query, or a fragment.")
+        if parsed.path not in {"", "/"}:
+            raise ValueError("SetupBaseUrl must not contain a path.")
+        if parsed.scheme == "http" and not is_local_or_private_setup_host(parsed.hostname):
+            raise ValueError("A public temporary setup page requires HTTPS.")
+        return configured.rstrip("/")
+
+    host = advertised_host(settings)
+    if not has_tls(settings) and not is_local_or_private_setup_host(host.strip("[]")):
+        raise ValueError(
+            "A public temporary setup page requires HTTPS. Configure SetupBaseUrl with the public HTTPS address."
+        )
+    host_for_url = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"{listen_scheme(settings)}://{host_for_url}:{int(settings['Port'])}"
+
+
+def create_setup_link(
+    config_path: Path,
+    settings: Dict[str, Any],
+    minutes: int = SETUP_DEFAULT_MINUTES,
+    downloads: int = SETUP_DEFAULT_DOWNLOADS,
+    base_url_override: str = "",
+) -> Tuple[str, Dict[str, Any]]:
+    if not 1 <= minutes <= SETUP_MAX_MINUTES:
+        raise ValueError(f"Setup link minutes must be between 1 and {SETUP_MAX_MINUTES}.")
+    if not 1 <= downloads <= SETUP_MAX_DOWNLOADS:
+        raise ValueError(f"Setup link downloads must be between 1 and {SETUP_MAX_DOWNLOADS}.")
+    base_url = setup_base_url(settings, base_url_override)
+    code = random_token()
+    state = {
+        "version": 1,
+        "code_sha256": hashlib.sha256(code.encode("ascii")).hexdigest(),
+        "created_unix_ms": now_ms(),
+        "expires_unix_ms": now_ms() + minutes * 60 * 1000,
+        "remaining_downloads": downloads,
+    }
+    target = setup_state_path(config_path)
+    make_private_dir(target.parent)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as stream:
+        json.dump(state, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    make_private_file(tmp)
+    tmp.replace(target)
+    make_private_file(target)
+    return f"{base_url}/setup/{code}", state
+
+
+def revoke_setup_link(config_path: Path) -> bool:
+    target = setup_state_path(config_path)
+    try:
+        target.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def load_valid_setup_state(config_path: Path, code: str) -> Dict[str, Any] | None:
+    target = setup_state_path(config_path)
+    try:
+        value = json.loads(target.read_text(encoding="utf-8-sig"))
+        expected = str(value["code_sha256"])
+        actual = hashlib.sha256(code.encode("ascii")).hexdigest()
+        if not hmac.compare_digest(expected, actual):
+            return None
+        if int(value["expires_unix_ms"]) <= now_ms() or int(value["remaining_downloads"]) <= 0:
+            revoke_setup_link(config_path)
+            return None
+        return value
+    except (FileNotFoundError, KeyError, TypeError, ValueError, json.JSONDecodeError, OSError):
+        return None
+
+
+def consume_setup_download(config_path: Path, code: str) -> Dict[str, Any] | None:
+    state = load_valid_setup_state(config_path, code)
+    if state is None:
+        return None
+    remaining = int(state["remaining_downloads"]) - 1
+    if remaining <= 0:
+        revoke_setup_link(config_path)
+    else:
+        state["remaining_downloads"] = remaining
+        target = setup_state_path(config_path)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as stream:
+            json.dump(state, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        make_private_file(tmp)
+        tmp.replace(target)
+        make_private_file(target)
+    return state
 
 
 def validate_network_security(settings: Dict[str, Any]) -> None:
@@ -865,9 +993,7 @@ def write_connection_info(config_path: Path, settings: Dict[str, Any]) -> Path:
     return target
 
 
-def write_connection_config(config_path: Path, settings: Dict[str, Any]) -> Path:
-    target = default_connection_config_path(config_path)
-    make_private_dir(target.parent)
+def connection_config_document(settings: Dict[str, Any]) -> Dict[str, Any]:
     authority = inspect_private_ca(settings)
     document = {
         "clipman": "server-connection",
@@ -879,6 +1005,17 @@ def write_connection_config(config_path: Path, settings: Dict[str, Any]) -> Path
     }
     if authority is not None:
         document["ca_cert_pem"] = authority["pem"]
+    return document
+
+
+def connection_config_bytes(settings: Dict[str, Any]) -> bytes:
+    return (json.dumps(connection_config_document(settings), indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def write_connection_config(config_path: Path, settings: Dict[str, Any]) -> Path:
+    target = default_connection_config_path(config_path)
+    make_private_dir(target.parent)
+    document = connection_config_document(settings)
     tmp = target.with_suffix(target.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(document, f, indent=2, sort_keys=True)
@@ -1241,6 +1378,65 @@ def start_database_prune_thread(settings: Dict[str, Any]) -> None:
     Thread(target=worker, daemon=True).start()
 
 
+def setup_page_html(code: str, state: Dict[str, Any], user_agent: str) -> bytes:
+    agent = user_agent.lower()
+    if "iphone" in agent or "ipad" in agent:
+        suggestion = "On this iPhone or iPad, download the connection file and choose Clipman when iOS asks how to open it."
+    elif "android" in agent:
+        suggestion = "On this Android device, download the connection file and open it with Clipman."
+    elif "macintosh" in agent or "mac os" in agent:
+        suggestion = "On this Mac, download the connection file, then import it from Clipman Settings."
+    elif "windows" in agent:
+        suggestion = "On this Windows computer, download the connection file, then import it from Clipman Preferences."
+    elif "linux" in agent:
+        suggestion = "On this Linux computer, download the connection file, then import it from Clipman Settings."
+    else:
+        suggestion = "Download the connection file on the device where you want to configure Clipman."
+    expires = datetime.fromtimestamp(int(state["expires_unix_ms"]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    download_path = "/setup/" + code + "/connection.clpconf"
+    document = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect Clipman to this server</title>
+  <style>
+    body {{ margin: 0; font: 1rem/1.55 system-ui, sans-serif; color: #181818; background: #fff; }}
+    main {{ max-width: 44rem; margin: 0 auto; padding: 1.25rem; }}
+    h1, h2 {{ line-height: 1.2; }}
+    .download {{ display: inline-block; padding: .75rem 1rem; border: 2px solid #174ea6; color: #fff; background: #174ea6; font-weight: 700; text-decoration: none; }}
+    .download:focus, a:focus {{ outline: 3px solid #d9480f; outline-offset: 3px; }}
+    .notice {{ border-left: .3rem solid #d9480f; padding-left: 1rem; }}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Connect Clipman to this server</h1>
+  <p>{html.escape(suggestion)}</p>
+  <p><a class="download" href="{html.escape(download_path, quote=True)}" download>Download Clipman server connection</a></p>
+  <p class="notice"><strong>Keep the downloaded file private.</strong> It contains the server token. It does not contain your clipboard history password.</p>
+  <p>This temporary page expires at {html.escape(expires)} or after {int(state['remaining_downloads'])} more connection-file downloads.</p>
+  <h2>Finish setup in Clipman</h2>
+  <ol>
+    <li>Open the downloaded <code>.clpconf</code> file with Clipman, or use <strong>Import server connection file</strong> in Clipman Settings or Preferences.</li>
+    <li>Review the server address.</li>
+    <li>Enter your history password. The server never receives or stores it.</li>
+    <li>Save the settings and confirm that history loads.</li>
+    <li>Delete the downloaded connection file when setup is complete.</li>
+  </ol>
+  <h2>Get Clipman</h2>
+  <ul>
+    <li><a href="https://github.com/OnjLouis/Clipman/releases/latest">Windows, macOS, Linux and Android downloads</a></li>
+    <li><a href="https://testflight.apple.com/join/HYReZKAk">Clipman for iPhone and iPad on TestFlight</a></li>
+  </ul>
+  <p>This page does not inspect your device, load external resources or send analytics. Its platform suggestion uses only the browser identification sent with this request.</p>
+</main>
+</body>
+</html>
+"""
+    return document.encode("utf-8")
+
+
 class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
@@ -1249,6 +1445,7 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.started_unix_ms = now_ms()
         self._stats_lock = Lock()
         self._database_locks_lock = Lock()
+        self.setup_link_lock = Lock()
         self._database_locks: Dict[str, Any] = {}
         self._stats: Dict[str, Any] = {
             "Requests": 0,
@@ -1356,6 +1553,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if '"HEAD /api/v1/database/' in message and ' 200 ' in message:
             return
         message = DATABASE_LOG_PATTERN.sub(r"\1<database-id>", message)
+        message = SETUP_LOG_PATTERN.sub(r"\1<temporary-code>", message)
         logging.info("%s - %s", self.address_string(), message)
 
     @property
@@ -1365,6 +1563,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def route(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+        setup_match = SETUP_PATH_PATTERN.fullmatch(path)
+        if setup_match and self.command in {"GET", "HEAD"}:
+            self.serve_setup(setup_match.group(1), bool(setup_match.group(2)))
+            return
+        if path.startswith("/setup/"):
+            self.send_setup_response(404, b"This temporary Clipman setup link is unavailable.\n", "text/plain; charset=utf-8")
+            return
         if self.command == "GET" and path == "/api/v1/health":
             self.write_json(status(self.settings, self.server))
             return
@@ -1388,6 +1593,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.restore_backup(parse_qs(parsed.query).get("name", [""])[0])
         else:
             self.send_text(404, "Not found")
+
+    def serve_setup(self, code: str, download: bool) -> None:
+        config_path = self.server.config_path  # type: ignore[attr-defined]
+        with self.server.setup_link_lock:  # type: ignore[attr-defined]
+            state = load_valid_setup_state(config_path, code)
+            if state is None:
+                self.send_setup_response(404, b"This temporary Clipman setup link is unavailable.\n", "text/plain; charset=utf-8")
+                return
+            if download and self.command == "GET":
+                state = consume_setup_download(config_path, code)
+                if state is None:
+                    self.send_setup_response(404, b"This temporary Clipman setup link is unavailable.\n", "text/plain; charset=utf-8")
+                    return
+
+        if download:
+            data = connection_config_bytes(self.settings)
+            self.send_setup_response(
+                200,
+                data,
+                "application/x-clipman-server-connection",
+                'attachment; filename="clipman-server-connection.clpconf"',
+            )
+            return
+        self.send_setup_response(200, setup_page_html(code, state, self.headers.get("User-Agent", "")), "text/html; charset=utf-8")
+
+    def send_setup_response(self, status_code: int, data: bytes, content_type: str, disposition: str = "") -> None:
+        self.send_response(status_code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+        if disposition:
+            self.send_header("Content-Disposition", disposition)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+        self.record(status_code, bytes_sent=0 if self.command == "HEAD" else len(data))
 
     def authorized(self) -> bool:
         token = str(self.settings.get("AuthToken", "")).strip()
@@ -1563,6 +1808,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-insecure-remote", action="store_true", help="Allow non-local HTTP listeners without TLS. Use only behind a VPN, firewall, or reverse proxy.")
     parser.add_argument("--show-token", action="store_true", help="Print the bearer token and exit.")
     parser.add_argument("--write-connection-info", action="store_true", help="Write importable and plain text server connection files beside the settings file.")
+    parser.add_argument("--create-setup-link", action="store_true", help="Create a temporary browser setup link and exit.")
+    parser.add_argument("--revoke-setup-link", action="store_true", help="Revoke the current temporary browser setup link and exit.")
+    parser.add_argument("--setup-minutes", type=int, default=SETUP_DEFAULT_MINUTES, help=f"Lifetime for --create-setup-link (1 to {SETUP_MAX_MINUTES}; default {SETUP_DEFAULT_MINUTES}).")
+    parser.add_argument("--setup-downloads", type=int, default=SETUP_DEFAULT_DOWNLOADS, help=f"Connection-file download limit for --create-setup-link (1 to {SETUP_MAX_DOWNLOADS}; default {SETUP_DEFAULT_DOWNLOADS}).")
+    parser.add_argument("--setup-base-url", help="Public HTTP or HTTPS root used when creating a setup link; public addresses require HTTPS. Saves SetupBaseUrl.")
     parser.add_argument("--list-databases", action="store_true", help="List database buckets known to this server and exit.")
     parser.add_argument("--list-databases-json", action="store_true", help="List database buckets as JSON and exit.")
     parser.add_argument("--delete-database", help="Move one database bucket to DeletedDatabases. Requires --confirm and refuses buckets touched in the last 24 hours unless --force-recent is also passed.")
@@ -1596,6 +1846,7 @@ def run_server(
         print(message, file=sys.stderr)
         return BIND_ERROR_EXIT_CODE
     server.settings = settings  # type: ignore[attr-defined]
+    server.config_path = config_path  # type: ignore[attr-defined]
     if tls_context is not None:
         try:
             server.socket = tls_context.wrap_socket(server.socket, server_side=True)
@@ -1666,6 +1917,12 @@ def main() -> int:
         settings["KeyFile"] = str(Path(args.key_file).expanduser().resolve())
     if args.allow_insecure_remote:
         settings["AllowInsecureRemote"] = True
+    if args.setup_base_url:
+        try:
+            settings["SetupBaseUrl"] = setup_base_url(settings, args.setup_base_url)
+        except ValueError as error:
+            print(f"Could not save SetupBaseUrl: {error}", file=sys.stderr)
+            return 2
     if settings != settings_before_overrides:
         save_settings(config_path, settings)
     try:
@@ -1675,6 +1932,29 @@ def main() -> int:
         print(f"Could not write the Clipman Server connection files: {error}", file=sys.stderr)
         return 1
     configure_logging(settings)
+
+    if args.create_setup_link:
+        try:
+            url, state = create_setup_link(
+                config_path,
+                settings,
+                args.setup_minutes,
+                args.setup_downloads,
+                args.setup_base_url or "",
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"Could not create the temporary setup link: {error}", file=sys.stderr)
+            return 1
+        expires = datetime.fromtimestamp(int(state["expires_unix_ms"]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        print(f"Setup URL: {url}")
+        print(f"Expires: {expires}")
+        print(f"Connection-file downloads: {state['remaining_downloads']}")
+        print("Revoke early with --revoke-setup-link.")
+        return 0
+    if args.revoke_setup_link:
+        removed = revoke_setup_link(config_path)
+        print("Temporary setup link revoked." if removed else "No temporary setup link is active.")
+        return 0
 
     if args.create_tls_certificate:
         try:

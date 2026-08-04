@@ -48,6 +48,7 @@
     <li><a href="#first-run">First Run</a></li>
     <li><a href="#startup">Run at System Start</a></li>
     <li><a href="#updates">Updates</a></li>
+    <li><a href="#temporary-setup">Temporary Browser Setup</a></li>
     <li><a href="#connection-info">Connection Details File</a></li>
     <li><a href="#settings-example">Commented Settings Example</a></li>
     <li><a href="#linux-helper">Linux Helper Commands</a></li>
@@ -269,6 +270,8 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
 
+  <p>Server 2.6.0 adds temporary browser onboarding. A server administrator can create a short-lived setup page, open it on a new device, and download the existing importable <code>.clpconf</code> connection file without manually copying an address or token. The random setup code is stored only as a SHA-256 hash, setup paths are redacted from logs, the page sends no analytics or external resources, and the link expires by both time and download count. Public setup pages require HTTPS; plain HTTP is accepted only for local, private-network, or VPN addresses. The feature was inspired by Michael Babcock's article <a href="https://payown.substack.com/p/how-i-got-an-ai-assistant-to-set?r=3gvkww&amp;triedRedirect=true">How I Got an AI Assistant to Set Up My Own Private Clipboard Sync Server</a>.</p>
+
   <p>Server 2.5.0 adds native runit and turnstile support for Void Linux and other runit systems while retaining the existing systemd and manual-start choices. It also prevents two server processes from writing to the same data folder, and ordinary startup no longer rewrites an existing settings file merely to apply missing defaults in memory. Installed Linux maintenance commands briefly stop an active managed service, perform the protected operation, and restart it even when the operation is refused. This incorporates <a href="https://github.com/OnjLouis/Clipman/pull/51">pull request #51</a> and closes the maintainer review in <a href="https://github.com/OnjLouis/Clipman/issues/52">issue #52</a>.</p>
 
   <p>Server 2.4.3 adds supported management and transactional updates for existing system-wide Linux services. Administrators can retain a dedicated service account and hardened service definition while using the normal <code>clipmanserver</code> commands. Program replacement preserves file ownership and permissions, verifies the restarted server locally, and restores the previous program if the health check fails.</p>
@@ -319,6 +322,30 @@ clipmanserver disable-auto-updates</code></pre>
 
   <p>You can also specify a checked port directly, for example <code>clipmanserver port 25766</code>. After changing the port, update the server address on every Clipman client or import the refreshed <code>clipman-server-connection.clpconf</code> file. Changing the port does not change the token or choose a different database bucket.</p>
 
+  <h2 id="temporary-setup">Temporary Browser Setup</h2>
+  <p>Temporary browser setup is an easier way to configure another Clipman client without leaving a permanent connection page online. On Windows or macOS, open the server menu and choose <strong>Create Temporary Setup Link</strong>. The server copies the URL, opens it in the default browser, and reports its expiry and download limit. Choose <strong>Revoke Temporary Setup Link</strong> as soon as onboarding is complete.</p>
+
+  <p>On an installed Linux server, use:</p>
+
+  <pre><code>clipmanserver setup-link
+clipmanserver revoke-setup-link</code></pre>
+
+  <p>The default link lasts 30 minutes and permits five connection-file downloads. Optional values set the lifetime in minutes and download count:</p>
+
+  <pre><code>clipmanserver setup-link 10 2</code></pre>
+
+  <p>Creating another link replaces the previous one. The server stores only a hash of the random setup code in <code>clipman-server-setup-link.json</code>; it does not store the usable setup URL. A successful connection-file download consumes one use before the file is sent, so an interrupted transfer can consume a use without exposing additional credentials. Browser previews and <code>HEAD</code> requests do not consume a use.</p>
+
+  <p>The page contains one explicit connection-file download, concise platform instructions, links to current Clipman downloads, and no scripts, analytics, external images, or automatic download. Browser identification is used only to put the most relevant instruction first; instructions and download links for every platform remain available.</p>
+
+  <p>The downloaded file contains the permanent server token and, when configured, the public private-certificate authority. It never contains the Clipman history password. Treat it like the ordinary connection file: transfer it only to a device you control and delete it after import.</p>
+
+  <p>For a private LAN, Tailscale, or another VPN, Clipman Server can infer the browser URL from <code>AdvertiseHost</code> and <code>Port</code>. For a public reverse proxy, add its HTTPS root to the live settings file, for example:</p>
+
+  <pre><code>"SetupBaseUrl": "https://clipman.example"</code></pre>
+
+  <p>Public HTTP setup links are refused even if the main server listener was deliberately allowed to use insecure remote HTTP. Direct private-CA HTTPS can also be used, but the browser must already trust that private authority; the downloaded <code>.clpconf</code> continues to provide app-specific trust to Clipman itself.</p>
+
   <h2 id="connection-info">Connection Files</h2>
   <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, requires a nonblank history password, and waits for <strong>Save</strong> before applying it.</p>
 
@@ -346,7 +373,7 @@ Token:</code></pre>
 
   <p>On Linux installs, recreate the file intentionally with:</p>
 
-  <pre><code>clipman-server --write-connection-info</code></pre>
+  <pre><code>clipmanserver connection</code></pre>
 
   <p>Without the Linux installer, run the Python server directly:</p>
 

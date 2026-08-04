@@ -139,7 +139,7 @@ Commands:
   version, check-update, update
   host [listening-address] [client-address]
   port [number]
-  token, connection, console
+  token, connection, setup-link [minutes] [downloads], revoke-setup-link, console
   list, list-json, prune [days], delete <id>, force-delete <id>
   cert [certificate options], fingerprint, share-ca [options]
   enable-auto-updates, disable-auto-updates, update-status
@@ -307,6 +307,11 @@ PY
     ;;
   token) require_root; "$SERVER" --show-token ;;
   connection) require_root; "$SERVER" --write-connection-info ;;
+  setup-link)
+    require_root
+    "$SERVER" --create-setup-link --setup-minutes "${2:-30}" --setup-downloads "${3:-5}"
+    ;;
+  revoke-setup-link) require_root; "$SERVER" --revoke-setup-link ;;
   console) require_root; exec "$SERVER" ;;
   list) require_root; "$SERVER" --list-databases ;;
   list-json) require_root; "$SERVER" --list-databases-json ;;

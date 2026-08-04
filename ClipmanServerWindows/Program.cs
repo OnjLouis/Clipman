@@ -105,6 +105,10 @@ namespace ClipmanServerWrapper
                 menu.Items.Clear();
                 menu.Items.Add("Clipman Server: " + StatusText()).Enabled = false;
                 menu.Items.Add("Copy connection details", null, delegate { CopyConnectionDetails(); });
+                menu.Items.Add("Create temporary setup link", null, delegate { CreateTemporarySetupLink(); });
+                var revokeSetup = new ToolStripMenuItem("Revoke temporary setup link", null, delegate { RevokeTemporarySetupLink(); });
+                revokeSetup.Enabled = File.Exists(Path.Combine(settingsDirectory, "clipman-server-setup-link.json"));
+                menu.Items.Add(revokeSetup);
                 menu.Items.Add("Change listening port...", null, delegate { ChangeListeningPort(); });
                 menu.Items.Add("Create or renew HTTPS certificate", null, delegate { CreateHttpsCertificate(); });
                 menu.Items.Add("Copy authority fingerprint", null, delegate { CopyAuthorityFingerprint(); });
@@ -457,6 +461,62 @@ namespace ClipmanServerWrapper
                 var combined = string.Join(Environment.NewLine, new[] { output.Trim(), error.Trim() }.Where(value => !string.IsNullOrWhiteSpace(value)));
                 return new CommandResult(process.ExitCode == 0, string.IsNullOrWhiteSpace(combined) ? "The operation completed." : combined);
             }
+        }
+
+        private void CreateTemporarySetupLink()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = RunPythonUtility("--create-setup-link --setup-minutes 30 --setup-downloads 5", 30000);
+                uiContext.Post(delegate
+                {
+                    if (!result.Succeeded)
+                    {
+                        MessageBox.Show(result.Output, "Temporary Setup Link", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    var urlLine = result.Output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+                        .FirstOrDefault(line => line.StartsWith("Setup URL: ", StringComparison.Ordinal));
+                    if (string.IsNullOrWhiteSpace(urlLine))
+                    {
+                        MessageBox.Show("Clipman Server did not return a setup URL.", "Temporary Setup Link", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    var url = urlLine.Substring("Setup URL: ".Length).Trim();
+                    Clipboard.SetText(url);
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        LogLine(ex.ToString());
+                    }
+                    MessageBox.Show(
+                        result.Output + Environment.NewLine + Environment.NewLine +
+                        "The URL has been copied and opened in your browser. Revoke it from this menu when onboarding is complete.",
+                        "Temporary Setup Link",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }, null);
+            });
+        }
+
+        private void RevokeTemporarySetupLink()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = RunPythonUtility("--revoke-setup-link", 10000);
+                uiContext.Post(delegate
+                {
+                    if (!result.Succeeded)
+                    {
+                        MessageBox.Show(result.Output, "Temporary Setup Link", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    tray.ShowBalloonTip(3000, "Clipman Server", result.Output.Trim(), ToolTipIcon.Info);
+                }, null);
+            });
         }
 
         private ProcessStartInfo CreatePythonStartInfo(PythonLauncher python, string arguments)

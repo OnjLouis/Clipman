@@ -39,7 +39,7 @@ That is enough for ordinary local use. The [full manual](https://onjlouis.github
 - **Shared folder:** On Windows and Mac, place the data folder in a cloud-synced folder or mounted network share.
 - **Clipman Server:** Self-host a server on Linux, macOS, Windows, Raspberry Pi, a NAS, or a VPS. Clients authenticate with a server token while the history password determines the encrypted database bucket. Internet-facing servers must use HTTPS.
 
-The server cannot decrypt clipboard history. A server connection file can carry its address, token, and an optional private certificate authority for app-scoped HTTPS trust, so new clients can be configured without manually transcribing credentials.
+The server cannot decrypt clipboard history. A server connection file can carry its address, token, and an optional private certificate authority for app-scoped HTTPS trust, so new clients can be configured without manually transcribing credentials. Server 2.6 can also create a short-lived, revocable browser setup page that downloads this file to a new device; public pages require HTTPS and the history password is never included.
 
 ## More Ways To Use It
 

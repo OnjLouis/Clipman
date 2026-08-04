@@ -51,7 +51,7 @@ class LinuxInstallerTests(unittest.TestCase):
                 raise SystemExit(7)
             config = Path(args[args.index("--config") + 1])
             if "--version" in args:
-                print("2.5.0")
+                print("2.6.0")
             elif "--write-connection-info" in args:
                 config.parent.mkdir(parents=True, exist_ok=True)
                 if not config.exists():
@@ -173,6 +173,8 @@ class LinuxInstallerTests(unittest.TestCase):
         self.assertTrue((update_service / "down").is_file())
         self._run([str(helper), "update-status"], environment)
         self._run([str(helper), "delete", "test-database-id"], environment)
+        self._run([str(helper), "setup-link", "12", "3"], environment)
+        self._run([str(helper), "revoke-setup-link"], environment)
 
         failed_maintenance_environment = environment.copy()
         failed_maintenance_environment["SERVER_FAIL_MAINTENANCE"] = "1"
@@ -193,6 +195,8 @@ class LinuxInstallerTests(unittest.TestCase):
         self.assertIn(f"sv -w 15 stop {server_service}", commands)
         self.assertIn("server --config", commands)
         self.assertIn("--delete-database test-database-id --confirm", commands)
+        self.assertIn("--create-setup-link --setup-minutes 12 --setup-downloads 3", commands)
+        self.assertIn("--revoke-setup-link", commands)
         self.assertGreaterEqual(commands.count(f"sv -w 15 start {server_service}"), 3)
 
     def test_user_systemd_behavior_remains_available(self) -> None:
@@ -292,10 +296,14 @@ class LinuxInstallerTests(unittest.TestCase):
         self._run([str(helper), "start"], environment)
         self.assertTrue((active_root / "clipman-public").samefile(service))
         self._run([str(helper), "delete", "test-database-id"], environment)
+        self._run([str(helper), "setup-link", "8", "2"], environment)
+        self._run([str(helper), "revoke-setup-link"], environment)
         commands = self.command_log.read_text(encoding="utf-8")
         self.assertIn(f"sv -w 15 stop {service}", commands)
         self.assertIn(f"sv -w 15 start {service}", commands)
         self.assertIn("--delete-database test-database-id --confirm", commands)
+        self.assertIn("--create-setup-link --setup-minutes 8 --setup-downloads 2", commands)
+        self.assertIn("--revoke-setup-link", commands)
 
 
 if __name__ == "__main__":

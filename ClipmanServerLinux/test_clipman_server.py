@@ -222,11 +222,17 @@ class ServerStartupTests(unittest.TestCase):
 
     def test_bind_failure_is_concise_and_has_dedicated_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
-            config = Path(folder) / "settings.json"
+            root = Path(folder)
+            config = root / "settings.json"
+            settings, _created = clipman_server.load_settings(config)
+            settings["DatabasePath"] = str(root / "data" / "clipman-history.clipdb")
+            settings["LogPath"] = str(root / "logs" / "clipman-server.log")
+            clipman_server.save_settings(config, settings)
             error_output = io.StringIO()
             args = ["clipman_server.py", "--config", str(config)]
             with mock.patch("sys.argv", args), \
                  mock.patch.object(clipman_server, "ThreadingServer", side_effect=OSError(10013, "Permission denied")), \
+                 mock.patch.object(clipman_server, "configure_logging"), \
                  redirect_stderr(error_output):
                 result = clipman_server.main()
 
@@ -279,6 +285,161 @@ class ConnectionConfigTests(unittest.TestCase):
         self.settings["AdvertiseHost"] = ""
         with self.assertRaisesRegex(RuntimeError, "wildcard listening address"):
             clipman_server.write_connection_config(self.config_path, self.settings)
+
+
+class TemporarySetupLinkTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.config_path = self.root / "settings.json"
+        self.settings, _ = clipman_server.load_settings(self.config_path)
+        self.settings.update({
+            "Host": "127.0.0.1",
+            "AdvertiseHost": "127.0.0.1",
+            "AuthToken": "permanent-test-token",
+            "DatabasePath": str(self.root / "data" / "clipman-history.clipdb"),
+            "LogPath": str(self.root / "logs" / "clipman-server.log"),
+        })
+        self.server = clipman_server.ThreadingServer(("127.0.0.1", 0), clipman_server.Handler)
+        self.settings["Port"] = self.server.server_port
+        self.server.settings = self.settings
+        self.server.config_path = self.config_path
+        self.thread = Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+        self.temp.cleanup()
+
+    def create(self, downloads: int = 2) -> tuple[str, str, dict[str, object]]:
+        url, state = clipman_server.create_setup_link(
+            self.config_path,
+            self.settings,
+            minutes=30,
+            downloads=downloads,
+        )
+        code = url.rsplit("/", 1)[1]
+        return url, code, state
+
+    def request(self, method: str, path: str, user_agent: str = "") -> tuple[int, bytes, dict[str, str]]:
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        headers = {"User-Agent": user_agent} if user_agent else {}
+        connection.request(method, path, headers=headers)
+        response = connection.getresponse()
+        body = response.read()
+        result = response.status, body, {key.lower(): value for key, value in response.getheaders()}
+        connection.close()
+        return result
+
+    def test_state_contains_only_hash_limit_and_expiry(self) -> None:
+        _url, code, _state = self.create()
+        state_path = clipman_server.setup_state_path(self.config_path)
+        raw = state_path.read_text(encoding="utf-8")
+        stored = json.loads(raw)
+
+        self.assertNotIn(code, raw)
+        self.assertNotIn(self.settings["AuthToken"], raw)
+        self.assertEqual(hashlib.sha256(code.encode("ascii")).hexdigest(), stored["code_sha256"])
+        self.assertEqual(2, stored["remaining_downloads"])
+        if os.name != "nt":
+            self.assertEqual(0, state_path.stat().st_mode & 0o077)
+
+    def test_accessible_page_has_all_platforms_and_secure_headers(self) -> None:
+        _url, code, _state = self.create()
+        status, body, headers = self.request("GET", f"/setup/{code}", "Mozilla/5.0 (iPhone)")
+        page = body.decode("utf-8")
+
+        self.assertEqual(200, status)
+        self.assertIn("On this iPhone or iPad", page)
+        self.assertIn("Windows, macOS, Linux and Android downloads", page)
+        self.assertIn("Clipman for iPhone and iPad", page)
+        self.assertIn(f'/setup/{code}/connection.clpconf', page)
+        self.assertNotIn(self.settings["AuthToken"], page)
+        self.assertEqual("no-store, max-age=0", headers["cache-control"])
+        self.assertEqual("no-referrer", headers["referrer-policy"])
+        self.assertEqual("nosniff", headers["x-content-type-options"])
+        self.assertIn("default-src 'none'", headers["content-security-policy"])
+
+    def test_head_does_not_consume_but_get_download_does(self) -> None:
+        _url, code, _state = self.create(downloads=2)
+        path = f"/setup/{code}/connection.clpconf"
+        status, body, headers = self.request("HEAD", path)
+        self.assertEqual(200, status)
+        self.assertEqual(b"", body)
+        self.assertEqual(2, json.loads(clipman_server.setup_state_path(self.config_path).read_text())["remaining_downloads"])
+
+        status, body, headers = self.request("GET", path)
+        document = json.loads(body)
+        self.assertEqual(200, status)
+        self.assertEqual("application/x-clipman-server-connection", headers["content-type"])
+        self.assertIn("clipman-server-connection.clpconf", headers["content-disposition"])
+        self.assertEqual("permanent-test-token", document["token"])
+        self.assertNotIn("password", json.dumps(document).lower())
+        self.assertEqual(1, json.loads(clipman_server.setup_state_path(self.config_path).read_text())["remaining_downloads"])
+
+    def test_final_download_revokes_link(self) -> None:
+        _url, code, _state = self.create(downloads=1)
+        path = f"/setup/{code}/connection.clpconf"
+        self.assertEqual(200, self.request("GET", path)[0])
+        self.assertFalse(clipman_server.setup_state_path(self.config_path).exists())
+        self.assertEqual(404, self.request("GET", path)[0])
+        self.assertEqual(404, self.request("GET", f"/setup/{code}")[0])
+
+    def test_only_one_concurrent_final_download_succeeds(self) -> None:
+        _url, code, _state = self.create(downloads=1)
+        path = f"/setup/{code}/connection.clpconf"
+        barrier = Barrier(2)
+
+        def download(_value: int) -> int:
+            barrier.wait(timeout=5)
+            return self.request("GET", path)[0]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            statuses = sorted(executor.map(download, (1, 2)))
+        self.assertEqual([200, 404], statuses)
+
+    def test_invalid_expired_revoked_and_corrupt_links_are_generic_404(self) -> None:
+        _url, code, _state = self.create()
+        state_path = clipman_server.setup_state_path(self.config_path)
+        self.assertEqual(404, self.request("GET", "/setup/not-a-valid-code")[0])
+        self.assertEqual(404, self.request("GET", "/setup/" + ("A" * 43))[0])
+
+        stored = json.loads(state_path.read_text())
+        stored["expires_unix_ms"] = 1
+        state_path.write_text(json.dumps(stored), encoding="utf-8")
+        self.assertEqual(404, self.request("GET", f"/setup/{code}")[0])
+
+        self.create()
+        state_path.write_text("not json", encoding="utf-8")
+        self.assertEqual(404, self.request("GET", f"/setup/{code}")[0])
+        clipman_server.revoke_setup_link(self.config_path)
+        self.assertEqual(404, self.request("GET", f"/setup/{code}")[0])
+
+    def test_setup_code_is_redacted_from_request_log(self) -> None:
+        _url, code, _state = self.create()
+        with self.assertLogs(level="INFO") as captured:
+            self.request("GET", f"/setup/{code}")
+        log_text = "\n".join(captured.output)
+        self.assertNotIn(code, log_text)
+        self.assertIn("/setup/<temporary-code>", log_text)
+
+    def test_public_http_is_rejected_but_public_https_is_allowed(self) -> None:
+        self.settings["AdvertiseHost"] = "public.example"
+        with mock.patch.object(clipman_server, "is_local_or_private_setup_host", return_value=False):
+            with self.assertRaisesRegex(ValueError, "requires HTTPS"):
+                clipman_server.create_setup_link(self.config_path, self.settings)
+            url, _state = clipman_server.create_setup_link(
+                self.config_path,
+                self.settings,
+                base_url_override="https://public.example",
+            )
+        self.assertTrue(url.startswith("https://public.example/setup/"))
+        with self.assertRaisesRegex(ValueError, "must not contain a path"):
+            clipman_server.setup_base_url(self.settings, "https://public.example/private")
+        with self.assertRaisesRegex(ValueError, "cannot contain credentials"):
+            clipman_server.setup_base_url(self.settings, "https://user:pass@public.example")
 
 
 class CertificateTests(unittest.TestCase):
@@ -514,7 +675,7 @@ class ConditionalCreateTests(unittest.TestCase):
 
         self.assertEqual(200, response.status)
         self.assertTrue(response.getheader("X-Clipman-Revision", ""))
-        self.assertIn(b'"Version": "2.5.0"', data)
+        self.assertIn(('"Version": "' + clipman_server.APP_VERSION + '"').encode("utf-8"), data)
         database = clipman_server.database_path(self.settings, database_id)
         self.assertEqual(b"expect-continue", database.read_bytes())
 

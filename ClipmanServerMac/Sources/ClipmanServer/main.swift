@@ -46,6 +46,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
     }
     private var settingsURL: URL { supportURL.appendingPathComponent("clipman-server-settings.json") }
     private var connectionURL: URL { supportURL.appendingPathComponent("clipman-server-connection.txt") }
+    private var setupLinkStateURL: URL { supportURL.appendingPathComponent("clipman-server-setup-link.json") }
     private var wrapperLogURL: URL { logsURL.appendingPathComponent("clipman-server-wrapper.log") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -72,6 +73,10 @@ final class ServerController: NSObject, NSApplicationDelegate {
         status.isEnabled = false
         menu.addItem(status)
         menu.addItem(NSMenuItem(title: "Copy Connection Details", action: #selector(copyConnectionDetails), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Create Temporary Setup Link", action: #selector(createTemporarySetupLink), keyEquivalent: ""))
+        let revokeSetup = NSMenuItem(title: "Revoke Temporary Setup Link", action: #selector(revokeTemporarySetupLink), keyEquivalent: "")
+        revokeSetup.isEnabled = FileManager.default.fileExists(atPath: setupLinkStateURL.path)
+        menu.addItem(revokeSetup)
         menu.addItem(NSMenuItem(title: "Change Listening Port...", action: #selector(changeListeningPort), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Create or Renew HTTPS Certificate", action: #selector(createHTTPSCertificate), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Copy Authority Fingerprint", action: #selector(copyAuthorityFingerprint), keyEquivalent: ""))
@@ -379,6 +384,37 @@ final class ServerController: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { completion(.success(combined.isEmpty ? "The operation completed." : combined)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
+    @objc private func createTemporarySetupLink() {
+        runPythonUtility(["--create-setup-link", "--setup-minutes", "30", "--setup-downloads", "5"], timeout: 30) { [weak self] result in
+            switch result {
+            case .failure(let error):
+                self?.showAlert("Could not create the temporary setup link: \(error.localizedDescription)")
+            case .success(let output):
+                guard let line = output.components(separatedBy: .newlines).first(where: { $0.hasPrefix("Setup URL: ") }) else {
+                    self?.showAlert("Clipman Server did not return a setup URL.")
+                    return
+                }
+                let address = String(line.dropFirst("Setup URL: ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(address, forType: .string)
+                if let url = URL(string: address) {
+                    NSWorkspace.shared.open(url)
+                }
+                self?.showAlert(output + "\n\nThe URL has been copied and opened in your browser. Revoke it from this menu when onboarding is complete.")
+                self?.refreshMenu()
+            }
+        }
+    }
+
+    @objc private func revokeTemporarySetupLink() {
+        runPythonUtility(["--revoke-setup-link"], timeout: 10) { [weak self] result in
+            switch result {
+            case .failure(let error): self?.showAlert("Could not revoke the temporary setup link: \(error.localizedDescription)")
+            case .success(let output): self?.showNotification(output); self?.refreshMenu()
             }
         }
     }

@@ -130,6 +130,8 @@ Commands:
   console     Run Clipman Server in the current terminal
   token       Print the server token
   connection  Write and print the connection details file path
+  setup-link  Create a temporary browser setup link [minutes] [downloads]
+  revoke-setup-link Revoke the current temporary browser setup link
   host        Show or change the listening host and restart safely
   port        Change the listening port and restart the server
   cert        Create or renew a private-CA HTTPS certificate
@@ -350,6 +352,14 @@ PY
     ;;
   connection)
     "\$LAUNCHER" --write-connection-info
+    ;;
+  setup-link)
+    MINUTES="\${2:-30}"
+    DOWNLOADS="\${3:-5}"
+    "\$LAUNCHER" --create-setup-link --setup-minutes "\$MINUTES" --setup-downloads "\$DOWNLOADS"
+    ;;
+  revoke-setup-link)
+    "\$LAUNCHER" --revoke-setup-link
     ;;
   host)
     HOST="\${2:-}"
