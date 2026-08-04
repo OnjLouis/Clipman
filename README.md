@@ -48,8 +48,13 @@ The [Clipman CLI preview](https://github.com/OnjLouis/Clipman/releases/tag/cli-v
 ## Project
 
 - [Release history and downloads](https://github.com/OnjLouis/Clipman/releases)
+- [Code signing and privacy policy](CODE_SIGNING_POLICY.md)
 - [Report a problem or suggest an improvement](https://github.com/OnjLouis/Clipman/issues)
 - [Contact Andre Louis](https://onj.me/contact)
 - [Support development](https://onj.me/donate)
 
 Clipman is free and open source under the MIT License. See [LICENSE.txt](https://github.com/OnjLouis/Clipman/blob/main/LICENSE.txt).
+
+## Code Signing
+
+Free code signing provided by SignPath.io, certificate by SignPath Foundation. Official Windows signing requests are produced from the public source revision by a trusted build and are manually approved before release. See the [Code Signing Policy](CODE_SIGNING_POLICY.md) for scope, project roles, privacy, network access, and release-integrity details.
