@@ -169,6 +169,16 @@ class ServerStartupTests(unittest.TestCase):
             self.assertEqual(34567, saved["Port"])
             self.assertNotEqual(before_hash, hashlib.sha256(config.read_bytes()).hexdigest())
 
+    def test_settings_replacement_preserves_existing_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "settings.json"
+            config.write_text("{}", encoding="utf-8")
+            expected_owner = (123, 456)
+            with mock.patch.object(clipman_server, "file_owner", return_value=expected_owner), \
+                    mock.patch.object(clipman_server, "restore_file_owner") as restore:
+                clipman_server.save_settings(config, {"Port": 34567})
+            restore.assert_called_once_with(config, expected_owner)
+
     def test_server_start_refuses_locked_root_and_allows_other_roots(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -345,6 +355,13 @@ class TemporarySetupLinkTests(unittest.TestCase):
         self.assertEqual(2, stored["remaining_downloads"])
         if os.name != "nt":
             self.assertEqual(0, state_path.stat().st_mode & 0o077)
+
+    def test_state_inherits_config_owner_for_system_services(self) -> None:
+        expected_owner = (123, 456)
+        with mock.patch.object(clipman_server, "file_owner", return_value=expected_owner), \
+                mock.patch.object(clipman_server, "restore_file_owner") as restore:
+            self.create()
+        restore.assert_called_once_with(clipman_server.setup_state_path(self.config_path), expected_owner)
 
     def test_accessible_page_has_all_platforms_and_secure_headers(self) -> None:
         _url, code, _state = self.create()

@@ -34,7 +34,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.6.0"
+APP_VERSION = "2.6.1"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 SETUP_LOG_PATTERN = re.compile(r"(/setup/)[A-Za-z0-9_-]+")
@@ -94,6 +94,23 @@ def make_private_dir(path: Path) -> None:
 def make_private_file(path: Path) -> None:
     try:
         os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def file_owner(path: Path) -> Tuple[int, int] | None:
+    try:
+        value = path.stat()
+        return value.st_uid, value.st_gid
+    except (AttributeError, OSError):
+        return None
+
+
+def restore_file_owner(path: Path, owner: Tuple[int, int] | None) -> None:
+    if owner is None or not hasattr(os, "chown"):
+        return
+    try:
+        os.chown(path, owner[0], owner[1])
     except OSError:
         pass
 
@@ -295,6 +312,7 @@ def create_setup_link(
         "remaining_downloads": downloads,
     }
     target = setup_state_path(config_path)
+    owner = file_owner(config_path)
     make_private_dir(target.parent)
     tmp = target.with_suffix(target.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as stream:
@@ -302,6 +320,7 @@ def create_setup_link(
         stream.write("\n")
     make_private_file(tmp)
     tmp.replace(target)
+    restore_file_owner(target, owner)
     make_private_file(target)
     return f"{base_url}/setup/{code}", state
 
@@ -341,12 +360,14 @@ def consume_setup_download(config_path: Path, code: str) -> Dict[str, Any] | Non
     else:
         state["remaining_downloads"] = remaining
         target = setup_state_path(config_path)
+        owner = file_owner(target)
         tmp = target.with_suffix(target.suffix + ".tmp")
         with tmp.open("w", encoding="utf-8") as stream:
             json.dump(state, stream, indent=2, sort_keys=True)
             stream.write("\n")
         make_private_file(tmp)
         tmp.replace(target)
+        restore_file_owner(target, owner)
         make_private_file(target)
     return state
 
@@ -384,12 +405,14 @@ def configure_logging(settings: Dict[str, Any]) -> None:
 
 
 def save_settings(config_path: Path, settings: Dict[str, Any]) -> None:
+    owner = file_owner(config_path)
     make_private_dir(config_path.parent)
     tmp = config_path.with_suffix(config_path.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, sort_keys=True)
     make_private_file(tmp)
     tmp.replace(config_path)
+    restore_file_owner(config_path, owner)
     make_private_file(config_path)
 
 
