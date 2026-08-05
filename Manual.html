@@ -89,6 +89,11 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.6.2</h3>
+  <ul>
+    <li>Fixed Clipman Server updates on runit systems such as Void Linux. Update backups now preserve persistent service definitions without trying to copy runit's live named pipes, and rollback retains active supervision state instead of deleting it. This closes <a href="https://github.com/OnjLouis/Clipman/issues/54">issue #54</a>.</li>
+  </ul>
+
   <h3>2.6.1</h3>
   <ul>
     <li>Released Clipman Server 2.6.1 with short-lived browser onboarding links. Windows and Mac expose creation and revocation in the server menu, while Linux provides <code>clipmanserver setup-link</code> and <code>clipmanserver revoke-setup-link</code>. The accessible setup page downloads the existing private <code>.clpconf</code> connection file, expires by time and download count, stores only a hash of its random setup code, redacts that code from logs, requires HTTPS for public addresses, and preserves dedicated service-account ownership on hardened system installations.</li>

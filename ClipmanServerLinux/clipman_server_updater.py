@@ -12,6 +12,7 @@ import re
 import shutil
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
@@ -152,17 +153,71 @@ def copy_path(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
+def runit_backup_ignore(directory: str, names: List[str]) -> List[str]:
+    ignored: List[str] = []
+    for name in names:
+        path = Path(directory) / name
+        if name == "supervise":
+            ignored.append(name)
+            continue
+        try:
+            mode = path.lstat().st_mode
+        except OSError:
+            ignored.append(name)
+            continue
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode)):
+            ignored.append(name)
+    return ignored
+
+
+def copy_service_artifact(source: Path, destination: Path, init_system: str) -> None:
+    if not source.exists():
+        return
+    if init_system == "runit" and source.is_dir():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            source,
+            destination,
+            copy_function=shutil.copy2,
+            ignore=runit_backup_ignore,
+            symlinks=True,
+        )
+        return
+    copy_path(source, destination)
+
+
 def remove_path(path: Path) -> None:
-    if path.is_dir():
+    if path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
         shutil.rmtree(path)
     elif path.exists() or path.is_symlink():
         path.unlink()
 
 
-def service_artifact_paths(service_file: Path, init_system: str = "") -> List[Path]:
+def restore_runit_service_artifact(backup: Path, destination: Path) -> None:
+    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+        remove_path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in destination.iterdir():
+        if child.name != "supervise":
+            remove_path(child)
+    if not backup.is_dir():
+        return
+    for child in backup.iterdir():
+        copy_path(child, destination / child.name)
+    shutil.copystat(backup, destination, follow_symlinks=False)
+
+
+def service_manager(service_file: Path, init_system: str = "") -> str:
     manager = (init_system or "").strip().lower()
     if not manager:
         manager = "runit" if service_file.is_dir() else "systemd"
+    return manager
+
+
+def service_artifact_paths(service_file: Path, init_system: str = "") -> List[Path]:
+    manager = service_manager(service_file, init_system)
     base_name = service_file.name[:-8] if service_file.name.endswith(".service") else service_file.name
     if manager == "runit":
         return [service_file, service_file.parent / f"{base_name}-update"]
@@ -183,14 +238,22 @@ def restore_program_files(
     backup: Path,
     init_system: str = "",
 ) -> None:
-    service_paths = service_artifact_paths(service_file, init_system)
-    for path in (app_dir, helper, launcher, *service_paths):
+    manager = service_manager(service_file, init_system)
+    service_paths = service_artifact_paths(service_file, manager)
+    for path in (app_dir, helper, launcher):
         remove_path(path)
+    if manager != "runit":
+        for path in service_paths:
+            remove_path(path)
     copy_path(backup / "app", app_dir)
     copy_path(backup / "clipmanserver", helper)
     copy_path(backup / "clipman-server", launcher)
     for path in service_paths:
-        copy_path(backup / "services" / path.name, path)
+        service_backup = backup / "services" / path.name
+        if manager == "runit":
+            restore_runit_service_artifact(service_backup, path)
+        else:
+            copy_path(service_backup, path)
 
 
 def snapshot_managed_program_files(app_dir: Path) -> Dict[Path, Optional[Tuple[bytes, int, int, int]]]:
@@ -440,7 +503,10 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
     bin_dir = Path(args.bin_dir).expanduser().resolve()
     config_file = Path(args.config).expanduser().resolve()
     service_file = Path(args.service_file).expanduser().resolve()
-    init_system = str(getattr(args, "init_system", "") or os.environ.get("CLIPMAN_SERVER_INIT_SYSTEM", "")).strip().lower()
+    init_system = service_manager(
+        service_file,
+        str(getattr(args, "init_system", "") or os.environ.get("CLIPMAN_SERVER_INIT_SYSTEM", "")),
+    )
     helper_path = getattr(args, "helper_path", None)
     helper = Path(helper_path).expanduser().resolve() if helper_path else bin_dir / "clipmanserver"
     launcher = bin_dir / "clipman-server"
@@ -460,7 +526,7 @@ def install_update(args: argparse.Namespace, version: str, asset: Dict[str, Any]
             copy_path(helper, backup / "clipmanserver")
             copy_path(launcher, backup / "clipman-server")
             for path in service_artifact_paths(service_file, init_system):
-                copy_path(path, backup / "services" / path.name)
+                copy_service_artifact(path, backup / "services" / path.name, init_system)
 
         run([str(helper), "stop"], check=False)
         try:

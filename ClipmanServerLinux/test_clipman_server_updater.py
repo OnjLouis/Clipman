@@ -11,6 +11,27 @@ import clipman_server_updater as updater
 
 
 class ClipmanServerUpdaterTests(unittest.TestCase):
+    def test_runit_service_backup_excludes_live_supervision_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = root / "service" / "clipman-server"
+            backup = root / "backup" / "clipman-server"
+            supervise = service / "supervise"
+            supervise.mkdir(parents=True)
+            (service / "run").write_text("persistent service definition", encoding="utf-8")
+            (supervise / "status").write_text("live runtime state", encoding="utf-8")
+            if hasattr(os, "mkfifo"):
+                os.mkfifo(supervise / "ok")
+                os.mkfifo(supervise / "control")
+
+            updater.copy_service_artifact(service, backup, "runit")
+
+            self.assertEqual(
+                "persistent service definition",
+                (backup / "run").read_text(encoding="utf-8"),
+            )
+            self.assertFalse((backup / "supervise").exists())
+
     def test_restore_program_files_supports_runit_service_directories(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -34,7 +55,12 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             helper.write_text("changed helper", encoding="utf-8")
             launcher.write_text("changed launcher", encoding="utf-8")
             (service / "run").write_text("changed run", encoding="utf-8")
+            (service / "stale").write_text("remove me", encoding="utf-8")
+            (service / "supervise").mkdir()
+            (service / "supervise" / "status").write_text("live server state", encoding="utf-8")
             (update_service / "run").write_text("changed update run", encoding="utf-8")
+            (update_service / "supervise").mkdir()
+            (update_service / "supervise" / "status").write_text("live updater state", encoding="utf-8")
             (backup / "app" / "clipman_server.py").write_text("original", encoding="utf-8")
             (backup / "clipmanserver").write_text("original helper", encoding="utf-8")
             (backup / "clipman-server").write_text("original launcher", encoding="utf-8")
@@ -52,8 +78,17 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             self.assertEqual("original launcher", launcher.read_text(encoding="utf-8"))
             self.assertEqual("original run", (service / "run").read_text(encoding="utf-8"))
             self.assertTrue((service / "down").is_file())
+            self.assertFalse((service / "stale").exists())
+            self.assertEqual(
+                "live server state",
+                (service / "supervise" / "status").read_text(encoding="utf-8"),
+            )
             self.assertEqual("original update run", (update_service / "run").read_text(encoding="utf-8"))
             self.assertTrue((update_service / "down").is_file())
+            self.assertEqual(
+                "live updater state",
+                (update_service / "supervise" / "status").read_text(encoding="utf-8"),
+            )
 
     def test_versions_and_release_asset_are_selected_numerically(self):
         release = {

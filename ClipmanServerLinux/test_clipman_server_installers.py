@@ -51,7 +51,7 @@ class LinuxInstallerTests(unittest.TestCase):
                 raise SystemExit(7)
             config = Path(args[args.index("--config") + 1])
             if "--version" in args:
-                print("2.6.1")
+                print("2.6.2")
             elif "--write-connection-info" in args:
                 config.parent.mkdir(parents=True, exist_ok=True)
                 if not config.exists():
