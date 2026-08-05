@@ -53,7 +53,7 @@ final class FileHistoryStore: @unchecked Sendable {
         queue.sync { database.Events.count }
     }
 
-    func add(files: [String], formats: [String], containsText: Bool, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+    func add(files: [String], formats: [String], containsText: Bool, source: String = "", operation: String = "Copy", completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         let cleanFiles = files
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -74,8 +74,8 @@ final class FileHistoryStore: @unchecked Sendable {
             let now = TimeUtil.nowUnixMs()
             var event = FileClipboardEvent(
                 CapturedUnixMs: now,
-                Source: "",
-                Operation: "Copy",
+                Source: source.trimmingCharacters(in: .whitespacesAndNewlines),
+                Operation: operation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Copy" : operation,
                 SourceMachine: self.machineName,
                 ContainsText: containsText,
                 FileCount: cleanFiles.count,
@@ -101,6 +101,82 @@ final class FileHistoryStore: @unchecked Sendable {
                     self.delegate?.fileHistoryStoreDidChange()
                 }
                 completion?(saved)
+            }
+        }
+    }
+
+    func eventID(files: [String]) -> String {
+        let clean = files.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return queue.sync { database.Events.first(where: { sameFileEvent($0, FileClipboardEvent(Files: clean)) })?.Id ?? "" }
+    }
+
+    func mergeCapturedEvents(baseID: String, baseFiles: [String], firstTapID: String, firstTapFiles: [String], files: [String], formats: [String], containsText: Bool, source: String, operation: String, completion: (@MainActor @Sendable (String?) -> Void)? = nil) {
+        let cleanFiles = files.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !cleanFiles.isEmpty else {
+            Task { @MainActor in completion?(nil) }
+            return
+        }
+        queue.async {
+            guard self.loadLocked() else {
+                Task { @MainActor in completion?(nil) }
+                return
+            }
+            let matchingIndex: ([String]) -> Int? = { paths in
+                let probe = FileClipboardEvent(Operation: operation, Files: paths)
+                return self.database.Events.indices
+                    .filter {
+                        !self.database.Events[$0].Pinned &&
+                        self.database.Events[$0].Operation.caseInsensitiveCompare(operation) == .orderedSame &&
+                        self.sameFileEvent(self.database.Events[$0], probe)
+                    }
+                    .max { self.database.Events[$0].CapturedUnixMs < self.database.Events[$1].CapturedUnixMs }
+            }
+            let baseIndex = baseID.isEmpty
+                ? matchingIndex(baseFiles)
+                : self.database.Events.firstIndex { $0.Id.caseInsensitiveCompare(baseID) == .orderedSame }
+            let firstIndex = firstTapID.isEmpty
+                ? matchingIndex(firstTapFiles)
+                : self.database.Events.firstIndex { $0.Id.caseInsensitiveCompare(firstTapID) == .orderedSame }
+            let targetID: String?
+            if let baseIndex, !self.database.Events[baseIndex].Pinned {
+                targetID = self.database.Events[baseIndex].Id
+            } else if let firstIndex, !self.database.Events[firstIndex].Pinned {
+                targetID = self.database.Events[firstIndex].Id
+            } else {
+                targetID = nil
+            }
+            let now = TimeUtil.nowUnixMs()
+            let savedID: String
+            if let targetID, let index = self.database.Events.firstIndex(where: { $0.Id == targetID }) {
+                self.database.Events[index].CapturedUnixMs = now
+                self.database.Events[index].Source = source
+                self.database.Events[index].Operation = operation
+                self.database.Events[index].SourceMachine = self.machineName
+                self.database.Events[index].ContainsText = containsText
+                self.database.Events[index].Files = cleanFiles
+                self.database.Events[index].FileCount = cleanFiles.count
+                self.database.Events[index].Formats = formats
+                savedID = targetID
+            } else {
+                var event = FileClipboardEvent(CapturedUnixMs: now, Source: source, Operation: operation, SourceMachine: self.machineName, ContainsText: containsText, FileCount: cleanFiles.count, Files: cleanFiles, Formats: formats, ManualOrder: 1)
+                self.moveToTopOfBandLocked(&event)
+                self.database.Events.insert(event, at: 0)
+                savedID = event.Id
+            }
+            let partialIndex = firstTapID.isEmpty
+                ? matchingIndex(firstTapFiles).flatMap { self.database.Events[$0].Id == savedID ? nil : $0 }
+                : self.database.Events.firstIndex(where: {
+                    $0.Id.caseInsensitiveCompare(firstTapID) == .orderedSame && $0.Id != savedID && !$0.Pinned
+                })
+            if let partialIndex {
+                self.database.Events.remove(at: partialIndex)
+            }
+            self.normalizeLocked()
+            self.trimLocked()
+            let saved = self.saveLocked()
+            Task { @MainActor in
+                if saved { self.delegate?.fileHistoryStoreDidChange() }
+                completion?(saved ? savedID : nil)
             }
         }
     }

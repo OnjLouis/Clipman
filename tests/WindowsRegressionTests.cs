@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -25,6 +26,11 @@ namespace Clipman.Tests
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
             Run("copied image files use the bounded Rich Text image path", CopiedImageFilesUseBoundedRichTextPath);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
+            Run("ClipMerge requires a deliberate matching second clipboard event", ClipMergeRequiresMatchingSecondEvent);
+            Run("ClipMerge rejects mixed and mismatched file operations", ClipMergeRejectsUnsafeCombinations);
+            Run("ClipMerge settings are conservative", ClipMergeSettingsAreConservative);
+            Run("ClipMerge replaces partial entries without modifying pins", ClipMergePreservesPinnedEntriesAndRemovesPartials);
+            Run("ClipMerge combines file events without retaining a partial", ClipMergeCombinesFileEvents);
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
@@ -273,6 +279,7 @@ namespace Clipman.Tests
                     () => { },
                     () => { },
                     () => { },
+                    () => { },
                     () => string.Empty))
                 {
                     Assert(form.MainMenuStrip != null, "The history window did not finish constructing its menu.");
@@ -282,6 +289,136 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void ClipMergeRequiresMatchingSecondEvent()
+        {
+            var detector = new ClipMergeDetector();
+            var first = Observation(ClipMergeKind.Text, "Paragraph A", "Writer", "", "a");
+            Assert(!detector.Observe(first, 1000, true, 500, false).ShouldMerge, "The first observed clipboard item merged without a base.");
+            detector.SetCurrentHistoryId("a");
+            var secondSelection = Observation(ClipMergeKind.Text, "Paragraph B", "Writer", "", "b");
+            Assert(!detector.Observe(secondSelection, 5000, true, 500, false).ShouldMerge, "The first tap on a new selection merged.");
+            detector.SetCurrentHistoryId("b");
+            var decision = detector.Observe(Observation(ClipMergeKind.Text, "Paragraph B", "Writer", "", ""), 5450, true, 500, false);
+            Assert(decision.ShouldMerge, "A matching second tap inside the window did not merge.");
+            Assert(decision.Base.HistoryId == "a" && decision.FirstTap.HistoryId == "b", "ClipMerge lost the base or partial history identity.");
+
+            detector.Reset();
+            detector.Observe(Observation(ClipMergeKind.Text, "A", "Writer", "", ""), 1000, true, 500, false);
+            detector.Observe(Observation(ClipMergeKind.Text, "B", "Writer", "", ""), 2000, true, 500, false);
+            Assert(!detector.Observe(Observation(ClipMergeKind.Text, "B", "Browser", "", ""), 2200, true, 500, false).ShouldMerge,
+                "Matching text from a different application merged.");
+            Assert(!detector.Observe(Observation(ClipMergeKind.Text, "B", "Writer", "", ""), 5000, true, 500, false).ShouldMerge,
+                "A clipboard repeat outside the merge window merged.");
+        }
+
+        private static void ClipMergeRejectsUnsafeCombinations()
+        {
+            var detector = new ClipMergeDetector();
+            detector.Observe(Observation(ClipMergeKind.Text, "A", "Writer", "", ""), 1000, true, 500, false);
+            detector.Observe(Observation(ClipMergeKind.Files, "one", "Explorer", "Copy", ""), 2000, true, 500, false);
+            Assert(!detector.Observe(Observation(ClipMergeKind.Files, "one", "Explorer", "Copy", ""), 2200, true, 500, false).ShouldMerge,
+                "A file selection merged onto text.");
+
+            detector.Reset();
+            detector.Observe(Observation(ClipMergeKind.Files, "base", "Explorer", "Move", ""), 1000, true, 500, false);
+            detector.Observe(Observation(ClipMergeKind.Files, "next", "Explorer", "Copy", ""), 2000, true, 500, false);
+            Assert(!detector.Observe(Observation(ClipMergeKind.Files, "next", "Explorer", "Copy", ""), 2200, true, 500, false).ShouldMerge,
+                "Copy files merged onto a cut clipboard.");
+
+            detector.Reset();
+            detector.Observe(Observation(ClipMergeKind.Text, "A", "Writer", "", ""), 1000, true, 500, false);
+            detector.Observe(Observation(ClipMergeKind.Text, "B", "Writer", "", ""), 2000, true, 500, false);
+            Assert(!detector.Observe(Observation(ClipMergeKind.Text, "B", "Writer", "", ""), 2200, true, 500, true).ShouldMerge,
+                "A deliberate one-shot save activated ClipMerge.");
+        }
+
+        private static void ClipMergeSettingsAreConservative()
+        {
+            var settings = new AppSettings();
+            Assert(!settings.ClipMergeEnabled, "ClipMerge must default to off.");
+            Assert(settings.ClipMergeWindowMilliseconds == 500, "ClipMerge must default to a 500 millisecond window.");
+            Assert(ClipMergeDetector.NormalizeWindow(1) == 200 && ClipMergeDetector.NormalizeWindow(9999) == 2000,
+                "ClipMerge window bounds are not enforced.");
+            Assert(ClipMergeDetector.ResolveSeparator("NewLine", "") == Environment.NewLine, "The default separator is not one new line.");
+            Assert(ClipMergeDetector.ResolveSeparator("Custom", "\\n--\\t") == "\n--\t", "Custom separator escapes were not decoded.");
+        }
+
+        private static void ClipMergePreservesPinnedEntriesAndRemovesPartials()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb"), string.Empty, "Test device"))
+                {
+                    var pinnedBase = store.AddText("First", "KeepBoth", 100, 0);
+                    store.SetPinned(pinnedBase.Id, true);
+                    var partial = store.AddText("Second", "KeepBoth", 100, 0);
+                    var saved = store.MergeCapturedText(pinnedBase.Id, partial.Id, "First\r\nSecond", 100, 0, "Writer");
+                    var entries = store.GetEntries();
+                    Assert(saved != null && saved.Id == partial.Id, "A pinned base was modified instead of using the unpinned partial entry.");
+                    Assert(entries.Count == 2, "The pinned base or merged entry was lost.");
+                    Assert(entries.Any(item => item.Id == pinnedBase.Id && item.Pinned && item.Text == "First"), "The pinned base changed during merge.");
+                    Assert(entries.Any(item => item.Id == partial.Id && !item.Pinned && item.Text == "First\r\nSecond"), "The partial entry was not replaced by merged text.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void ClipMergeCombinesFileEvents()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var store = new FileClipboardEventStore(Path.Combine(directory, "file-history.json"), () => string.Empty);
+                var first = store.Add(FileEvent("C:\\one.txt"));
+                var partial = store.Add(FileEvent("C:\\two.txt"));
+                var merged = FileEvent("C:\\one.txt", "C:\\two.txt");
+                var saved = store.MergeCapturedEvents(first.Id, partial.Id, merged);
+                var events = store.GetEvents();
+                Assert(saved != null && saved.Id == first.Id, "The existing unpinned file event was not reused.");
+                Assert(events.Count == 1, "The partial file event remained after merge.");
+                Assert(events[0].Files.Count == 2 && events[0].Files.Contains("C:\\one.txt") && events[0].Files.Contains("C:\\two.txt"),
+                    "The merged file event did not retain both unique paths.");
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static ClipboardEventSummary FileEvent(params string[] paths)
+        {
+            return new ClipboardEventSummary
+            {
+                CapturedAt = DateTime.Now,
+                Source = "Explorer",
+                Operation = "Copy",
+                SourceMachine = "Test device",
+                ContainsText = true,
+                FileCount = paths.Length,
+                Files = paths.ToList(),
+                Formats = new List<string> { "FileDrop" }
+            };
+        }
+
+        private static ClipMergeObservation Observation(ClipMergeKind kind, string signature, string source, string operation, string historyId)
+        {
+            return new ClipMergeObservation
+            {
+                Kind = kind,
+                Signature = signature,
+                SourceApplication = source,
+                Operation = operation,
+                HistoryId = historyId,
+                Payload = signature
+            };
         }
 
         private static bool ContainsForbiddenLabelCharacter(string value)

@@ -17,6 +17,10 @@ namespace Clipman
         private readonly CheckBox removeDuplicates;
         private readonly ComboBox duplicateMode;
         private readonly CheckBox soundsEnabled;
+        private readonly CheckBox clipMergeEnabled;
+        private readonly NumericUpDown clipMergeWindow;
+        private readonly ComboBox clipMergeSeparator;
+        private readonly TextBox clipMergeCustomSeparator;
         private readonly CheckBox autoGroupByApp;
         private readonly CheckBox autoCopyLatestRemoteText;
         private readonly CheckBox pasteAfterEnter;
@@ -108,6 +112,23 @@ namespace Clipman
             deviceName.AccessibleDescription = "Name recorded on new clipboard entries created by this device. Existing entries keep their original device name.";
             confirmDeletions = NewCheckBox("Confirm before deleting entr&ies", settings.ConfirmDeletions);
             soundsEnabled = NewCheckBox("Play &sounds", settings.SoundsEnabled);
+            clipMergeEnabled = NewCheckBox("T&urn on ClipMerge", settings.ClipMergeEnabled);
+            clipMergeEnabled.AccessibleDescription = "When checked, copying the same text or file selection twice within the merge window appends it to the clipboard. This is off by default.";
+            clipMergeWindow = NewNumeric(ClipMergeDetector.NormalizeWindow(settings.ClipMergeWindowMilliseconds), ClipMergeDetector.MinimumWindowMilliseconds, ClipMergeDetector.MaximumWindowMilliseconds, 50);
+            clipMergeWindow.AccessibleName = "ClipMerge window in milliseconds";
+            clipMergeSeparator = NewComboBox("ClipMerge text separator", new[] { "New line", "Blank line", "Space", "Comma and space", "Custom" }, DisplayClipMergeSeparator(settings.ClipMergeSeparatorMode));
+            clipMergeCustomSeparator = NewTextBox(settings.ClipMergeCustomSeparator);
+            clipMergeCustomSeparator.AccessibleName = "Custom ClipMerge text separator";
+            clipMergeCustomSeparator.AccessibleDescription = "Text inserted between merged selections when Custom is selected. Backslash n, backslash r backslash n, and backslash t are supported.";
+            Action updateClipMergeAvailability = () =>
+            {
+                clipMergeWindow.Enabled = clipMergeEnabled.Checked;
+                clipMergeSeparator.Enabled = clipMergeEnabled.Checked;
+                clipMergeCustomSeparator.Enabled = clipMergeEnabled.Checked && string.Equals(Convert.ToString(clipMergeSeparator.SelectedItem), "Custom", StringComparison.OrdinalIgnoreCase);
+            };
+            clipMergeEnabled.CheckedChanged += (s, e) => updateClipMergeAvailability();
+            clipMergeSeparator.SelectedIndexChanged += (s, e) => updateClipMergeAvailability();
+            updateClipMergeAvailability();
             autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
             autoCopyLatestRemoteText = NewCheckBox("Put new text received from another devi&ce on the clipboard", settings.AutoCopyLatestRemoteText);
             autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another device onto this device's clipboard. Reusing an older entry on another device does not trigger this. This is off by default.";
@@ -153,6 +174,11 @@ namespace Clipman
             AddRow(generalLayout, "Device la&bel:", deviceName);
             AddFullRow(generalLayout, confirmDeletions);
             AddFullRow(generalLayout, soundsEnabled);
+            AddFullRow(generalLayout, clipMergeEnabled);
+            AddRow(generalLayout, "Merge &window, milliseconds:", clipMergeWindow);
+            AddRow(generalLayout, "Text separator &kind:", clipMergeSeparator);
+            AddRow(generalLayout, "Custom separator se&quence:", clipMergeCustomSeparator);
+            AddFullRow(generalLayout, NewNote("ClipMerge accepts 200 to 2000 milliseconds. Merged formatted text becomes plain text. Files merge only when copy or cut operations match."));
             AddFullRow(generalLayout, autoGroupByApp);
             AddFullRow(generalLayout, autoCopyLatestRemoteText);
             AddFullRow(generalLayout, pasteAfterEnter);
@@ -411,6 +437,10 @@ namespace Clipman
                 ApplyNow();
             };
             soundsEnabled.CheckedChanged += (s, e) => ApplyNow();
+            clipMergeEnabled.CheckedChanged += (s, e) => ApplyNow();
+            clipMergeWindow.ValueChanged += (s, e) => ApplyNow();
+            clipMergeSeparator.SelectedIndexChanged += (s, e) => ApplyNow();
+            clipMergeCustomSeparator.TextChanged += (s, e) => ApplyNow();
             autoGroupByApp.CheckedChanged += (s, e) => ApplyNow();
             autoCopyLatestRemoteText.CheckedChanged += (s, e) => ApplyNow();
             pasteAfterEnter.CheckedChanged += (s, e) => ApplyNow();
@@ -459,6 +489,10 @@ namespace Clipman
             settings.DuplicateMode = StoredDuplicateMode(Convert.ToString(duplicateMode.SelectedItem));
             settings.RemoveDuplicates = !string.Equals(settings.DuplicateMode, "KeepBoth", StringComparison.OrdinalIgnoreCase);
             settings.SoundsEnabled = soundsEnabled.Checked;
+            settings.ClipMergeEnabled = clipMergeEnabled.Checked;
+            settings.ClipMergeWindowMilliseconds = Convert.ToInt32(clipMergeWindow.Value);
+            settings.ClipMergeSeparatorMode = StoredClipMergeSeparator(Convert.ToString(clipMergeSeparator.SelectedItem));
+            settings.ClipMergeCustomSeparator = clipMergeCustomSeparator.Text ?? string.Empty;
             settings.AutoGroupByApp = autoGroupByApp.Checked;
             settings.AutoCopyLatestRemoteText = autoCopyLatestRemoteText.Checked;
             settings.PasteAfterEnter = pasteAfterEnter.Checked;
@@ -1056,6 +1090,10 @@ namespace Clipman
                 DynamicHistoryMode = current.DynamicHistoryMode,
                 RemoveDuplicates = current.RemoveDuplicates,
                 SoundsEnabled = current.SoundsEnabled,
+                ClipMergeEnabled = current.ClipMergeEnabled,
+                ClipMergeWindowMilliseconds = current.ClipMergeWindowMilliseconds,
+                ClipMergeSeparatorMode = current.ClipMergeSeparatorMode,
+                ClipMergeCustomSeparator = current.ClipMergeCustomSeparator,
                 SaveListPosition = current.SaveListPosition,
                 Active = current.Active,
                 DatabasePath = current.DatabasePath,
@@ -1307,6 +1345,27 @@ namespace Clipman
                 return "KeepBoth";
             }
             return "MoveToTop";
+        }
+
+        private static string DisplayClipMergeSeparator(string value)
+        {
+            switch ((value ?? string.Empty).Trim().ToUpperInvariant())
+            {
+                case "BLANKLINE": return "Blank line";
+                case "SPACE": return "Space";
+                case "COMMASPACE": return "Comma and space";
+                case "CUSTOM": return "Custom";
+                default: return "New line";
+            }
+        }
+
+        private static string StoredClipMergeSeparator(string value)
+        {
+            if (string.Equals(value, "Blank line", StringComparison.OrdinalIgnoreCase)) return "BlankLine";
+            if (string.Equals(value, "Space", StringComparison.OrdinalIgnoreCase)) return "Space";
+            if (string.Equals(value, "Comma and space", StringComparison.OrdinalIgnoreCase)) return "CommaSpace";
+            if (string.Equals(value, "Custom", StringComparison.OrdinalIgnoreCase)) return "Custom";
+            return "NewLine";
         }
 
         private static string DisplayStorageMode(string value)

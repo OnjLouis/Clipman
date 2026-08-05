@@ -116,6 +116,53 @@ func TestReadPropagatesNonNotFoundErrors(t *testing.T) {
 	}
 }
 
+func TestMutateStateReturnsCommittedStateWithoutSecondDownload(t *testing.T) {
+	password := "test-password"
+	limits := clipdb.DefaultLimits()
+	database := model.NewDatabase(1000)
+	blob, err := clipdb.Encode(database, password, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getCount := 0
+	putCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			getCount++
+			w.Header().Set("X-Clipman-Revision", "before")
+			_, _ = w.Write(blob)
+		case http.MethodPut:
+			putCount++
+			w.Header().Set("X-Clipman-Revision", "after")
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+	testServer := httptest.NewServer(handler)
+	defer testServer.Close()
+	client, err := server.New(testServer.URL, "token", "bucket", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.HTTP = testServer.Client()
+	engine := Engine{Client: client, Password: password, Limits: limits}
+	_, state, err := engine.MutateState(context.Background(), func(database *model.Database, now int64) (bool, any, error) {
+		entry, outcome := operation.Put(database, "local", "", "", "test", "keep", "local-entry", false, false, now)
+		return outcome != "ignored", entry, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if getCount != 1 || putCount != 1 {
+		t.Fatalf("requests = GET %d, PUT %d; want one of each", getCount, putCount)
+	}
+	if state.Revision != "after" || !state.Exists || len(state.Blob) == 0 || len(state.Database.Entries) != 1 {
+		t.Fatalf("committed state = %#v", state)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return fn(request) }

@@ -649,6 +649,62 @@ namespace Clipman
             }
         }
 
+        public ClipEntry MergeCapturedText(string baseId, string firstTapId, string mergedText, int maxEntries, int maxDays, string group)
+        {
+            if (string.IsNullOrEmpty(mergedText)) return null;
+            lock (sync)
+            {
+                var baseEntry = database.Entries.FirstOrDefault(item => string.Equals(item.Id, baseId, StringComparison.OrdinalIgnoreCase));
+                var firstTapEntry = database.Entries.FirstOrDefault(item => string.Equals(item.Id, firstTapId, StringComparison.OrdinalIgnoreCase));
+                var target = baseEntry != null && !baseEntry.Pinned
+                    ? baseEntry
+                    : firstTapEntry != null && !firstTapEntry.Pinned
+                        ? firstTapEntry
+                        : null;
+                var now = TimeUtil.NowUnixMs();
+
+                if (target == null)
+                {
+                    target = new ClipEntry
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Text = mergedText,
+                        Group = (group ?? string.Empty).Trim(),
+                        SourceMachine = CurrentMachineName(),
+                        CreatedUnixMs = now,
+                        LastUsedUnixMs = now,
+                        ModifiedUnixMs = now,
+                        ManualOrder = NextManualOrderLocked()
+                    };
+                    database.Entries.Add(target);
+                }
+                else
+                {
+                    target.Text = mergedText;
+                    target.SourceMachine = CurrentMachineName();
+                    target.LastUsedUnixMs = now;
+                    target.ModifiedUnixMs = now;
+                    target.IsTemplate = false;
+                    target.RichText = null;
+                    target.RichTextUpdatedUnixMs = now;
+                    if (string.IsNullOrWhiteSpace(target.Group) && !string.IsNullOrWhiteSpace(group))
+                    {
+                        target.Group = group.Trim();
+                    }
+                }
+
+                if (firstTapEntry != null && !firstTapEntry.Pinned && !string.Equals(firstTapEntry.Id, target.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddDeletedEntryLocked(firstTapEntry.Id, firstTapEntry.Text);
+                    database.Entries.Remove(firstTapEntry);
+                }
+                PruneLocked(maxEntries, maxDays);
+                SaveLocked();
+                OnChanged();
+                return Clone(target);
+            }
+        }
+
         public bool TrySetNameIfUnchanged(string id, string expectedText, string name)
         {
             if (string.IsNullOrEmpty(id)) return false;

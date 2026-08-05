@@ -516,6 +516,10 @@ def harness(capture_on_start):
             "capture_on_start": capture_on_start, "ignored_applications": [],
             "sensitive_data_mode": "off", "sensitive_data_presets": [],
             "rich_text_history_enabled": False,
+            "auto_remove_url_tracking": False,
+            "clipmerge_enabled": False, "clipmerge_window_ms": 500,
+            "clipmerge_separator_mode": "NewLine", "clipmerge_custom_separator": "",
+            "auto_group_by_app": False,
         }),
         last_clipboard_text=None,
         last_clipboard_files=None,
@@ -526,10 +530,11 @@ def harness(capture_on_start):
         clipboard_source_application="",
         capture_current_clipboard=capture_on_start,
         clipboard_read_busy=True,
+        clipmerge=module.ClipMergeDetector(),
         captured=[],
         sounds=types.SimpleNamespace(play=lambda _name: None),
     )
-    value._put_text = lambda text, quiet=False, automatic=False, source="", rich_text=None: value.captured.append((text, quiet, automatic, source))
+    value._put_text = lambda text, quiet=False, automatic=False, source="", rich_text=None, capture_observation=None: value.captured.append((text, quiet, automatic, source))
     value._capture_file_paths = lambda *_args: None
     value._standalone_image_mime = lambda _clipboard: None
     value._clear_clipboard_image_file = lambda: None

@@ -37,6 +37,7 @@ namespace Clipman
         private readonly Thread resumeThread;
         private readonly Thread toggleThread;
         private readonly ClipboardFloodGuardRegistry clipboardFloodGuards = new ClipboardFloodGuardRegistry();
+        private readonly ClipMergeDetector clipMergeDetector = new ClipMergeDetector();
         private FileSystemWatcher sharedStateWatcher;
         private FileSystemWatcher executableWatcher;
         private System.Threading.Timer sharedStateTimer;
@@ -393,6 +394,10 @@ namespace Clipman
             settings.DynamicHistoryMode = updated.DynamicHistoryMode;
             settings.RemoveDuplicates = updated.RemoveDuplicates;
             settings.SoundsEnabled = updated.SoundsEnabled;
+            settings.ClipMergeEnabled = updated.ClipMergeEnabled;
+            settings.ClipMergeWindowMilliseconds = ClipMergeDetector.NormalizeWindow(updated.ClipMergeWindowMilliseconds);
+            settings.ClipMergeSeparatorMode = updated.ClipMergeSeparatorMode;
+            settings.ClipMergeCustomSeparator = updated.ClipMergeCustomSeparator;
             settings.SaveListPosition = updated.SaveListPosition;
             settings.Active = updated.Active;
             settings.DatabasePath = updated.DatabasePath;
@@ -663,12 +668,14 @@ namespace Clipman
 
             if (!deliberate && !settings.Active)
             {
+                clipMergeDetector.Reset();
                 sounds.Skip(settings.SoundsEnabled);
                 return;
             }
 
             if (!deliberate && IsIgnoredProcess(sourceProcessName))
             {
+                clipMergeDetector.Reset();
                 sounds.Skip(settings.SoundsEnabled);
                 return;
             }
@@ -676,6 +683,7 @@ namespace Clipman
             var privacySignal = ClipboardPrivacySignals.Detect();
             if (privacySignal != null)
             {
+                clipMergeDetector.Reset();
                 lastClipboardPrivacySignal = privacySignal.Reason;
                 sounds.Exclude(settings.SoundsEnabled);
                 return;
@@ -686,6 +694,7 @@ namespace Clipman
             if (settings.RichTextHistoryEnabled && settings.IncludeImagesInRichText &&
                 !Clipboard.ContainsText(TextDataFormat.UnicodeText) && RichImageData.ClipboardHasStandaloneImage())
             {
+                clipMergeDetector.Reset();
                 var imageCapture = RichImageData.CaptureFromClipboard();
                 if (imageCapture == null)
                 {
@@ -711,10 +720,17 @@ namespace Clipman
                 return;
             }
 
-            var recordedFileEvent = RecordClipboardEvent(sourceProcessName);
-            if (recordedFileEvent)
+            ClipboardEventSummary fileSummary = null;
+            try
             {
-                RememberReceivedHistoryTab(HistoryTabs.Files);
+                fileSummary = ReadClipboardEventSummary(sourceProcessName);
+            }
+            catch
+            {
+            }
+            if (fileSummary != null)
+            {
+                HandleCapturedFileEvent(fileSummary, sourceProcessName, deliberate);
                 if (settings.RichTextHistoryEnabled && settings.IncludeImagesInRichText && settings.AutoAddImageFilesToRichText)
                 {
                     string imageFilePath;
@@ -724,18 +740,13 @@ namespace Clipman
                         AddCopiedImageFileToRichTextAsync(imageFilePath, sourceProcessName);
                     }
                 }
+                return;
             }
 
             if (!Clipboard.ContainsText(TextDataFormat.UnicodeText))
             {
-                if (recordedFileEvent)
-                {
-                    sounds.Copy(settings.SoundsEnabled);
-                }
-                else
-                {
-                    sounds.Skip(settings.SoundsEnabled);
-                }
+                clipMergeDetector.Reset();
+                sounds.Skip(settings.SoundsEnabled);
                 return;
             }
 
@@ -751,6 +762,7 @@ namespace Clipman
 
             if (string.IsNullOrEmpty(text))
             {
+                clipMergeDetector.Reset();
                 if (deliberate)
                 {
                     sounds.Skip(settings.SoundsEnabled);
@@ -759,6 +771,7 @@ namespace Clipman
             }
 
             var richText = settings.RichTextHistoryEnabled ? RichTextData.CaptureFromClipboard() : null;
+            var rawText = text;
 
             if (!deliberate && store.HasRecentlyTouchedRemoteText(text, CurrentDeviceName(), 90000))
             {
@@ -768,6 +781,7 @@ namespace Clipman
             var sensitiveMatch = deliberate ? null : SensitiveDataExclusion.FindMatch(text, settings);
             if (sensitiveMatch != null)
             {
+                clipMergeDetector.Reset();
                 sounds.Exclude(settings.SoundsEnabled);
                 return;
             }
@@ -792,7 +806,53 @@ namespace Clipman
             }
 
             var group = settings.AutoGroupByApp ? FriendlyProcessName(sourceProcessName) : string.Empty;
-            store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group, richText);
+            var textObservation = new ClipMergeObservation
+            {
+                Kind = ClipMergeKind.Text,
+                Signature = rawText,
+                SourceApplication = NormalizeProcessName(sourceProcessName),
+                Payload = text
+            };
+            var mergeDecision = clipMergeDetector.Observe(
+                textObservation,
+                ClipboardFloodGuard.MonotonicMilliseconds(),
+                settings.ClipMergeEnabled,
+                settings.ClipMergeWindowMilliseconds,
+                deliberate);
+            ClipEntry storedEntry;
+            if (mergeDecision.ShouldMerge)
+            {
+                var baseText = Convert.ToString(mergeDecision.Base.Payload) ?? string.Empty;
+                var mergedText = baseText + ClipMergeDetector.ResolveSeparator(settings.ClipMergeSeparatorMode, settings.ClipMergeCustomSeparator) + text;
+                storedEntry = store.MergeCapturedText(
+                    mergeDecision.Base.HistoryId,
+                    mergeDecision.FirstTap.HistoryId,
+                    mergedText,
+                    settings.MaxHistoryEntries,
+                    settings.MaxHistoryDays,
+                    group);
+                if (storedEntry != null)
+                {
+                    try
+                    {
+                        IgnoreClipboardChanges(1);
+                        Clipboard.SetText(mergedText, TextDataFormat.UnicodeText);
+                    }
+                    catch
+                    {
+                        ClearIgnoredClipboardChanges();
+                    }
+                    textObservation.Signature = mergedText;
+                    textObservation.Payload = mergedText;
+                    clipMergeDetector.CompleteMerge(textObservation, storedEntry.Id);
+                    RememberReceivedHistoryTab(LinkClassifier.IsLinkOnlyText(mergedText) ? HistoryTabs.Links : HistoryTabs.Text);
+                    sounds.Merge(settings.SoundsEnabled);
+                    return;
+                }
+            }
+
+            storedEntry = store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group, richText);
+            clipMergeDetector.SetCurrentHistoryId(storedEntry == null ? string.Empty : storedEntry.Id);
             if (IsStorageUnavailable())
             {
                 sounds.Skip(settings.SoundsEnabled);
@@ -800,10 +860,7 @@ namespace Clipman
                 return;
             }
 
-            if (!recordedFileEvent)
-            {
-                RememberReceivedHistoryTab(richText != null ? HistoryTabs.RichText : LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text);
-            }
+            RememberReceivedHistoryTab(richText != null ? HistoryTabs.RichText : LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text);
 
             sounds.Copy(settings.SoundsEnabled);
         }
@@ -846,25 +903,107 @@ namespace Clipman
             receivedHistoryTabPending = true;
         }
 
-        private bool RecordClipboardEvent(string sourceProcessName)
+        private void HandleCapturedFileEvent(ClipboardEventSummary summary, string sourceProcessName, bool deliberate)
         {
-            ClipboardEventSummary summary;
-            try
+            if (summary == null || summary.Files == null || summary.Files.Count == 0) return;
+            if (string.IsNullOrWhiteSpace(summary.Operation)) summary.Operation = "Copy";
+            var observation = new ClipMergeObservation
             {
-                summary = ReadClipboardEventSummary(sourceProcessName);
-            }
-            catch
+                Kind = ClipMergeKind.Files,
+                Signature = FileMergeSignature(summary.Files, summary.Operation),
+                SourceApplication = NormalizeProcessName(sourceProcessName),
+                Operation = summary.Operation,
+                Payload = CloneClipboardEvent(summary)
+            };
+            var decision = clipMergeDetector.Observe(
+                observation,
+                ClipboardFloodGuard.MonotonicMilliseconds(),
+                settings.ClipMergeEnabled,
+                settings.ClipMergeWindowMilliseconds,
+                deliberate);
+
+            if (decision.ShouldMerge)
             {
-                return false;
+                var baseSummary = decision.Base.Payload as ClipboardEventSummary;
+                if (baseSummary != null)
+                {
+                    var mergedFiles = baseSummary.Files
+                        .Concat(summary.Files)
+                        .Where(path => !string.IsNullOrWhiteSpace(path))
+                        .Select(path => path.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    var merged = new ClipboardEventSummary
+                    {
+                        CapturedAt = DateTime.Now,
+                        Source = summary.Source,
+                        Operation = summary.Operation,
+                        SourceMachine = CurrentDeviceName(),
+                        ContainsText = true,
+                        FileCount = mergedFiles.Count,
+                        Files = mergedFiles,
+                        Formats = baseSummary.Formats.Concat(summary.Formats).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                    };
+                    var saved = fileEventStore.MergeCapturedEvents(decision.Base.HistoryId, decision.FirstTap.HistoryId, merged);
+                    if (saved != null && string.IsNullOrWhiteSpace(fileEventStore.LastStorageError))
+                    {
+                        WriteMergedFilesToClipboard(mergedFiles, merged.Operation);
+                        observation.Signature = FileMergeSignature(mergedFiles, merged.Operation);
+                        observation.Payload = CloneClipboardEvent(merged);
+                        clipMergeDetector.CompleteMerge(observation, saved.Id);
+                        RememberReceivedHistoryTab(HistoryTabs.Files);
+                        sounds.Merge(settings.SoundsEnabled);
+                        return;
+                    }
+                }
             }
 
-            if (summary == null) return false;
-            fileEventStore.Add(summary);
+            var stored = fileEventStore.Add(summary);
+            clipMergeDetector.SetCurrentHistoryId(stored == null ? string.Empty : stored.Id);
             if (settings.AutoRemoveUnavailableFileHistoryEvents)
             {
                 fileEventStore.RemoveUnavailableEvents();
             }
-            return string.IsNullOrWhiteSpace(fileEventStore.LastStorageError);
+            if (string.IsNullOrWhiteSpace(fileEventStore.LastStorageError))
+            {
+                RememberReceivedHistoryTab(HistoryTabs.Files);
+                sounds.Copy(settings.SoundsEnabled);
+            }
+            else
+            {
+                sounds.Skip(settings.SoundsEnabled);
+            }
+        }
+
+        private void WriteMergedFilesToClipboard(IEnumerable<string> paths, string operation)
+        {
+            var files = (paths ?? Enumerable.Empty<string>()).Where(path => !string.IsNullOrWhiteSpace(path)).ToList();
+            if (files.Count == 0) return;
+            var fileList = new StringCollection();
+            fileList.AddRange(files.ToArray());
+            var data = new DataObject();
+            data.SetFileDropList(fileList);
+            data.SetText(string.Join(Environment.NewLine, files), TextDataFormat.UnicodeText);
+            var effect = string.Equals(operation, "Move", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
+            data.SetData("Preferred DropEffect", false, new MemoryStream(BitConverter.GetBytes(effect)));
+            try
+            {
+                IgnoreClipboardChanges(1);
+                Clipboard.SetDataObject(data, true);
+            }
+            catch
+            {
+                ClearIgnoredClipboardChanges();
+            }
+        }
+
+        private static string FileMergeSignature(IEnumerable<string> paths, string operation)
+        {
+            return (operation ?? string.Empty).Trim().ToUpperInvariant() + "\n" + string.Join("\n",
+                (paths ?? Enumerable.Empty<string>())
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Select(path => path.Trim().ToUpperInvariant())
+                    .OrderBy(path => path, StringComparer.Ordinal));
         }
 
         private List<ClipboardEventSummary> GetRecentClipboardEvents()
@@ -955,7 +1094,9 @@ namespace Clipman
                 ContainsText = source.ContainsText,
                 FileCount = source.FileCount,
                 Files = source.Files == null ? new List<string>() : source.Files.ToList(),
-                Formats = source.Formats == null ? new List<string>() : source.Formats.ToList()
+                Formats = source.Formats == null ? new List<string>() : source.Formats.ToList(),
+                Pinned = source.Pinned,
+                ManualOrder = source.ManualOrder
             };
         }
 
@@ -1885,6 +2026,7 @@ namespace Clipman
         private void IgnoreClipboardChanges(int count)
         {
             if (count <= 0) return;
+            clipMergeDetector.Reset();
             ignoredClipboardChangeCount += count;
         }
 

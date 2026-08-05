@@ -349,6 +349,41 @@ class EmbeddedImageTests(unittest.TestCase):
         self.assertFalse(clipman.should_import_file_as_rich_image(values, "text", False))
 
 
+class ClipMergeTests(unittest.TestCase):
+    @staticmethod
+    def observation(kind="text", signature="value", source="Writer", operation="", history_id=""):
+        return {
+            "kind": kind, "signature": signature, "source": source,
+            "operation": operation, "history_id": history_id, "values": [signature],
+        }
+
+    def test_requires_matching_second_change_from_same_application(self):
+        detector = clipman.ClipMergeDetector()
+        self.assertIsNone(detector.observe(self.observation(signature="A", history_id="a"), 1000, True, 500, False))
+        detector.set_current_history_id("a")
+        self.assertIsNone(detector.observe(self.observation(signature="B", history_id="b"), 2000, True, 500, False))
+        base, first = detector.observe(self.observation(signature="B"), 2450, True, 500, False)
+        self.assertEqual((base["history_id"], first["history_id"]), ("a", "b"))
+
+        detector.reset()
+        detector.observe(self.observation(signature="A"), 1000, True, 500, False)
+        detector.observe(self.observation(signature="B"), 2000, True, 500, False)
+        self.assertIsNone(detector.observe(self.observation(signature="B", source="Browser"), 2200, True, 500, False))
+
+    def test_rejects_mixed_types_operations_and_deliberate_capture(self):
+        detector = clipman.ClipMergeDetector()
+        detector.observe(self.observation(kind="files", signature="base", operation="cut"), 1000, True, 500, False)
+        detector.observe(self.observation(kind="files", signature="next", operation="copy"), 2000, True, 500, False)
+        self.assertIsNone(detector.observe(self.observation(kind="files", signature="next", operation="copy"), 2200, True, 500, False))
+        self.assertIsNone(detector.observe(self.observation(signature="value"), 2300, True, 500, True))
+
+    def test_defaults_and_separator_bounds_are_conservative(self):
+        self.assertEqual(clipman.ClipMergeDetector.normalize_window(1), 200)
+        self.assertEqual(clipman.ClipMergeDetector.normalize_window(9999), 2000)
+        self.assertEqual(clipman.ClipMergeDetector.separator("newline", ""), "\n")
+        self.assertEqual(clipman.ClipMergeDetector.separator("custom", r"\n--\t"), "\n--\t")
+
+
 class PreferenceTests(unittest.TestCase):
     def test_image_capture_is_cleared_when_rich_text_is_disabled(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": folder}):

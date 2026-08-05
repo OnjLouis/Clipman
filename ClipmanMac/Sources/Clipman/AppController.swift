@@ -16,6 +16,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private let keychain = KeychainPasswordStore()
     private let serverTokenKeychain = KeychainPasswordStore(service: "Clipman.server.token")
     private let monitor = ClipboardMonitor()
+    private var clipMergeDetector = ClipMergeDetector()
     private let hotkeys = HotkeyManager()
     private let startup = StartupService()
     private let updates = UpdateService()
@@ -112,6 +113,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
         monitor.includeImagesInRichTextHistory = settings.richTextHistoryEnabled && settings.includeImagesInRichTextHistory
+        monitor.clipMergeEnabled = settings.clipMergeEnabled
         monitor.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
             richTextHistoryEnabled: settings.richTextHistoryEnabled,
             includeImagesEnabled: settings.includeImagesInRichTextHistory,
@@ -395,6 +397,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             return
         }
         settings.monitoringEnabled.toggle()
+        clipMergeDetector.reset()
         monitor.isEnabled = settings.monitoringEnabled
         try? settingsStore.save(settings)
         sounds.play(settings.monitoringEnabled ? .on : .off)
@@ -726,8 +729,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.saveCurrentContents()
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, deliberate: Bool) {
         guard storageUnavailableReason.isEmpty else {
+            clipMergeDetector.reset()
             sounds.play(.skip)
             return
         }
@@ -735,11 +739,37 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             return
         }
         if !deliberate && SensitiveDataExclusion.matchName(in: text, mode: settings.sensitiveDataMode, presetIds: settings.sensitiveDataPresetIds) != nil {
+            clipMergeDetector.reset()
             sounds.play(.exclude)
             return
         }
         let capturedRichText = settings.richTextHistoryEnabled ? richText : nil
         let isEmbeddedImage = EmbeddedImageHTML.imageInfo(from: capturedRichText) != nil
+        let observation = ClipMergeObservation(kind: .text, signature: text, sourceApplication: sourceApplication, values: [text])
+        let decision = clipMergeDetector.observe(
+            observation,
+            nowMilliseconds: observedAtMilliseconds,
+            enabled: settings.clipMergeEnabled,
+            windowMilliseconds: settings.clipMergeWindowMilliseconds,
+            deliberate: deliberate
+        )
+        if decision.shouldMerge, let base = decision.base, let firstTap = decision.firstTap, let baseText = base.values.first {
+            let mergedText = baseText + ClipMergeDetector.separator(mode: settings.clipMergeSeparatorMode, custom: settings.clipMergeCustomSeparator) + text
+            store.mergeCapturedText(baseID: base.historyID, baseText: baseText, firstTapID: firstTap.historyID, firstTapText: text, mergedText: mergedText, group: sourceApplication) { [weak self] savedID in
+                guard let self, let savedID else {
+                    self?.sounds.play(.skip)
+                    return
+                }
+                self.monitor.writeInternalText(mergedText, richText: nil)
+                self.clipMergeDetector.completeMerge(
+                    ClipMergeObservation(kind: .text, signature: mergedText, sourceApplication: sourceApplication, values: [mergedText]),
+                    historyID: savedID
+                )
+                self.rememberReceivedHistoryTab(LinkClassifier.isLinkOnlyText(mergedText) ? HistoryTabID.links : HistoryTabID.text)
+                self.sounds.play(.merge)
+            }
+            return
+        }
         store.addTextWithResult(
             text,
             group: sourceApplication,
@@ -749,6 +779,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             guard let self else { return }
             switch result {
             case .saved:
+                self.clipMergeDetector.setCurrentHistoryID(self.store.entryID(forText: text), matching: text)
                 self.rememberReceivedHistoryTab(capturedRichText != nil ? HistoryTabID.richText : LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text)
                 self.sounds.play(.copy)
             case .refused(let reason):
@@ -782,14 +813,45 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         )
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, deliberate: Bool) {
         guard storageUnavailableReason.isEmpty else {
+            clipMergeDetector.reset()
             sounds.play(.skip)
             return
         }
-        fileStore.add(files: files, formats: formats, containsText: containsText) { [weak self] saved in
+        let normalizedOperation = operation.isEmpty ? "Copy" : operation
+        let signature = normalizedOperation.uppercased() + "\n" + files.map { $0.uppercased() }.sorted().joined(separator: "\n")
+        let observation = ClipMergeObservation(kind: .files, signature: signature, sourceApplication: sourceApplication, operation: normalizedOperation, values: files)
+        let decision = clipMergeDetector.observe(
+            observation,
+            nowMilliseconds: observedAtMilliseconds,
+            enabled: settings.clipMergeEnabled,
+            windowMilliseconds: settings.clipMergeWindowMilliseconds,
+            deliberate: deliberate
+        )
+        if decision.shouldMerge, let base = decision.base, let firstTap = decision.firstTap {
+            var seen = Set<String>()
+            let mergedFiles = (base.values + files).filter { seen.insert($0.lowercased()).inserted }
+            fileStore.mergeCapturedEvents(baseID: base.historyID, baseFiles: base.values, firstTapID: firstTap.historyID, firstTapFiles: files, files: mergedFiles, formats: Array(Set(formats)).sorted(), containsText: true, source: sourceApplication, operation: normalizedOperation) { [weak self] savedID in
+                guard let self, let savedID else {
+                    self?.sounds.play(.skip)
+                    return
+                }
+                self.monitor.writeInternalFiles(mergedFiles, includeText: true)
+                let mergedSignature = normalizedOperation.uppercased() + "\n" + mergedFiles.map { $0.uppercased() }.sorted().joined(separator: "\n")
+                self.clipMergeDetector.completeMerge(
+                    ClipMergeObservation(kind: .files, signature: mergedSignature, sourceApplication: sourceApplication, operation: normalizedOperation, values: mergedFiles),
+                    historyID: savedID
+                )
+                self.rememberReceivedHistoryTab(HistoryTabID.files)
+                self.sounds.play(.merge)
+            }
+            return
+        }
+        fileStore.add(files: files, formats: formats, containsText: containsText, source: sourceApplication, operation: normalizedOperation) { [weak self] saved in
             guard let self else { return }
             if saved {
+                self.clipMergeDetector.setCurrentHistoryID(self.fileStore.eventID(files: files), matching: signature)
                 self.rememberReceivedHistoryTab(HistoryTabID.files)
                 self.sounds.play(.copy)
             } else if self.storageUnavailableReason.isEmpty {
@@ -813,7 +875,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor) {
+        clipMergeDetector.reset()
         sounds.play(.skip)
+    }
+
+    func clipboardMonitorDidWriteInternalClipboard(_ monitor: ClipboardMonitor) {
+        clipMergeDetector.reset()
     }
 
     private func rememberReceivedHistoryTab(_ tabID: String) {
@@ -1669,6 +1736,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) -> Bool {
         let previousSettings = self.settings!
+        clipMergeDetector.reset()
         let previousDatabasePath = previousSettings.databasePath
         let previousPassword = currentDatabasePassword(for: previousDatabasePath)
         let requestedPassword = passwordToSave?.isEmpty == false ? passwordToSave! : previousPassword
@@ -1731,6 +1799,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
         monitor.includeImagesInRichTextHistory = settings.richTextHistoryEnabled && settings.includeImagesInRichTextHistory
+        monitor.clipMergeEnabled = settings.clipMergeEnabled
         monitor.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
             richTextHistoryEnabled: settings.richTextHistoryEnabled,
             includeImagesEnabled: settings.includeImagesInRichTextHistory,

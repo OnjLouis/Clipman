@@ -42,6 +42,13 @@ func (e *Engine) Read(ctx context.Context) (State, error) {
 }
 
 func (e *Engine) Mutate(ctx context.Context, mutation Mutation) (any, error) {
+	result, _, err := e.MutateState(ctx, mutation)
+	return result, err
+}
+
+// MutateState returns the exact state committed by a successful mutation so
+// callers do not need to download and decrypt the same database again.
+func (e *Engine) MutateState(ctx context.Context, mutation Mutation) (any, State, error) {
 	retries := e.Retries
 	if retries <= 0 {
 		retries = 3
@@ -51,30 +58,35 @@ func (e *Engine) Mutate(ctx context.Context, mutation Mutation) (any, error) {
 	for attempt := 0; attempt <= retries; attempt++ {
 		state, err := e.Read(ctx)
 		if err != nil {
-			return nil, err
+			return nil, State{}, err
 		}
 		merge.Normalize(&state.Database, mutationTime)
 		changed, result, err := mutation(&state.Database, mutationTime)
 		if err != nil {
-			return nil, err
+			return nil, State{}, err
 		}
 		if !changed {
-			return result, nil
+			return result, state, nil
 		}
 		merge.Normalize(&state.Database, mutationTime)
 		encoded, err := clipdb.EncodeWithLimits(state.Database, e.Password, state.Blob, e.Limits)
 		if err != nil {
-			return nil, err
+			return nil, State{}, err
 		}
-		_, err = e.Client.Put(ctx, encoded, state.Revision, !state.Exists)
+		metadata, err := e.Client.Put(ctx, encoded, state.Revision, !state.Exists)
 		if err == nil {
-			return result, nil
+			return result, State{
+				Database: state.Database,
+				Blob:     encoded,
+				Revision: metadata.Revision,
+				Exists:   true,
+			}, nil
 		}
 		if !errors.Is(err, server.ErrConflict) {
-			return nil, err
+			return nil, State{}, err
 		}
 		last = err
 		time.Sleep(time.Duration(30+attempt*40) * time.Millisecond)
 	}
-	return nil, fmt.Errorf("database changed repeatedly; operation was not committed: %w", last)
+	return nil, State{}, fmt.Errorf("database changed repeatedly; operation was not committed: %w", last)
 }

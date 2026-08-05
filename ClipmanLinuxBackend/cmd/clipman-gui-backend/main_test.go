@@ -248,6 +248,26 @@ func TestConfiguredSessionMutationRoundTrip(t *testing.T) {
 		t.Fatalf("bulk deletion result: entries=%d tombstones=%d", len(s.database.Entries), len(s.database.Deleted))
 	}
 
+	if _, err = s.put(json.RawMessage(`{"text":"Alpha","name":"","group":"","pinned":false,"is_template":false,"duplicate":"keep"}`)); err != nil {
+		t.Fatalf("put ClipMerge base: %v", err)
+	}
+	baseID := s.database.Entries[0].ID
+	if _, err = s.put(json.RawMessage(`{"text":"Beta","name":"","group":"","pinned":false,"is_template":false,"duplicate":"keep"}`)); err != nil {
+		t.Fatalf("put ClipMerge partial: %v", err)
+	}
+	mergeRequest, _ := json.Marshal(map[string]string{
+		"base_id": baseID, "base_text": "Alpha", "first_id": "", "first_text": "Beta", "text": "Alpha\nBeta",
+	})
+	if _, err = s.mergeCapture(mergeRequest); err != nil {
+		t.Fatalf("merge capture with pending partial ID: %v", err)
+	}
+	if len(s.database.Entries) != 1 || s.database.Entries[0].Text != "Alpha\nBeta" {
+		t.Fatalf("ClipMerge result = %#v", s.database.Entries)
+	}
+	if _, err = s.delete(json.RawMessage(`{"id":"` + s.database.Entries[0].ID + `"}`)); err != nil {
+		t.Fatalf("delete merged test entry: %v", err)
+	}
+
 	if _, err = s.put(json.RawMessage(`{"text":"https://example.com/article","name":"","group":"","pinned":false,"is_template":false,"duplicate":"move"}`)); err != nil {
 		t.Fatalf("put unnamed link: %v", err)
 	}

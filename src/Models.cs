@@ -198,6 +198,10 @@ namespace Clipman
         public bool DynamicHistoryMode { get; set; }
         public bool RemoveDuplicates { get; set; }
         public bool SoundsEnabled { get; set; }
+        public bool ClipMergeEnabled { get; set; }
+        public int ClipMergeWindowMilliseconds { get; set; }
+        public string ClipMergeSeparatorMode { get; set; }
+        public string ClipMergeCustomSeparator { get; set; }
         public bool SaveListPosition { get; set; }
         public bool LinksHistoryEnabled { get; set; }
         public bool RichTextHistoryEnabled { get; set; }
@@ -262,6 +266,10 @@ namespace Clipman
             DynamicHistoryMode = false;
             RemoveDuplicates = true;
             SoundsEnabled = true;
+            ClipMergeEnabled = false;
+            ClipMergeWindowMilliseconds = ClipMergeDetector.DefaultWindowMilliseconds;
+            ClipMergeSeparatorMode = "NewLine";
+            ClipMergeCustomSeparator = string.Empty;
             SaveListPosition = true;
             LinksHistoryEnabled = false;
             RichTextHistoryEnabled = false;

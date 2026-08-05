@@ -143,6 +143,107 @@ func (s *session) addFileEvent(raw json.RawMessage) (any, error) {
 	return s.fileHistoryResult(true), nil
 }
 
+func (s *session) mergeFileCapture(raw json.RawMessage) (any, error) {
+	var p struct {
+		BaseID       string   `json:"base_id"`
+		BaseFiles    []string `json:"base_files"`
+		FirstID      string   `json:"first_id"`
+		FirstFiles   []string `json:"first_files"`
+		Files        []string `json:"files"`
+		Formats      []string `json:"formats"`
+		Source       string   `json:"source"`
+		Operation    string   `json:"operation"`
+		ContainsText bool     `json:"contains_text"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, err
+	}
+	files := cleanFilePaths(p.Files)
+	if len(files) == 0 {
+		return nil, errors.New("merged file clipboard data does not contain a local file path")
+	}
+	baseIndex, firstIndex := -1, -1
+	for index := range s.fileDB.Events {
+		if strings.EqualFold(s.fileDB.Events[index].ID, p.BaseID) {
+			baseIndex = index
+		}
+		if strings.EqualFold(s.fileDB.Events[index].ID, p.FirstID) {
+			firstIndex = index
+		}
+	}
+	matchingFiles := func(paths []string) int {
+		clean := cleanFilePaths(paths)
+		found := -1
+		for index := range s.fileDB.Events {
+			event := s.fileDB.Events[index]
+			if event.Pinned || !strings.EqualFold(event.Operation, p.Operation) || !sameFileSet(event.Files, clean) {
+				continue
+			}
+			if found < 0 || event.CapturedUnixMs > s.fileDB.Events[found].CapturedUnixMs {
+				found = index
+			}
+		}
+		return found
+	}
+	if strings.TrimSpace(p.BaseID) == "" {
+		baseIndex = matchingFiles(p.BaseFiles)
+	}
+	if strings.TrimSpace(p.FirstID) == "" {
+		firstIndex = matchingFiles(p.FirstFiles)
+	}
+	targetIndex := -1
+	if baseIndex >= 0 && !s.fileDB.Events[baseIndex].Pinned {
+		targetIndex = baseIndex
+	} else if firstIndex >= 0 && !s.fileDB.Events[firstIndex].Pinned {
+		targetIndex = firstIndex
+	}
+	now := time.Now().UnixMilli()
+	var saved model.FileEvent
+	if targetIndex >= 0 {
+		target := &s.fileDB.Events[targetIndex]
+		target.CapturedUnixMs, target.Source, target.Operation = now, strings.TrimSpace(p.Source), strings.TrimSpace(p.Operation)
+		target.SourceMachine, target.ContainsText = s.cfg.Machine, p.ContainsText
+		target.Files, target.FileCount, target.Formats = files, len(files), cleanStrings(p.Formats)
+		if target.Source == "" {
+			target.Source = "Files"
+		}
+		if target.Operation == "" {
+			target.Operation = "Copy"
+		}
+		saved = *target
+	} else {
+		saved = model.FileEvent{
+			ID: merge.NewID(), CapturedUnixMs: now, Source: strings.TrimSpace(p.Source), Operation: strings.TrimSpace(p.Operation),
+			SourceMachine: s.cfg.Machine, ContainsText: p.ContainsText, FileCount: len(files), Files: files,
+			Formats: cleanStrings(p.Formats), ManualOrder: 1,
+		}
+		if saved.Source == "" {
+			saved.Source = "Files"
+		}
+		if saved.Operation == "" {
+			saved.Operation = "Copy"
+		}
+		s.fileDB.Events = append([]model.FileEvent{saved}, s.fileDB.Events...)
+	}
+	for index := range s.fileDB.Events {
+		event := s.fileDB.Events[index]
+		matchesFirst := strings.TrimSpace(p.FirstID) != "" && strings.EqualFold(event.ID, p.FirstID)
+		if strings.TrimSpace(p.FirstID) == "" {
+			matchesFirst = index == firstIndex
+		}
+		if matchesFirst && !strings.EqualFold(event.ID, saved.ID) && !event.Pinned {
+			s.fileDB.Events = append(s.fileDB.Events[:index], s.fileDB.Events[index+1:]...)
+			break
+		}
+	}
+	s.normalizeFileHistory()
+	s.trimFileHistory()
+	if err := s.saveFileHistory(); err != nil {
+		return nil, err
+	}
+	return s.fileHistoryResult(true), nil
+}
+
 func (s *session) deleteFileEvent(raw json.RawMessage) (any, error) {
 	id, err := fileEventID(raw)
 	if err != nil {

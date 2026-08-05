@@ -1028,6 +1028,79 @@ class HotkeyEntry(Gtk.Entry):
         return True
 
 
+class ClipMergeDetector:
+    def __init__(self):
+        self.reset()
+
+    def observe(self, incoming, now_ms, enabled, window_ms, deliberate=False):
+        window_ms = self.normalize_window(window_ms)
+        if not enabled or deliberate or not incoming.get("source", "").strip():
+            self.candidate_base = None
+            self.candidate_first = None
+            self.current = incoming
+            return None
+        elapsed = now_ms - self.candidate_started_ms
+        if (
+            self.candidate_first and self.candidate_base and 0 <= elapsed <= window_ms
+            and self._same_tap(self.candidate_first, incoming)
+            and self._compatible(self.candidate_base, incoming)
+        ):
+            decision = (self.candidate_base.copy(), self.candidate_first.copy())
+            self.candidate_base = None
+            self.candidate_first = None
+            return decision
+        self.candidate_base = self.current.copy() if self.current else None
+        self.candidate_first = incoming
+        self.candidate_started_ms = now_ms
+        self.current = incoming
+        return None
+
+    def set_current_history_id(self, history_id):
+        if self.current is not None:
+            self.current["history_id"] = history_id or ""
+        if self.candidate_first is not None:
+            self.candidate_first["history_id"] = history_id or ""
+
+    def complete(self, merged, history_id):
+        merged["history_id"] = history_id or ""
+        self.current = merged
+        self.candidate_base = None
+        self.candidate_first = None
+
+    def reset(self):
+        self.current = None
+        self.candidate_base = None
+        self.candidate_first = None
+        self.candidate_started_ms = 0
+
+    @staticmethod
+    def normalize_window(value):
+        return max(200, min(2000, int(value)))
+
+    @staticmethod
+    def separator(mode, custom):
+        return {
+            "blankline": "\n\n", "space": " ", "commaspace": ", ",
+            "custom": str(custom or "").replace("\\r\\n", "\r\n").replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t"),
+        }.get(str(mode or "").casefold(), "\n")
+
+    @staticmethod
+    def _same_tap(left, right):
+        return (
+            left.get("kind") == right.get("kind")
+            and left.get("signature") == right.get("signature")
+            and left.get("source", "").casefold() == right.get("source", "").casefold()
+            and left.get("operation", "").casefold() == right.get("operation", "").casefold()
+        )
+
+    @staticmethod
+    def _compatible(base, incoming):
+        return base.get("kind") == incoming.get("kind") and (
+            incoming.get("kind") != "files"
+            or base.get("operation", "").casefold() == incoming.get("operation", "").casefold()
+        )
+
+
 class Preferences:
     def __init__(self):
         self.path = config_home() / "clipman-linux" / "settings.json"
@@ -1035,6 +1108,10 @@ class Preferences:
             "monitor_clipboard": True,
             "capture_on_start": False,
             "play_sounds": True,
+            "clipmerge_enabled": False,
+            "clipmerge_window_ms": 500,
+            "clipmerge_separator_mode": "newline",
+            "clipmerge_custom_separator": "",
             "last_section": "text",
             "history_tab_order": DEFAULT_HISTORY_TAB_ORDER.copy(),
             "last_received_section": "text",
@@ -1077,9 +1154,16 @@ class Preferences:
                         self.values[key] = loaded[key]
         except (OSError, ValueError):
             pass
-        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "include_images_in_rich_text_history", "add_copied_image_files_to_rich_text_history", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries", "confirm_deletions"):
+        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "clipmerge_enabled", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "include_images_in_rich_text_history", "add_copied_image_files_to_rich_text_history", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries", "confirm_deletions"):
             if not isinstance(self.values[key], bool):
                 self.values[key] = defaults[key]
+        if not isinstance(self.values["clipmerge_window_ms"], int):
+            self.values["clipmerge_window_ms"] = 500
+        self.values["clipmerge_window_ms"] = max(200, min(2000, self.values["clipmerge_window_ms"]))
+        if self.values["clipmerge_separator_mode"] not in ("newline", "blankline", "space", "commaspace", "custom"):
+            self.values["clipmerge_separator_mode"] = "newline"
+        if not isinstance(self.values["clipmerge_custom_separator"], str):
+            self.values["clipmerge_custom_separator"] = ""
         if not self.values["rich_text_history_enabled"]:
             self.values["include_images_in_rich_text_history"] = False
         if not (self.values["rich_text_history_enabled"] and self.values["include_images_in_rich_text_history"]):
@@ -1319,6 +1403,7 @@ class SoundPlayer:
     def __init__(self, preferences):
         self.preferences = preferences
         self.root = pathlib.Path(__file__).resolve().parent
+        self.current_process = None
 
     def play(self, name):
         if not self.preferences.values["play_sounds"]:
@@ -1326,11 +1411,24 @@ class SoundPlayer:
         override = config_home() / "clipman-linux" / "sounds" / f"{name}.wav"
         bundled = self.root / "sounds" / f"{name}.wav"
         sound = override if override.exists() else bundled
+        if not sound.exists() and name == "merge":
+            copy_override = override.with_name("copy.wav")
+            copy_bundled = bundled.with_name("copy.wav")
+            sound = copy_override if copy_override.exists() else copy_bundled
         if not sound.exists() and name != "skip":
             sound = override.with_name("skip.wav") if override.with_name("skip.wav").exists() else bundled.with_name("skip.wav")
         player = shutil.which("pw-play") or shutil.which("paplay") or shutil.which("aplay")
         if player and sound.exists():
-            subprocess.Popen([player, str(sound)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if self.current_process and self.current_process.poll() is None:
+                try:
+                    self.current_process.terminate()
+                    self.current_process.wait(timeout=0.05)
+                except subprocess.TimeoutExpired:
+                    self.current_process.kill()
+                    self.current_process.wait(timeout=0.05)
+                except OSError:
+                    pass
+            self.current_process = subprocess.Popen([player, str(sound)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class ClipmanApplication(Gtk.Application):
@@ -1363,6 +1461,8 @@ class ClipmanApplication(Gtk.Application):
         self.image_clipboard_cache = ClipboardImageFileCache()
         self.image_clipboard_expiry_source = 0
         self.clipboard_read_busy = False
+        self.clipboard_read_from_change = False
+        self.clipmerge = ClipMergeDetector()
         self.clipboard_change_source = 0
         self.poll_source = 0
         self.clipboard = None
@@ -1899,10 +1999,10 @@ class ClipmanApplication(Gtk.Application):
 
     def _poll_changed_clipboard(self):
         self.clipboard_change_source = 0
-        self._poll_clipboard()
+        self._poll_clipboard(True)
         return GLib.SOURCE_REMOVE
 
-    def _poll_clipboard(self):
+    def _poll_clipboard(self, from_change=False):
         if not self.ready_for_history or not self.preferences.values["monitor_clipboard"] or not self.window:
             return GLib.SOURCE_CONTINUE
         if self.clipboard_change_source:
@@ -1911,6 +2011,7 @@ class ClipmanApplication(Gtk.Application):
         if self.clipboard_read_busy:
             return GLib.SOURCE_CONTINUE
         self.clipboard_read_busy = True
+        self.clipboard_read_from_change = bool(from_change)
         self.clipboard_source_application, _window_id = active_application_info()
         mime_type = next((mime for mime in FILE_CLIPBOARD_MIME_TYPES if clipboard.get_formats().contain_mime_type(mime)), None)
         if mime_type:
@@ -2125,7 +2226,8 @@ class ClipmanApplication(Gtk.Application):
             normalized_rich.get("html_fragment", "") if normalized_rich else "",
             normalized_rich.get("rtf_base64", "") if normalized_rich else "",
         )
-        if signature == self.last_clipboard_signature:
+        repeated_change = signature == self.last_clipboard_signature and self.clipboard_read_from_change
+        if signature == self.last_clipboard_signature and not (repeated_change and self.preferences.values["clipmerge_enabled"]):
             return
         self.last_clipboard_signature = signature
         self.last_clipboard_text = text
@@ -2136,20 +2238,58 @@ class ClipmanApplication(Gtk.Application):
                 return
         if text == self.own_clipboard_text:
             self.own_clipboard_text = None
+            self.clipmerge.reset()
             return
         self._clear_clipboard_image_file()
         if text.strip():
             source = self.clipboard_source_application
             ignored = {value.casefold() for value in self.preferences.values["ignored_applications"]}
             if source and source.casefold() in ignored:
+                self.clipmerge.reset()
                 self.sounds.play("skip")
                 return
             if self.preferences.values["sensitive_data_mode"] == "exclude":
                 match = sensitive_data_match(text, self.preferences.values["sensitive_data_presets"])
                 if match:
+                    self.clipmerge.reset()
                     self.sounds.play("exclude")
                     return
-            self._put_text(text, quiet=True, automatic=True, source=source, rich_text=normalized_rich)
+            stored_text = clean_tracking_text(text, False) if self.preferences.values["auto_remove_url_tracking"] else text
+            observation = {"kind": "text", "signature": text, "source": source, "operation": "", "history_id": "", "values": [stored_text]}
+            decision = self.clipmerge.observe(
+                observation, int(time.monotonic() * 1000), self.preferences.values["clipmerge_enabled"],
+                self.preferences.values["clipmerge_window_ms"], False,
+            )
+            if decision:
+                base, first = decision
+                merged_text = base["values"][0] + ClipMergeDetector.separator(
+                    self.preferences.values["clipmerge_separator_mode"], self.preferences.values["clipmerge_custom_separator"],
+                ) + stored_text
+                group = source if source and self.preferences.values["auto_group_by_app"] else ""
+                self.backend.call(
+                    "merge_capture",
+                    {
+                        "base_id": base.get("history_id", ""), "base_text": base["values"][0],
+                        "first_id": first.get("history_id", ""), "first_text": first["values"][0],
+                        "text": merged_text, "group": group,
+                    },
+                    lambda message: self._clipmerge_text_response(message, observation, merged_text, source),
+                )
+                return
+            self._put_text(text, quiet=True, automatic=True, source=source, rich_text=normalized_rich, capture_observation=observation)
+
+    def _clipmerge_text_response(self, message, observation, merged_text, source):
+        if not message.get("ok"):
+            self.sounds.play("skip")
+            return
+        operation = message.get("result", {}).get("operation", {})
+        entry_id = operation.get("entry", {}).get("id", "")
+        self._history_response(message)
+        self._set_clipboard(merged_text)
+        merged = {"kind": "text", "signature": merged_text, "source": source, "operation": "", "history_id": entry_id, "values": [merged_text]}
+        self.clipmerge.complete(merged, entry_id)
+        self._remember_received_section("links" if is_standalone_link(merged_text) else "text")
+        self.sounds.play("merge")
 
     def _clipboard_files_read(self, clipboard, result, force=False):
         try:
@@ -2190,7 +2330,8 @@ class ClipmanApplication(Gtk.Application):
             self._clear_clipboard_image_file()
         self.last_clipboard_files = signature
         self.last_file_clipboard_monotonic = time.monotonic()
-        if not force and signature == self.last_clipboard_signature:
+        repeated_change = signature == self.last_clipboard_signature and self.clipboard_read_from_change
+        if not force and signature == self.last_clipboard_signature and not (repeated_change and self.preferences.values["clipmerge_enabled"]):
             return
         first = not self.clipboard_baseline_ready
         self.clipboard_baseline_ready = True
@@ -2202,10 +2343,17 @@ class ClipmanApplication(Gtk.Application):
                 return
         if not force and signature == self.own_clipboard_files:
             self.own_clipboard_files = None
+            self.clipmerge.reset()
+            return
+        source = ("Files" if force else self.clipboard_source_application) or "Files"
+        ignored = {value.casefold() for value in self.preferences.values["ignored_applications"]}
+        if not force and source and source.casefold() in ignored:
+            self.clipmerge.reset()
+            self.sounds.play("skip")
             return
         params = {
             "files": paths, "formats": [mime_type], "operation": operation,
-            "source": ("Files" if force else self.clipboard_source_application) or "Files", "contains_text": clipboard.get_formats().contain_mime_type("text/plain"),
+            "source": source, "contains_text": clipboard.get_formats().contain_mime_type("text/plain"),
         }
         rich_image = None
         if not force and should_import_file_as_rich_image(self.preferences.values, self.section, False):
@@ -2213,12 +2361,40 @@ class ClipmanApplication(Gtk.Application):
                 rich_image = local_image_file_candidate(paths)
             except ValueError:
                 pass
-        self.backend.call("file_add", params, lambda message: self._file_capture_response(message, force, rich_image, params["source"]))
+        observation = {
+            "kind": "files", "signature": repr(signature), "source": source, "operation": operation,
+            "history_id": "", "values": list(paths),
+        }
+        decision = self.clipmerge.observe(
+            observation, int(time.monotonic() * 1000), self.preferences.values["clipmerge_enabled"],
+            self.preferences.values["clipmerge_window_ms"], force,
+        )
+        if decision:
+            base, first = decision
+            seen = set()
+            merged_paths = []
+            for path in base["values"] + list(paths):
+                key = path.casefold()
+                if key not in seen:
+                    seen.add(key); merged_paths.append(path)
+            merge_params = {
+                "base_id": base.get("history_id", ""), "base_files": base["values"],
+                "first_id": first.get("history_id", ""), "first_files": first["values"],
+                "files": merged_paths, "formats": [mime_type], "operation": operation,
+                "source": source, "contains_text": True,
+            }
+            self.backend.call("file_merge_capture", merge_params, lambda message: self._clipmerge_file_response(message, observation, merged_paths, operation, source))
+            return
+        self.backend.call("file_add", params, lambda message: self._file_capture_response(message, force, rich_image, params["source"], observation))
 
-    def _file_capture_response(self, message, announce, rich_image=None, source=""):
+    def _file_capture_response(self, message, announce, rich_image=None, source="", observation=None):
         if not message.get("ok"):
             if announce: self.show_error(message.get("error"))
             return
+        if observation is not None:
+            expected = {path.casefold() for path in observation.get("values", [])}
+            event_id = next((event.get("id", "") for event in message.get("result", {}).get("file_events", []) if {path.casefold() for path in event.get("files", [])} == expected), "")
+            self.clipmerge.set_current_history_id(event_id)
         self._history_response(message, False)
         self._remember_received_section("files")
         if self.preferences.values["auto_remove_unavailable_file_history"]:
@@ -2232,6 +2408,19 @@ class ClipmanApplication(Gtk.Application):
             return
         self.sounds.play("copy")
         if announce: self.set_status("Clipboard files added to file history.", True)
+
+    def _clipmerge_file_response(self, message, observation, merged_paths, operation, source):
+        if not message.get("ok"):
+            self.sounds.play("skip")
+            return
+        expected = {path.casefold() for path in merged_paths}
+        event_id = next((event.get("id", "") for event in message.get("result", {}).get("file_events", []) if {path.casefold() for path in event.get("files", [])} == expected), "")
+        self._history_response(message, False)
+        self._set_file_clipboard(merged_paths, operation)
+        merged_signature = repr(("files", tuple(sorted(merged_paths, key=str.casefold)), operation))
+        self.clipmerge.complete({"kind": "files", "signature": merged_signature, "source": source, "operation": operation, "history_id": event_id, "values": merged_paths}, event_id)
+        self._remember_received_section("files")
+        self.sounds.play("merge")
 
     def _prepare_local_image_file(self, path, mime_type, callback):
         threading.Thread(
@@ -2919,6 +3108,7 @@ class ClipmanApplication(Gtk.Application):
         self._set_clipboard(text); self._after_copy(entries, close)
 
     def _set_clipboard(self, text, rich_text=None, entry=None):
+        self.clipmerge.reset()
         self.own_clipboard_text = text
         self._clear_clipboard_image_file()
         rich_text = normalize_rich_text(rich_text)
@@ -3255,7 +3445,7 @@ class ClipmanApplication(Gtk.Application):
             dialog.destroy()
         dialog.connect("response", response); dialog.present(); password.grab_focus()
 
-    def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None, failure=None, success=None):
+    def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None, failure=None, success=None, capture_observation=None):
         original_text = text
         if self.preferences.values["auto_remove_url_tracking"]:
             text = clean_tracking_text(text, False)
@@ -3264,13 +3454,16 @@ class ClipmanApplication(Gtk.Application):
         duplicate = "keep" if self.preferences.values["keep_duplicate_entries"] else "move"
         group = source if automatic and source and self.preferences.values["auto_group_by_app"] else ""
         normalized_rich = normalize_rich_text(rich_text) if self.preferences.values["rich_text_history_enabled"] else None
-        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate, "rich_text": normalized_rich}, lambda m: self._put_response(m, quiet, text, normalized_rich, failure, success))
+        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate, "rich_text": normalized_rich}, lambda m: self._put_response(m, quiet, text, normalized_rich, failure, success, capture_observation))
 
-    def _put_response(self, message, quiet, text, rich_text=None, failure=None, success=None):
+    def _put_response(self, message, quiet, text, rich_text=None, failure=None, success=None, capture_observation=None):
         if not message.get("ok"):
             if failure: failure(message.get("error"))
             elif not quiet: self.show_error(message.get("error"))
             return
+        if capture_observation is not None:
+            entry_id = message.get("result", {}).get("operation", {}).get("entry", {}).get("id", "")
+            self.clipmerge.set_current_history_id(entry_id)
         self._history_response(message)
         self._remember_received_section("rich" if rich_text else "links" if is_standalone_link(text) else "text")
         if not quiet: self.sounds.play("copy"); self.set_status("Clipboard text added to history.", True)
@@ -4156,6 +4349,8 @@ class ClipmanApplication(Gtk.Application):
     def _set_monitoring(self, enabled, announce=False):
         enabled = bool(enabled)
         previous = self.preferences.values["monitor_clipboard"]
+        if enabled != previous:
+            self.clipmerge.reset()
         self.preferences.values["monitor_clipboard"] = enabled
         if enabled and not previous:
             self.last_clipboard_text = None; self.last_clipboard_files = None; self.last_clipboard_signature = None
@@ -4197,6 +4392,26 @@ class ClipmanApplication(Gtk.Application):
         monitor = Gtk.CheckButton(label="Monitor clipboard text, links and files while Clipman is running", active=self.preferences.values["monitor_clipboard"])
         startup = Gtk.CheckButton(label="Add current clipboard item when Clipman starts", active=self.preferences.values["capture_on_start"])
         sounds = Gtk.CheckButton(label="Play sounds", active=self.preferences.values["play_sounds"])
+        clipmerge = Gtk.CheckButton(label="Enable ClipMerge", active=self.preferences.values["clipmerge_enabled"])
+        clipmerge.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Copy the same text or file selection twice within the merge window to append it to the clipboard. This is off by default."])
+        clipmerge_window = Gtk.SpinButton.new_with_range(200, 2000, 50)
+        clipmerge_window.set_value(self.preferences.values["clipmerge_window_ms"])
+        clipmerge_window.update_property([Gtk.AccessibleProperty.LABEL], ["ClipMerge window in milliseconds"])
+        separator_keys = ["newline", "blankline", "space", "commaspace", "custom"]
+        clipmerge_separator = Gtk.DropDown(model=Gtk.StringList.new(["New line", "Blank line", "Space", "Comma and space", "Custom"]))
+        clipmerge_separator.set_selected(separator_keys.index(self.preferences.values["clipmerge_separator_mode"]))
+        clipmerge_separator.update_property([Gtk.AccessibleProperty.LABEL], ["ClipMerge text separator"])
+        clipmerge_custom = Gtk.Entry(text=self.preferences.values["clipmerge_custom_separator"])
+        clipmerge_custom.update_property([Gtk.AccessibleProperty.LABEL], ["Custom ClipMerge text separator"])
+        clipmerge_custom.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Backslash n, backslash r backslash n, and backslash t are supported. Merged formatted text becomes plain text."])
+        def update_clipmerge_availability(*_args):
+            enabled = clipmerge.get_active()
+            clipmerge_window.set_sensitive(enabled)
+            clipmerge_separator.set_sensitive(enabled)
+            clipmerge_custom.set_sensitive(enabled and clipmerge_separator.get_selected() == 4)
+        clipmerge.connect("toggled", update_clipmerge_availability)
+        clipmerge_separator.connect("notify::selected", update_clipmerge_availability)
+        update_clipmerge_availability()
         auto_group = Gtk.CheckButton(label="Automatically group new clips by source application", active=self.preferences.values["auto_group_by_app"])
         auto_remote = Gtk.CheckButton(label="Put new text received from another device on the clipboard", active=self.preferences.values["auto_copy_remote_text"])
         paste_enter = Gtk.CheckButton(label="After Enter, paste into the previous application", active=self.preferences.values["paste_after_enter"])
@@ -4242,7 +4457,16 @@ class ClipmanApplication(Gtk.Application):
         save_position = Gtk.CheckButton(label="Save list position", active=self.preferences.values["save_list_position"])
         duplicates = Gtk.CheckButton(label="Keep duplicate text entries", active=self.preferences.values["keep_duplicate_entries"])
         confirm_deletions = Gtk.CheckButton(label="Confirm before deleting entries", active=self.preferences.values["confirm_deletions"])
-        for control in (monitor, sounds, auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, include_images, add_copied_image_files):
+        for control in (monitor, sounds, clipmerge):
+            general.append(control)
+        clipmerge_window_label = Gtk.Label(label="ClipMerge window, milliseconds", xalign=0); clipmerge_window_label.set_mnemonic_widget(clipmerge_window)
+        general.append(clipmerge_window_label); general.append(clipmerge_window)
+        clipmerge_separator_label = Gtk.Label(label="ClipMerge text separator", xalign=0); clipmerge_separator_label.set_mnemonic_widget(clipmerge_separator)
+        general.append(clipmerge_separator_label); general.append(clipmerge_separator)
+        clipmerge_custom_label = Gtk.Label(label="Custom separator", xalign=0); clipmerge_custom_label.set_mnemonic_widget(clipmerge_custom)
+        general.append(clipmerge_custom_label); general.append(clipmerge_custom)
+        general.append(Gtk.Label(label="ClipMerge accepts 200 to 2000 milliseconds. Files merge only when copy or cut operations match.", wrap=True, xalign=0))
+        for control in (auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, include_images, add_copied_image_files):
             general.append(control)
         general.append(image_privacy)
         for control in (save_position, duplicates, confirm_deletions):
@@ -4334,6 +4558,10 @@ class ClipmanApplication(Gtk.Application):
                 self._set_monitoring(monitor.get_active())
                 self.preferences.values.update({
                     "capture_on_start": startup.get_active(), "play_sounds": sounds.get_active(),
+                    "clipmerge_enabled": clipmerge.get_active(),
+                    "clipmerge_window_ms": clipmerge_window.get_value_as_int(),
+                    "clipmerge_separator_mode": separator_keys[clipmerge_separator.get_selected()],
+                    "clipmerge_custom_separator": clipmerge_custom.get_text(),
                     "auto_group_by_app": auto_group.get_active(), "auto_copy_remote_text": auto_remote.get_active(),
                     "paste_after_enter": paste_enter.get_active(), "dynamic_history_mode": dynamic.get_active(),
                     "auto_remove_url_tracking": remove_tracking.get_active(), "keep_duplicate_entries": duplicates.get_active(),

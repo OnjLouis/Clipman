@@ -258,6 +258,8 @@ func (s *session) handle(action string, raw json.RawMessage) (any, error) {
 		return s.refresh(p.Force)
 	case "put":
 		return s.put(raw)
+	case "merge_capture":
+		return s.mergeCapture(raw)
 	case "put_after":
 		return s.putAfter(raw)
 	case "update":
@@ -318,6 +320,8 @@ func (s *session) handle(action string, raw json.RawMessage) (any, error) {
 		return map[string]string{"text": tmpl.Resolve(p.Text, time.Now())}, nil
 	case "file_add":
 		return s.addFileEvent(raw)
+	case "file_merge_capture":
+		return s.mergeFileCapture(raw)
 	case "file_delete":
 		return s.deleteFileEvent(raw)
 	case "file_delete_many":
@@ -638,11 +642,7 @@ func (s *session) mutate(fn syncengine.Mutation) (any, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	result, err := s.engine.Mutate(ctx, fn)
-	if err != nil {
-		return nil, err
-	}
-	state, err := s.engine.Read(ctx)
+	result, state, err := s.engine.MutateState(ctx, fn)
 	if err != nil {
 		return nil, err
 	}
@@ -689,6 +689,86 @@ func (s *session) put(raw json.RawMessage) (any, error) {
 			}
 		}
 		return outcome != "ignored", map[string]any{"entry": exportEntry(entry), "outcome": outcome}, nil
+	})
+}
+
+func (s *session) mergeCapture(raw json.RawMessage) (any, error) {
+	var p struct {
+		BaseID    string `json:"base_id"`
+		BaseText  string `json:"base_text"`
+		FirstID   string `json:"first_id"`
+		FirstText string `json:"first_text"`
+		Text      string `json:"text"`
+		Group     string `json:"group"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(p.Text) == "" || !utf8.ValidString(p.Text) {
+		return nil, errors.New("merged clipboard text cannot be empty or invalid UTF-8")
+	}
+	return s.mutate(func(db *model.Database, now int64) (bool, any, error) {
+		baseIndex, firstIndex := -1, -1
+		for index := range db.Entries {
+			if strings.EqualFold(db.Entries[index].ID, p.BaseID) {
+				baseIndex = index
+			}
+			if strings.EqualFold(db.Entries[index].ID, p.FirstID) {
+				firstIndex = index
+			}
+		}
+		newestMatchingText := func(text string) int {
+			found := -1
+			for index := range db.Entries {
+				entry := db.Entries[index]
+				if entry.Pinned || entry.Text != text {
+					continue
+				}
+				if found < 0 || entry.LastUsedUnixMs > db.Entries[found].LastUsedUnixMs {
+					found = index
+				}
+			}
+			return found
+		}
+		if strings.TrimSpace(p.BaseID) == "" {
+			baseIndex = newestMatchingText(p.BaseText)
+		}
+		if strings.TrimSpace(p.FirstID) == "" {
+			firstIndex = newestMatchingText(p.FirstText)
+		}
+		targetIndex := -1
+		if baseIndex >= 0 && !db.Entries[baseIndex].Pinned {
+			targetIndex = baseIndex
+		} else if firstIndex >= 0 && !db.Entries[firstIndex].Pinned {
+			targetIndex = firstIndex
+		}
+		var saved model.Entry
+		if targetIndex >= 0 {
+			target := &db.Entries[targetIndex]
+			target.Text, target.SourceMachine = p.Text, s.cfg.Machine
+			target.LastUsedUnixMs, target.ModifiedUnixMs, target.IsTemplate = now, now, false
+			if strings.TrimSpace(target.Group) == "" && strings.TrimSpace(p.Group) != "" {
+				target.Group = canonicalLabelFor(db.Entries, func(entry model.Entry) string { return entry.Group }, p.Group)
+			}
+			clearRichText(target, now)
+			saved = *target
+		} else {
+			entry, _ := operation.Put(db, p.Text, "", p.Group, s.cfg.Machine, "keep", merge.NewID(), false, false, now)
+			saved = entry
+		}
+		for index := range db.Entries {
+			entry := db.Entries[index]
+			matchesFirst := strings.TrimSpace(p.FirstID) != "" && strings.EqualFold(entry.ID, p.FirstID)
+			if strings.TrimSpace(p.FirstID) == "" {
+				matchesFirst = index == firstIndex
+			}
+			if matchesFirst && !strings.EqualFold(entry.ID, saved.ID) && !entry.Pinned {
+				merge.AddDeleted(db, entry, s.cfg.Machine, now)
+				break
+			}
+		}
+		db.UpdatedUnixMs = now
+		return true, map[string]any{"entry": exportEntry(saved), "outcome": "merged"}, nil
 	})
 }
 

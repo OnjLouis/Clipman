@@ -33,11 +33,12 @@ private struct PasteboardSnapshot {
 
 @MainActor
 protocol ClipboardMonitorDelegate: AnyObject {
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, deliberate: Bool)
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, deliberate: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, deliberate: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, deliberate: Bool)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didRejectImage reason: String, deliberate: Bool)
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor)
+    func clipboardMonitorDidWriteInternalClipboard(_ monitor: ClipboardMonitor)
 }
 
 @MainActor
@@ -52,6 +53,13 @@ final class ClipboardMonitor: @unchecked Sendable {
     var ignoredApplications: [String] = []
     var includeImagesInRichTextHistory = false
     var alsoAddCopiedImageFilesToRichTextHistory = false
+    var clipMergeEnabled = false {
+        didSet {
+            if oldValue != clipMergeEnabled, timer != nil {
+                start()
+            }
+        }
+    }
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var embeddedImagePasteboardFile: EmbeddedImagePasteboardFile?
@@ -66,7 +74,8 @@ final class ClipboardMonitor: @unchecked Sendable {
     func start() {
         stop()
         lastChangeCount = NSPasteboard.general.changeCount
-        timer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+        let interval = clipMergeEnabled ? 0.1 : 0.6
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.tick()
             }
@@ -97,6 +106,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         richText: RichTextPayload? = nil,
         imageFilename: String? = nil
     ) {
+        delegate?.clipboardMonitorDidWriteInternalClipboard(self)
         suppressRemoteEchoText(text)
         let pasteboard = NSPasteboard.general
         embeddedImagePasteboardFile = nil
@@ -118,6 +128,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         restoreAfter delay: TimeInterval,
         action: () -> Void
     ) {
+        delegate?.clipboardMonitorDidWriteInternalClipboard(self)
         let pasteboard = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
         let previousImagePasteboardFile = embeddedImagePasteboardFile
@@ -134,6 +145,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         action()
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
+            self.delegate?.clipboardMonitorDidWriteInternalClipboard(self)
             snapshot.restore(to: pasteboard)
             if self.embeddedImagePasteboardFile === promise {
                 self.embeddedImagePasteboardFile = previousImagePasteboardFile
@@ -144,6 +156,7 @@ final class ClipboardMonitor: @unchecked Sendable {
     }
 
     func writeInternalFiles(_ paths: [String], includeText: Bool = true) {
+        delegate?.clipboardMonitorDidWriteInternalClipboard(self)
         let urls = paths.map { URL(fileURLWithPath: $0) }
         let pasteboard = NSPasteboard.general
         embeddedImagePasteboardFile = nil
@@ -183,6 +196,7 @@ final class ClipboardMonitor: @unchecked Sendable {
 
     private func capture(from pasteboard: NSPasteboard, playSkipSound: Bool, deliberate: Bool) {
         guard isEnabled || deliberate else { return }
+        let observedAtMilliseconds = Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
         let appDiagnostic = foregroundApplicationDiagnostic()
         let pasteboardDiagnostic = pasteboardTypesDiagnostic(from: pasteboard)
         if !deliberate && isClipmanForegroundApplication() {
@@ -224,7 +238,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic
             )
-            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, deliberate: deliberate)
+            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, sourceApplication: sourceApplicationName(), operation: "Copy", observedAtMilliseconds: observedAtMilliseconds, deliberate: deliberate)
             captureAdditionalRichTextImageIfEnabled(from: fileCapture.files)
             return
         }
@@ -239,6 +253,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         ), let imageInput = RichTextData.standaloneImageInput(from: pasteboard, preferredFilename: text) {
             captureStandaloneImage(
                 imageInput,
+                observedAtMilliseconds: observedAtMilliseconds,
                 deliberate: deliberate,
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic,
@@ -251,6 +266,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                let imageInput = RichTextData.standaloneImageInput(from: pasteboard) {
                 captureStandaloneImage(
                     imageInput,
+                    observedAtMilliseconds: observedAtMilliseconds,
                     deliberate: deliberate,
                     appDiagnostic: appDiagnostic,
                     pasteboardDiagnostic: pasteboardDiagnostic,
@@ -281,11 +297,12 @@ final class ClipboardMonitor: @unchecked Sendable {
             appDiagnostic: appDiagnostic,
             pasteboardDiagnostic: pasteboardDiagnostic
         )
-        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), deliberate: deliberate)
+        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), observedAtMilliseconds: observedAtMilliseconds, deliberate: deliberate)
     }
 
     private func captureStandaloneImage(
         _ imageInput: Result<StandaloneImageInput, EmbeddedImageError>,
+        observedAtMilliseconds: Int64,
         deliberate: Bool,
         appDiagnostic: String,
         pasteboardDiagnostic: String,
@@ -323,6 +340,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                         didCapture: prepared.text,
                         richText: prepared.payload,
                         sourceApplication: sourceApplication,
+                        observedAtMilliseconds: observedAtMilliseconds,
                         deliberate: deliberate
                     )
                 } catch {

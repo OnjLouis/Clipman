@@ -146,3 +146,49 @@ func TestFileHistoryBulkPinAndDelete(t *testing.T) {
 		t.Fatalf("bulk delete failed: %v %#v", err, s.fileDB.Events)
 	}
 }
+
+func TestFileHistoryMergeFallsBackToPayloadAndPreservesPinnedBase(t *testing.T) {
+	directory := t.TempDir()
+	basePath := filepath.Join(directory, "base.txt")
+	partialPath := filepath.Join(directory, "partial.txt")
+	for path, content := range map[string]string{basePath: "base", partialPath: "partial"} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &session{
+		cfg: config.Config{Machine: "Fedora"}, password: "secret",
+		filePath: filepath.Join(directory, "files.clipdb"), fileLoaded: true,
+		fileDB: model.FileDatabase{Version: 1, Events: []model.FileEvent{
+			{ID: "base", CapturedUnixMs: 10, Operation: "Copy", Files: []string{basePath}, FileCount: 1, Pinned: true},
+			{ID: "partial", CapturedUnixMs: 20, Operation: "Copy", Files: []string{partialPath}, FileCount: 1},
+		}},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"base_files": []string{basePath}, "first_files": []string{partialPath},
+		"files": []string{basePath, partialPath}, "formats": []string{"text/uri-list"},
+		"operation": "Copy", "source": "Files", "contains_text": true,
+	})
+	if _, err := s.mergeFileCapture(raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.fileDB.Events) != 2 {
+		t.Fatalf("unexpected event count after merge: %d", len(s.fileDB.Events))
+	}
+	var pinned, merged *model.FileEvent
+	for index := range s.fileDB.Events {
+		event := &s.fileDB.Events[index]
+		if event.ID == "base" {
+			pinned = event
+		}
+		if event.ID == "partial" {
+			merged = event
+		}
+	}
+	if pinned == nil || !pinned.Pinned || len(pinned.Files) != 1 || pinned.Files[0] != basePath {
+		t.Fatalf("pinned base changed: %+v", pinned)
+	}
+	if merged == nil || merged.Pinned || !sameFileSet(merged.Files, []string{basePath, partialPath}) {
+		t.Fatalf("partial event was not replaced safely: %+v", merged)
+	}
+}

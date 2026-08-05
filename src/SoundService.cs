@@ -27,6 +27,7 @@ namespace Clipman
         public void Remote(bool enabled) { Play("remote.wav", enabled); }
         public void Skip(bool enabled) { Play("skip.wav", enabled); }
         public void Exclude(bool enabled) { Play("exclude.wav", enabled, "skip.wav"); }
+        public void Merge(bool enabled) { Play("merge.wav", enabled, "copy.wav"); }
 
         private void Play(string fileName, bool enabled)
         {

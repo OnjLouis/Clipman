@@ -100,9 +100,9 @@ namespace Clipman
             }
         }
 
-        public void Add(ClipboardEventSummary summary)
+        public ClipboardEventSummary Add(ClipboardEventSummary summary)
         {
-            if (summary == null) return;
+            if (summary == null) return null;
             Normalize(summary);
 
             lock (sync)
@@ -133,6 +133,59 @@ namespace Clipman
             }
 
             OnChanged();
+            return Clone(summary);
+        }
+
+        public ClipboardEventSummary MergeCapturedEvents(string baseId, string firstTapId, ClipboardEventSummary merged)
+        {
+            if (merged == null || merged.Files == null || merged.Files.Count == 0) return null;
+            Normalize(merged);
+            ClipboardEventSummary saved;
+            lock (sync)
+            {
+                var baseIndex = database.Events.FindIndex(item => string.Equals(item.Id, baseId, StringComparison.OrdinalIgnoreCase));
+                var firstIndex = database.Events.FindIndex(item => string.Equals(item.Id, firstTapId, StringComparison.OrdinalIgnoreCase));
+                var targetIndex = baseIndex >= 0 && !database.Events[baseIndex].Pinned
+                    ? baseIndex
+                    : firstIndex >= 0 && !database.Events[firstIndex].Pinned
+                        ? firstIndex
+                        : -1;
+
+                if (targetIndex >= 0)
+                {
+                    var target = database.Events[targetIndex];
+                    target.CapturedAt = merged.CapturedAt;
+                    target.Source = merged.Source;
+                    target.Operation = merged.Operation;
+                    target.SourceMachine = merged.SourceMachine;
+                    target.ContainsText = merged.ContainsText;
+                    target.Files = merged.Files.ToList();
+                    target.FileCount = target.Files.Count;
+                    target.Formats = merged.Formats.ToList();
+                    saved = target;
+                }
+                else
+                {
+                    merged.ManualOrder = NextManualOrderLocked();
+                    MoveToTopOfBandLocked(merged);
+                    database.Events.Insert(0, merged);
+                    saved = merged;
+                }
+
+                var partial = database.Events.FirstOrDefault(item =>
+                    string.Equals(item.Id, firstTapId, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(item.Id, saved.Id, StringComparison.OrdinalIgnoreCase));
+                if (partial != null && !partial.Pinned)
+                {
+                    database.Events.Remove(partial);
+                }
+                MoveToTopOfBandLocked(saved);
+                NormalizeDatabase();
+                SaveLocked();
+                saved = Clone(saved);
+            }
+            OnChanged();
+            return saved;
         }
 
         public int DeleteMany(IEnumerable<string> ids)

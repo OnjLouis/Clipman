@@ -76,6 +76,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let serverAuthorityFingerprint = NSTextField()
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds", target: nil, action: nil)
+    private let clipMergeCheckbox = NSButton(checkboxWithTitle: "Enable ClipMerge", target: nil, action: nil)
+    private let clipMergeWindowField = NSTextField()
+    private let clipMergeSeparatorPopup = NSPopUpButton()
+    private let clipMergeCustomSeparatorField = NSTextField()
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
     private let captureClipboardOnStartupCheckbox = NSButton(checkboxWithTitle: "Add current clipboard item to Clipman on start", target: nil, action: nil)
     private let rememberPasswordCheckbox = NSButton(checkboxWithTitle: "Remember history password in Keychain", target: nil, action: nil)
@@ -195,6 +199,22 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         soundsCheckbox.setAccessibilityLabel("Play sounds")
         soundsCheckbox.setAccessibilityHelp("When checked, Clipman plays sounds for copy, remote sync, monitoring on, monitoring off, and skipped clipboard events.")
         grid.addRow(with: [NSGridCell.emptyContentView, soundsCheckbox])
+
+        clipMergeCheckbox.target = self
+        clipMergeCheckbox.action = #selector(clipMergeSettingChanged)
+        clipMergeCheckbox.setAccessibilityLabel("Enable ClipMerge")
+        clipMergeCheckbox.setAccessibilityHelp("When checked, copying the same text or file selection twice within the merge window appends it to the clipboard. This is off by default.")
+        grid.addRow(with: [NSGridCell.emptyContentView, clipMergeCheckbox])
+        clipMergeWindowField.setAccessibilityLabel("ClipMerge window in milliseconds")
+        addRow("ClipMerge window, milliseconds", clipMergeWindowField)
+        clipMergeSeparatorPopup.addItems(withTitles: ["New line", "Blank line", "Space", "Comma and space", "Custom"])
+        clipMergeSeparatorPopup.target = self
+        clipMergeSeparatorPopup.action = #selector(clipMergeSettingChanged)
+        clipMergeSeparatorPopup.setAccessibilityLabel("ClipMerge text separator")
+        addRow("ClipMerge text separator", clipMergeSeparatorPopup)
+        clipMergeCustomSeparatorField.setAccessibilityLabel("Custom ClipMerge text separator")
+        clipMergeCustomSeparatorField.setAccessibilityHelp("Backslash n, backslash r backslash n, and backslash t are supported. Merged formatted text becomes plain text.")
+        addRow("Custom separator", clipMergeCustomSeparatorField)
 
         runAtStartupCheckbox.target = nil
         runAtStartupCheckbox.action = nil
@@ -316,6 +336,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         updateServerAuthorityStatus()
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
         soundsCheckbox.state = settings.soundsEnabled ? .on : .off
+        clipMergeCheckbox.state = settings.clipMergeEnabled ? .on : .off
+        clipMergeWindowField.integerValue = settings.clipMergeWindowMilliseconds
+        clipMergeSeparatorPopup.selectItem(withTitle: displayClipMergeSeparator(settings.clipMergeSeparatorMode))
+        clipMergeCustomSeparatorField.stringValue = settings.clipMergeCustomSeparator
+        updateClipMergeAvailability()
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
         captureClipboardOnStartupCheckbox.state = settings.captureClipboardOnStartup ? .on : .off
         rememberPasswordCheckbox.state = settings.rememberDatabasePassword ? .on : .off
@@ -505,6 +530,17 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         updateImageHistoryAvailability()
     }
 
+    @objc private func clipMergeSettingChanged() {
+        updateClipMergeAvailability()
+    }
+
+    private func updateClipMergeAvailability() {
+        let enabled = clipMergeCheckbox.state == .on
+        clipMergeWindowField.isEnabled = enabled
+        clipMergeSeparatorPopup.isEnabled = enabled
+        clipMergeCustomSeparatorField.isEnabled = enabled && clipMergeSeparatorPopup.titleOfSelectedItem == "Custom"
+    }
+
     private func updateImageHistoryAvailability() {
         let enabled = richTextHistoryCheckbox.state == .on
         if !enabled {
@@ -600,6 +636,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         serverTokenField.stringValue = settings.serverToken
         settings.monitoringEnabled = monitoringCheckbox.state == .on
         settings.soundsEnabled = soundsCheckbox.state == .on
+        settings.clipMergeEnabled = clipMergeCheckbox.state == .on
+        settings.clipMergeWindowMilliseconds = ClipMergeDetector.normalizeWindow(clipMergeWindowField.integerValue)
+        settings.clipMergeSeparatorMode = storedClipMergeSeparator(clipMergeSeparatorPopup.titleOfSelectedItem ?? "New line")
+        settings.clipMergeCustomSeparator = clipMergeCustomSeparatorField.stringValue
         settings.runAtStartup = runAtStartupCheckbox.state == .on
         settings.captureClipboardOnStartup = captureClipboardOnStartupCheckbox.state == .on
         settings.rememberDatabasePassword = rememberPasswordCheckbox.state == .on
@@ -727,6 +767,26 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         case "hourly": return "Hourly"
         case "daily": return "Daily"
         default: return "Never"
+        }
+    }
+
+    private func displayClipMergeSeparator(_ value: String) -> String {
+        switch ClipmanSettings.normalizeClipMergeSeparatorMode(value) {
+        case "BlankLine": return "Blank line"
+        case "Space": return "Space"
+        case "CommaSpace": return "Comma and space"
+        case "Custom": return "Custom"
+        default: return "New line"
+        }
+    }
+
+    private func storedClipMergeSeparator(_ value: String) -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "blank line": return "BlankLine"
+        case "space": return "Space"
+        case "comma and space": return "CommaSpace"
+        case "custom": return "Custom"
+        default: return "NewLine"
         }
     }
 

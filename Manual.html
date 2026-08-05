@@ -67,6 +67,7 @@
     <li><a href="#groups">Groups</a></li>
     <li><a href="#sorting-and-manual-order">Sorting and Manual Order</a></li>
     <li><a href="#cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</a></li>
+    <li><a href="#clipmerge">ClipMerge</a></li>
     <li><a href="#history-limits">History Limits</a></li>
     <li><a href="#actions">Actions</a></li>
     <li><a href="#menus">Menus</a></li>
@@ -89,6 +90,13 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.7.0</h3>
+  <ul>
+    <li>Added the opt-in ClipMerge workflow to Windows, Mac and Linux. Copy one selection normally, then copy the next selection twice within the configured interval to append it to the clipboard and history. Text separators are configurable, file selections are deduplicated, pinned entries remain unchanged, and guarded source/type/operation matching prevents unrelated clipboard changes from being combined. This closes <a href="https://github.com/OnjLouis/Clipman/issues/55">issue #55</a>.</li>
+    <li>Unified the default copy, remote and skip sounds across Windows, Mac, Linux, Android and iOS, so the same events now provide consistent feedback on every platform without requiring per-device overrides.</li>
+    <li>Reduced Linux save, delete and ClipMerge latency by reusing the database state that the server had already accepted instead of immediately downloading and decrypting the same revision again.</li>
+  </ul>
+
   <h3>2.6.2</h3>
   <ul>
     <li>Fixed Clipman Server updates on runit systems such as Void Linux. Update backups now preserve persistent service definitions without trying to copy runit's live named pipes, and rollback retains active supervision state instead of deleting it. This closes <a href="https://github.com/OnjLouis/Clipman/issues/54">issue #54</a>.</li>
@@ -755,6 +763,15 @@
   <h2 id="cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</h2>
   <p><code>Ctrl+C</code> and <code>Ctrl+X</code> on Windows, or <code>Command+C</code> and <code>Command+X</code> on Mac, put normal text on the system clipboard, so the text can be pasted into other applications. Windows also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries. Mac pastes multiple copied entries back as separate entries when they are separated by Clipman's text separator.</p>
 
+  <h2 id="clipmerge">ClipMerge</h2>
+  <p>ClipMerge is an optional Windows, Mac and Linux feature for building one clipboard value while moving through a document or file list. It is off by default. Enable it in General preferences, copy the first text or file selection normally, then copy the next selection twice within the configured merge window. Clipman replaces the clipboard with the combined result and plays <code>merge.wav</code>. The default window is 500 milliseconds and can be set from 200 to 2000 milliseconds.</p>
+
+  <p>Text can be separated by one new line, one blank line, a space, comma and space, or a custom separator. Custom separators accept <code>\n</code>, <code>\r\n</code>, <code>\r</code>, and <code>\t</code>. Combining separately copied formatted selections safely produces plain text; Clipman does not splice unrelated HTML or RTF documents.</p>
+
+  <p>File merging requires the copy or cut operation to match and removes duplicate paths. Clipman also requires both quick copies to contain the same payload and come from the same source application. A different application, clipboard type, operation, expired interval, ignored application, sensitive-data exclusion, deliberate Save Current Clipboard command, or clipboard value written by Clipman resets the pending merge. These rules favour missing an uncertain merge over combining unrelated or private data.</p>
+
+  <p>The first copy is stored normally so ordinary copying is never delayed. When the second copy completes the gesture, Clipman updates an unpinned history entry and removes the temporary partial entry. A pinned base is never modified; the merged result uses an unpinned entry instead. Text results use the shared text database, while file results remain in machine-local File History.</p>
+
   <h2 id="history-limits">History Limits</h2>
   <p>Preferences can limit the maximum number of entries or maximum entry age. Use <code>0</code> for no limit. Pinned entries and named entries are kept even when limits are applied.</p>
 
@@ -968,9 +985,9 @@
   <p>Use <strong>Help, Version history</strong> on Windows or <strong>Version History</strong> on Mac to review the latest release notes. Use <strong>Help, Project page</strong> or <code>Ctrl+F1</code> on Windows and <strong>Project Page</strong> or <code>Command+F1</code> on Mac to open the GitHub project page. Use <strong>Help, Contact</strong> on Windows or <strong>Contact</strong> on Mac for feedback, and <strong>Help, Donate</strong> on Windows or <strong>Donate</strong> on Mac to support Clipman. Use <strong>Help, Diagnostics</strong> or <code>Alt+F1</code> on Windows and <strong>Diagnostics</strong> or <code>Option+F1</code> on Mac to open diagnostics.</p>
 
   <h2 id="sounds">Sounds</h2>
-  <p>Clipman can play short sounds when text is copied, remote text is copied from another synced machine, monitoring is turned on, monitoring is turned off, a clipboard item is ignored because monitoring is off, or a sensitive-data exclusion blocks automatic capture. Sounds can be enabled or disabled in preferences.</p>
+  <p>Clipman can play short sounds when text is copied, selections are merged, remote text is copied from another synced machine, monitoring is turned on, monitoring is turned off, a clipboard item is ignored because monitoring is off, or a sensitive-data exclusion blocks automatic capture. Sounds can be enabled or disabled in preferences.</p>
 
-  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, <code>skip.wav</code>, and <code>exclude.wav</code>. If <code>exclude.wav</code> is missing, Clipman falls back to <code>skip.wav</code>.</p>
+  <p>The default sounds are ordinary WAV files. On Windows they live in the <code>sounds</code> folder beside <code>clipman.exe</code>. On Mac they are bundled inside <code>Clipman.app</code>. To keep custom sounds safe across updates, create a <code>sounds</code> folder inside Clipman's active settings/data folder and put any replacement WAV files there. For a default Windows portable install this is usually <code>Settings\sounds</code> beside <code>clipman.exe</code>; if you choose a different data folder, use the <code>sounds</code> folder inside that chosen data folder instead. Clipman checks custom sounds first, then falls back to the bundled/default sounds for any missing file. Keep the same file names: <code>copy.wav</code>, <code>merge.wav</code>, <code>remote.wav</code>, <code>on.wav</code>, <code>off.wav</code>, <code>skip.wav</code>, and <code>exclude.wav</code>. If <code>merge.wav</code> is missing, Clipman falls back to <code>copy.wav</code>; if <code>exclude.wav</code> is missing, Clipman falls back to <code>skip.wav</code>.</p>
 
   <h2 id="application-files">Application Files</h2>
   <p>A normal Windows portable Clipman folder contains only the files needed to run the app. A Mac package contains <code>Clipman.app</code>, which bundles the executable, manual, sounds, and supporting resources inside the app package.</p>

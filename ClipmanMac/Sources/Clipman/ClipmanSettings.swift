@@ -13,6 +13,10 @@ struct ClipmanSettings: Codable, Equatable {
     var serverCaHost: String
     var monitoringEnabled: Bool
     var soundsEnabled: Bool
+    var clipMergeEnabled: Bool
+    var clipMergeWindowMilliseconds: Int
+    var clipMergeSeparatorMode: String
+    var clipMergeCustomSeparator: String
     var showHistoryHotkey: HotkeyDescriptor
     var toggleMonitoringHotkey: HotkeyDescriptor
     var saveCurrentClipboardHotkey: HotkeyDescriptor?
@@ -48,7 +52,7 @@ struct ClipmanSettings: Codable, Equatable {
     var sensitiveDataPresetIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
+        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, clipMergeEnabled, clipMergeWindowMilliseconds, clipMergeSeparatorMode, clipMergeCustomSeparator, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, includeImagesInRichTextHistory, alsoAddCopiedImageFilesToRichTextHistory, groupFilter, historyFilterType, deviceFilter, confirmDeletions, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
@@ -72,6 +76,10 @@ struct ClipmanSettings: Codable, Equatable {
         serverCaHost: String,
         monitoringEnabled: Bool,
         soundsEnabled: Bool,
+        clipMergeEnabled: Bool,
+        clipMergeWindowMilliseconds: Int,
+        clipMergeSeparatorMode: String,
+        clipMergeCustomSeparator: String,
         showHistoryHotkey: HotkeyDescriptor,
         toggleMonitoringHotkey: HotkeyDescriptor,
         saveCurrentClipboardHotkey: HotkeyDescriptor?,
@@ -116,6 +124,10 @@ struct ClipmanSettings: Codable, Equatable {
         self.serverCaHost = serverCaHost
         self.monitoringEnabled = monitoringEnabled
         self.soundsEnabled = soundsEnabled
+        self.clipMergeEnabled = clipMergeEnabled
+        self.clipMergeWindowMilliseconds = ClipMergeDetector.normalizeWindow(clipMergeWindowMilliseconds)
+        self.clipMergeSeparatorMode = ClipmanSettings.normalizeClipMergeSeparatorMode(clipMergeSeparatorMode)
+        self.clipMergeCustomSeparator = clipMergeCustomSeparator
         self.showHistoryHotkey = showHistoryHotkey
         self.toggleMonitoringHotkey = toggleMonitoringHotkey
         self.saveCurrentClipboardHotkey = saveCurrentClipboardHotkey
@@ -168,6 +180,10 @@ struct ClipmanSettings: Codable, Equatable {
         serverCaHost = try container.decodeIfPresent(String.self, forKey: .serverCaHost) ?? ""
         monitoringEnabled = try container.decodeIfPresent(Bool.self, forKey: .monitoringEnabled) ?? fallback.monitoringEnabled
         soundsEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundsEnabled) ?? true
+        clipMergeEnabled = try container.decodeIfPresent(Bool.self, forKey: .clipMergeEnabled) ?? false
+        clipMergeWindowMilliseconds = ClipMergeDetector.normalizeWindow(try container.decodeIfPresent(Int.self, forKey: .clipMergeWindowMilliseconds) ?? ClipMergeDetector.defaultWindowMilliseconds)
+        clipMergeSeparatorMode = ClipmanSettings.normalizeClipMergeSeparatorMode(try container.decodeIfPresent(String.self, forKey: .clipMergeSeparatorMode) ?? "NewLine")
+        clipMergeCustomSeparator = try container.decodeIfPresent(String.self, forKey: .clipMergeCustomSeparator) ?? ""
         showHistoryHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .showHistoryHotkey) ?? fallback.showHistoryHotkey
         toggleMonitoringHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .toggleMonitoringHotkey) ?? fallback.toggleMonitoringHotkey
         saveCurrentClipboardHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .saveCurrentClipboardHotkey)
@@ -235,6 +251,10 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(serverCaHost, forKey: .serverCaHost)
         try container.encode(monitoringEnabled, forKey: .monitoringEnabled)
         try container.encode(soundsEnabled, forKey: .soundsEnabled)
+        try container.encode(clipMergeEnabled, forKey: .clipMergeEnabled)
+        try container.encode(ClipMergeDetector.normalizeWindow(clipMergeWindowMilliseconds), forKey: .clipMergeWindowMilliseconds)
+        try container.encode(ClipmanSettings.normalizeClipMergeSeparatorMode(clipMergeSeparatorMode), forKey: .clipMergeSeparatorMode)
+        try container.encode(clipMergeCustomSeparator, forKey: .clipMergeCustomSeparator)
         try container.encode(showHistoryHotkey, forKey: .showHistoryHotkey)
         try container.encode(toggleMonitoringHotkey, forKey: .toggleMonitoringHotkey)
         try container.encodeIfPresent(saveCurrentClipboardHotkey, forKey: .saveCurrentClipboardHotkey)
@@ -290,6 +310,10 @@ struct ClipmanSettings: Codable, Equatable {
             serverCaHost: "",
             monitoringEnabled: true,
             soundsEnabled: true,
+            clipMergeEnabled: false,
+            clipMergeWindowMilliseconds: ClipMergeDetector.defaultWindowMilliseconds,
+            clipMergeSeparatorMode: "NewLine",
+            clipMergeCustomSeparator: "",
             showHistoryHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ANSI_Grave), modifiers: [.option, .shift]),
             toggleMonitoringHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ISO_Section), modifiers: [.option, .shift]),
             saveCurrentClipboardHotkey: nil,
@@ -330,6 +354,16 @@ struct ClipmanSettings: Codable, Equatable {
         (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Server") == .orderedSame
             ? "Server"
             : "File"
+    }
+
+    static func normalizeClipMergeSeparatorMode(_ value: String?) -> String {
+        switch (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "blankline": return "BlankLine"
+        case "space": return "Space"
+        case "commaspace": return "CommaSpace"
+        case "custom": return "Custom"
+        default: return "NewLine"
+        }
     }
 }
 

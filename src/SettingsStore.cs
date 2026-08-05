@@ -171,6 +171,9 @@ namespace Clipman
             {
                 settings.MaxHistoryDays = 0;
             }
+            settings.ClipMergeWindowMilliseconds = ClipMergeDetector.NormalizeWindow(settings.ClipMergeWindowMilliseconds);
+            settings.ClipMergeSeparatorMode = NormalizeClipMergeSeparatorMode(settings.ClipMergeSeparatorMode);
+            settings.ClipMergeCustomSeparator = settings.ClipMergeCustomSeparator ?? string.Empty;
             if (settings.IgnoredProcesses == null)
             {
                 settings.IgnoredProcesses = new List<string>();
@@ -256,6 +259,19 @@ namespace Clipman
                 settings.ProtectedDatabasePassword = string.Empty;
             }
             settings.PlainDatabasePassword = string.Empty;
+        }
+
+        private static string NormalizeClipMergeSeparatorMode(string value)
+        {
+            switch ((value ?? string.Empty).Trim().ToUpperInvariant())
+            {
+                case "BLANKLINE": return "BlankLine";
+                case "SPACE": return "Space";
+                case "COMMASPACE": return "CommaSpace";
+                case "CUSTOM": return "Custom";
+                case "NEWLINE":
+                default: return "NewLine";
+            }
         }
 
         private static string ReadStringProperty(string path, string propertyName)

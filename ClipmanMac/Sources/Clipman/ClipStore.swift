@@ -285,6 +285,84 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
+    func entryID(forText text: String) -> String {
+        queue.sync { database.Entries.first(where: { $0.Text == text })?.Id ?? "" }
+    }
+
+    func mergeCapturedText(baseID: String, baseText: String, firstTapID: String, firstTapText: String, mergedText: String, group: String, completion: (@MainActor @Sendable (String?) -> Void)? = nil) {
+        guard !mergedText.isEmpty else {
+            Task { @MainActor in completion?(nil) }
+            return
+        }
+        queue.async {
+            guard self.mergeLatestBeforeWriteLocked() else {
+                Task { @MainActor in completion?(nil) }
+                return
+            }
+            let newestMatchingIndex: (String) -> Int? = { text in
+                self.database.Entries.indices
+                    .filter { !self.database.Entries[$0].Pinned && self.database.Entries[$0].Text == text }
+                    .max { self.database.Entries[$0].LastUsedUnixMs < self.database.Entries[$1].LastUsedUnixMs }
+            }
+            let baseIndex = baseID.isEmpty
+                ? newestMatchingIndex(baseText)
+                : self.database.Entries.firstIndex { $0.Id.caseInsensitiveCompare(baseID) == .orderedSame }
+            let firstIndex = firstTapID.isEmpty
+                ? newestMatchingIndex(firstTapText)
+                : self.database.Entries.firstIndex { $0.Id.caseInsensitiveCompare(firstTapID) == .orderedSame }
+            let targetID: String?
+            if let baseIndex, !self.database.Entries[baseIndex].Pinned {
+                targetID = self.database.Entries[baseIndex].Id
+            } else if let firstIndex, !self.database.Entries[firstIndex].Pinned {
+                targetID = self.database.Entries[firstIndex].Id
+            } else {
+                targetID = nil
+            }
+            let now = TimeUtil.nowUnixMs()
+            let savedID: String
+            if let targetID, let index = self.database.Entries.firstIndex(where: { $0.Id == targetID }) {
+                self.database.Entries[index].Text = mergedText
+                self.database.Entries[index].SourceMachine = self.machineName
+                self.database.Entries[index].LastUsedUnixMs = now
+                self.database.Entries[index].ModifiedUnixMs = now
+                self.database.Entries[index].IsTemplate = false
+                self.database.Entries[index].RichText = nil
+                self.database.Entries[index].RichTextUpdatedUnixMs = now
+                if self.database.Entries[index].Group.isEmpty && !group.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.database.Entries[index].Group = self.canonicalGroupLocked(group)
+                }
+                savedID = targetID
+            } else {
+                let entry = ClipEntry(
+                    Text: mergedText,
+                    Group: self.canonicalGroupLocked(group),
+                    SourceMachine: self.machineName,
+                    CreatedUnixMs: now,
+                    LastUsedUnixMs: now,
+                    ModifiedUnixMs: now,
+                    ManualOrder: self.nextManualOrderLocked()
+                )
+                self.database.Entries.append(entry)
+                savedID = entry.Id
+            }
+            let partialIndex = firstTapID.isEmpty
+                ? newestMatchingIndex(firstTapText).flatMap { self.database.Entries[$0].Id == savedID ? nil : $0 }
+                : self.database.Entries.firstIndex(where: {
+                    $0.Id.caseInsensitiveCompare(firstTapID) == .orderedSame && $0.Id != savedID && !$0.Pinned
+                })
+            if let partialIndex {
+                let partial = self.database.Entries.remove(at: partialIndex)
+                SyncConflictResolver.addDeletedEntry(id: partial.Id, text: partial.Text, machineName: self.machineName, to: &self.database)
+            }
+            self.pruneLocked(maxEntries: 1000)
+            let saved = self.saveLocked()
+            Task { @MainActor in
+                if saved { self.delegate?.clipStoreDidChange() }
+                completion?(saved ? savedID : nil)
+            }
+        }
+    }
+
     func pushEntriesToOtherMachines(ids: [String]) {
         let idSet = Set(ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         guard !idSet.isEmpty else { return }
