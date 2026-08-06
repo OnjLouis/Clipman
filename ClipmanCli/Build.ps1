@@ -16,8 +16,8 @@ if ($outputRoot -eq $sourceRoot -or $outputRoot.StartsWith($sourceRoot + '\', [S
 $version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION') -Raw).Trim()
 if ([string]::IsNullOrWhiteSpace($version)) { throw 'VERSION is empty.' }
 $packageFiles = @(
-    @{ Source = Join-Path $PSScriptRoot 'Manual.html'; Destination = 'Manual.html' },
-    @{ Source = Join-Path $PSScriptRoot 'clipman-cli.1'; Destination = 'clipman-cli.1' },
+    @{ Source = Join-Path $PSScriptRoot 'Manual.html'; Destination = 'manual/Manual.html' },
+    @{ Source = Join-Path $PSScriptRoot 'clipman-cli.1'; Destination = 'manual/clipman-cli.1' },
     @{ Source = Join-Path (Split-Path -Parent $PSScriptRoot) 'LICENSE.txt'; Destination = 'LICENSE.txt' }
 )
 foreach ($file in $packageFiles) {
@@ -25,13 +25,16 @@ foreach ($file in $packageFiles) {
         throw "Required package file is missing: $($file.Source)"
     }
 }
+# Every binary is named clipman-cli and identified by its directory, so
+# installing one is a move rather than a rename.
 $targets = @(
-    @{ os = 'windows'; arch = 'amd64'; arm = '';  output = 'clipman-cli-windows-amd64.exe' },
-    @{ os = 'linux';   arch = 'amd64'; arm = '';  output = 'clipman-cli-linux-amd64' },
-    @{ os = 'linux';   arch = 'arm';   arm = '7'; output = 'clipman-cli-linux-armv7' },
-    @{ os = 'linux';   arch = 'arm64'; arm = '';  output = 'clipman-cli-linux-arm64' },
-    @{ os = 'darwin';  arch = 'amd64'; arm = '';  output = 'clipman-cli-macos-amd64' },
-    @{ os = 'darwin';  arch = 'arm64'; arm = '';  output = 'clipman-cli-macos-arm64' }
+    @{ os = 'windows'; arch = 'amd64'; arm = '';  directory = 'windows-amd64'; binary = 'clipman-cli.exe' },
+    @{ os = 'windows'; arch = 'arm64'; arm = '';  directory = 'windows-arm64'; binary = 'clipman-cli.exe' },
+    @{ os = 'linux';   arch = 'amd64'; arm = '';  directory = 'linux-amd64';   binary = 'clipman-cli' },
+    @{ os = 'linux';   arch = 'arm';   arm = '7'; directory = 'linux-armv7';   binary = 'clipman-cli' },
+    @{ os = 'linux';   arch = 'arm64'; arm = '';  directory = 'linux-arm64';   binary = 'clipman-cli' },
+    @{ os = 'darwin';  arch = 'amd64'; arm = '';  directory = 'macos-amd64';   binary = 'clipman-cli' },
+    @{ os = 'darwin';  arch = 'arm64'; arm = '';  directory = 'macos-arm64';   binary = 'clipman-cli' }
 )
 
 $staging = Join-Path $outputRoot 'staging'
@@ -56,7 +59,9 @@ try {
         $env:GOARCH = $target.arch
         if ($target.arm) { $env:GOARM = $target.arm }
         else { Remove-Item Env:GOARM -ErrorAction SilentlyContinue }
-        $destination = Join-Path $staging $target.output
+        $targetDirectory = Join-Path $staging $target.directory
+        New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
+        $destination = Join-Path $targetDirectory $target.binary
         & $GoExecutable build -trimpath -ldflags "-s -w -X main.version=$version" -o $destination ./cmd/clipman-cli
         if ($LASTEXITCODE -ne 0) { throw "Build failed for $($target.os)/$($target.arch)." }
     }
@@ -69,14 +74,19 @@ finally {
     }
 }
 
+# Paths stay relative with forward slashes so that `sha256sum -c SHA256SUMS`
+# verifies the whole package from its root on any platform.
 $records = foreach ($target in $targets) {
-    $path = Join-Path $staging $target.output
+    $relative = "$($target.directory)/$($target.binary)"
+    $path = Join-Path $staging $relative
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$hash  $($target.output)"
+    "$hash  $relative"
 }
 [IO.File]::WriteAllText((Join-Path $staging 'SHA256SUMS'), (($records | Sort-Object) -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
 foreach ($file in $packageFiles) {
-    Copy-Item -LiteralPath $file.Source -Destination (Join-Path $staging $file.Destination)
+    $destination = Join-Path $staging $file.Destination
+    New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+    Copy-Item -LiteralPath $file.Source -Destination $destination
 }
 
 $final = Join-Path $outputRoot "ClipmanCli-$version"

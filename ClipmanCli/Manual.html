@@ -150,13 +150,20 @@ clipman-cli get --kind templates --name today</code></pre>
     </table>
 
     <h2 id="files">Included Files</h2>
+    <p>Each platform has its own directory, and the program inside every one of them is called <code>clipman-cli</code>. Installing it is therefore a move, with no renaming step: pick the directory matching your operating system and architecture and copy the program out of it.</p>
     <table>
-      <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+      <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>clipman-cli-PLATFORM</code></td><td>Standalone command-line client for the named operating system and architecture.</td></tr>
-        <tr><td><code>Manual.html</code></td><td>This accessible manual.</td></tr>
-        <tr><td><code>clipman-cli.1</code></td><td>Unix manual page source.</td></tr>
-        <tr><td><code>SHA256SUMS</code></td><td>SHA-256 checksums for the supplied binaries.</td></tr>
+        <tr><td><code>windows-amd64/clipman-cli.exe</code></td><td>Windows on a 64-bit Intel or AMD processor.</td></tr>
+        <tr><td><code>windows-arm64/clipman-cli.exe</code></td><td>Windows on a 64-bit ARM processor.</td></tr>
+        <tr><td><code>macos-amd64/clipman-cli</code></td><td>macOS on an Intel processor.</td></tr>
+        <tr><td><code>macos-arm64/clipman-cli</code></td><td>macOS on Apple silicon.</td></tr>
+        <tr><td><code>linux-amd64/clipman-cli</code></td><td>Linux on a 64-bit Intel or AMD processor.</td></tr>
+        <tr><td><code>linux-arm64/clipman-cli</code></td><td>Linux on a 64-bit ARM processor.</td></tr>
+        <tr><td><code>linux-armv7/clipman-cli</code></td><td>Linux on a 32-bit ARMv7 processor.</td></tr>
+        <tr><td><code>manual/Manual.html</code></td><td>This accessible manual.</td></tr>
+        <tr><td><code>manual/clipman-cli.1</code></td><td>Unix manual page source.</td></tr>
+        <tr><td><code>SHA256SUMS</code></td><td>SHA-256 checksums for the supplied binaries. Run <code>sha256sum -c SHA256SUMS</code> from this directory to verify every one of them.</td></tr>
         <tr><td><code>LICENSE.txt</code></td><td>MIT licence terms.</td></tr>
       </tbody>
     </table>
@@ -164,6 +171,9 @@ clipman-cli get --kind templates --name today</code></pre>
     <h2 id="changelog">Changelog</h2>
     <h3>0.3.0 development preview</h3>
     <ul>
+      <li>Restructured the release package so each platform has its own directory holding a program simply called <code>clipman-cli</code>. Installing it is now a move instead of a rename.</li>
+      <li>Added a Windows ARM64 build.</li>
+      <li>Moved the manual and manual page into a <code>manual</code> directory.</li>
       <li>Fixed <code>get</code> and <code>rm</code> rejecting an option written after the index. <code>get 3 --json</code> and <code>rm 3 --yes</code> reported "only one index may be supplied" and now work as documented.</li>
       <li>Fixed <code>sync</code> reporting "History is current: 0 entries" when no database existed for the token and history password, which could hide a mistyped password. It now says so explicitly.</li>
       <li>Fixed a negative index reporting "entry not found" instead of a usage error.</li>

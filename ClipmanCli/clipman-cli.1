@@ -224,12 +224,30 @@ History password required or incorrect, or database authentication failed.
 .B 6
 Requested entry or database not found.
 .SH FILES
+The release package gives every platform its own directory and names the
+program
+.B clipman-cli
+inside each one, so installing it is a move rather than a rename. The
+directories are
+.IR windows-amd64 ,
+.IR windows-arm64 ,
+.IR macos-amd64 ,
+.IR macos-arm64 ,
+.IR linux-amd64 ,
+.IR linux-arm64 ,
+and
+.IR linux-armv7 .
 .TP
-.I Manual.html
+.I manual/Manual.html
 Accessible full manual supplied with the binaries.
 .TP
+.I manual/clipman-cli.1
+This manual page.
+.TP
 .I SHA256SUMS
-SHA-256 checksums for all supplied platform binaries.
+SHA-256 checksums for all supplied platform binaries. Run
+.B sha256sum -c SHA256SUMS
+from the package root to verify them.
 .TP
 .I LICENSE.txt
 MIT License terms.
