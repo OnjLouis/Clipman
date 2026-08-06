@@ -64,6 +64,7 @@ clipman-cli get --name deploy-command &gt; command.txt</code></pre>
         <tr><td><code>--insecure</code></td><td>Disable HTTPS certificate verification for the selected server. This is an explicit last resort for a trusted private network; it prints a warning and must not be used across an untrusted network.</td></tr>
         <tr><td><code>--json</code></td><td>Produce structured JSON where the selected command supports it.</td></tr>
         <tr><td><code>--quiet</code> or <code>-q</code></td><td>Suppress nonessential status messages. Security warnings remain visible.</td></tr>
+        <tr><td><code>--verbose</code></td><td>Write diagnostic messages to standard error: the configuration file in use, the server address, the short history-bucket fingerprint, and the revision and entry count of each download. It never writes the token, the history password, or the full database identifier. <code>--quiet</code> takes precedence.</td></tr>
         <tr><td><code>--version</code></td><td>Show the CLI version.</td></tr>
       </tbody>
     </table>
@@ -91,7 +92,10 @@ clipman-cli get --name deploy-command &gt; command.txt</code></pre>
     <pre><code>clipman-cli get 3
 clipman-cli get --id 0123456789abcdef0123456789abcdef
 clipman-cli get --search kubectl --first
-clipman-cli rm --name old-command --yes</code></pre>
+clipman-cli rm --name old-command --yes
+clipman-cli get 3 --json
+clipman-cli rm 3 --yes</code></pre>
+    <p>Command options may be written before or after the index, so <code>get 3 --json</code> and <code>get --json 3</code> are equivalent. To select an entry whose name or search text begins with a hyphen, put <code>--</code> before it.</p>
     <p>An ambiguous search is not treated as bulk deletion. Use a unique ID or a reviewed visible index.</p>
     <p>Clipman CLI preserves optional HTML and RTF fields created by Windows or Mac Rich Text history when it reads, merges, and writes shared entries. CLI output remains the authoritative plain-text fallback and does not emit rich clipboard formats.</p>
 
@@ -158,6 +162,16 @@ clipman-cli get --kind templates --name today</code></pre>
     </table>
 
     <h2 id="changelog">Changelog</h2>
+    <h3>0.3.0 development preview</h3>
+    <ul>
+      <li>Fixed <code>get</code> and <code>rm</code> rejecting an option written after the index. <code>get 3 --json</code> and <code>rm 3 --yes</code> reported "only one index may be supplied" and now work as documented.</li>
+      <li>Fixed <code>sync</code> reporting "History is current: 0 entries" when no database existed for the token and history password, which could hide a mistyped password. It now says so explicitly.</li>
+      <li>Fixed a negative index reporting "entry not found" instead of a usage error.</li>
+      <li>Fixed <code>--help</code> and <code>-h</code> being ignored when another option preceded them, so <code>get --json --help</code> now prints the command syntax and exits successfully.</li>
+      <li>Replaced the generated option dump printed on a usage error with the command's one-line syntax, which is shorter and clearer to read aloud.</li>
+      <li>Implemented <code>--verbose</code>, which was previously accepted and ignored, and documented it.</li>
+      <li><code>status --json</code> now reports <code>entries</code> as <code>null</code> rather than <code>-1</code> when <code>--refresh</code> was not used.</li>
+    </ul>
     <h3>0.2.0 development preview</h3>
     <ul>
       <li>Returned Clipman CLI to active development after practical server testing and community feedback.</li>

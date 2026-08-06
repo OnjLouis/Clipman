@@ -7,6 +7,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
+	"flag"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -18,6 +21,7 @@ import (
 	"time"
 
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/config"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/operation"
 )
 
 func testServerWithCertificateChain(t *testing.T) (*httptest.Server, *x509.Certificate, *x509.Certificate) {
@@ -133,6 +137,190 @@ func TestResolvePasswordRequiresNonblankValue(t *testing.T) {
 	password, err := resolvePassword(globals{password: optionalString{set: true, value: "test-password"}}, config.Default(), false)
 	if err != nil || password != "test-password" {
 		t.Fatalf("nonblank history password = %q, %v", password, err)
+	}
+}
+
+// captureStdout runs body with standard output redirected and returns what it
+// wrote, so usage tests do not pollute the test log.
+func captureStdout(t *testing.T, body func()) string {
+	t.Helper()
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdout
+	os.Stdout = write
+	done := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(read)
+		done <- string(data)
+	}()
+	body()
+	os.Stdout = saved
+	write.Close()
+	output := <-done
+	read.Close()
+	return output
+}
+
+// selectorFlags mirrors the option shapes that get and rm register: a mix of
+// options that take a value and options that do not.
+func selectorFlags() *flag.FlagSet {
+	fs := newFlagSet("get")
+	fs.String("id", "", "exact entry ID")
+	fs.String("kind", "history", "history, templates, or all")
+	fs.Bool("json", false, "write JSON output")
+	fs.Bool("touch", false, "mark the entry used")
+	return fs
+}
+
+func TestPermuteArgsAllowsOptionsAfterTheIndex(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"index then boolean option", []string{"0", "--json"}, []string{"--json", "--", "0"}},
+		{"index then option with a value", []string{"0", "--kind", "all"}, []string{"--kind", "all", "--", "0"}},
+		{"index between options", []string{"--touch", "3", "--json"}, []string{"--touch", "--json", "--", "3"}},
+		{"already in flag order", []string{"--json", "0"}, []string{"--json", "--", "0"}},
+		{"joined option value", []string{"0", "--kind=all"}, []string{"--kind=all", "--", "0"}},
+		{"no operands", []string{"--id", "abc", "--json"}, []string{"--id", "abc", "--json"}},
+		{"explicit separator is preserved", []string{"--json", "--", "0"}, []string{"--json", "--", "0"}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := permuteArgs(selectorFlags(), testCase.args)
+			if strings.Join(got, " ") != strings.Join(testCase.want, " ") {
+				t.Fatalf("permuteArgs(%q) = %q, want %q", testCase.args, got, testCase.want)
+			}
+		})
+	}
+}
+
+// permuteArgs must not swallow the value of an option, which would turn
+// `--id 0` into a selector with an empty ID and a stray index.
+func TestPermuteArgsKeepsOptionValuesAttached(t *testing.T) {
+	got := permuteArgs(selectorFlags(), []string{"--id", "0"})
+	if strings.Join(got, " ") != "--id 0" {
+		t.Fatalf("permuteArgs = %q, want %q", got, "--id 0")
+	}
+}
+
+// An undefined option keeps reaching Parse so that it is still reported as a
+// usage error rather than silently treated as an index.
+func TestPermuteArgsLeavesUndefinedOptionsForParse(t *testing.T) {
+	got := permuteArgs(selectorFlags(), []string{"--nope"})
+	if strings.Join(got, " ") != "--nope" {
+		t.Fatalf("permuteArgs = %q, want %q", got, "--nope")
+	}
+}
+
+func TestParseGetAcceptsOptionsAfterTheIndex(t *testing.T) {
+	var g globals
+	selector, kind, _, touch, _, _, err := parseGet([]string{"0", "--json", "--touch", "--kind", "all"}, config.Default(), &g)
+	if err != nil {
+		t.Fatalf("parseGet returned %v", err)
+	}
+	if selector.Index == nil || *selector.Index != 0 {
+		t.Fatalf("selector index = %v, want 0", selector.Index)
+	}
+	if kind != operation.All {
+		t.Fatalf("kind = %q, want %q", kind, operation.All)
+	}
+	if !touch {
+		t.Fatal("--touch after the index was not applied")
+	}
+	if !g.json {
+		t.Fatal("--json after the index was not applied")
+	}
+}
+
+func TestBuildSelectorRejectsNegativeIndex(t *testing.T) {
+	_, err := buildSelector([]string{"-1"}, "", "", "", false, false)
+	if err == nil || !strings.Contains(err.Error(), "non-negative") {
+		t.Fatalf("negative index error = %v", err)
+	}
+	var app appError
+	if !errors.As(err, &app) || app.code != 2 {
+		t.Fatalf("negative index exit code = %v, want 2", err)
+	}
+}
+
+func TestBuildSelectorRejectsCombinedSelectors(t *testing.T) {
+	if _, err := buildSelector([]string{"0"}, "some-id", "", "", false, false); err == nil {
+		t.Fatal("index combined with --id should fail")
+	}
+	if _, err := buildSelector([]string{"0", "1"}, "", "", "", false, false); err == nil {
+		t.Fatal("two indexes should fail")
+	}
+}
+
+func TestCommandHelpWorksAfterOtherOptions(t *testing.T) {
+	fs := selectorFlags()
+	var err error
+	output := captureStdout(t, func() {
+		err = parseCommandFlags(fs, "get", []string{"--json", "--help"})
+	})
+	if !errors.Is(err, errHelpRequested) {
+		t.Fatalf("parseCommandFlags returned %v, want errHelpRequested", err)
+	}
+	if !strings.Contains(output, "Usage: clipman-cli") {
+		t.Fatalf("help output = %q", output)
+	}
+	if printError(err) != 0 {
+		t.Fatal("requesting help must exit 0")
+	}
+}
+
+func TestEveryKnownCommandHasUsageText(t *testing.T) {
+	for _, command := range []string{"init", "status", "list", "get", "put", "rm", "sync", "pick", "menu", "help"} {
+		if !printCommandUsage(io.Discard, command) {
+			t.Fatalf("command %q has no usage text", command)
+		}
+	}
+	if printCommandUsage(io.Discard, "not-a-command") {
+		t.Fatal("unknown command reported usage text")
+	}
+}
+
+func captureStderr(t *testing.T, body func()) string {
+	t.Helper()
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = write
+	done := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(read)
+		done <- string(data)
+	}()
+	body()
+	os.Stderr = saved
+	write.Close()
+	output := <-done
+	read.Close()
+	return output
+}
+
+func TestVerboseDiagnosticsRequireTheOption(t *testing.T) {
+	quiet := captureStderr(t, func() { verbosef(globals{}, "server %s", "https://example.invalid") })
+	if quiet != "" {
+		t.Fatalf("diagnostics must stay off without --verbose, got %q", quiet)
+	}
+	suppressed := captureStderr(t, func() {
+		verbosef(globals{verbose: true, quiet: true}, "server %s", "https://example.invalid")
+	})
+	if suppressed != "" {
+		t.Fatalf("--quiet must win over --verbose, got %q", suppressed)
+	}
+	enabled := captureStderr(t, func() {
+		verbosef(globals{verbose: true}, "server %s", "https://example.invalid")
+	})
+	if !strings.Contains(enabled, "server https://example.invalid") {
+		t.Fatalf("verbose output = %q", enabled)
 	}
 }
 

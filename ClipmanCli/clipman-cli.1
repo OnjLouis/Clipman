@@ -100,6 +100,15 @@ be visible in the process list.
 .TP
 .B rm
 Delete exactly one entry and add a synchronization tombstone.
+.IP
+.B get
+and
+.B rm
+accept their index before or after the command options, so
+.B "get 3 --json"
+and
+.B "get --json 3"
+are equivalent.
 .TP
 .B pick
 Display a numbered list on the controlling terminal and write the selected
@@ -142,6 +151,14 @@ Produce structured JSON where supported.
 .TP
 .BR --quiet , " -q"
 Suppress nonessential status messages. Security warnings remain visible.
+.TP
+.B --verbose
+Write diagnostic messages to standard error: the configuration file in use, the
+server address, the short history-bucket fingerprint, and the revision and
+entry count of each download. It never writes the token, the history password,
+or the full database identifier.
+.B --quiet
+takes precedence.
 .TP
 .B --version
 Show the CLI version.

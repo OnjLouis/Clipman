@@ -47,6 +47,10 @@ func fail(code int, format string, args ...any) error {
 	return appError{code: code, err: fmt.Errorf(format, args...)}
 }
 
+// errHelpRequested reports that a command printed its own usage in response to
+// --help or -h. It is not a failure and must not be written to standard error.
+var errHelpRequested = errors.New("help requested")
+
 type optionalString struct {
 	value string
 	set   bool
@@ -146,7 +150,7 @@ func hasHelpOption(args []string) bool {
 	return len(args) > 0 && (args[0] == "--help" || args[0] == "-h")
 }
 func printError(err error) int {
-	if err == nil {
+	if err == nil || errors.Is(err, errHelpRequested) {
 		return 0
 	}
 	code := 1
@@ -231,6 +235,83 @@ func addOutputFlags(fs *flag.FlagSet, g *globals) {
 	fs.BoolVar(&g.quiet, "quiet", g.quiet, "suppress status messages")
 	fs.BoolVar(&g.quiet, "q", g.quiet, "suppress status messages")
 	fs.BoolVar(&g.verbose, "verbose", g.verbose, "write diagnostic status messages")
+}
+
+// newFlagSet builds a command flag set that writes nothing itself, so that
+// parseCommandFlags is the single place that reports usage and errors. The flag
+// package would otherwise repeat the error and add a long generated option
+// dump, which is unordered and reads poorly aloud in a screen reader.
+func newFlagSet(command string) *flag.FlagSet {
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	return fs
+}
+
+// parseCommandFlags parses args and turns a --help or -h anywhere in the
+// command line into the command's usage on standard output, so that
+// `get --json --help` behaves like `get --help`. Any other parse failure gets
+// the same one-line syntax on standard error, followed by the error itself.
+func parseCommandFlags(fs *flag.FlagSet, command string, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printCommandUsage(os.Stdout, command)
+			return errHelpRequested
+		}
+		printCommandUsage(os.Stderr, command)
+		return fail(2, "%v", err)
+	}
+	return nil
+}
+
+// permuteArgs moves positional operands behind the options so that options may
+// follow an index, as the documented syntax implies. The flag package stops at
+// the first operand, which would otherwise make `get 0 --json` read --json as a
+// second index and report a confusing "only one index may be supplied".
+func permuteArgs(fs *flag.FlagSet, args []string) []string {
+	options := make([]string, 0, len(args))
+	operands := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			operands = append(operands, args[i+1:]...)
+			break
+		}
+		if len(arg) < 2 || !strings.HasPrefix(arg, "-") {
+			operands = append(operands, arg)
+			continue
+		}
+		options = append(options, arg)
+		if strings.Contains(arg, "=") {
+			continue
+		}
+		defined := fs.Lookup(strings.TrimLeft(arg, "-"))
+		if defined == nil {
+			continue
+		}
+		if boolValue, ok := defined.Value.(interface{ IsBoolFlag() bool }); ok && boolValue.IsBoolFlag() {
+			continue
+		}
+		if i+1 < len(args) {
+			i++
+			options = append(options, args[i])
+		}
+	}
+	if len(operands) == 0 {
+		return options
+	}
+	// The separator keeps an operand that begins with "-" from being reparsed
+	// as an option once it has moved behind the options.
+	return append(append(options, "--"), operands...)
+}
+
+// verbosef writes a diagnostic line to standard error for --verbose. It never
+// reports a token, a password, or a full database identifier.
+func verbosef(g globals, format string, args ...any) {
+	if !g.verbose || g.quiet {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "clipman-cli: "+format+"\n", args...)
 }
 
 // tlsOptionsForGlobals resolves the TLS trust options to use for a connection,
@@ -399,6 +480,9 @@ func loadContext(g globals) (*appContext, error) {
 	if err != nil {
 		return nil, fail(2, "invalid server configuration: %v", err)
 	}
+	verbosef(g, "configuration %s", path)
+	verbosef(g, "server %s", serverURL)
+	verbosef(g, "history bucket %s", fingerprint(databaseID))
 	limits := clipdb.Limits{MaxBlobBytes: cfg.Limits.MaxBlobBytes, MaxJSONBytes: cfg.Limits.MaxJSONBytes, MaxEntries: cfg.Limits.MaxEntries, MaxTextBytes: cfg.Limits.MaxTextBytes}
 	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3}
 	return &appContext{globals: g, configPath: path, config: cfg, token: token, password: password, databaseID: databaseID, client: client, engine: engine}, nil
@@ -430,8 +514,7 @@ func resolvePassword(g globals, cfg config.Config, allowPrompt bool) (string, er
 }
 
 func runInit(g globals, args []string) error {
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet("init")
 	addOutputFlags(fs, &g)
 	tokenValue := fs.String("token", "", "server token (visible in process lists)")
 	tokenFile := fs.String("token-file", "", "read server token from a file")
@@ -440,8 +523,8 @@ func runInit(g globals, args []string) error {
 	machine := fs.String("machine", "", "source machine name")
 	nonInteractive := fs.Bool("non-interactive", false, "do not prompt")
 	force := fs.Bool("force", false, "replace existing configuration")
-	if err := fs.Parse(args); err != nil {
-		return fail(2, "%v", err)
+	if err := parseCommandFlags(fs, "init", args); err != nil {
+		return err
 	}
 	savePasswordExplicit := false
 	fs.Visit(func(f *flag.Flag) {
@@ -689,12 +772,11 @@ func runInit(g globals, args []string) error {
 }
 
 func runStatus(ctx *appContext, args []string) error {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet("status")
 	addOutputFlags(fs, &ctx.globals)
 	refresh := fs.Bool("refresh", false, "download and validate the database")
-	if err := fs.Parse(args); err != nil {
-		return fail(2, "%v", err)
+	if err := parseCommandFlags(fs, "status", args); err != nil {
+		return err
 	}
 	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -711,7 +793,9 @@ func runStatus(ctx *appContext, args []string) error {
 	if err != nil {
 		return mapRuntimeError("database status failed", err)
 	}
-	entries := -1
+	// entries stays null in JSON unless --refresh actually counted them, so a
+	// consumer cannot mistake "not counted" for a real count.
+	var entries any
 	if *refresh && exists {
 		state, readErr := ctx.engine.Read(callCtx)
 		if readErr != nil {
@@ -731,7 +815,7 @@ func runStatus(ctx *appContext, args []string) error {
 			return fail(1, "cannot write output: %v", err)
 		}
 	}
-	if entries >= 0 {
+	if entries != nil {
 		if _, err = fmt.Printf("Entries: %d\n", entries); err != nil {
 			return fail(1, "cannot write output: %v", err)
 		}
@@ -740,11 +824,10 @@ func runStatus(ctx *appContext, args []string) error {
 }
 
 func runSync(ctx *appContext, args []string) error {
-	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet("sync")
 	addOutputFlags(fs, &ctx.globals)
-	if err := fs.Parse(args); err != nil {
-		return fail(2, "%v", err)
+	if err := parseCommandFlags(fs, "sync", args); err != nil {
+		return err
 	}
 	if len(fs.Args()) > 0 {
 		return fail(2, "sync takes no positional arguments")
@@ -759,14 +842,20 @@ func runSync(ctx *appContext, args []string) error {
 		return writeJSON(map[string]any{"revision": state.Revision, "database_exists": state.Exists, "entries": len(state.Database.Entries), "uploaded": false})
 	}
 	if !ctx.globals.quiet {
-		fmt.Fprintf(os.Stderr, "History is current: %d entries.\n", len(state.Database.Entries))
+		// An absent database is not an empty history: it usually means the
+		// history password or token differs from the one that holds the data,
+		// so saying "history is current" here would hide a typed password.
+		if !state.Exists {
+			fmt.Fprintln(os.Stderr, "No history exists on the server for this token and history password yet.")
+		} else {
+			fmt.Fprintf(os.Stderr, "History is current: %d entries.\n", len(state.Database.Entries))
+		}
 	}
 	return nil
 }
 
 func runList(ctx *appContext, args []string) error {
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet("list")
 	addOutputFlags(fs, &ctx.globals)
 	count := fs.Int("n", 20, "maximum entries")
 	all := fs.Bool("all", false, "list all entries")
@@ -775,8 +864,8 @@ func runList(ctx *appContext, args []string) error {
 	kind := fs.String("kind", ctx.config.DefaultKind, "history, templates, or all")
 	pinned := fs.Bool("pinned-first", ctx.config.PinnedFirst, "show pinned entries first")
 	porcelain := fs.Bool("porcelain", false, "stable tab-separated output")
-	if err := fs.Parse(args); err != nil {
-		return fail(2, "%v", err)
+	if err := parseCommandFlags(fs, "list", args); err != nil {
+		return err
 	}
 	state, err := readState(ctx)
 	if err != nil {
@@ -880,8 +969,7 @@ func runGet(ctx *appContext, args []string) error {
 }
 
 func runPut(ctx *appContext, args []string) error {
-	fs := flag.NewFlagSet("put", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet("put")
 	addOutputFlags(fs, &ctx.globals)
 	file := fs.String("file", "", "read text from file")
 	textValue := fs.String("text", "", "text to store")
@@ -890,8 +978,8 @@ func runPut(ctx *appContext, args []string) error {
 	pin := fs.Bool("pin", false, "pin the entry")
 	template := fs.Bool("template", false, "create a template entry")
 	duplicate := fs.String("duplicate", "movetotop", "ignore, movetotop, or keep")
-	if err := fs.Parse(args); err != nil {
-		return fail(2, "%v", err)
+	if err := parseCommandFlags(fs, "put", args); err != nil {
+		return err
 	}
 	switch strings.ToLower(strings.TrimSpace(*duplicate)) {
 	case "ignore", "movetotop", "keep":
@@ -943,8 +1031,7 @@ func runPut(ctx *appContext, args []string) error {
 }
 
 func runRemove(ctx *appContext, args []string) error {
-	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet("rm")
 	addOutputFlags(fs, &ctx.globals)
 	id := fs.String("id", "", "exact entry ID")
 	name := fs.String("name", "", "exact entry name")
@@ -952,8 +1039,8 @@ func runRemove(ctx *appContext, args []string) error {
 	kindValue := fs.String("kind", ctx.config.DefaultKind, "history, templates, or all")
 	yes := fs.Bool("yes", false, "skip confirmation")
 	caseSensitive := fs.Bool("case-sensitive", false, "case-sensitive name/search")
-	if err := fs.Parse(args); err != nil {
-		return fail(2, "%v", err)
+	if err := parseCommandFlags(fs, "rm", permuteArgs(fs, args)); err != nil {
+		return err
 	}
 	selector, err := buildSelector(fs.Args(), *id, *name, *search, false, *caseSensitive)
 	if err != nil {
@@ -1109,14 +1196,13 @@ func runMenu(ctx *appContext, args []string) error {
 }
 
 func interactiveEntries(ctx *appContext, args []string, command string) ([]model.Entry, error) {
-	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet(command)
 	count := fs.Int("n", 20, "maximum entries")
 	all := fs.Bool("all", false, "show all entries")
 	kindValue := fs.String("kind", ctx.config.DefaultKind, "history, templates, or all")
 	pinned := fs.Bool("pinned-first", ctx.config.PinnedFirst, "show pinned entries first")
-	if err := fs.Parse(args); err != nil {
-		return nil, fail(2, "%v", err)
+	if err := parseCommandFlags(fs, command, args); err != nil {
+		return nil, err
 	}
 	if len(fs.Args()) != 0 {
 		return nil, fail(2, "%s takes no positional arguments", command)
@@ -1161,8 +1247,7 @@ func writeConsoleLine(value string) {
 }
 
 func parseGet(args []string, cfg config.Config, g *globals) (operation.Selector, operation.Kind, bool, bool, bool, bool, error) {
-	fs := flag.NewFlagSet("get", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newFlagSet("get")
 	addOutputFlags(fs, g)
 	id := fs.String("id", "", "exact entry ID")
 	name := fs.String("name", "", "exact entry name")
@@ -1175,8 +1260,8 @@ func parseGet(args []string, cfg config.Config, g *globals) (operation.Selector,
 	newline := fs.Bool("newline", false, "ensure a final LF")
 	raw := fs.Bool("raw", false, "do not resolve template variables")
 	fs.BoolVar(newline, "n", false, "ensure a final LF")
-	if err := fs.Parse(args); err != nil {
-		return operation.Selector{}, operation.History, false, false, false, false, fail(2, "%v", err)
+	if err := parseCommandFlags(fs, "get", permuteArgs(fs, args)); err != nil {
+		return operation.Selector{}, operation.History, false, false, false, false, err
 	}
 	parsedKind, err := operation.ParseKind(*kind)
 	if err != nil {
@@ -1202,7 +1287,7 @@ func buildSelector(args []string, id, name, search string, first, caseSensitive 
 	}
 	if len(args) == 1 {
 		value, err := strconv.Atoi(args[0])
-		if err != nil {
+		if err != nil || value < 0 {
 			return operation.Selector{}, fail(2, "index must be a non-negative number")
 		}
 		index = &value
@@ -1221,6 +1306,11 @@ func readState(ctx *appContext) (syncengine.State, error) {
 		return state, mapRuntimeError("history could not be loaded", err)
 	}
 	merge.Normalize(&state.Database, time.Now().UnixMilli())
+	if state.Exists {
+		verbosef(ctx.globals, "downloaded revision %s, %d entries", state.Revision, len(state.Database.Entries))
+	} else {
+		verbosef(ctx.globals, "no database exists for this token and history password")
+	}
 	return state, nil
 }
 func selectionError(err error) error {
@@ -1366,7 +1456,7 @@ func escape(value string) string {
 	return replacer.Replace(value)
 }
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Open the accessible line-based history manager\n  sync     Download and validate current history\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --version         Show version information")
+	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Open the accessible line-based history manager\n  sync     Download and validate current history\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --verbose         Write diagnostic messages to standard error\n  --version         Show version information")
 }
 
 func printCommandUsage(out io.Writer, command string) bool {
