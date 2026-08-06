@@ -365,10 +365,23 @@ namespace Clipman
 
         private static bool LooksOpaque(string value)
         {
-            if (string.IsNullOrEmpty(value) || value.Length < 32) return false;
+            if (string.IsNullOrEmpty(value) || value.Length < 32 || value.IndexOf(' ') >= 0) return false;
+            if (Regex.IsMatch(value, "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")) return true;
+            if (LooksLikeReadableSlug(value)) return false;
             var letters = value.Count(char.IsLetter);
             var digits = value.Count(char.IsDigit);
-            return letters >= 8 && digits >= 4 && !value.Contains(" ");
+            return letters >= 8 && digits >= 4;
+        }
+
+        private static bool LooksLikeReadableSlug(string value)
+        {
+            var slug = Regex.Replace(value ?? string.Empty, @"\.(?:html?|shtml)$", string.Empty, RegexOptions.IgnoreCase);
+            var parts = Regex.Split(slug, "[-_]+").Where(part => part.Length > 0).ToArray();
+            if (parts.Length < 5 || parts.Any(part => part.Length > 24)) return false;
+            if (parts.Any(part => !part.All(char.IsLetter) &&
+                !(part.Length <= 12 && part.All(char.IsDigit)) &&
+                !Regex.IsMatch(part, "^[A-Za-z]?[0-9]{4,12}$"))) return false;
+            return parts.Count(part => part.Length >= 3 && part.All(char.IsLetter)) >= 4;
         }
 
         private static bool IsSensitiveParameterName(string value)

@@ -156,6 +156,25 @@ enum LinkFetchSafety {
     private static func isOpaqueToken(_ value: String) -> Bool {
         let compact = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard compact.count >= 32, !compact.contains(where: \.isWhitespace) else { return false }
+        if compact.range(of: #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#, options: .regularExpression) != nil {
+            return true
+        }
+        let pageSuffixes = [".html", ".htm", ".shtml"]
+        let lowercased = compact.lowercased()
+        let slug = pageSuffixes.first(where: { lowercased.hasSuffix($0) })
+            .map { String(compact.dropLast($0.count)) } ?? compact
+        let parts = slug.split(whereSeparator: { $0 == "-" || $0 == "_" })
+        let readableWords = parts.filter { part in
+            part.count >= 3 && part.count <= 24 && part.allSatisfy(\.isLetter)
+        }
+        let readableParts = parts.allSatisfy { part in
+            let articleDigits = part.first?.isLetter == true ? part.dropFirst() : part[...]
+            let isArticleID = articleDigits.count >= 4 && articleDigits.count <= 12 && articleDigits.allSatisfy(\.isNumber)
+            return part.count <= 24 && (part.allSatisfy(\.isLetter) || isArticleID)
+        }
+        if parts.count >= 5, readableParts, readableWords.count >= 4 {
+            return false
+        }
         return compact.filter(\.isLetter).count >= 8 && compact.filter(\.isNumber).count >= 4
     }
 

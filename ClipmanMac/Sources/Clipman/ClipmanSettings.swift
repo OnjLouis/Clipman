@@ -36,6 +36,8 @@ struct ClipmanSettings: Codable, Equatable {
     var historyFilterType: String
     var deviceFilter: String
     var confirmDeletions: Bool
+    var confirmWebsiteTitleRequests: Bool
+    var autoNameCopiedWebsiteLinks: Bool
     var runAtStartup: Bool
     var captureClipboardOnStartup: Bool
     var rememberDatabasePassword: Bool
@@ -53,7 +55,7 @@ struct ClipmanSettings: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, clipMergeEnabled, clipMergeWindowMilliseconds, clipMergeSeparatorMode, clipMergeCustomSeparator, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
-        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, includeImagesInRichTextHistory, alsoAddCopiedImageFilesToRichTextHistory, groupFilter, historyFilterType, deviceFilter, confirmDeletions, runAtStartup
+        case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, includeImagesInRichTextHistory, alsoAddCopiedImageFilesToRichTextHistory, groupFilter, historyFilterType, deviceFilter, confirmDeletions, confirmWebsiteTitleRequests, autoNameCopiedWebsiteLinks, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
         case autoCopyLatestRemoteText, pasteAfterEnter, dynamicHistoryMode, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
@@ -99,6 +101,8 @@ struct ClipmanSettings: Codable, Equatable {
         historyFilterType: String,
         deviceFilter: String,
         confirmDeletions: Bool,
+        confirmWebsiteTitleRequests: Bool,
+        autoNameCopiedWebsiteLinks: Bool,
         runAtStartup: Bool,
         captureClipboardOnStartup: Bool,
         rememberDatabasePassword: Bool,
@@ -151,6 +155,8 @@ struct ClipmanSettings: Codable, Equatable {
         self.historyFilterType = historyFilterType
         self.deviceFilter = deviceFilter
         self.confirmDeletions = confirmDeletions
+        self.confirmWebsiteTitleRequests = confirmWebsiteTitleRequests
+        self.autoNameCopiedWebsiteLinks = autoNameCopiedWebsiteLinks
         self.runAtStartup = runAtStartup
         self.captureClipboardOnStartup = captureClipboardOnStartup
         self.rememberDatabasePassword = rememberDatabasePassword
@@ -209,6 +215,8 @@ struct ClipmanSettings: Codable, Equatable {
         historyFilterType = (try container.decodeIfPresent(String.self, forKey: .historyFilterType) ?? "Group").caseInsensitiveCompare("Device") == .orderedSame ? "Device" : "Group"
         deviceFilter = try container.decodeIfPresent(String.self, forKey: .deviceFilter) ?? "All"
         confirmDeletions = try container.decodeIfPresent(Bool.self, forKey: .confirmDeletions) ?? true
+        confirmWebsiteTitleRequests = try container.decodeIfPresent(Bool.self, forKey: .confirmWebsiteTitleRequests) ?? true
+        autoNameCopiedWebsiteLinks = try container.decodeIfPresent(Bool.self, forKey: .autoNameCopiedWebsiteLinks) ?? false
         runAtStartup = try container.decodeIfPresent(Bool.self, forKey: .runAtStartup) ?? false
         captureClipboardOnStartup = try container.decodeIfPresent(Bool.self, forKey: .captureClipboardOnStartup) ?? false
         rememberDatabasePassword = try container.decodeIfPresent(Bool.self, forKey: .rememberDatabasePassword) ?? false
@@ -281,6 +289,8 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(historyFilterType, forKey: .historyFilterType)
         try container.encode(deviceFilter, forKey: .deviceFilter)
         try container.encode(confirmDeletions, forKey: .confirmDeletions)
+        try container.encode(confirmWebsiteTitleRequests, forKey: .confirmWebsiteTitleRequests)
+        try container.encode(autoNameCopiedWebsiteLinks, forKey: .autoNameCopiedWebsiteLinks)
         try container.encode(runAtStartup, forKey: .runAtStartup)
         try container.encode(captureClipboardOnStartup, forKey: .captureClipboardOnStartup)
         try container.encode(rememberDatabasePassword, forKey: .rememberDatabasePassword)
@@ -333,6 +343,8 @@ struct ClipmanSettings: Codable, Equatable {
             historyFilterType: "Group",
             deviceFilter: "All",
             confirmDeletions: true,
+            confirmWebsiteTitleRequests: true,
+            autoNameCopiedWebsiteLinks: false,
             runAtStartup: false,
             captureClipboardOnStartup: false,
             rememberDatabasePassword: false,

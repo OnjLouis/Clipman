@@ -92,6 +92,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let alsoAddCopiedImageFilesCheckbox = NSButton(checkboxWithTitle: "Also add copied PNG and JPEG files to Rich Text history", target: nil, action: nil)
     private let includeImagesPrivacyLabel = NSTextField(wrappingLabelWithString: imageMetadataPrivacyText)
     private let confirmDeletionsCheckbox = NSButton(checkboxWithTitle: "Confirm before deleting entries", target: nil, action: nil)
+    private let confirmWebsiteTitleRequestsCheckbox = NSButton(checkboxWithTitle: "Ask before contacting a website for its title", target: nil, action: nil)
+    private let autoNameCopiedWebsiteLinksCheckbox = NSButton(checkboxWithTitle: "Automatically name copied website links from page headings", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
     private let updateFrequencyPopup = NSPopUpButton()
     private let sensitiveDataModePopup = NSPopUpButton()
@@ -277,6 +279,18 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         confirmDeletionsCheckbox.setAccessibilityLabel("Confirm before deleting entries")
         grid.addRow(with: [NSGridCell.emptyContentView, confirmDeletionsCheckbox])
 
+        confirmWebsiteTitleRequestsCheckbox.target = nil
+        confirmWebsiteTitleRequestsCheckbox.action = nil
+        confirmWebsiteTitleRequestsCheckbox.setAccessibilityLabel("Ask before contacting a website for its title")
+        confirmWebsiteTitleRequestsCheckbox.setAccessibilityHelp("When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog.")
+        grid.addRow(with: [NSGridCell.emptyContentView, confirmWebsiteTitleRequestsCheckbox])
+
+        autoNameCopiedWebsiteLinksCheckbox.target = nil
+        autoNameCopiedWebsiteLinksCheckbox.action = nil
+        autoNameCopiedWebsiteLinksCheckbox.setAccessibilityLabel("Automatically name copied website links from page headings")
+        autoNameCopiedWebsiteLinksCheckbox.setAccessibilityHelp("When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default.")
+        grid.addRow(with: [NSGridCell.emptyContentView, autoNameCopiedWebsiteLinksCheckbox])
+
         updateFrequencyPopup.addItems(withTitles: ["Never", "At startup", "Hourly", "Daily"])
         updateFrequencyPopup.setAccessibilityLabel("Check for updates")
         addRow("Check for updates", updateFrequencyPopup)
@@ -353,6 +367,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         alsoAddCopiedImageFilesCheckbox.state = settings.alsoAddCopiedImageFilesToRichTextHistory ? .on : .off
         updateImageHistoryAvailability()
         confirmDeletionsCheckbox.state = settings.confirmDeletions ? .on : .off
+        confirmWebsiteTitleRequestsCheckbox.state = settings.confirmWebsiteTitleRequests ? .on : .off
+        autoNameCopiedWebsiteLinksCheckbox.state = settings.autoNameCopiedWebsiteLinks ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
         updateFrequencyPopup.selectItem(withTitle: displayUpdateFrequency(settings.updateCheckFrequency))
         sensitiveDataModePopup.selectItem(withTitle: displaySensitiveDataMode(settings.sensitiveDataMode))
@@ -655,6 +671,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             alsoAddCopiedImageFilesEnabled: alsoAddCopiedImageFilesCheckbox.state == .on
         )
         settings.confirmDeletions = confirmDeletionsCheckbox.state == .on
+        settings.confirmWebsiteTitleRequests = confirmWebsiteTitleRequestsCheckbox.state == .on
+        settings.autoNameCopiedWebsiteLinks = autoNameCopiedWebsiteLinksCheckbox.state == .on
         settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled, richTextEnabled: settings.richTextHistoryEnabled)
         settings.installUpdatesSilently = installUpdatesSilentlyCheckbox.state == .on
         settings.updateCheckFrequency = storedUpdateFrequency(updateFrequencyPopup.titleOfSelectedItem ?? "Never")

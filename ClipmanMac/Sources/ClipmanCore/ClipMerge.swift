@@ -11,14 +11,16 @@ public struct ClipMergeObservation: Sendable {
     public var sourceApplication: String
     public var operation: String
     public var historyID: String
+    public var changeIdentifier: Int
     public var values: [String]
 
-    public init(kind: ClipMergeKind, signature: String, sourceApplication: String, operation: String = "", historyID: String = "", values: [String]) {
+    public init(kind: ClipMergeKind, signature: String, sourceApplication: String, operation: String = "", historyID: String = "", changeIdentifier: Int = 0, values: [String]) {
         self.kind = kind
         self.signature = signature
         self.sourceApplication = sourceApplication
         self.operation = operation
         self.historyID = historyID
+        self.changeIdentifier = changeIdentifier
         self.values = values
     }
 }
@@ -26,6 +28,7 @@ public struct ClipMergeObservation: Sendable {
 public struct ClipMergeDecision: Sendable {
     public var base: ClipMergeObservation?
     public var firstTap: ClipMergeObservation?
+    public var suppressDuplicate = false
     public var shouldMerge: Bool { base != nil && firstTap != nil }
 }
 
@@ -33,6 +36,8 @@ public struct ClipMergeDetector: Sendable {
     public static let defaultWindowMilliseconds = 500
     public static let minimumWindowMilliseconds = 200
     public static let maximumWindowMilliseconds = 2000
+    public static let duplicateNotificationMilliseconds: Int64 = 60
+    public static let mozillaDuplicateNotificationMilliseconds: Int64 = 500
 
     private var current: ClipMergeObservation?
     private var candidateBase: ClipMergeObservation?
@@ -50,6 +55,11 @@ public struct ClipMergeDetector: Sendable {
             return ClipMergeDecision()
         }
         let elapsed = nowMilliseconds - candidateStartedMilliseconds
+        if let first = candidateFirstTap, sameTap(first, incoming),
+           isDuplicateNotification(first, incoming, elapsed: elapsed) {
+            candidateStartedMilliseconds = nowMilliseconds
+            return ClipMergeDecision(suppressDuplicate: true)
+        }
         if let first = candidateFirstTap, let base = candidateBase,
            elapsed >= 0, elapsed <= Int64(window), sameTap(first, incoming), compatible(base, incoming) {
             candidateBase = nil
@@ -76,6 +86,12 @@ public struct ClipMergeDetector: Sendable {
         var value = merged
         value.historyID = historyID
         current = value
+        candidateBase = nil
+        candidateFirstTap = nil
+    }
+
+    public mutating func retainFirstTap(_ firstTap: ClipMergeObservation) {
+        current = firstTap
         candidateBase = nil
         candidateFirstTap = nil
     }
@@ -112,7 +128,34 @@ public struct ClipMergeDetector: Sendable {
             left.operation.caseInsensitiveCompare(right.operation) == .orderedSame
     }
 
+    private func isDuplicateNotification(_ left: ClipMergeObservation, _ right: ClipMergeObservation, elapsed: Int64) -> Bool {
+        if left.changeIdentifier != 0, right.changeIdentifier != 0 {
+            if left.changeIdentifier == right.changeIdentifier { return true }
+            return isMozillaApplication(left.sourceApplication) && elapsed >= 0 && elapsed < Self.mozillaDuplicateNotificationMilliseconds
+        }
+        let threshold = isMozillaApplication(left.sourceApplication)
+            ? Self.mozillaDuplicateNotificationMilliseconds
+            : Self.duplicateNotificationMilliseconds
+        return elapsed >= 0 && elapsed < threshold
+    }
+
+    private func isMozillaApplication(_ value: String) -> Bool {
+        let source = value.lowercased()
+        return source.contains("firefox") || source.contains("thunderbird")
+    }
+
     private func compatible(_ base: ClipMergeObservation, _ incoming: ClipMergeObservation) -> Bool {
-        base.kind == incoming.kind && (incoming.kind != .files || base.operation.caseInsensitiveCompare(incoming.operation) == .orderedSame)
+        base.kind == incoming.kind && base.signature != incoming.signature &&
+            (incoming.kind != .files || base.operation.caseInsensitiveCompare(incoming.operation) == .orderedSame)
+    }
+}
+
+public enum ClipMergeFilePolicy {
+    public static func sourcesAreAvailable(_ paths: [String]) -> Bool {
+        guard !paths.isEmpty else { return false }
+        return paths.allSatisfy { path in
+            let clean = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !clean.isEmpty && FileManager.default.fileExists(atPath: clean)
+        }
     }
 }

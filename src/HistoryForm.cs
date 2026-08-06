@@ -3046,16 +3046,22 @@ namespace Clipman
                 statusText.Text = reason;
                 return;
             }
-            var confirmation = MessageBox.Show(
-                "Clipman will contact " + uri.Host + " once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content.\r\n\r\nContinue?",
-                "Use website title as name",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Information,
-                MessageBoxDefaultButton.Button2);
-            if (confirmation != DialogResult.Yes)
+            if (settings.ConfirmWebsiteTitleRequests)
             {
-                statusText.Text = "Website title request cancelled.";
-                return;
+                bool suppressFuturePrompts;
+                if (!WebsiteTitleConfirmationForm.Ask(
+                    this,
+                    "Clipman will contact " + uri.Host + " once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content.",
+                    out suppressFuturePrompts))
+                {
+                    statusText.Text = "Website title request cancelled.";
+                    return;
+                }
+                if (suppressFuturePrompts)
+                {
+                    settings.ConfirmWebsiteTitleRequests = false;
+                    saveSettings();
+                }
             }
 
             linkTitleFetches.Add(entry.Id);

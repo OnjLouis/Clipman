@@ -34,6 +34,8 @@ namespace Clipman
         private readonly CheckBox active;
         private readonly TextBox deviceName;
         private readonly CheckBox confirmDeletions;
+        private readonly CheckBox confirmWebsiteTitleRequests;
+        private readonly CheckBox autoNameCopiedWebsiteLinks;
         private readonly CheckBox runAtStartup;
         private readonly CheckBox captureClipboardOnStartup;
         private readonly ComboBox updateCheckFrequency;
@@ -111,6 +113,10 @@ namespace Clipman
             deviceName.AccessibleName = "Device name";
             deviceName.AccessibleDescription = "Name recorded on new clipboard entries created by this device. Existing entries keep their original device name.";
             confirmDeletions = NewCheckBox("Confirm before deleting entr&ies", settings.ConfirmDeletions);
+            confirmWebsiteTitleRequests = NewCheckBox("Ask before contacting a website for its title (&J)", settings.ConfirmWebsiteTitleRequests);
+            confirmWebsiteTitleRequests.AccessibleDescription = "When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog.";
+            autoNameCopiedWebsiteLinks = NewCheckBox("Automatically name copied website links from page &headings", settings.AutoNameCopiedWebsiteLinks);
+            autoNameCopiedWebsiteLinks.AccessibleDescription = "When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default.";
             soundsEnabled = NewCheckBox("Play &sounds", settings.SoundsEnabled);
             clipMergeEnabled = NewCheckBox("T&urn on ClipMerge", settings.ClipMergeEnabled);
             clipMergeEnabled.AccessibleDescription = "When checked, copying the same text or file selection twice within the merge window appends it to the clipboard. This is off by default.";
@@ -173,6 +179,8 @@ namespace Clipman
             AddFullRow(generalLayout, active);
             AddRow(generalLayout, "Device la&bel:", deviceName);
             AddFullRow(generalLayout, confirmDeletions);
+            AddFullRow(generalLayout, confirmWebsiteTitleRequests);
+            AddFullRow(generalLayout, autoNameCopiedWebsiteLinks);
             AddFullRow(generalLayout, soundsEnabled);
             AddFullRow(generalLayout, clipMergeEnabled);
             AddRow(generalLayout, "Merge &window, milliseconds:", clipMergeWindow);
@@ -451,6 +459,8 @@ namespace Clipman
             active.CheckedChanged += (s, e) => ApplyNow();
             deviceName.Leave += (s, e) => ApplyNow();
             confirmDeletions.CheckedChanged += (s, e) => ApplyNow();
+            confirmWebsiteTitleRequests.CheckedChanged += (s, e) => ApplyNow();
+            autoNameCopiedWebsiteLinks.CheckedChanged += (s, e) => ApplyNow();
             autoRemoveUnavailableFileHistoryEvents.CheckedChanged += (s, e) => ApplyNow();
             diagnosticsFileHistoryLimit.ValueChanged += (s, e) => ApplyNow();
             runAtStartup.CheckedChanged += (s, e) => ApplyNow();
@@ -507,6 +517,8 @@ namespace Clipman
             settings.Active = active.Checked;
             settings.DeviceName = string.IsNullOrWhiteSpace(deviceName.Text) ? Environment.MachineName : deviceName.Text.Trim();
             settings.ConfirmDeletions = confirmDeletions.Checked;
+            settings.ConfirmWebsiteTitleRequests = confirmWebsiteTitleRequests.Checked;
+            settings.AutoNameCopiedWebsiteLinks = autoNameCopiedWebsiteLinks.Checked;
             settings.AutoRemoveUnavailableFileHistoryEvents = autoRemoveUnavailableFileHistoryEvents.Checked;
             settings.DiagnosticsFileHistoryLimit = (int)diagnosticsFileHistoryLimit.Value;
             settings.RunAtStartup = runAtStartup.Checked;
@@ -1119,6 +1131,8 @@ namespace Clipman
                 HistoryFilterType = current.HistoryFilterType,
                 DeviceFilter = current.DeviceFilter,
                 ConfirmDeletions = current.ConfirmDeletions,
+                ConfirmWebsiteTitleRequests = current.ConfirmWebsiteTitleRequests,
+                AutoNameCopiedWebsiteLinks = current.AutoNameCopiedWebsiteLinks,
                 DuplicateMode = current.DuplicateMode,
                 AutoGroupByApp = current.AutoGroupByApp,
                 AutoRemoveUrlTracking = current.AutoRemoveUrlTracking,

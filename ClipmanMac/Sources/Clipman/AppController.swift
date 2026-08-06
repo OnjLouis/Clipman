@@ -46,6 +46,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var databaseErrorAlertShown = false
     private var databasePasswordRecoveryInProgress = false
     private var websiteTitleFetches = Set<String>()
+    private var automaticWebsiteTitleQueue: [(id: String, text: String, host: String)] = []
+    private var automaticWebsiteTitleFetchRunning = false
 
     private var storageUnavailableReason: String {
         storageUnavailableReasons.values.sorted().joined(separator: "; ")
@@ -729,7 +731,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.saveCurrentContents()
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool) {
         guard storageUnavailableReason.isEmpty else {
             clipMergeDetector.reset()
             sounds.play(.skip)
@@ -745,7 +747,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         let capturedRichText = settings.richTextHistoryEnabled ? richText : nil
         let isEmbeddedImage = EmbeddedImageHTML.imageInfo(from: capturedRichText) != nil
-        let observation = ClipMergeObservation(kind: .text, signature: text, sourceApplication: sourceApplication, values: [text])
+        let observation = ClipMergeObservation(kind: .text, signature: text, sourceApplication: sourceApplication, changeIdentifier: changeIdentifier, values: [text])
         let decision = clipMergeDetector.observe(
             observation,
             nowMilliseconds: observedAtMilliseconds,
@@ -753,6 +755,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             windowMilliseconds: settings.clipMergeWindowMilliseconds,
             deliberate: deliberate
         )
+        if decision.suppressDuplicate {
+            return
+        }
         if decision.shouldMerge, let base = decision.base, let firstTap = decision.firstTap, let baseText = base.values.first {
             let mergedText = baseText + ClipMergeDetector.separator(mode: settings.clipMergeSeparatorMode, custom: settings.clipMergeCustomSeparator) + text
             store.mergeCapturedText(baseID: base.historyID, baseText: baseText, firstTapID: firstTap.historyID, firstTapText: text, mergedText: mergedText, group: sourceApplication) { [weak self] savedID in
@@ -782,6 +787,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 self.clipMergeDetector.setCurrentHistoryID(self.store.entryID(forText: text), matching: text)
                 self.rememberReceivedHistoryTab(capturedRichText != nil ? HistoryTabID.richText : LinkClassifier.isLinkOnlyText(text) ? HistoryTabID.links : HistoryTabID.text)
                 self.sounds.play(.copy)
+                if !deliberate {
+                    self.queueAutomaticWebsiteTitle(entryID: self.store.entryID(forText: text), text: text)
+                }
             case .refused(let reason):
                 self.reportImageRefusal(reason, deliberate: deliberate)
             case .failed:
@@ -813,7 +821,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         )
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool) {
         guard storageUnavailableReason.isEmpty else {
             clipMergeDetector.reset()
             sounds.play(.skip)
@@ -821,7 +829,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         let normalizedOperation = operation.isEmpty ? "Copy" : operation
         let signature = normalizedOperation.uppercased() + "\n" + files.map { $0.uppercased() }.sorted().joined(separator: "\n")
-        let observation = ClipMergeObservation(kind: .files, signature: signature, sourceApplication: sourceApplication, operation: normalizedOperation, values: files)
+        let observation = ClipMergeObservation(kind: .files, signature: signature, sourceApplication: sourceApplication, operation: normalizedOperation, changeIdentifier: changeIdentifier, values: files)
         let decision = clipMergeDetector.observe(
             observation,
             nowMilliseconds: observedAtMilliseconds,
@@ -829,7 +837,15 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             windowMilliseconds: settings.clipMergeWindowMilliseconds,
             deliberate: deliberate
         )
+        if decision.suppressDuplicate {
+            return
+        }
         if decision.shouldMerge, let base = decision.base, let firstTap = decision.firstTap {
+            if normalizedOperation.caseInsensitiveCompare("Move") == .orderedSame,
+               (!ClipMergeFilePolicy.sourcesAreAvailable(base.values) || !ClipMergeFilePolicy.sourcesAreAvailable(files)) {
+                clipMergeDetector.retainFirstTap(firstTap)
+                return
+            }
             var seen = Set<String>()
             let mergedFiles = (base.values + files).filter { seen.insert($0.lowercased()).inserted }
             fileStore.mergeCapturedEvents(baseID: base.historyID, baseFiles: base.values, firstTapID: firstTap.historyID, firstTapFiles: files, files: mergedFiles, formats: Array(Set(formats)).sorted(), containsText: true, source: sourceApplication, operation: normalizedOperation) { [weak self] savedID in
@@ -1472,13 +1488,23 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
 
         let host = validatedURL.host ?? "this website"
-        let alert = NSAlert()
-        alert.messageText = "Contact Website for Its Title?"
-        alert.informativeText = "Clipman will contact \(host) once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Use Website Title")
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        if settings.confirmWebsiteTitleRequests {
+            let alert = NSAlert()
+            alert.messageText = "Contact Website for Its Title?"
+            alert.informativeText = "Clipman will contact \(host) once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Use Website Title")
+            let suppress = NSButton(checkboxWithTitle: "Do not show this again", target: nil, action: nil)
+            suppress.setAccessibilityLabel("Do not show this again")
+            suppress.setAccessibilityHelp("Turn this confirmation off. You can turn it back on in Preferences.")
+            alert.accessoryView = suppress
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+            if suppress.state == .on {
+                settings.confirmWebsiteTitleRequests = false
+                try? settingsStore.save(settings)
+            }
+        }
 
         websiteTitleFetches.insert(current.Id)
         WebsiteTitleFetcher.fetch(urlText: current.Text) { [weak self] result in
@@ -1510,6 +1536,65 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 }
             }
         }
+    }
+
+    private func queueAutomaticWebsiteTitle(entryID: String, text: String) {
+        guard settings.autoNameCopiedWebsiteLinks,
+              !entryID.isEmpty,
+              let entry = store.entry(id: entryID),
+              entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              entry.Text == text,
+              LinkClassifier.isLinkOnlyText(text),
+              !websiteTitleFetches.contains(entryID),
+              automaticWebsiteTitleQueue.count < 8,
+              let validated = try? LinkFetchSafety.validatedURL(text, resolveHost: false)
+        else { return }
+        websiteTitleFetches.insert(entryID)
+        automaticWebsiteTitleQueue.append((entryID, text, validated.host ?? "this website"))
+        processNextAutomaticWebsiteTitle()
+    }
+
+    private func processNextAutomaticWebsiteTitle() {
+        guard !automaticWebsiteTitleFetchRunning, !automaticWebsiteTitleQueue.isEmpty else { return }
+        let request = automaticWebsiteTitleQueue.removeFirst()
+        guard settings.autoNameCopiedWebsiteLinks else {
+            websiteTitleFetches.remove(request.id)
+            processNextAutomaticWebsiteTitle()
+            return
+        }
+        automaticWebsiteTitleFetchRunning = true
+        WebsiteTitleFetcher.fetch(urlText: request.text) { [weak self] result in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
+                    RuntimeLogger.write("Automatic website title lookup failed.", error: error, details: "Host: \(request.host)")
+                    self.finishAutomaticWebsiteTitle(request.id)
+                case .success(let title):
+                    guard self.settings.autoNameCopiedWebsiteLinks,
+                          let latest = self.store.entry(id: request.id),
+                          latest.Text == request.text,
+                          latest.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    else {
+                        self.finishAutomaticWebsiteTitle(request.id)
+                        return
+                    }
+                    self.store.setNameIfEmpty(id: request.id, expectedText: request.text, name: title) { [weak self] saved in
+                        guard let self else { return }
+                        if !saved {
+                            RuntimeLogger.write("Automatic website title was not applied because the entry changed.")
+                        }
+                        self.finishAutomaticWebsiteTitle(request.id)
+                    }
+                }
+            }
+        }
+    }
+
+    private func finishAutomaticWebsiteTitle(_ entryID: String) {
+        websiteTitleFetches.remove(entryID)
+        automaticWebsiteTitleFetchRunning = false
+        processNextAutomaticWebsiteTitle()
     }
 
     func historyWindow(_ controller: HistoryWindowController, didCleanLinksForSharing entries: [ClipEntry]) {

@@ -1,1 +1,6 @@
 *.sh text eol=lf
+ClipmanLinux/*.desktop text eol=lf
+ClipmanLinux/*.xml text eol=lf
+ClipmanLinux/*.py text eol=lf
+ClipmanLinux/VERSION text eol=lf
+ClipmanLinux/clipman-linux text eol=lf

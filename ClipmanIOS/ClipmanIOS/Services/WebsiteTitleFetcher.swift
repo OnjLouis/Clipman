@@ -77,6 +77,25 @@ enum WebsiteTitlePolicy {
     private static func looksLikeSecret(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 32, !trimmed.contains(where: \.isWhitespace) else { return false }
+        if trimmed.range(of: #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#, options: .regularExpression) != nil {
+            return true
+        }
+        let pageSuffixes = [".html", ".htm", ".shtml"]
+        let lowercased = trimmed.lowercased()
+        let slug = pageSuffixes.first(where: { lowercased.hasSuffix($0) })
+            .map { String(trimmed.dropLast($0.count)) } ?? trimmed
+        let parts = slug.split(whereSeparator: { $0 == "-" || $0 == "_" })
+        let readableWords = parts.filter { part in
+            part.count >= 3 && part.count <= 24 && part.allSatisfy(\.isLetter)
+        }
+        let readableParts = parts.allSatisfy { part in
+            let articleDigits = part.first?.isLetter == true ? part.dropFirst() : part[...]
+            let isArticleID = articleDigits.count >= 4 && articleDigits.count <= 12 && articleDigits.allSatisfy(\.isNumber)
+            return part.count <= 24 && (part.allSatisfy(\.isLetter) || isArticleID)
+        }
+        if parts.count >= 5, readableParts, readableWords.count >= 4 {
+            return false
+        }
         return trimmed.filter(\.isLetter).count >= 8 && trimmed.filter(\.isNumber).count >= 4
     }
 

@@ -20,6 +20,7 @@ namespace Clipman.Tests
             Run("bounded exact reads handle partial streams", BoundedExactReadsHandlePartialStreams);
             Run("encrypted database round trip", EncryptedDatabaseRoundTrip);
             Run("URL length is bounded before presentation or fetch", UrlLengthIsBounded);
+            Run("website title safety distinguishes readable slugs from capability tokens", WebsiteTitleSafetyDistinguishesReadableSlugs);
             Run("link labels remove unsafe Unicode categories", LinkLabelsRemoveUnsafeUnicode);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
@@ -27,6 +28,7 @@ namespace Clipman.Tests
             Run("copied image files use the bounded Rich Text image path", CopiedImageFilesUseBoundedRichTextPath);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("ClipMerge requires a deliberate matching second clipboard event", ClipMergeRequiresMatchingSecondEvent);
+            Run("ClipMerge coalesces duplicates and rejects stale cut sources", ClipMergeCoalescesDuplicatesAndRejectsStaleCuts);
             Run("ClipMerge rejects mixed and mismatched file operations", ClipMergeRejectsUnsafeCombinations);
             Run("ClipMerge settings are conservative", ClipMergeSettingsAreConservative);
             Run("ClipMerge replaces partial entries without modifying pins", ClipMergePreservesPinnedEntriesAndRemovesPartials);
@@ -112,6 +114,22 @@ namespace Clipman.Tests
             Assert(title == expected, "Website title sanitization was not consistent with offline labels: " + title);
             Assert(!ContainsForbiddenLabelCharacter(offline), "Offline label retained a prohibited Unicode category.");
             Assert(!ContainsForbiddenLabelCharacter(title), "Website title retained a prohibited Unicode category.");
+        }
+
+        private static void WebsiteTitleSafetyDistinguishesReadableSlugs()
+        {
+            var readable = new Uri("https://example.org/a-long-human-readable-article-title-with-2026-and-many-words?utm_source=share");
+            var readableWithArticleID = new Uri("https://nautil.us/a-new-toad-species-emerges-from-the-la-brea-tar-pits-1283396?utm_source=firefox-newtab-en-gb");
+            var readableWithPrefixedArticleID = new Uri("https://www.independent.co.uk/news/science/monkeys-primates-friendships-animals-b3028129.html?utm_source=firefox-newtab-en-gb");
+            var opaque = new Uri("https://example.org/download/Az19Qw82Er73Ty64Ui50Op21Lm98Qr76");
+            var uuid = new Uri("https://example.org/download/550e8400-e29b-41d4-a716-446655440000");
+            var reset = new Uri("https://example.org/page?reset_token=value");
+            Assert(!LinkTitleFetcher.IsCapabilityUrl(readable), "A readable article slug was mistaken for a private capability URL.");
+            Assert(!LinkTitleFetcher.IsCapabilityUrl(readableWithArticleID), "A readable article slug with a numeric article ID was mistaken for a private capability URL.");
+            Assert(!LinkTitleFetcher.IsCapabilityUrl(readableWithPrefixedArticleID), "A readable article filename with a prefixed numeric ID was mistaken for a private capability URL.");
+            Assert(LinkTitleFetcher.IsCapabilityUrl(opaque), "An uninterrupted opaque path token was accepted.");
+            Assert(LinkTitleFetcher.IsCapabilityUrl(uuid), "A UUID-like path token was accepted.");
+            Assert(LinkTitleFetcher.IsCapabilityUrl(reset), "A reset-token query was accepted.");
         }
 
         private static void ImagePreviewIsKeyboardFocusable()
@@ -334,10 +352,84 @@ namespace Clipman.Tests
                 "A deliberate one-shot save activated ClipMerge.");
         }
 
+        private static void ClipMergeCoalescesDuplicatesAndRejectsStaleCuts()
+        {
+            var detector = new ClipMergeDetector();
+            detector.Observe(Observation(ClipMergeKind.Text, "A", "Writer", "", "a"), 1000, true, 500, false);
+            detector.SetCurrentHistoryId("a");
+            var firstCopy = Observation(ClipMergeKind.Text, "B", "Writer", "", "b");
+            firstCopy.ChangeIdentifier = 20;
+            detector.Observe(firstCopy, 2000, true, 500, false);
+            detector.SetCurrentHistoryId("b");
+            var repeatedNotification = Observation(ClipMergeKind.Text, "B", "Writer", "", "");
+            repeatedNotification.ChangeIdentifier = 20;
+            var duplicate = detector.Observe(repeatedNotification, 2040, true, 500, false);
+            Assert(duplicate.SuppressDuplicate && !duplicate.ShouldMerge,
+                "One copy command reported twice was treated as a deliberate ClipMerge gesture.");
+            var secondCopy = Observation(ClipMergeKind.Text, "B", "Writer", "", "");
+            secondCopy.ChangeIdentifier = 21;
+            var deliberateSecondCopy = detector.Observe(secondCopy, 2050, true, 500, false);
+            Assert(deliberateSecondCopy.ShouldMerge,
+                "A new clipboard sequence was suppressed merely because the deliberate second copy arrived quickly.");
+
+            detector.Reset();
+            detector.Observe(Observation(ClipMergeKind.Text, "A", "Thunderbird", "", "a"), 1000, true, 1000, false);
+            detector.SetCurrentHistoryId("a");
+            var mozillaFirst = Observation(ClipMergeKind.Text, "B", "Thunderbird", "", "b");
+            mozillaFirst.ChangeIdentifier = 30;
+            detector.Observe(mozillaFirst, 2000, true, 1000, false);
+            detector.SetCurrentHistoryId("b");
+            var mozillaAutomaticRepeat = Observation(ClipMergeKind.Text, "B", "Thunderbird", "", "");
+            mozillaAutomaticRepeat.ChangeIdentifier = 31;
+            Assert(detector.Observe(mozillaAutomaticRepeat, 2250, true, 1000, false).SuppressDuplicate,
+                "Thunderbird's delayed second clipboard write was treated as a deliberate merge gesture.");
+            var mozillaDeliberateRepeat = Observation(ClipMergeKind.Text, "B", "Thunderbird", "", "");
+            mozillaDeliberateRepeat.ChangeIdentifier = 32;
+            Assert(detector.Observe(mozillaDeliberateRepeat, 2800, true, 1000, false).ShouldMerge,
+                "A later deliberate Mozilla copy remained blocked after the fixed duplicate guard expired.");
+
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanCutMerge-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var oldPath = Path.Combine(directory, "old.txt");
+                var newPath = Path.Combine(directory, "new.txt");
+                File.WriteAllText(oldPath, "old");
+                File.WriteAllText(newPath, "new");
+
+                detector.Reset();
+                var firstCut = Observation(ClipMergeKind.Files, "old", "Explorer", "Move", "old");
+                firstCut.ChangeIdentifier = 30;
+                detector.Observe(firstCut, 3000, true, 500, false);
+                var repeatedCutObservation = Observation(ClipMergeKind.Files, "old", "Explorer", "Move", "");
+                repeatedCutObservation.ChangeIdentifier = 30;
+                var repeatedCut = detector.Observe(repeatedCutObservation, 3100, true, 500, false);
+                Assert(!repeatedCut.ShouldMerge && repeatedCut.SuppressDuplicate,
+                    "A duplicate cut notification was not coalesced.");
+                var nextCut = Observation(ClipMergeKind.Files, "new", "Explorer", "Move", "new");
+                nextCut.ChangeIdentifier = 40;
+                detector.Observe(nextCut, 4000, true, 500, false);
+                var repeatedNextCut = Observation(ClipMergeKind.Files, "new", "Explorer", "Move", "");
+                repeatedNextCut.ChangeIdentifier = 41;
+                var liveCutMerge = detector.Observe(repeatedNextCut, 4010, true, 500, false);
+                Assert(liveCutMerge.ShouldMerge, "Two live cut selections could not enter ClipMerge.");
+                Assert(ClipMergeFilePolicy.AreSourcesAvailable(new[] { oldPath, newPath }), "Existing cut sources were rejected.");
+                File.Delete(oldPath);
+                Assert(!ClipMergeFilePolicy.AreSourcesAvailable(new[] { oldPath, newPath }), "A moved cut source was still considered mergeable.");
+                detector.RetainFirstTap(liveCutMerge.FirstTap);
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
         private static void ClipMergeSettingsAreConservative()
         {
             var settings = new AppSettings();
             Assert(!settings.ClipMergeEnabled, "ClipMerge must default to off.");
+            Assert(settings.ConfirmWebsiteTitleRequests, "Manual website-title requests must ask by default.");
+            Assert(!settings.AutoNameCopiedWebsiteLinks, "Automatic website-title naming must default to off.");
             Assert(settings.ClipMergeWindowMilliseconds == 500, "ClipMerge must default to a 500 millisecond window.");
             Assert(ClipMergeDetector.NormalizeWindow(1) == 200 && ClipMergeDetector.NormalizeWindow(9999) == 2000,
                 "ClipMerge window bounds are not enforced.");

@@ -38,6 +38,10 @@ namespace Clipman
         private readonly Thread toggleThread;
         private readonly ClipboardFloodGuardRegistry clipboardFloodGuards = new ClipboardFloodGuardRegistry();
         private readonly ClipMergeDetector clipMergeDetector = new ClipMergeDetector();
+        private readonly object automaticWebsiteTitleLock = new object();
+        private readonly Queue<AutomaticWebsiteTitleRequest> automaticWebsiteTitleQueue = new Queue<AutomaticWebsiteTitleRequest>();
+        private readonly HashSet<string> automaticWebsiteTitleEntryIds = new HashSet<string>(StringComparer.Ordinal);
+        private bool automaticWebsiteTitleWorkerRunning;
         private FileSystemWatcher sharedStateWatcher;
         private FileSystemWatcher executableWatcher;
         private System.Threading.Timer sharedStateTimer;
@@ -67,6 +71,13 @@ namespace Clipman
         private IntPtr previousForegroundWindow = IntPtr.Zero;
         private string lastReceivedHistoryTab = HistoryTabs.Text;
         private bool receivedHistoryTabPending;
+
+        private sealed class AutomaticWebsiteTitleRequest
+        {
+            public string EntryId { get; set; }
+            public string OriginalText { get; set; }
+            public Uri Uri { get; set; }
+        }
 
         public ClipmanApplicationContext()
         {
@@ -419,6 +430,8 @@ namespace Clipman
             settings.DeviceFilter = updated.DeviceFilter;
             settings.DeviceName = updated.DeviceName;
             settings.ConfirmDeletions = updated.ConfirmDeletions;
+            settings.ConfirmWebsiteTitleRequests = updated.ConfirmWebsiteTitleRequests;
+            settings.AutoNameCopiedWebsiteLinks = updated.AutoNameCopiedWebsiteLinks;
             settings.DuplicateMode = updated.DuplicateMode;
             settings.AutoGroupByApp = updated.AutoGroupByApp;
             settings.AutoRemoveUrlTracking = updated.AutoRemoveUrlTracking;
@@ -583,6 +596,75 @@ namespace Clipman
             sounds.Copy(settings.SoundsEnabled);
         }
 
+        private void QueueAutomaticWebsiteTitle(ClipEntry entry, bool deliberate)
+        {
+            if (deliberate || !settings.AutoNameCopiedWebsiteLinks || entry == null ||
+                !string.IsNullOrWhiteSpace(entry.Name) || string.IsNullOrWhiteSpace(entry.Id)) return;
+            Uri uri;
+            string reason;
+            if (!LinkPresentation.TryGetUri(entry, out uri) || !LinkTitleFetcher.CanOffer(uri, out reason)) return;
+
+            var startWorker = false;
+            lock (automaticWebsiteTitleLock)
+            {
+                if (automaticWebsiteTitleEntryIds.Contains(entry.Id) || automaticWebsiteTitleQueue.Count >= 8) return;
+                automaticWebsiteTitleEntryIds.Add(entry.Id);
+                automaticWebsiteTitleQueue.Enqueue(new AutomaticWebsiteTitleRequest
+                {
+                    EntryId = entry.Id,
+                    OriginalText = entry.Text ?? string.Empty,
+                    Uri = uri
+                });
+                if (!automaticWebsiteTitleWorkerRunning)
+                {
+                    automaticWebsiteTitleWorkerRunning = true;
+                    startWorker = true;
+                }
+            }
+            if (startWorker) ThreadPool.QueueUserWorkItem(_ => ProcessAutomaticWebsiteTitles());
+        }
+
+        private void ProcessAutomaticWebsiteTitles()
+        {
+            while (true)
+            {
+                AutomaticWebsiteTitleRequest request;
+                lock (automaticWebsiteTitleLock)
+                {
+                    if (automaticWebsiteTitleQueue.Count == 0)
+                    {
+                        automaticWebsiteTitleWorkerRunning = false;
+                        return;
+                    }
+                    request = automaticWebsiteTitleQueue.Dequeue();
+                }
+
+                if (!settings.AutoNameCopiedWebsiteLinks)
+                {
+                    lock (automaticWebsiteTitleLock) automaticWebsiteTitleEntryIds.Remove(request.EntryId);
+                    continue;
+                }
+
+                var result = LinkTitleFetcher.Fetch(request.Uri);
+                BeginInvokeIfReady(() => CompleteAutomaticWebsiteTitle(request, result));
+            }
+        }
+
+        private void CompleteAutomaticWebsiteTitle(AutomaticWebsiteTitleRequest request, LinkTitleFetchResult result)
+        {
+            lock (automaticWebsiteTitleLock) automaticWebsiteTitleEntryIds.Remove(request.EntryId);
+            if (!settings.AutoNameCopiedWebsiteLinks) return;
+            if (!result.Success)
+            {
+                Program.WriteRuntimeLog("Automatic website title lookup failed for " + request.Uri.Host + ".", new InvalidOperationException(result.Error));
+                return;
+            }
+            if (!store.TrySetNameIfUnchanged(request.EntryId, request.OriginalText, result.Title))
+            {
+                Program.WriteRuntimeLog("Automatic website title was not applied because the entry changed.", null);
+            }
+        }
+
         public void CopyEntriesToClipboard(List<ClipEntry> entries)
         {
             if (entries == null || entries.Count == 0) return;
@@ -633,8 +715,12 @@ namespace Clipman
             HandleClipboardUpdate(true);
         }
 
-        internal void HandleClipboardUpdate(bool deliberate = false)
+        internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0)
         {
+            if (!deliberate && clipboardSequence == 0)
+            {
+                clipboardSequence = NativeMethods.GetClipboardSequenceNumber();
+            }
             if (!deliberate && ignoredClipboardChangeCount > 0)
             {
                 ignoredClipboardChangeCount--;
@@ -730,7 +816,7 @@ namespace Clipman
             }
             if (fileSummary != null)
             {
-                HandleCapturedFileEvent(fileSummary, sourceProcessName, deliberate);
+                HandleCapturedFileEvent(fileSummary, sourceProcessName, deliberate, clipboardSequence);
                 if (settings.RichTextHistoryEnabled && settings.IncludeImagesInRichText && settings.AutoAddImageFilesToRichText)
                 {
                     string imageFilePath;
@@ -811,6 +897,7 @@ namespace Clipman
                 Kind = ClipMergeKind.Text,
                 Signature = rawText,
                 SourceApplication = NormalizeProcessName(sourceProcessName),
+                ChangeIdentifier = clipboardSequence,
                 Payload = text
             };
             var mergeDecision = clipMergeDetector.Observe(
@@ -819,6 +906,10 @@ namespace Clipman
                 settings.ClipMergeEnabled,
                 settings.ClipMergeWindowMilliseconds,
                 deliberate);
+            if (mergeDecision.SuppressDuplicate)
+            {
+                return;
+            }
             ClipEntry storedEntry;
             if (mergeDecision.ShouldMerge)
             {
@@ -863,6 +954,7 @@ namespace Clipman
             RememberReceivedHistoryTab(richText != null ? HistoryTabs.RichText : LinkClassifier.IsLinkOnlyText(text) ? HistoryTabs.Links : HistoryTabs.Text);
 
             sounds.Copy(settings.SoundsEnabled);
+            QueueAutomaticWebsiteTitle(storedEntry, deliberate);
         }
 
         private void AddCopiedImageFileToRichTextAsync(string path, string sourceProcessName)
@@ -903,7 +995,7 @@ namespace Clipman
             receivedHistoryTabPending = true;
         }
 
-        private void HandleCapturedFileEvent(ClipboardEventSummary summary, string sourceProcessName, bool deliberate)
+        private void HandleCapturedFileEvent(ClipboardEventSummary summary, string sourceProcessName, bool deliberate, uint clipboardSequence)
         {
             if (summary == null || summary.Files == null || summary.Files.Count == 0) return;
             if (string.IsNullOrWhiteSpace(summary.Operation)) summary.Operation = "Copy";
@@ -913,6 +1005,7 @@ namespace Clipman
                 Signature = FileMergeSignature(summary.Files, summary.Operation),
                 SourceApplication = NormalizeProcessName(sourceProcessName),
                 Operation = summary.Operation,
+                ChangeIdentifier = clipboardSequence,
                 Payload = CloneClipboardEvent(summary)
             };
             var decision = clipMergeDetector.Observe(
@@ -922,11 +1015,23 @@ namespace Clipman
                 settings.ClipMergeWindowMilliseconds,
                 deliberate);
 
+            if (decision.SuppressDuplicate)
+            {
+                return;
+            }
+
             if (decision.ShouldMerge)
             {
                 var baseSummary = decision.Base.Payload as ClipboardEventSummary;
                 if (baseSummary != null)
                 {
+                    if (string.Equals(summary.Operation, "Move", StringComparison.OrdinalIgnoreCase) &&
+                        (!ClipMergeFilePolicy.AreSourcesAvailable(baseSummary.Files) ||
+                         !ClipMergeFilePolicy.AreSourcesAvailable(summary.Files)))
+                    {
+                        clipMergeDetector.RetainFirstTap(decision.FirstTap);
+                        return;
+                    }
                     var mergedFiles = baseSummary.Files
                         .Concat(summary.Files)
                         .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -2843,7 +2948,7 @@ namespace Clipman
 
                 if (m.Msg == NativeMethods.WM_CLIPBOARDUPDATE)
                 {
-                    app.HandleClipboardUpdate();
+                    app.HandleClipboardUpdate(false, NativeMethods.GetClipboardSequenceNumber());
                     return;
                 }
 

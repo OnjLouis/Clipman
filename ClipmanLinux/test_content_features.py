@@ -351,10 +351,11 @@ class EmbeddedImageTests(unittest.TestCase):
 
 class ClipMergeTests(unittest.TestCase):
     @staticmethod
-    def observation(kind="text", signature="value", source="Writer", operation="", history_id=""):
+    def observation(kind="text", signature="value", source="Writer", operation="", history_id="", values=None):
         return {
             "kind": kind, "signature": signature, "source": source,
-            "operation": operation, "history_id": history_id, "values": [signature],
+            "operation": operation, "history_id": history_id,
+            "values": list(values) if values is not None else [signature],
         }
 
     def test_requires_matching_second_change_from_same_application(self):
@@ -377,6 +378,42 @@ class ClipMergeTests(unittest.TestCase):
         self.assertIsNone(detector.observe(self.observation(kind="files", signature="next", operation="copy"), 2200, True, 500, False))
         self.assertIsNone(detector.observe(self.observation(signature="value"), 2300, True, 500, True))
 
+    def test_coalesces_duplicates_and_rejects_stale_cut_sources(self):
+        detector = clipman.ClipMergeDetector()
+        detector.observe(self.observation(signature="A", history_id="a"), 1000, True, 500, False)
+        detector.set_current_history_id("a")
+        detector.observe(self.observation(signature="B", history_id="b"), 2000, True, 500, False)
+        detector.set_current_history_id("b")
+        duplicate = detector.observe(self.observation(signature="B"), 2040, True, 500, False)
+        self.assertIs(duplicate, clipman.ClipMergeDetector.DUPLICATE_NOTIFICATION)
+        self.assertIsNotNone(detector.observe(self.observation(signature="B"), 2200, True, 500, False))
+
+        detector.reset()
+        detector.observe(self.observation(signature="A", source="Thunderbird", history_id="a"), 1000, True, 1000, False)
+        detector.set_current_history_id("a")
+        detector.observe(self.observation(signature="B", source="Thunderbird", history_id="b"), 2000, True, 1000, False)
+        detector.set_current_history_id("b")
+        mozilla_duplicate = detector.observe(self.observation(signature="B", source="Thunderbird"), 2250, True, 1000, False)
+        self.assertIs(mozilla_duplicate, clipman.ClipMergeDetector.DUPLICATE_NOTIFICATION)
+        self.assertIsNotNone(detector.observe(self.observation(signature="B", source="Thunderbird"), 2800, True, 1000, False))
+
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = os.path.join(directory, "old.txt")
+            new_path = os.path.join(directory, "new.txt")
+            pathlib.Path(old_path).write_text("old", encoding="utf-8")
+            pathlib.Path(new_path).write_text("new", encoding="utf-8")
+            detector.reset()
+            detector.observe(self.observation(kind="files", signature="old", operation="move", values=[old_path]), 3000, True, 500, False)
+            duplicate_cut = detector.observe(self.observation(kind="files", signature="old", operation="move", values=[old_path]), 3040, True, 500, False)
+            self.assertIs(duplicate_cut, clipman.ClipMergeDetector.DUPLICATE_NOTIFICATION)
+            detector.observe(self.observation(kind="files", signature="new", operation="move", values=[new_path]), 4000, True, 500, False)
+            live_cut_merge = detector.observe(self.observation(kind="files", signature="new", operation="move", values=[new_path]), 4300, True, 500, False)
+            self.assertIsNotNone(live_cut_merge)
+            self.assertTrue(clipman.ClipMergeDetector.sources_available([old_path, new_path]))
+            os.remove(old_path)
+            self.assertFalse(clipman.ClipMergeDetector.sources_available([old_path, new_path]))
+            detector.retain_first(live_cut_merge[1])
+
     def test_defaults_and_separator_bounds_are_conservative(self):
         self.assertEqual(clipman.ClipMergeDetector.normalize_window(1), 200)
         self.assertEqual(clipman.ClipMergeDetector.normalize_window(9999), 2000)
@@ -385,6 +422,12 @@ class ClipMergeTests(unittest.TestCase):
 
 
 class PreferenceTests(unittest.TestCase):
+    def test_website_title_contact_defaults_are_conservative(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": folder}):
+            preferences = clipman.Preferences()
+            self.assertTrue(preferences.values["confirm_website_title_requests"])
+            self.assertFalse(preferences.values["auto_name_copied_website_links"])
+
     def test_image_capture_is_cleared_when_rich_text_is_disabled(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": folder}):
             settings = os.path.join(folder, "clipman-linux", "settings.json")

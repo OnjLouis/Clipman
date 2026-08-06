@@ -59,6 +59,9 @@ namespace Clipman
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
+        [DllImport("user32.dll")]
+        public static extern uint GetClipboardSequenceNumber();
+
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         public static extern uint RegisterClipboardFormat(string lpszFormat);
 

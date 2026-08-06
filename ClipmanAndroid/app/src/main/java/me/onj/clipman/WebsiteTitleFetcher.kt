@@ -339,6 +339,17 @@ object WebsiteTitlePolicy {
     private fun looksLikeCapabilityValue(value: String): Boolean {
         val compact = value.trim()
         if (compact.length < 32 || compact.any(Char::isWhitespace)) return false
+        if (Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$").matches(compact)) return true
+        val slug = compact.replace(Regex("(?i)\\.(?:html?|shtml)$"), "")
+        val parts = slug.split(Regex("[-_]+"))
+            .filter(String::isNotEmpty)
+        val readableWords = parts.count { part ->
+            part.length in 3..24 && part.all(Char::isLetter)
+        }
+        val readableParts = parts.all { part ->
+            part.length <= 24 && (part.all(Char::isLetter) || Regex("(?i)^[a-z]?[0-9]{4,12}$").matches(part))
+        }
+        if (parts.size >= 5 && readableParts && readableWords >= 4) return false
         return compact.count(Char::isLetter) >= 8 && compact.count(Char::isDigit) >= 4
     }
 

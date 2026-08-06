@@ -33,8 +33,8 @@ private struct PasteboardSnapshot {
 
 @MainActor
 protocol ClipboardMonitorDelegate: AnyObject {
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, deliberate: Bool)
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, deliberate: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didRejectImage reason: String, deliberate: Bool)
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor)
@@ -238,7 +238,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic
             )
-            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, sourceApplication: sourceApplicationName(), operation: "Copy", observedAtMilliseconds: observedAtMilliseconds, deliberate: deliberate)
+            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, sourceApplication: sourceApplicationName(), operation: "Copy", observedAtMilliseconds: observedAtMilliseconds, changeIdentifier: pasteboard.changeCount, deliberate: deliberate)
             captureAdditionalRichTextImageIfEnabled(from: fileCapture.files)
             return
         }
@@ -254,6 +254,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             captureStandaloneImage(
                 imageInput,
                 observedAtMilliseconds: observedAtMilliseconds,
+                changeIdentifier: pasteboard.changeCount,
                 deliberate: deliberate,
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic,
@@ -267,6 +268,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                 captureStandaloneImage(
                     imageInput,
                     observedAtMilliseconds: observedAtMilliseconds,
+                    changeIdentifier: pasteboard.changeCount,
                     deliberate: deliberate,
                     appDiagnostic: appDiagnostic,
                     pasteboardDiagnostic: pasteboardDiagnostic,
@@ -297,12 +299,13 @@ final class ClipboardMonitor: @unchecked Sendable {
             appDiagnostic: appDiagnostic,
             pasteboardDiagnostic: pasteboardDiagnostic
         )
-        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), observedAtMilliseconds: observedAtMilliseconds, deliberate: deliberate)
+        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), observedAtMilliseconds: observedAtMilliseconds, changeIdentifier: pasteboard.changeCount, deliberate: deliberate)
     }
 
     private func captureStandaloneImage(
         _ imageInput: Result<StandaloneImageInput, EmbeddedImageError>,
         observedAtMilliseconds: Int64,
+        changeIdentifier: Int,
         deliberate: Bool,
         appDiagnostic: String,
         pasteboardDiagnostic: String,
@@ -341,6 +344,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                         richText: prepared.payload,
                         sourceApplication: sourceApplication,
                         observedAtMilliseconds: observedAtMilliseconds,
+                        changeIdentifier: changeIdentifier,
                         deliberate: deliberate
                     )
                 } catch {

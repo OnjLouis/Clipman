@@ -74,6 +74,7 @@ type session struct {
 }
 
 var version = "0.1.0-preview"
+var responseWriteMu sync.Mutex
 
 type entryJSON struct {
 	ID                    string        `json:"id"`
@@ -139,15 +140,23 @@ func main() {
 			write(response{OK: false, Error: "Invalid backend request"})
 			continue
 		}
-		result, err := s.handle(req.Action, req.Params)
-		if err != nil {
-			write(response{ID: req.ID, OK: false, Error: friendlyError(err)})
-		} else {
-			write(response{ID: req.ID, OK: true, Result: result})
+		if req.Action == "fetch_website_title" {
+			go respond(s, req)
+			continue
 		}
+		respond(s, req)
 		if req.Action == "shutdown" {
 			return
 		}
+	}
+}
+
+func respond(s *session, req request) {
+	result, err := s.handle(req.Action, req.Params)
+	if err != nil {
+		write(response{ID: req.ID, OK: false, Error: friendlyError(err)})
+	} else {
+		write(response{ID: req.ID, OK: true, Result: result})
 	}
 }
 
@@ -1233,6 +1242,8 @@ func friendlyError(err error) string {
 }
 
 func write(value response) {
+	responseWriteMu.Lock()
+	defer responseWriteMu.Unlock()
 	data, _ := json.Marshal(value)
 	fmt.Println(string(data))
 }

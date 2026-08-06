@@ -1029,6 +1029,10 @@ class HotkeyEntry(Gtk.Entry):
 
 
 class ClipMergeDetector:
+    DUPLICATE_NOTIFICATION = object()
+    DUPLICATE_NOTIFICATION_MS = 60
+    MOZILLA_DUPLICATE_NOTIFICATION_MS = 500
+
     def __init__(self):
         self.reset()
 
@@ -1040,6 +1044,15 @@ class ClipMergeDetector:
             self.current = incoming
             return None
         elapsed = now_ms - self.candidate_started_ms
+        source = incoming.get("source", "").lower()
+        duplicate_window_ms = (
+            self.MOZILLA_DUPLICATE_NOTIFICATION_MS
+            if "firefox" in source or "thunderbird" in source
+            else self.DUPLICATE_NOTIFICATION_MS
+        )
+        if self.candidate_first and 0 <= elapsed < duplicate_window_ms and self._same_tap(self.candidate_first, incoming):
+            self.candidate_started_ms = now_ms
+            return self.DUPLICATE_NOTIFICATION
         if (
             self.candidate_first and self.candidate_base and 0 <= elapsed <= window_ms
             and self._same_tap(self.candidate_first, incoming)
@@ -1064,6 +1077,11 @@ class ClipMergeDetector:
     def complete(self, merged, history_id):
         merged["history_id"] = history_id or ""
         self.current = merged
+        self.candidate_base = None
+        self.candidate_first = None
+
+    def retain_first(self, first):
+        self.current = first
         self.candidate_base = None
         self.candidate_first = None
 
@@ -1095,10 +1113,14 @@ class ClipMergeDetector:
 
     @staticmethod
     def _compatible(base, incoming):
-        return base.get("kind") == incoming.get("kind") and (
+        return base.get("kind") == incoming.get("kind") and base.get("signature") != incoming.get("signature") and (
             incoming.get("kind") != "files"
             or base.get("operation", "").casefold() == incoming.get("operation", "").casefold()
         )
+
+    @staticmethod
+    def sources_available(paths):
+        return bool(paths) and all(path and os.path.exists(path) for path in paths)
 
 
 class Preferences:
@@ -1132,6 +1154,8 @@ class Preferences:
             "auto_remove_url_tracking": False,
             "keep_duplicate_entries": False,
             "confirm_deletions": True,
+            "confirm_website_title_requests": True,
+            "auto_name_copied_website_links": False,
             "ignored_applications": [],
             "sensitive_data_mode": "off",
             "sensitive_data_presets": [],
@@ -1154,7 +1178,7 @@ class Preferences:
                         self.values[key] = loaded[key]
         except (OSError, ValueError):
             pass
-        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "clipmerge_enabled", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "include_images_in_rich_text_history", "add_copied_image_files_to_rich_text_history", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries", "confirm_deletions"):
+        for key in ("monitor_clipboard", "capture_on_start", "play_sounds", "clipmerge_enabled", "run_at_startup", "install_updates_silently", "file_sort_descending", "auto_remove_unavailable_file_history", "auto_copy_remote_text", "dynamic_history_mode", "paste_after_enter", "links_history_enabled", "rich_text_history_enabled", "include_images_in_rich_text_history", "add_copied_image_files_to_rich_text_history", "save_list_position", "auto_group_by_app", "auto_remove_url_tracking", "keep_duplicate_entries", "confirm_deletions", "confirm_website_title_requests", "auto_name_copied_website_links"):
             if not isinstance(self.values[key], bool):
                 self.values[key] = defaults[key]
         if not isinstance(self.values["clipmerge_window_ms"], int):
@@ -1480,6 +1504,9 @@ class ClipmanApplication(Gtk.Application):
         self.type_buffer = ""
         self.type_deadline = 0.0
         self.received_history_section_pending = False
+        self.automatic_website_title_queue = []
+        self.automatic_website_title_ids = set()
+        self.automatic_website_title_busy = False
         self.hotkeys = GlobalHotkeys(self)
 
     def do_startup(self):
@@ -2260,6 +2287,8 @@ class ClipmanApplication(Gtk.Application):
                 observation, int(time.monotonic() * 1000), self.preferences.values["clipmerge_enabled"],
                 self.preferences.values["clipmerge_window_ms"], False,
             )
+            if decision is ClipMergeDetector.DUPLICATE_NOTIFICATION:
+                return
             if decision:
                 base, first = decision
                 merged_text = base["values"][0] + ClipMergeDetector.separator(
@@ -2369,8 +2398,16 @@ class ClipmanApplication(Gtk.Application):
             observation, int(time.monotonic() * 1000), self.preferences.values["clipmerge_enabled"],
             self.preferences.values["clipmerge_window_ms"], force,
         )
+        if decision is ClipMergeDetector.DUPLICATE_NOTIFICATION:
+            return
         if decision:
             base, first = decision
+            if operation.casefold() == "move" and not (
+                ClipMergeDetector.sources_available(base["values"])
+                and ClipMergeDetector.sources_available(paths)
+            ):
+                self.clipmerge.retain_first(first)
+                return
             seen = set()
             merged_paths = []
             for path in base["values"] + list(paths):
@@ -3466,6 +3503,9 @@ class ClipmanApplication(Gtk.Application):
             self.clipmerge.set_current_history_id(entry_id)
         self._history_response(message)
         self._remember_received_section("rich" if rich_text else "links" if is_standalone_link(text) else "text")
+        if capture_observation is not None and self.preferences.values["auto_name_copied_website_links"]:
+            entry = message.get("result", {}).get("operation", {}).get("entry", {})
+            self._queue_automatic_website_title(entry)
         if not quiet: self.sounds.play("copy"); self.set_status("Clipboard text added to history.", True)
         if success: success()
 
@@ -3520,6 +3560,9 @@ class ClipmanApplication(Gtk.Application):
         if not parsed:
             self.sounds.play("skip")
             return
+        if not self.preferences.values["confirm_website_title_requests"]:
+            self._request_website_title(entry)
+            return
         host = parsed.hostname or destination.split("/", 1)[0]
         dialog = Gtk.Dialog(title="Use Website Title as Name", transient_for=self.window, modal=True)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
@@ -3534,18 +3577,80 @@ class ClipmanApplication(Gtk.Application):
         destination_label = Gtk.Label(label="Destination: " + destination, wrap=True, xalign=0, selectable=True)
         destination_label.update_property([Gtk.AccessibleProperty.LABEL], ["Website destination: " + destination])
         area.append(destination_label)
+        suppress = Gtk.CheckButton(label="Do not show this again")
+        suppress.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Turn this confirmation off. You can turn it back on in Preferences."])
+        area.append(suppress)
 
         def response(_dialog, code):
             dialog.destroy()
             if code != Gtk.ResponseType.OK:
                 return
-            self.set_status("Requesting website title...", True)
-            self.backend.call(
-                "fetch_website_title", {"url": entry.get("text", "")},
-                lambda message: self._website_title_received(message, entry.get("id", ""), entry.get("text", "")),
-            )
+            if suppress.get_active():
+                self.preferences.values["confirm_website_title_requests"] = False
+                self.preferences.save()
+            self._request_website_title(entry)
         dialog.connect("response", response)
         dialog.present()
+
+    def _request_website_title(self, entry):
+        self.set_status("Requesting website title...", True)
+        self.backend.call(
+            "fetch_website_title", {"url": entry.get("text", "")},
+            lambda message: self._website_title_received(message, entry.get("id", ""), entry.get("text", "")),
+        )
+
+    def _queue_automatic_website_title(self, entry):
+        entry_id = str(entry.get("id", "")) if isinstance(entry, dict) else ""
+        if (
+            not self.preferences.values["auto_name_copied_website_links"]
+            or not entry_id
+            or entry_id in self.automatic_website_title_ids
+            or len(self.automatic_website_title_queue) >= 8
+            or not can_use_website_title(entry)
+        ):
+            return
+        self.automatic_website_title_ids.add(entry_id)
+        self.automatic_website_title_queue.append({"id": entry_id, "text": entry.get("text", "")})
+        self._process_next_automatic_website_title()
+
+    def _process_next_automatic_website_title(self):
+        if self.automatic_website_title_busy or not self.automatic_website_title_queue:
+            return
+        request = self.automatic_website_title_queue.pop(0)
+        if not self.preferences.values["auto_name_copied_website_links"]:
+            self.automatic_website_title_ids.discard(request["id"])
+            self._process_next_automatic_website_title()
+            return
+        self.automatic_website_title_busy = True
+        self.backend.call(
+            "fetch_website_title", {"url": request["text"]},
+            lambda message: self._automatic_website_title_received(message, request),
+        )
+
+    def _automatic_website_title_received(self, message, request):
+        if not message.get("ok") or not self.preferences.values["auto_name_copied_website_links"]:
+            self._finish_automatic_website_title(request["id"])
+            return
+        current = next((item for item in self.entries if item.get("id") == request["id"]), None)
+        title = _clean_link_text(message.get("result", {}).get("title", ""), 200)
+        if not current or current.get("text") != request["text"] or str(current.get("name", "")).strip() or not title:
+            self._finish_automatic_website_title(request["id"])
+            return
+        self.backend.call(
+            "set_name_if_blank",
+            {"id": request["id"], "expected_text": request["text"], "name": title},
+            lambda result: self._automatic_website_title_saved(result, request["id"]),
+        )
+
+    def _automatic_website_title_saved(self, message, entry_id):
+        if message.get("ok"):
+            self._history_response(message)
+        self._finish_automatic_website_title(entry_id)
+
+    def _finish_automatic_website_title(self, entry_id):
+        self.automatic_website_title_ids.discard(entry_id)
+        self.automatic_website_title_busy = False
+        self._process_next_automatic_website_title()
 
     def _website_title_received(self, message, entry_id, expected_text):
         if not message.get("ok"):
@@ -4457,6 +4562,10 @@ class ClipmanApplication(Gtk.Application):
         save_position = Gtk.CheckButton(label="Save list position", active=self.preferences.values["save_list_position"])
         duplicates = Gtk.CheckButton(label="Keep duplicate text entries", active=self.preferences.values["keep_duplicate_entries"])
         confirm_deletions = Gtk.CheckButton(label="Confirm before deleting entries", active=self.preferences.values["confirm_deletions"])
+        confirm_website_titles = Gtk.CheckButton(label="Ask before contacting a website for its title", active=self.preferences.values["confirm_website_title_requests"])
+        confirm_website_titles.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog."])
+        auto_name_links = Gtk.CheckButton(label="Automatically name copied website links from page headings", active=self.preferences.values["auto_name_copied_website_links"])
+        auto_name_links.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default."])
         for control in (monitor, sounds, clipmerge):
             general.append(control)
         clipmerge_window_label = Gtk.Label(label="ClipMerge window, milliseconds", xalign=0); clipmerge_window_label.set_mnemonic_widget(clipmerge_window)
@@ -4469,7 +4578,7 @@ class ClipmanApplication(Gtk.Application):
         for control in (auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, include_images, add_copied_image_files):
             general.append(control)
         general.append(image_privacy)
-        for control in (save_position, duplicates, confirm_deletions):
+        for control in (save_position, duplicates, confirm_deletions, confirm_website_titles, auto_name_links):
             general.append(control)
 
         startup_run = Gtk.CheckButton(label="Run Clipman when this desktop session starts", active=self.preferences.values["run_at_startup"])
@@ -4566,6 +4675,8 @@ class ClipmanApplication(Gtk.Application):
                     "paste_after_enter": paste_enter.get_active(), "dynamic_history_mode": dynamic.get_active(),
                     "auto_remove_url_tracking": remove_tracking.get_active(), "keep_duplicate_entries": duplicates.get_active(),
                     "confirm_deletions": confirm_deletions.get_active(),
+                    "confirm_website_title_requests": confirm_website_titles.get_active(),
+                    "auto_name_copied_website_links": auto_name_links.get_active(),
                     "links_history_enabled": links_enabled.get_active(), "rich_text_history_enabled": rich_enabled.get_active(),
                     "include_images_in_rich_text_history": include_images.get_active(),
                     "add_copied_image_files_to_rich_text_history": add_copied_image_files.get_active(),

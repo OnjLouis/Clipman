@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -23,6 +24,9 @@ const (
 	websiteTitleTimeout       = 8 * time.Second
 	websiteTitleURLLimit      = 8192
 )
+
+var capabilityUUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var readableArticleIDPattern = regexp.MustCompile(`(?i)^[a-z]?[0-9]{4,12}$`)
 
 var sensitiveQueryNames = map[string]bool{
 	"access_token": true, "apikey": true, "api_key": true, "auth": true,
@@ -161,6 +165,34 @@ func repeatedlyUnescapeURLComponent(value string) string {
 func looksLikeCapabilityValue(value string) bool {
 	value = strings.TrimSpace(value)
 	if utf8.RuneCountInString(value) < 32 || strings.IndexFunc(value, unicode.IsSpace) >= 0 {
+		return false
+	}
+	if capabilityUUIDPattern.MatchString(value) {
+		return true
+	}
+	slug := value
+	lowerSlug := strings.ToLower(slug)
+	for _, suffix := range []string{".html", ".htm", ".shtml"} {
+		if strings.HasSuffix(lowerSlug, suffix) {
+			slug = slug[:len(slug)-len(suffix)]
+			break
+		}
+	}
+	parts := strings.FieldsFunc(slug, func(character rune) bool { return character == '-' || character == '_' })
+	readableWords := 0
+	allPartsBounded := len(parts) >= 5
+	for _, part := range parts {
+		length := utf8.RuneCountInString(part)
+		isLetters := strings.IndexFunc(part, func(character rune) bool { return !unicode.IsLetter(character) }) < 0
+		isArticleID := readableArticleIDPattern.MatchString(part)
+		if length > 24 || (!isLetters && !isArticleID) {
+			allPartsBounded = false
+		}
+		if length >= 3 && length <= 24 && isLetters {
+			readableWords++
+		}
+	}
+	if allPartsBounded && readableWords >= 4 {
 		return false
 	}
 	letters, digits := 0, 0

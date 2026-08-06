@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace Clipman
 {
@@ -15,6 +17,7 @@ namespace Clipman
         public string SourceApplication { get; set; }
         public string Operation { get; set; }
         public string HistoryId { get; set; }
+        public uint ChangeIdentifier { get; set; }
         public object Payload { get; set; }
 
         public ClipMergeObservation()
@@ -29,6 +32,7 @@ namespace Clipman
     internal sealed class ClipMergeDecision
     {
         public bool ShouldMerge { get; private set; }
+        public bool SuppressDuplicate { get; private set; }
         public ClipMergeObservation Base { get; private set; }
         public ClipMergeObservation FirstTap { get; private set; }
 
@@ -50,6 +54,11 @@ namespace Clipman
                 FirstTap = firstTap
             };
         }
+
+        public static ClipMergeDecision Duplicate()
+        {
+            return new ClipMergeDecision { SuppressDuplicate = true };
+        }
     }
 
     internal sealed class ClipMergeDetector
@@ -57,6 +66,8 @@ namespace Clipman
         public const int DefaultWindowMilliseconds = 500;
         public const int MinimumWindowMilliseconds = 200;
         public const int MaximumWindowMilliseconds = 2000;
+        public const int DuplicateNotificationMilliseconds = 60;
+        public const int MozillaDuplicateNotificationMilliseconds = 500;
 
         private ClipMergeObservation current;
         private ClipMergeObservation candidateBase;
@@ -77,6 +88,12 @@ namespace Clipman
             }
 
             var elapsed = nowMilliseconds - candidateStartedMilliseconds;
+            if (candidateFirstTap != null && SameTap(candidateFirstTap, incoming) &&
+                IsDuplicateNotification(candidateFirstTap, incoming, elapsed))
+            {
+                candidateStartedMilliseconds = nowMilliseconds;
+                return ClipMergeDecision.Duplicate();
+            }
             if (candidateFirstTap != null && candidateBase != null && elapsed >= 0 && elapsed <= windowMilliseconds &&
                 SameTap(candidateFirstTap, incoming) && Compatible(candidateBase, incoming))
             {
@@ -107,6 +124,13 @@ namespace Clipman
             if (merged == null) throw new ArgumentNullException("merged");
             merged.HistoryId = historyId ?? string.Empty;
             current = merged;
+            candidateBase = null;
+            candidateFirstTap = null;
+        }
+
+        public void RetainFirstTap(ClipMergeObservation firstTap)
+        {
+            current = firstTap;
             candidateBase = null;
             candidateFirstTap = null;
         }
@@ -154,11 +178,50 @@ namespace Clipman
                 string.Equals(left.Operation, right.Operation, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsDuplicateNotification(ClipMergeObservation left, ClipMergeObservation right, long elapsedMilliseconds)
+        {
+            if (left.ChangeIdentifier != 0 && right.ChangeIdentifier != 0)
+            {
+                if (left.ChangeIdentifier == right.ChangeIdentifier) return true;
+                return IsMozillaApplication(left.SourceApplication) && elapsedMilliseconds >= 0 &&
+                    elapsedMilliseconds < MozillaDuplicateNotificationMilliseconds;
+            }
+            var threshold = IsMozillaApplication(left.SourceApplication)
+                ? MozillaDuplicateNotificationMilliseconds
+                : DuplicateNotificationMilliseconds;
+            return elapsedMilliseconds >= 0 && elapsedMilliseconds < threshold;
+        }
+
+        private static bool IsMozillaApplication(string value)
+        {
+            var source = value ?? string.Empty;
+            return source.IndexOf("firefox", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                source.IndexOf("thunderbird", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private static bool Compatible(ClipMergeObservation baseItem, ClipMergeObservation incoming)
         {
             return baseItem.Kind == incoming.Kind &&
+                !string.Equals(baseItem.Signature, incoming.Signature, StringComparison.Ordinal) &&
                 (incoming.Kind != ClipMergeKind.Files ||
                  string.Equals(baseItem.Operation, incoming.Operation, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    internal static class ClipMergeFilePolicy
+    {
+        public static bool AreSourcesAvailable(IEnumerable<string> paths)
+        {
+            if (paths == null) return false;
+            var found = false;
+            foreach (var value in paths)
+            {
+                var path = (value ?? string.Empty).Trim();
+                if (path.Length == 0) return false;
+                found = true;
+                if (!File.Exists(path) && !Directory.Exists(path)) return false;
+            }
+            return found;
         }
     }
 }

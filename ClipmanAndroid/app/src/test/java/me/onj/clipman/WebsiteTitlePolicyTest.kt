@@ -48,6 +48,10 @@ class WebsiteTitlePolicyTest {
         assertTrue(LinkPresentation.isFetchableHttpUrl("https://example.org/login"))
         assertTrue(LinkPresentation.isFetchableHttpUrl("https://example.org/reset-password#instructions"))
         assertTrue(LinkPresentation.isFetchableHttpUrl("https://www.youtube.com/watch?v=6-fvja4UXJk&pp=ygUbU29uaWNjb3V0dXJlIEJhbGluZXNlIGZsdXRl"))
+        assertTrue(LinkPresentation.isFetchableHttpUrl("https://example.org/a-long-human-readable-article-title-with-2026-and-many-words?utm_source=share"))
+        assertTrue(LinkPresentation.isFetchableHttpUrl("https://nautil.us/a-new-toad-species-emerges-from-the-la-brea-tar-pits-1283396?utm_source=firefox-newtab-en-gb"))
+        assertTrue(LinkPresentation.isFetchableHttpUrl("https://www.independent.co.uk/news/science/monkeys-primates-friendships-animals-b3028129.html?utm_source=firefox-newtab-en-gb"))
+        assertFalse(LinkPresentation.isFetchableHttpUrl("https://example.org/download/550e8400-e29b-41d4-a716-446655440000"))
     }
 
     @Test

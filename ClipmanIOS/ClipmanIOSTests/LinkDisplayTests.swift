@@ -149,6 +149,19 @@ final class LinkDisplayTests: XCTestCase {
         XCTAssertTrue(snapshot.resolutions.isEmpty)
     }
 
+    func testWebsiteTitleSafetyDistinguishesReadableSlugsFromCapabilities() throws {
+        let readable = try XCTUnwrap(URL(string: "https://example.org/a-long-human-readable-article-title-with-2026-and-many-words?utm_source=share"))
+        let readableWithArticleID = try XCTUnwrap(URL(string: "https://nautil.us/a-new-toad-species-emerges-from-the-la-brea-tar-pits-1283396?utm_source=firefox-newtab-en-gb"))
+        let readableWithPrefixedArticleID = try XCTUnwrap(URL(string: "https://www.independent.co.uk/news/science/monkeys-primates-friendships-animals-b3028129.html?utm_source=firefox-newtab-en-gb"))
+        let opaque = try XCTUnwrap(URL(string: "https://example.org/download/Az19Qw82Er73Ty64Ui50Op21Lm98Qr76"))
+        let uuid = try XCTUnwrap(URL(string: "https://example.org/download/550e8400-e29b-41d4-a716-446655440000"))
+        XCTAssertNoThrow(try WebsiteTitlePolicy.validateStructure(readable))
+        XCTAssertNoThrow(try WebsiteTitlePolicy.validateStructure(readableWithArticleID))
+        XCTAssertNoThrow(try WebsiteTitlePolicy.validateStructure(readableWithPrefixedArticleID))
+        XCTAssertThrowsError(try WebsiteTitlePolicy.validateStructure(opaque))
+        XCTAssertThrowsError(try WebsiteTitlePolicy.validateStructure(uuid))
+    }
+
     func testOverlongRedirectIsRejectedBeforeAnotherHop() async throws {
         let start = try XCTUnwrap(URL(string: "https://start.example/article"))
         let overlongLocation = "https://final.example/" + String(repeating: "b", count: 8_193)
