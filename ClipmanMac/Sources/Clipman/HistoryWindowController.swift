@@ -433,6 +433,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didEdit entry: ClipEntry, name: String, text: String)
     func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, isTemplate: Bool, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode)
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry])
+    func historyWindow(_ controller: HistoryWindowController, didCopyNameAndContent entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didPushToOtherMachines entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didMove entries: [ClipEntry], direction: Int)
@@ -494,6 +495,7 @@ final class HistoryWindow: NSWindow {
     var onGroupFilter: (() -> Void)?
     var onGroupFilterPosition: ((Int) -> Void)?
     var onGoToFile: (() -> Void)?
+    var onCopyNameAndContent: (() -> Void)?
     var onMoveUp: (() -> Void)?
     var onMoveDown: (() -> Void)?
     var onMoveHistoryTab: ((Int) -> Void)?
@@ -651,7 +653,11 @@ final class HistoryWindow: NSWindow {
                 return true
             }
             if modifiers == [.command] {
-                onGoToFile?()
+                if onCopyNameAndContent != nil {
+                    onCopyNameAndContent?()
+                } else {
+                    onGoToFile?()
+                }
                 return true
             }
             guard modifiers.isEmpty else {
@@ -860,6 +866,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.onGroupFilter = { [weak self] in self?.showGroupFilterMenu() }
         window.onGroupFilterPosition = { [weak self] index in self?.applyGroupFilter(at: index) }
         window.onGoToFile = { [weak self] in self?.goToSelectedFileEvent() }
+        window.onCopyNameAndContent = { [weak self] in self?.copySelectedNameAndContent() }
         window.onMoveUp = { [weak self] in self?.moveSelectedItems(direction: -1) }
         window.onMoveDown = { [weak self] in self?.moveSelectedItems(direction: 1) }
         window.onMoveHistoryTab = { [weak self] direction in self?.moveCurrentHistoryTab(direction: direction) }
@@ -1559,6 +1566,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         addMenuItem("Choose Selected", action: #selector(menuChooseSelected), to: menu, shortcut: "Enter")
         addMenuItem(mode == .files ? "Copy Selected Paths" : "Copy Selected", action: #selector(menuCopySelected), to: menu, shortcut: "Command+C")
         if mode != .files {
+            addMenuItem("Copy Name and Content", action: #selector(menuCopyNameAndContent), to: menu, shortcut: "Command+Enter")
             addMenuItem("Cut Selected", action: #selector(menuCutSelected), to: menu, shortcut: "Command+X")
             addMenuItem("Paste After Selected", action: #selector(menuPasteAfterSelected), to: menu, shortcut: "Command+V")
             addMenuItem("Entry Properties", action: #selector(menuEditSelected), to: menu, shortcut: "F2")
@@ -1784,6 +1792,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     @objc private func menuChooseSelected() { chooseSelectedEntry() }
     @objc private func menuCopySelected() { copySelectedEntries() }
+    @objc private func menuCopyNameAndContent() { copySelectedNameAndContent() }
     @objc private func menuCutSelected() { cutSelectedEntries() }
     @objc private func menuPasteAfterSelected() { pasteAfterSelectedEntry() }
     @objc private func menuSaveCurrentClipboard() { historyDelegate?.historyWindowDidRequestSaveCurrentClipboard(self) }
@@ -2354,6 +2363,16 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             guard !events.isEmpty else { return }
             historyDelegate?.historyWindow(self, didCopyFilePaths: events)
         }
+    }
+
+    private func copySelectedNameAndContent() {
+        guard mode != .files else {
+            goToSelectedFileEvent()
+            return
+        }
+        let entries = selectedEntries()
+        guard !entries.isEmpty else { return }
+        historyDelegate?.historyWindow(self, didCopyNameAndContent: entries)
     }
 
     private func moveSelectedItems(direction: Int) {

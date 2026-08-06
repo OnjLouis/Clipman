@@ -19,6 +19,7 @@ namespace Clipman
         private readonly Action refreshHotkeys;
         private readonly Action<ClipEntry> copyEntry;
         private readonly Action<List<ClipEntry>> copyEntries;
+        private readonly Func<string, List<ClipEntry>, bool> copyPlainText;
         private readonly Action pasteIntoPreviousApplication;
         private readonly Action saveCurrentClipboard;
         private readonly Func<List<ClipboardEventSummary>> recentClipboardEvents;
@@ -75,7 +76,7 @@ namespace Clipman
         private bool listPositionSaveFailureLogged;
         private readonly HashSet<string> linkTitleFetches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Action playSkipSound, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<string, List<ClipEntry>, bool> copyPlainText, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Action playSkipSound, Func<string> diagnosticsText)
         {
             this.store = store;
             this.settings = settings;
@@ -83,6 +84,7 @@ namespace Clipman
             this.refreshHotkeys = refreshHotkeys;
             this.copyEntry = copyEntry;
             this.copyEntries = copyEntries;
+            this.copyPlainText = copyPlainText;
             this.pasteIntoPreviousApplication = pasteIntoPreviousApplication;
             this.saveCurrentClipboard = saveCurrentClipboard;
             this.recentClipboardEvents = recentClipboardEvents;
@@ -794,6 +796,7 @@ namespace Clipman
 
             edit.DropDownItems.Add("Copy and c&lose\tEnter", null, (s, e) => CopySelected());
             edit.DropDownItems.Add("&Copy\tCtrl+C", null, (s, e) => CopySelected(false));
+            edit.DropDownItems.Add("Copy name and c&ontent\tCtrl+Enter", null, (s, e) => CopySelectedNameAndContent());
             edit.DropDownItems.Add("Cu&t\tCtrl+X", null, (s, e) => CutSelected());
             edit.DropDownItems.Add("Paste &after selected\tCtrl+V", null, (s, e) => PasteAfterSelected());
             groupEntryMenuItem = new ToolStripMenuItem("&Group entry...\tCtrl+G", null, (s, e) => GroupSelectedEntries());
@@ -833,6 +836,7 @@ namespace Clipman
             menu.Items.Clear();
             menu.Items.Add("Copy and c&lose\tEnter", null, (sender, args) => CopySelected());
             menu.Items.Add("&Copy\tCtrl+C", null, (sender, args) => CopySelected(false));
+            menu.Items.Add("Copy name and c&ontent\tCtrl+Enter", null, (sender, args) => CopySelectedNameAndContent());
             menu.Items.Add("Cu&t\tCtrl+X", null, (sender, args) => CutSelected());
             menu.Items.Add("Paste &after selected\tCtrl+V", null, (sender, args) => PasteAfterSelected());
             menu.Items.Add("&Group entry...\tCtrl+G", null, (sender, args) => GroupSelectedEntries());
@@ -958,10 +962,13 @@ namespace Clipman
                 {
                     TogglePinned();
                 }
+                else if (e.Control)
+                {
+                    CopySelectedNameAndContent();
+                }
                 else
                 {
-                    var closeAfterCopy = !e.Control;
-                    CopySelected(closeAfterCopy, closeAfterCopy && settings.PasteAfterEnter);
+                    CopySelected(true, settings.PasteAfterEnter);
                 }
             }
             else if (e.KeyCode == Keys.Delete)
@@ -2402,18 +2409,56 @@ namespace Clipman
             var selected = SelectedEntries();
             if (selected.Count == 0) return;
             var text = selected.Count == 1
-                ? selected[0].Text ?? string.Empty
-                : string.Join("\r\n\r\n", selected.Select(e => e.Text ?? string.Empty));
-            Clipboard.SetText(text, TextDataFormat.UnicodeText);
-            foreach (var entry in selected)
+                ? ResolvedEntryText(selected[0])
+                : string.Join("\r\n\r\n", selected.Select(ResolvedEntryText));
+            if (!copyPlainText(text, selected))
             {
-                store.MarkUsed(entry.Id);
+                statusText.Text = "Could not copy the selected entry or entries as plain text.";
+                return;
             }
             statusText.Text = "Copied selected entry or entries as plain text.";
             if (closeAfterCopy)
             {
                 Hide();
             }
+        }
+
+        private void CopySelectedNameAndContent()
+        {
+            var selected = SelectedEntries();
+            if (selected.Count == 0) return;
+            var text = BuildNameAndContentText(selected);
+            SaveCurrentListPositionIfEnabled();
+            if (!copyPlainText(text, selected))
+            {
+                statusText.Text = "Could not copy the selected name and content.";
+                return;
+            }
+            statusText.Text = selected.Count == 1
+                ? "Copied the selected name and content to the clipboard."
+                : "Copied the selected names and content to the clipboard.";
+            Hide();
+            if (settings.PasteAfterEnter)
+            {
+                pasteIntoPreviousApplication();
+            }
+        }
+
+        internal static string BuildNameAndContentText(IEnumerable<ClipEntry> entries)
+        {
+            return string.Join("\r\n\r\n", (entries ?? Enumerable.Empty<ClipEntry>()).Select(entry =>
+            {
+                var content = ResolvedEntryText(entry);
+                var name = entry == null ? string.Empty : (entry.Name ?? string.Empty).Trim();
+                return name.Length == 0 ? content : name + "\r\n" + content;
+            }));
+        }
+
+        private static string ResolvedEntryText(ClipEntry entry)
+        {
+            if (entry == null) return string.Empty;
+            var text = entry.Text ?? string.Empty;
+            return entry.IsTemplate ? TemplateResolver.Resolve(text) : text;
         }
 
         private void PushSelectedToOtherMachines()

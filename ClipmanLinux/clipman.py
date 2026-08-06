@@ -163,6 +163,16 @@ def entry_summary(entry, limit=240):
     return name or text or str(entry.get("display", "Empty entry"))
 
 
+def name_and_content_text(entries, resolved_texts=None):
+    values = list(resolved_texts) if resolved_texts is not None else [str(entry.get("text", "")) for entry in entries]
+    blocks = []
+    for index, entry in enumerate(entries):
+        content = values[index] if index < len(values) else str(entry.get("text", ""))
+        name = str(entry.get("name", "")).strip()
+        blocks.append(f"{name}\n{content}" if name else content)
+    return "\n\n".join(blocks)
+
+
 def _url_within_link_limit(value):
     return len(str(value or "")) <= MAX_LINK_URL_CHARACTERS
 
@@ -1554,6 +1564,7 @@ class ClipmanApplication(Gtk.Application):
             "new": self.new_entry,
             "copy": self.copy_selected,
             "copy-close": lambda *_: self.copy_selected(close=True),
+            "copy-name-content": self.copy_name_and_content,
             "select-all": self.select_all,
             "cut": self.cut_selected,
             "paste-after": self.paste_after_selected,
@@ -1643,7 +1654,7 @@ class ClipmanApplication(Gtk.Application):
             "app.properties": ["F2"],
             "app.group-entry": ["<Control>g"],
             "app.details": ["F4"], "app.delete": ["Delete"],
-            "app.pin": ["<Shift>Return"], "app.go-to-file": ["<Control>Return"],
+            "app.pin": ["<Shift>Return"], "app.copy-name-content": ["<Control>Return"],
             "app.clear-file-history": ["<Control>Delete"], "app.remove-unavailable-files": ["<Alt>Delete"],
             "app.move-up": ["<Alt>Up"], "app.move-down": ["<Alt>Down"],
             "app.move-tab-left": ["<Alt>Left"], "app.move-tab-right": ["<Alt>Right"],
@@ -1773,7 +1784,7 @@ class ClipmanApplication(Gtk.Application):
         if getattr(self, "section", "text") == "files":
             for label, action in (
                 ("_Restore files to clipboard", "copy-close"), ("Copy file _paths", "copy-paths"),
-                ("Pin or unp_in", "pin"), ("Go to _file", "go-to-file"),
+                ("Pin or unp_in", "pin"), ("Go to _file", "copy-name-content"),
                 ("_View event details", "details"), ("S_elect all", "select-all"), ("_Delete selected", "delete"),
                 ("Remove _unavailable events", "remove-unavailable-files"),
                 ("Clear file _history", "clear-file-history"),
@@ -1782,7 +1793,8 @@ class ClipmanApplication(Gtk.Application):
             sort_items = (("_Manual Order", "manual"), ("_Newest First", "newest"), ("_Oldest First", "oldest"), ("_File count", "files"), ("N_ame", "name"), ("O_peration", "operation"), ("_Source application", "source"))
         else:
             for label, action in (
-                ("Copy and c_lose", "copy-close"), ("_Copy", "copy"), ("Cu_t", "cut"),
+                ("Copy and c_lose", "copy-close"), ("_Copy", "copy"),
+                ("Copy name and c_ontent", "copy-name-content"), ("Cu_t", "cut"),
                 ("Paste _after selected", "paste-after"), ("_Group entry", "group-entry"),
                 ("Entry _properties", "properties"), ("Set as _quick-paste target", "quick-assign"),
                 ("P_ush to other devices", "push"),
@@ -1833,6 +1845,7 @@ class ClipmanApplication(Gtk.Application):
             "properties": one_selected and not files, "quick-assign": one_selected and writable_text,
             "group-entry": selected and writable_text,
             "details": one_selected, "go-to-file": files and one_selected and one_available_file,
+            "copy-name-content": (files and one_selected and one_available_file) or (selected and not files),
             "delete": selected and (files or writable_text) and not any_pinned,
             "pin": selected and (files or writable_text), "move-up": one_selected and (files or writable_text),
             "move-down": one_selected and (files or writable_text), "new": writable_text,
@@ -1901,8 +1914,8 @@ class ClipmanApplication(Gtk.Application):
             primary = state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.SUPER_MASK)
             if primary == Gdk.ModifierType.SHIFT_MASK:
                 self.toggle_pin(); return True
-            if primary == Gdk.ModifierType.CONTROL_MASK and self.section == "files":
-                self.go_to_selected_file(); return True
+            if primary == Gdk.ModifierType.CONTROL_MASK:
+                self.copy_name_and_content(); return True
             if not primary:
                 self.copy_selected(close=True); return True
         if keyval == Gdk.KEY_Escape:
@@ -3137,6 +3150,43 @@ class ClipmanApplication(Gtk.Application):
             text = "\n".join(entry.get("text", "") for entry in entries)
             rich_text = entries[0].get("rich_text") if len(entries) == 1 else None
             self._set_clipboard(text, rich_text, entries[0] if len(entries) == 1 else None); self._after_copy(entries, close)
+
+    def copy_name_and_content(self, *_args):
+        if self.section == "files":
+            self.go_to_selected_file()
+            return
+        entries = self.selected_entries()
+        if not entries:
+            self.sounds.play("skip")
+            return
+        if any(entry.get("is_template") for entry in entries):
+            self.backend.call(
+                "resolve_many",
+                {"ids": [entry["id"] for entry in entries]},
+                lambda message: self._copy_name_and_content_result(message, entries),
+            )
+            return
+        try:
+            self._set_clipboard(name_and_content_text(entries))
+        except (GLib.Error, RuntimeError, ValueError):
+            self.sounds.play("skip")
+            self.set_status("Could not copy the selected name and content.", True)
+            return
+        self._after_copy(entries, True)
+
+    def _copy_name_and_content_result(self, message, entries):
+        if not message.get("ok"):
+            self.show_error(message.get("error"))
+            return
+        result = message["result"]
+        texts = result.get("texts", []) if "texts" in result else [result.get("text", "")]
+        try:
+            self._set_clipboard(name_and_content_text(entries, texts))
+        except (GLib.Error, RuntimeError, ValueError):
+            self.sounds.play("skip")
+            self.set_status("Could not copy the selected name and content.", True)
+            return
+        self._after_copy(entries, True)
 
     def _copy_result(self, message, entries, close):
         if not message.get("ok"): self.show_error(message.get("error")); return

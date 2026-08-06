@@ -53,6 +53,20 @@ def image_rich_text_with_filename(filename, data=None, mime_type="image/png"):
 
 
 class LinkLabelTests(unittest.TestCase):
+    def test_name_and_content_copy_formatting(self):
+        entries = [
+            {"name": " Release notes ", "text": "https://example.com/release"},
+            {"name": "", "text": "Unnamed text"},
+        ]
+        self.assertEqual(
+            clipman.name_and_content_text(entries),
+            "Release notes\nhttps://example.com/release\n\nUnnamed text",
+        )
+        self.assertEqual(
+            clipman.name_and_content_text(entries, ["Resolved first", "Resolved second"]),
+            "Release notes\nResolved first\n\nResolved second",
+        )
+
     def test_name_wins_and_destination_omits_scheme(self):
         label, destination = clipman.link_display_parts(
             "https://www.ableton.com/en/release-notes/move-1-beta/?tracking=ignored",

@@ -28,7 +28,7 @@ Windows is portable, macOS uses a signed and notarized app, Linux includes a per
 
 1. Install or extract the build for your platform and open Clipman.
 2. Copy a few pieces of text, then open history using the shortcut shown by the app or its menu.
-3. Press Enter or activate an entry to return it to the clipboard.
+3. Press Enter or activate an entry to return it to the clipboard. On desktop, the Edit menu also offers Copy Name and Content when you want an entry's short Name and full content together.
 4. Open Preferences or Settings when you want to enable optional views, encryption, synchronization, sounds, or other behavior.
 
 That is enough for ordinary local use. The [full manual](https://onjlouis.github.io/clipman/manual.html) covers every command, platform shortcut, accessibility behavior, import and export option, privacy control, and synchronization workflow.

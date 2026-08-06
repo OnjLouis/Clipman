@@ -1174,6 +1174,30 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         sounds.play(.copy)
     }
 
+    func historyWindow(_ controller: HistoryWindowController, didCopyNameAndContent entries: [ClipEntry]) {
+        guard !entries.isEmpty else { return }
+        if settings.pasteAfterEnter, !ensurePasteAutomationAccess() {
+            pasteAfterHistoryHide = false
+            return
+        }
+        let text = entries.map { entry in
+            let content = TemplateResolver.resolveEntryText(entry)
+            let name = entry.Name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? content : name + "\n" + content
+        }.joined(separator: "\n\n")
+        guard monitor.writeInternalText(text) else {
+            sounds.play(.skip)
+            controller.reportPasteStatus("Could not copy the selected name and content.")
+            return
+        }
+        for entry in entries {
+            store.markUsed(entry.Id)
+        }
+        sounds.play(.copy)
+        pasteAfterHistoryHide = settings.pasteAfterEnter
+        controller.hide()
+    }
+
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry]) {
         historyWindow(controller, didCopy: entries)
         for entry in entries where !entry.Pinned {

@@ -181,7 +181,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, PasteClipboardIntoPreviousApplication, SaveCurrentClipboardToHistory, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, () => sounds.Skip(settings.SoundsEnabled), BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, CopyPlainTextToClipboard, PasteClipboardIntoPreviousApplication, SaveCurrentClipboardToHistory, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, () => sounds.Skip(settings.SoundsEnabled), BuildDiagnosticsText);
                 created = true;
             }
 
@@ -678,6 +678,28 @@ namespace Clipman
                 store.MarkUsed(entry.Id);
             }
             sounds.Copy(settings.SoundsEnabled);
+        }
+
+        private bool CopyPlainTextToClipboard(string text, List<ClipEntry> entries)
+        {
+            try
+            {
+                IgnoreClipboardChanges(1);
+                Clipboard.SetText(text ?? string.Empty, TextDataFormat.UnicodeText);
+                foreach (var entry in entries ?? new List<ClipEntry>())
+                {
+                    if (entry != null) store.MarkUsed(entry.Id);
+                }
+                sounds.Copy(settings.SoundsEnabled);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ClearIgnoredClipboardChanges();
+                sounds.Skip(settings.SoundsEnabled);
+                Program.WriteRuntimeLog("Clipman could not copy plain text to the clipboard.", ex);
+                return false;
+            }
         }
 
         private void CopySensitiveTextToClipboard(string text)

@@ -27,6 +27,7 @@ namespace Clipman.Tests
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
             Run("copied image files use the bounded Rich Text image path", CopiedImageFilesUseBoundedRichTextPath);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
+            Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
             Run("ClipMerge requires a deliberate matching second clipboard event", ClipMergeRequiresMatchingSecondEvent);
             Run("ClipMerge coalesces duplicates and rejects stale cut sources", ClipMergeCoalescesDuplicatesAndRejectsStaleCuts);
             Run("ClipMerge rejects mixed and mismatched file operations", ClipMergeRejectsUnsafeCombinations);
@@ -285,6 +286,7 @@ namespace Clipman.Tests
                     () => { },
                     entry => { },
                     entries => { },
+                    (text, entries) => true,
                     () => { },
                     () => { },
                     () => new System.Collections.Generic.List<ClipboardEventSummary>(),
@@ -308,6 +310,23 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void NameAndContentCopyFormattingIsDeterministic()
+        {
+            var entries = new[]
+            {
+                new ClipEntry { Name = " Release notes ", Text = "https://example.com/release" },
+                new ClipEntry { Text = "Unnamed text" }
+            };
+            Assert(
+                HistoryForm.BuildNameAndContentText(entries) == "Release notes\r\nhttps://example.com/release\r\n\r\nUnnamed text",
+                "Name and content copy did not place the name before its content or separate entries with one blank line.");
+
+            var template = new ClipEntry { Name = "Year", Text = "{{year_full}}", IsTemplate = true };
+            Assert(
+                HistoryForm.BuildNameAndContentText(new[] { template }) == "Year\r\n" + DateTime.Now.Year.ToString(CultureInfo.InvariantCulture),
+                "Name and content copy did not resolve template text at use time.");
         }
 
         private static void ClipMergeRequiresMatchingSecondEvent()

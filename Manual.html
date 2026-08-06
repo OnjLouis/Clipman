@@ -90,6 +90,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.8.0</h3>
+  <ul>
+    <li>Added <strong>Copy Name and Content</strong> to Windows, Mac and Linux. On Text, Links and Rich Text history, press <code>Ctrl+Enter</code> on Windows or Linux, or <code>Command+Enter</code> on Mac, to copy each non-empty entry Name followed by its resolved content and close history. Multiple selections are separated by one blank line, and the existing optional paste-after-Enter behavior is honoured. The same shortcuts continue to mean <strong>Go to file</strong> in File History.</li>
+    <li>Fixed Windows <strong>Copy as plain text</strong> so successful copies use Clipman's guarded clipboard path, play the normal copy sound, resolve templates at use time, and update Last used only after the clipboard write succeeds. A failed clipboard write leaves history open and reports the failure.</li>
+  </ul>
+
   <h3>2.7.2</h3>
   <ul>
     <li>Fixed a Windows mixed-version failure when separately installed Clipman copies shared only a custom Syncthing, cloud or network data folder. Executable update coordination now operates only through the install-local <code>Settings</code> folder beside <code>clipman.exe</code>; a newer build marker in a separate data folder can no longer make an older local copy exit while waiting for an executable that will never arrive. Malformed update state is ignored safely, and Syncthing conflict names are recognized. This closes <a href="https://github.com/OnjLouis/Clipman/issues/56">issue #56</a>.</li>
@@ -615,6 +621,7 @@
       <tr><td>Switch Preferences tabs</td><td><code>Ctrl+1</code> to <code>Ctrl+6</code></td><td>Tab control navigation</td></tr>
       <tr><td>Copy selected text entry and close history; optionally paste into the previous application</td><td><code>Enter</code></td><td><code>Enter</code></td></tr>
       <tr><td>Copy selected text entry without closing history</td><td><code>Ctrl+C</code></td><td><code>Command+C</code></td></tr>
+      <tr><td>Copy each selected entry's Name and resolved content, then close history</td><td><code>Ctrl+Enter</code></td><td><code>Command+Enter</code></td></tr>
       <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
       <tr><td>Paste clipboard text into history</td><td><code>Ctrl+V</code></td><td><code>Command+V</code></td></tr>
       <tr><td>Push selected text entry to other synced devices</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
@@ -794,6 +801,8 @@
   <p>On Windows, the Actions menu contains simple text cleanup tools for selected entries: copy as plain text, trim whitespace, convert to single line, remove blank lines, remove URL tracking, clean links for sharing, line endings, uppercase, lowercase, HTML encode, HTML decode, HTML to readable text, URL encode, and URL decode. The most common actions also have shortcuts: <code>Ctrl+Shift+C</code> for plain-text copy, <code>Ctrl+Shift+T</code> for trim, <code>Ctrl+Shift+L</code> for single line, <code>Ctrl+Shift+B</code> for remove blank lines, <code>Ctrl+Shift+R</code> for remove URL tracking, <code>Ctrl+Shift+S</code> for clean link for sharing, <code>Ctrl+Shift+H</code> for HTML to readable text, and <code>Ctrl+Shift+U</code> for URL encode. Transform actions update the stored entry and also put the transformed result on the Windows clipboard. Mac includes URL cleanup and line-ending actions in the Clipman menu; <code>Command+Shift+R</code> removes URL tracking and <code>Command+Shift+S</code> cleans links for sharing. These update the stored entry and put the transformed result on the Mac clipboard.</p>
 
   <p>On Windows, <strong>Copy as plain text</strong> copies the selected entry using only the Windows plain-text clipboard format. It does not strip HTML tags from stored HTML source. Use <strong>HTML to readable text</strong> when you want Clipman to remove HTML tags and keep the readable text.</p>
+
+  <p>On Windows, Mac and Linux, <strong>Copy Name and Content</strong> puts each selected entry's non-empty Name on one line followed by its content. Template content resolves when copied. Multiple selected entries are separated by one blank line. The command closes history and follows the existing paste-after-Enter preference; in File History, the same shortcut remains <strong>Go to file</strong>.</p>
 
   <p>Text transforms change the stored plain text and therefore clear any previous Rich Text formatting for that entry. Copy as plain text does not modify the stored entry.</p>
 

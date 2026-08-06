@@ -105,6 +105,7 @@ assert '("device", value, "Device: " + value)' not in source
 assert 'entry.get("group", "").casefold() != filter_value.casefold()' in source
 assert 'menu.append_submenu("Grou_ps", self.groups_menu)' in source
 assert '"app.diagnostics": ["<Alt>F1"]' in source
+assert '"app.copy-name-content": ["<Control>Return"]' in source
 
 backend_source = pathlib.Path("ClipmanLinuxBackend/cmd/clipman-gui-backend/main.go").read_text(encoding="utf-8")
 assert '`json:"rich_text,omitempty"`' in backend_source
@@ -218,6 +219,10 @@ assert module.Gdk.keyval_to_unicode(module.Gdk.KEY_F4) == 0
 assert module.Gdk.keyval_to_unicode(module.Gdk.KEY_a) == ord("a")
 assert module.entry_summary({"text": "Multiline Linux capture\nLine two\nLine three"}) == "Multiline Linux capture Line two Line three"
 assert module.entry_summary({"name": "Named", "text": "Line one\nLine two"}) == "Named: Line one Line two"
+assert module.name_and_content_text([
+    {"name": "Named", "text": "Line one"},
+    {"name": "", "text": "Line two"},
+]) == "Named\nLine one\n\nLine two"
 assert module.is_standalone_link("https://example.com/path")
 assert module.is_standalone_link("clipman://server.example:1234")
 assert not module.is_standalone_link("Some text https://example.com/path")
@@ -225,10 +230,15 @@ copied_with_enter = []
 enter_harness = types.SimpleNamespace(
     _focus_is_in_history=lambda: True,
     copy_selected=lambda *args, **kwargs: copied_with_enter.append(kwargs.get("close")),
+    copy_name_and_content=lambda *args, **kwargs: copied_with_enter.append("name-content"),
 )
 assert module.ClipmanApplication._key_pressed(enter_harness, None, module.Gdk.KEY_Return, 0, 0)
 assert module.ClipmanApplication._key_pressed(enter_harness, None, module.Gdk.KEY_KP_Enter, 0, 0)
 assert copied_with_enter == [True, True]
+assert module.ClipmanApplication._key_pressed(
+    enter_harness, None, module.Gdk.KEY_Return, 0, module.Gdk.ModifierType.CONTROL_MASK,
+)
+assert copied_with_enter[-1] == "name-content"
 
 fake_release = {
     "tag_name": "v9.8.7", "html_url": "https://github.com/OnjLouis/Clipman/releases/tag/v9.8.7",

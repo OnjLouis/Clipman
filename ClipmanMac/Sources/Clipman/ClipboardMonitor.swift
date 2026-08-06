@@ -101,17 +101,22 @@ final class ClipboardMonitor: @unchecked Sendable {
         timer = nil
     }
 
+    @discardableResult
     func writeInternalText(
         _ text: String,
         richText: RichTextPayload? = nil,
         imageFilename: String? = nil
-    ) {
+    ) -> Bool {
         delegate?.clipboardMonitorDidWriteInternalClipboard(self)
-        suppressRemoteEchoText(text)
         let pasteboard = NSPasteboard.general
         embeddedImagePasteboardFile = nil
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        guard pasteboard.setString(text, forType: .string) else {
+            ignoredChangeCount = pasteboard.changeCount
+            lastChangeCount = pasteboard.changeCount
+            return false
+        }
+        suppressRemoteEchoText(text)
         embeddedImagePasteboardFile = RichTextData.write(
             richText,
             to: pasteboard,
@@ -119,6 +124,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         )
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
+        return true
     }
 
     func writeTemporaryInternalText(
