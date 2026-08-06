@@ -33,6 +33,7 @@ namespace Clipman.Tests
             Run("ClipMerge settings are conservative", ClipMergeSettingsAreConservative);
             Run("ClipMerge replaces partial entries without modifying pins", ClipMergePreservesPinnedEntriesAndRemovesPartials);
             Run("ClipMerge combines file events without retaining a partial", ClipMergeCombinesFileEvents);
+            Run("shared executable updates require install-local settings", SharedExecutableUpdatesRequireInstallLocalSettings);
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
@@ -435,6 +436,76 @@ namespace Clipman.Tests
                 "ClipMerge window bounds are not enforced.");
             Assert(ClipMergeDetector.ResolveSeparator("NewLine", "") == Environment.NewLine, "The default separator is not one new line.");
             Assert(ClipMergeDetector.ResolveSeparator("Custom", "\\n--\\t") == "\n--\t", "Custom separator escapes were not decoded.");
+        }
+
+        private static void SharedExecutableUpdatesRequireInstallLocalSettings()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ClipmanSharedUpdate-" + Guid.NewGuid().ToString("N"));
+            var appDirectory = Path.Combine(root, "Clipman");
+            var executablePath = Path.Combine(appDirectory, "clipman.exe");
+            var localSettings = Path.Combine(appDirectory, "Settings");
+            var externalSettings = Path.Combine(root, "Syncthing", "Clipman");
+            Directory.CreateDirectory(appDirectory);
+            Directory.CreateDirectory(localSettings);
+            Directory.CreateDirectory(externalSettings);
+            File.WriteAllText(executablePath, "test executable");
+            try
+            {
+                Assert(SharedUpdateStateStore.CanCoordinateExecutable(localSettings, executablePath),
+                    "Install-local Settings was not allowed to coordinate its executable.");
+                Assert(!SharedUpdateStateStore.CanCoordinateExecutable(externalSettings, executablePath),
+                    "A separately synchronized data folder was allowed to coordinate a local executable.");
+
+                SharedUpdateStateStore.PublishCurrentBuild(externalSettings, executablePath);
+                Assert(!File.Exists(SharedUpdateStateStore.StatePath(externalSettings)),
+                    "A separately synchronized data folder received executable update state.");
+
+                JsonUtil.SaveAtomic(SharedUpdateStateStore.StatePath(externalSettings), new SharedUpdateState
+                {
+                    BuildStampUtcMs = BuildInfo.BuildStampUtcMs + 1000,
+                    ExeSha256 = "a newer executable hash",
+                    UpdatedByMachine = "Other machine"
+                });
+                SharedUpdateState ignoredState;
+                string ignoredReason;
+                Assert(!SharedUpdateStateStore.ShouldRestartForState(externalSettings, executablePath, out ignoredState, out ignoredReason) && ignoredState == null,
+                    "Newer state in a separate data folder could still stop the local client.");
+
+                SharedUpdateStateStore.PublishCurrentBuild(localSettings, executablePath);
+                var localState = SharedUpdateStateStore.Load(localSettings);
+                Assert(localState.BuildStampUtcMs == BuildInfo.BuildStampUtcMs && !string.IsNullOrWhiteSpace(localState.ExeSha256),
+                    "Install-local executable state did not publish normally.");
+
+                JsonUtil.SaveAtomic(SharedUpdateStateStore.StatePath(localSettings), new SharedUpdateState
+                {
+                    BuildStampUtcMs = BuildInfo.BuildStampUtcMs + 1000,
+                    UpdatedByMachine = "Other machine"
+                });
+                SharedUpdateState newerState;
+                string newerReason;
+                Assert(SharedUpdateStateStore.ShouldRestartForState(localSettings, executablePath, out newerState, out newerReason),
+                    "Install-local newer state no longer requests a restart.");
+
+                var syncthingConflict = Path.Combine(localSettings, "clipman-shared-state.sync-conflict-20260806-120000-OTHER.json");
+                JsonUtil.SaveAtomic(syncthingConflict, new SharedUpdateState
+                {
+                    BuildStampUtcMs = BuildInfo.BuildStampUtcMs + 2000,
+                    UpdatedAtUtcMs = TimeUtil.NowUnixMs() + 1000,
+                    UpdatedByMachine = "Other machine"
+                });
+                var mergedState = SharedUpdateStateStore.Load(localSettings);
+                Assert(mergedState.BuildStampUtcMs == BuildInfo.BuildStampUtcMs + 2000 && !File.Exists(syncthingConflict),
+                    "A Syncthing shared-state conflict was not normalized.");
+
+                File.WriteAllText(SharedUpdateStateStore.StatePath(localSettings), "{ incomplete json", Encoding.UTF8);
+                var malformed = SharedUpdateStateStore.Load(localSettings);
+                Assert(malformed != null && malformed.BuildStampUtcMs == 0,
+                    "Malformed shared update state was not ignored safely.");
+            }
+            finally
+            {
+                Directory.Delete(root, true);
+            }
         }
 
         private static void ClipMergePreservesPinnedEntriesAndRemovesPartials()

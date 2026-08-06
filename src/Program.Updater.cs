@@ -80,7 +80,7 @@ namespace Clipman
                 }
 
                 WriteUpdateHistory(targetDir, "Requesting other shared-folder instances to close.");
-                SharedUpdateStateStore.PublishCloseRequest(Path.Combine(targetDir, "Settings"), 90);
+                SharedUpdateStateStore.PublishCloseRequest(Path.Combine(targetDir, "Settings"), exePath, 90);
                 Thread.Sleep(5000);
 
                 WriteUpdateHistory(targetDir, "Update source located. Applying files.");

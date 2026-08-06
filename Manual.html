@@ -90,6 +90,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.7.2</h3>
+  <ul>
+    <li>Fixed a Windows mixed-version failure when separately installed Clipman copies shared only a custom Syncthing, cloud or network data folder. Executable update coordination now operates only through the install-local <code>Settings</code> folder beside <code>clipman.exe</code>; a newer build marker in a separate data folder can no longer make an older local copy exit while waiting for an executable that will never arrive. Malformed update state is ignored safely, and Syncthing conflict names are recognized. This closes <a href="https://github.com/OnjLouis/Clipman/issues/56">issue #56</a>.</li>
+    <li>Fixed the Windows Preferences website-title confirmation checkbox displaying its mnemonic as literal <strong>(J)</strong>. Its mnemonic is now <strong>Alt+O</strong> on the word Contacting.</li>
+  </ul>
+
   <h3>2.7.1</h3>
   <ul>
     <li>Made desktop ClipMerge distinguish a deliberate second copy from rapid duplicate clipboard notifications produced by applications such as Firefox, Thunderbird and Windows Explorer. One command now creates one history update and one sound. File cuts can merge while every source still exists, but a pasted or moved source is rejected before it can leave unusable paths in a later merged clipboard.</li>
@@ -899,9 +905,9 @@
 
   <p>If a sync service creates conflict copies of Clipman's settings or history database, Clipman attempts to tidy them automatically when it next loads the affected file. History database conflicts are merged by entry, then the conflict copies are removed. Machine settings conflicts use the newest copy for that machine, then remove the extra files. This is intended only for Clipman's own settings and <code>.clipdb</code> files.</p>
 
-  <p>Clipman also writes a small shared update-state file in the <code>Settings</code> folder. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy.</p>
+  <p>When Windows uses the install-local <code>Settings</code> folder beside <code>clipman.exe</code>, Clipman writes a small shared update-state file there. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance from that same shared installation sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy. A custom data folder elsewhere may still share history and settings, but it does not coordinate executable replacement; each separately installed Clipman updates normally without being stopped by another machine's build marker.</p>
 
-  <p>During an online or automatic update, Clipman downloads the release ZIP to a temporary folder, asks other instances running from the same shared folder to close briefly, replaces the app files while preserving <code>Settings</code>, then starts the updated copy. When the new copy starts it publishes the new shared update state, so other computers can restart after their cloud service or network share exposes the updated executable. This is designed to make shared-folder updates feel seamless whether the folder is synced locally or opened from a direct network share.</p>
+  <p>During an online or automatic update, Clipman downloads the release ZIP to a temporary folder, asks other instances running from the same install-local shared folder to close briefly, replaces the app files while preserving <code>Settings</code>, then starts the updated copy. When the new copy starts it publishes the new shared update state, so other computers using that same shared installation can restart after their cloud service or network share exposes the updated executable. Separately installed clients that share only a custom data folder remain running and use their own updater.</p>
 
   <h2 id="secrets">Secrets</h2>
   <p>Clipman 2.0 includes a small optional Secrets area for short private snippets that you type deliberately, such as a system password or code that you sometimes need to paste quickly outside a web browser. Secrets are not captured automatically from the clipboard, are not shown in normal Text history, and are not included in ordinary history import or export. Open <strong>Options, Secrets</strong> on Windows, <strong>Secrets</strong> from the Mac status menu, or <strong>Secrets</strong> from the Mac in-window Clipman menu with <code>Option+M</code>. You can also open Secrets directly with <code>Ctrl+Shift+E</code> on Windows or <code>Command+Shift+E</code> on Mac.</p>

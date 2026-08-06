@@ -43,13 +43,39 @@ namespace Clipman
         public static SharedUpdateState Load(string settingsDirectory)
         {
             if (string.IsNullOrWhiteSpace(settingsDirectory)) return new SharedUpdateState();
-            ResolveStateConflicts(settingsDirectory);
-            return JsonUtil.Load<SharedUpdateState>(StatePath(settingsDirectory));
+            try
+            {
+                ResolveStateConflicts(settingsDirectory);
+                return TryLoad(StatePath(settingsDirectory)) ?? new SharedUpdateState();
+            }
+            catch
+            {
+                return new SharedUpdateState();
+            }
         }
 
-        public static void PublishCurrentBuild(string settingsDirectory)
+        public static bool CanCoordinateExecutable(string settingsDirectory, string executablePath)
         {
-            if (string.IsNullOrWhiteSpace(settingsDirectory)) return;
+            if (string.IsNullOrWhiteSpace(settingsDirectory) || string.IsNullOrWhiteSpace(executablePath)) return false;
+            try
+            {
+                var executableDirectory = Path.GetDirectoryName(Path.GetFullPath(executablePath));
+                if (string.IsNullOrWhiteSpace(executableDirectory)) return false;
+                var expectedSettingsDirectory = Path.Combine(executableDirectory, "Settings");
+                return string.Equals(
+                    NormalizeDirectory(settingsDirectory),
+                    NormalizeDirectory(expectedSettingsDirectory),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static void PublishCurrentBuild(string settingsDirectory, string executablePath)
+        {
+            if (!CanCoordinateExecutable(settingsDirectory, executablePath)) return;
             try
             {
                 Directory.CreateDirectory(settingsDirectory);
@@ -59,17 +85,18 @@ namespace Clipman
                     return;
                 }
 
-                JsonUtil.SaveAtomic(StatePath(settingsDirectory), CurrentState());
+                JsonUtil.SaveAtomic(StatePath(settingsDirectory), CurrentState(executablePath));
             }
             catch
             {
             }
         }
 
-        public static bool ShouldRestartForState(string settingsDirectory, out SharedUpdateState state, out string reason)
+        public static bool ShouldRestartForState(string settingsDirectory, string executablePath, out SharedUpdateState state, out string reason)
         {
             state = null;
             reason = string.Empty;
+            if (!CanCoordinateExecutable(settingsDirectory, executablePath)) return false;
             try
             {
                 state = Load(settingsDirectory);
@@ -85,7 +112,7 @@ namespace Clipman
                     return true;
                 }
 
-                var diskHash = HashFile(Application.ExecutablePath);
+                var diskHash = HashFile(executablePath);
                 if (string.Equals(diskHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                 {
                     reason = "shared state and executable hash indicate a newer build is on disk";
@@ -101,9 +128,9 @@ namespace Clipman
             }
         }
 
-        public static void PublishCloseRequest(string settingsDirectory, int seconds)
+        public static void PublishCloseRequest(string settingsDirectory, string executablePath, int seconds)
         {
-            if (string.IsNullOrWhiteSpace(settingsDirectory)) return;
+            if (!CanCoordinateExecutable(settingsDirectory, executablePath)) return;
             try
             {
                 Directory.CreateDirectory(settingsDirectory);
@@ -121,7 +148,7 @@ namespace Clipman
                 }
                 if (string.IsNullOrWhiteSpace(state.ExeSha256))
                 {
-                    state.ExeSha256 = CurrentExeHash();
+                    state.ExeSha256 = CurrentExeHash(executablePath);
                 }
                 JsonUtil.SaveAtomic(StatePath(settingsDirectory), state);
             }
@@ -130,9 +157,10 @@ namespace Clipman
             }
         }
 
-        public static bool HasActiveCloseRequest(string settingsDirectory, string lastHandledRequestId, out SharedUpdateState state)
+        public static bool HasActiveCloseRequest(string settingsDirectory, string executablePath, string lastHandledRequestId, out SharedUpdateState state)
         {
             state = null;
+            if (!CanCoordinateExecutable(settingsDirectory, executablePath)) return false;
             try
             {
                 state = Load(settingsDirectory);
@@ -159,9 +187,14 @@ namespace Clipman
 
         public static string CurrentExeHash()
         {
+            return CurrentExeHash(Application.ExecutablePath);
+        }
+
+        private static string CurrentExeHash(string executablePath)
+        {
             try
             {
-                return HashFile(Application.ExecutablePath);
+                return HashFile(executablePath);
             }
             catch
             {
@@ -169,14 +202,14 @@ namespace Clipman
             }
         }
 
-        private static SharedUpdateState CurrentState()
+        private static SharedUpdateState CurrentState(string executablePath)
         {
             return new SharedUpdateState
             {
                 Schema = 1,
                 Version = AppVersion(),
                 BuildStampUtcMs = BuildInfo.BuildStampUtcMs,
-                ExeSha256 = CurrentExeHash(),
+                ExeSha256 = CurrentExeHash(executablePath),
                 UpdatedByMachine = Environment.MachineName ?? string.Empty,
                 UpdatedAtUtcMs = TimeUtil.NowUnixMs()
             };
@@ -193,10 +226,12 @@ namespace Clipman
                 if (conflicts.Count == 0) return;
 
                 var candidates = new List<Tuple<string, SharedUpdateState>>();
-                if (File.Exists(canonicalPath)) candidates.Add(Tuple.Create(canonicalPath, JsonUtil.Load<SharedUpdateState>(canonicalPath)));
+                var canonical = TryLoad(canonicalPath);
+                if (canonical != null) candidates.Add(Tuple.Create(canonicalPath, canonical));
                 foreach (var conflict in conflicts)
                 {
-                    candidates.Add(Tuple.Create(conflict, JsonUtil.Load<SharedUpdateState>(conflict)));
+                    var candidate = TryLoad(conflict);
+                    if (candidate != null) candidates.Add(Tuple.Create(conflict, candidate));
                 }
 
                 var newest = candidates
@@ -209,6 +244,7 @@ namespace Clipman
                     JsonUtil.SaveAtomic(canonicalPath, newest.Item2);
                 }
 
+                if (newest == null || newest.Item2 == null) return;
                 foreach (var conflict in conflicts)
                 {
                     TryDelete(conflict);
@@ -232,11 +268,29 @@ namespace Clipman
             var suffix = name.Substring("clipman-shared-state".Length).Trim().ToLowerInvariant();
             if (suffix.Length == 0) return false;
             return suffix.Contains("conflicted copy") ||
+                suffix.StartsWith(".sync-conflict-", StringComparison.Ordinal) ||
                 suffix.Contains("[conflict]") ||
                 suffix.Contains(" conflict") ||
                 suffix.StartsWith("_conf(") ||
                 suffix.StartsWith("-") ||
                 suffix.StartsWith("(");
+        }
+
+        private static SharedUpdateState TryLoad(string path)
+        {
+            try
+            {
+                return File.Exists(path) ? JsonUtil.Load<SharedUpdateState>(path) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string NormalizeDirectory(string path)
+        {
+            return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
         private static string HashFile(string path)

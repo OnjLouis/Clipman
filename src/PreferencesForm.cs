@@ -113,7 +113,7 @@ namespace Clipman
             deviceName.AccessibleName = "Device name";
             deviceName.AccessibleDescription = "Name recorded on new clipboard entries created by this device. Existing entries keep their original device name.";
             confirmDeletions = NewCheckBox("Confirm before deleting entr&ies", settings.ConfirmDeletions);
-            confirmWebsiteTitleRequests = NewCheckBox("Ask before contacting a website for its title (&J)", settings.ConfirmWebsiteTitleRequests);
+            confirmWebsiteTitleRequests = NewCheckBox("Ask before c&ontacting a website for its title", settings.ConfirmWebsiteTitleRequests);
             confirmWebsiteTitleRequests.AccessibleDescription = "When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog.";
             autoNameCopiedWebsiteLinks = NewCheckBox("Automatically name copied website links from page &headings", settings.AutoNameCopiedWebsiteLinks);
             autoNameCopiedWebsiteLinks.AccessibleDescription = "When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default.";

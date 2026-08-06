@@ -88,7 +88,7 @@ namespace Clipman
             ResolveDatabaseLocation();
             ResolveDatabasePassword();
             SeedServerCacheFromConfiguredDatabase();
-            SharedUpdateStateStore.PublishCurrentBuild(settingsStore.SettingsDirectory);
+            SharedUpdateStateStore.PublishCurrentBuild(SharedExecutableSettingsDirectory(), Application.ExecutablePath);
             sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
             store = new ClipStore(EffectiveTextHistoryDatabasePath(), CurrentDatabasePassword, CurrentDeviceName());
             store.Changed += StoreChanged;
@@ -461,7 +461,7 @@ namespace Clipman
             var settingsDirectoryChanged = !string.Equals(oldSettingsDirectory, settingsStore.SettingsDirectory, StringComparison.OrdinalIgnoreCase);
             if (settingsDirectoryChanged)
             {
-                SharedUpdateStateStore.PublishCurrentBuild(settingsStore.SettingsDirectory);
+                SharedUpdateStateStore.PublishCurrentBuild(SharedExecutableSettingsDirectory(), Application.ExecutablePath);
                 RestartSharedUpdateWatchers();
                 sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
                 ReopenFileHistoryStore();
@@ -1603,7 +1603,13 @@ namespace Clipman
         private string BuildDiagnosticsText()
         {
             var diagnosticNowMilliseconds = ClipboardFloodGuard.MonotonicMilliseconds();
-            var sharedState = SharedUpdateStateStore.Load(settingsStore.SettingsDirectory);
+            var sharedExecutableSettingsDirectory = SharedExecutableSettingsDirectory();
+            var sharedUpdateCoordinationEnabled = SharedUpdateStateStore.CanCoordinateExecutable(
+                sharedExecutableSettingsDirectory,
+                Application.ExecutablePath);
+            var sharedState = sharedUpdateCoordinationEnabled
+                ? SharedUpdateStateStore.Load(sharedExecutableSettingsDirectory)
+                : new SharedUpdateState();
             var serverStatus = store.GetServerSyncStatus();
             var entries = store.GetEntries();
             var richEntries = entries.Where(e => RichTextData.Normalize(e.RichText) != null).ToList();
@@ -1651,7 +1657,8 @@ namespace Clipman
                 "Dynamic history mode: " + (settings.DynamicHistoryMode ? "on" : "off") + "\r\n" +
                 "Build stamp: " + BuildInfo.BuildStampUtcMs + "\r\n" +
                 "Executable hash: " + SharedUpdateStateStore.CurrentExeHash() + "\r\n" +
-                "Shared update state path: " + SharedUpdateStateStore.StatePath(settingsStore.SettingsDirectory) + "\r\n" +
+                "Shared executable update coordination: " + (sharedUpdateCoordinationEnabled ? "enabled for install-local Settings" : "disabled for separately stored settings") + "\r\n" +
+                "Shared update state path: " + (sharedUpdateCoordinationEnabled ? SharedUpdateStateStore.StatePath(sharedExecutableSettingsDirectory) : "Not used") + "\r\n" +
                 "Shared update state build stamp: " + (sharedState == null ? 0 : sharedState.BuildStampUtcMs) + "\r\n" +
                 "Remove duplicates: " + settings.RemoveDuplicates + "\r\n" +
                 "Duplicate mode: " + settings.DuplicateMode + "\r\n" +
@@ -2360,12 +2367,24 @@ namespace Clipman
 
         private void StartSharedUpdateWatchers()
         {
+            var sharedExecutableSettingsDirectory = SharedExecutableSettingsDirectory();
+            if (!SharedUpdateStateStore.CanCoordinateExecutable(sharedExecutableSettingsDirectory, Application.ExecutablePath)) return;
             try
             {
-                Directory.CreateDirectory(settingsStore.SettingsDirectory);
-                sharedStateTimer = new System.Threading.Timer(delegate { CheckSharedUpdateState(); }, null, Timeout.Infinite, Timeout.Infinite);
+                Directory.CreateDirectory(sharedExecutableSettingsDirectory);
+                sharedStateTimer = new System.Threading.Timer(delegate
+                {
+                    try
+                    {
+                        CheckSharedUpdateState();
+                    }
+                    catch (Exception ex)
+                    {
+                        Program.WriteRuntimeLog("Shared executable update coordination check failed.", ex);
+                    }
+                }, null, Timeout.Infinite, Timeout.Infinite);
 
-                sharedStateWatcher = new FileSystemWatcher(settingsStore.SettingsDirectory, "clipman-shared-state*.json")
+                sharedStateWatcher = new FileSystemWatcher(sharedExecutableSettingsDirectory, "clipman-shared-state*.json")
                 {
                     NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName | NotifyFilters.CreationTime
                 };
@@ -2786,6 +2805,11 @@ namespace Clipman
             return version == null ? "1.1.0" : version.Major + "." + version.Minor + "." + version.Build;
         }
 
+        private string SharedExecutableSettingsDirectory()
+        {
+            return Path.Combine(appDirectory, "Settings");
+        }
+
         private void SharedUpdateStateChanged(object sender, FileSystemEventArgs e)
         {
             ScheduleSharedUpdateCheck(10000);
@@ -2807,8 +2831,10 @@ namespace Clipman
 
         private void CheckSharedUpdateState()
         {
+            var sharedExecutableSettingsDirectory = SharedExecutableSettingsDirectory();
+            if (!SharedUpdateStateStore.CanCoordinateExecutable(sharedExecutableSettingsDirectory, Application.ExecutablePath)) return;
             SharedUpdateState closeState;
-            if (SharedUpdateStateStore.HasActiveCloseRequest(settingsStore.SettingsDirectory, lastHandledCloseRequestId, out closeState))
+            if (SharedUpdateStateStore.HasActiveCloseRequest(sharedExecutableSettingsDirectory, Application.ExecutablePath, lastHandledCloseRequestId, out closeState))
             {
                 lastHandledCloseRequestId = closeState.CloseRequestId ?? string.Empty;
                 if (invoker != null && invoker.IsHandleCreated)
@@ -2820,7 +2846,7 @@ namespace Clipman
 
             SharedUpdateState state;
             string reason;
-            if (!SharedUpdateStateStore.ShouldRestartForState(settingsStore.SettingsDirectory, out state, out reason))
+            if (!SharedUpdateStateStore.ShouldRestartForState(sharedExecutableSettingsDirectory, Application.ExecutablePath, out state, out reason))
             {
                 if (SharedUpdateStateStore.IsNewerStateFromAnotherMachine(state))
                 {
@@ -2869,6 +2895,8 @@ namespace Clipman
 
         private void StartStandDownRestartHelper()
         {
+            var sharedExecutableSettingsDirectory = SharedExecutableSettingsDirectory();
+            if (!SharedUpdateStateStore.CanCoordinateExecutable(sharedExecutableSettingsDirectory, Application.ExecutablePath)) return;
             try
             {
                 var tempRoot = Path.Combine(Path.GetTempPath(), "ClipmanRestart-" + Guid.NewGuid().ToString("N"));
@@ -2882,7 +2910,7 @@ namespace Clipman
                         "--wait-restart" +
                         " --restart-exe " + Quote(Application.ExecutablePath) +
                         " --restart-working-dir " + Quote(appDirectory) +
-                        " --restart-state " + Quote(SharedUpdateStateStore.StatePath(settingsStore.SettingsDirectory)) +
+                        " --restart-state " + Quote(SharedUpdateStateStore.StatePath(sharedExecutableSettingsDirectory)) +
                         " --restart-current-build " + BuildInfo.BuildStampUtcMs +
                         " --restart-wait-pid " + Process.GetCurrentProcess().Id +
                         " --restart-timeout-ms 120000",
