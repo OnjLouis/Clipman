@@ -1312,3 +1312,186 @@ func TestPickRefusesToSwitch(t *testing.T) {
 		t.Fatalf("pick must say why it refused, got %q", status)
 	}
 }
+
+func viewerBrowser(t *testing.T, text string, events ...tcell.Event) (*Browser, tcell.SimulationScreen) {
+	t.Helper()
+	entries := sampleEntries(3)
+	entries[1].Text = text
+	store := &fakeStore{entries: entries}
+	var stdout strings.Builder
+	browser, screen := newTestBrowser(store, &stdout, events...)
+	browser.selected = 1
+	return browser, screen
+}
+
+// TestViewerOpensOnTheFirstLineWithTheCaretOnIt. Opening a viewer that leaves
+// the caret somewhere other than the text is a viewer that reads as empty.
+func TestViewerOpensOnTheFirstLineWithTheCaretOnIt(t *testing.T) {
+	browser, screen := viewerBrowser(t, "first line\nsecond line\nthird line", runeKey('v'), runeKey('q'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	if browser.mode != modeView {
+		t.Fatalf("v must open the viewer, mode = %v", browser.mode)
+	}
+	rows := screenRows(t, screen)
+	if !strings.Contains(rows[firstListRow], "1. first line") {
+		t.Fatalf("first viewer row = %q, want line 1", rows[firstListRow])
+	}
+	x, y, visible := screen.GetCursor()
+	if !visible || y != firstListRow {
+		t.Fatalf("caret at (%d,%d) visible %v, want row %d", x, y, visible, firstListRow)
+	}
+	if want := browser.caretColumn(); x != want {
+		t.Errorf("caret column = %d, want %d, the space after the line number", x, want)
+	}
+}
+
+// TestViewerCaretFollowsTheLine is the viewer's version of the central
+// accessibility assertion: a screen reader reads what is at the caret.
+func TestViewerCaretFollowsTheLine(t *testing.T) {
+	browser, screen := viewerBrowser(t, "alpha\nbravo\ncharlie\ndelta",
+		runeKey('v'), key(tcell.KeyDown), key(tcell.KeyDown), runeKey('q'))
+	if err := browser.loopUntil(context.Background(), 3); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	_, y, _ := screen.GetCursor()
+	if want := firstListRow + 2; y != want {
+		t.Fatalf("caret row = %d, want %d", y, want)
+	}
+	if row := screenRows(t, screen)[y]; !strings.Contains(row, "3. charlie") {
+		t.Fatalf("row under the caret = %q, want line 3", row)
+	}
+}
+
+// TestViewerNeverLetsTheStatusLineHoldTheCaret while reading, same rule as the
+// list. Events are stepped by hand rather than through the loop, so each motion
+// can be checked on its own.
+func TestViewerNeverLetsTheStatusLineHoldTheCaret(t *testing.T) {
+	browser, screen := viewerBrowser(t, strings.Repeat("a line of text\n", 40), runeKey('v'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	for _, event := range []tcell.Event{
+		key(tcell.KeyDown), key(tcell.KeyPgDn), runeKey(' '),
+		runeKey('b'), key(tcell.KeyEnd), key(tcell.KeyHome), key(tcell.KeyUp),
+	} {
+		if _, err := browser.handle(context.Background(), event); err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		browser.draw()
+		x, y, visible := screen.GetCursor()
+		if !visible {
+			t.Fatal("the caret must stay visible while reading")
+		}
+		if y == statusRow {
+			t.Fatalf("the caret was left on the status line after %v", event)
+		}
+		if y < firstListRow {
+			t.Fatalf("the caret left the clip: row %d", y)
+		}
+		if want := browser.caretColumn(); x != want {
+			t.Errorf("caret column = %d, want %d", x, want)
+		}
+	}
+}
+
+// TestDeleteInTheViewerDoesNothing is the blocker. Falling through to the list
+// handler would make d delete the entry being read, silently.
+func TestDeleteInTheViewerDoesNothing(t *testing.T) {
+	browser, _ := viewerBrowser(t, "some text", runeKey('v'), runeKey('d'), runeKey('q'))
+	if err := browser.loopUntil(context.Background(), 2); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	if browser.mode != modeView {
+		t.Fatalf("d in the viewer must not leave it, mode = %v", browser.mode)
+	}
+	store := browser.Store.(*fakeStore)
+	if len(store.deleted) != 0 {
+		t.Fatalf("d in the viewer deleted %v", store.deleted)
+	}
+}
+
+// TestClosingTheViewerRestoresTheList, at the entry it was opened from. The
+// viewer must not have moved the list underneath it.
+func TestClosingTheViewerRestoresTheList(t *testing.T) {
+	browser, screen := viewerBrowser(t, strings.Repeat("line\n", 60),
+		runeKey('v'), key(tcell.KeyEnd), runeKey('q'))
+	if err := browser.loopUntil(context.Background(), 3); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	if browser.mode != modeList {
+		t.Fatalf("q must close the viewer, mode = %v", browser.mode)
+	}
+	if browser.selected != 1 {
+		t.Fatalf("selection moved to %d; scrolling a clip must not move the list", browser.selected)
+	}
+	_, y, _ := screen.GetCursor()
+	if want := firstListRow + 1; y != want {
+		t.Fatalf("caret row after closing = %d, want %d", y, want)
+	}
+}
+
+// TestEnterInTheViewerStillEmits. Enter means one thing everywhere, and a
+// pipeline depends on it.
+func TestEnterInTheViewerStillEmits(t *testing.T) {
+	entries := sampleEntries(3)
+	entries[1].Text = "the whole clip\nsecond line"
+	store := &fakeStore{entries: entries}
+	var stdout strings.Builder
+	browser, _ := newTestBrowser(store, &stdout, runeKey('v'), key(tcell.KeyEnter))
+	browser.selected = 1
+	if err := browser.loop(context.Background()); err != nil {
+		t.Fatalf("loop: %v", err)
+	}
+	if stdout.String() != "the whole clip\nsecond line" {
+		t.Fatalf("stdout = %q, want the whole clip", stdout.String())
+	}
+}
+
+// TestViewerWrapsRatherThanTruncates. A viewer that drops the end of a long
+// line is a viewer that cannot show the clip.
+func TestViewerWrapsRatherThanTruncates(t *testing.T) {
+	long := strings.Repeat("0123456789", 30)
+	browser, screen := viewerBrowser(t, long, runeKey('v'), runeKey('q'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	var seen strings.Builder
+	for _, row := range screenRows(t, screen)[firstListRow:] {
+		if trimmed := strings.TrimSpace(row); trimmed != "" {
+			_, text, _ := strings.Cut(trimmed, " ")
+			seen.WriteString(text)
+		}
+	}
+	if !strings.Contains(seen.String(), long[:200]) {
+		t.Errorf("the viewer truncated a long line instead of wrapping it")
+	}
+	if len(browser.viewRows) < 2 {
+		t.Errorf("a 300-character line produced %d rows, want several", len(browser.viewRows))
+	}
+}
+
+// TestArrowInTheViewerRedrawsAlmostNothing holds the viewer to the same budget
+// as the list: everything rewritten is resent to the screen reader.
+func TestArrowInTheViewerRedrawsAlmostNothing(t *testing.T) {
+	browser, screen := viewerBrowser(t, strings.Repeat("a line\n", 40), runeKey('v'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	before := screenRows(t, screen)
+	if _, err := browser.handle(context.Background(), key(tcell.KeyDown)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	browser.draw()
+	after := screenRows(t, screen)
+	changed := 0
+	for index := range before {
+		if before[index] != after[index] {
+			changed++
+		}
+	}
+	if changed > 3 {
+		t.Fatalf("one arrow key rewrote %d rows; only the two markers should change", changed)
+	}
+}

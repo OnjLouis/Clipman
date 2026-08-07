@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/uniseg"
 
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/model"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/operation"
@@ -79,6 +80,7 @@ const (
 	modeGoto
 	modeConfirmDelete
 	modeConfirmSwitch
+	modeView
 	modeHelp
 )
 
@@ -121,6 +123,15 @@ type Browser struct {
 	status   string
 	chosen   string
 	quit     bool
+	// The viewer holds its own position. Reusing selected and top would mean
+	// scrolling a 220-line clip moves the list selection underneath it, so
+	// closing the viewer would leave the user somewhere they never navigated to.
+	viewText   string
+	viewRows   []viewRow
+	viewWidth  int
+	viewCursor int
+	viewTop    int
+
 	// switching records that the user left for the other interface rather than
 	// leaving altogether, so the caller starts the other one instead of exiting.
 	switching bool
@@ -209,6 +220,16 @@ func (b *Browser) applyArrival() {
 	b.selected = b.Arrival.Selected
 }
 
+// debugText is the caret diagnostic drawn on its own row, blank in normal use.
+func (b *Browser) debugText() string {
+	if !b.debugging() {
+		return ""
+	}
+	column, row := b.caretPosition()
+	return fmt.Sprintf("DEBUG caret row %d column %d, mode %s, writing %s",
+		row, column, b.modeName(), b.DebugPath)
+}
+
 // setInitialStatus writes the line the interface opens with.
 //
 // The interface names itself on the first frame for the same reason the line
@@ -233,6 +254,8 @@ func (b *Browser) modeName() string {
 		return "delete confirmation"
 	case modeConfirmSwitch:
 		return "interface switch confirmation"
+	case modeView:
+		return "clip viewer"
 	case modeHelp:
 		return "help"
 	}
@@ -443,15 +466,26 @@ func (b *Browser) clampSelection() {
 	}
 }
 
+// drawText writes text starting at x, advancing by how many columns each
+// character actually occupies.
+//
+// Advancing one column per rune, as this used to, is wrong for any text a user
+// might have copied. A wide character occupies two cells, so the next write
+// lands inside it and corrupts both; a combining mark occupies none and belongs
+// in the cell it modifies rather than in one of its own. The list hid this
+// because previews are short and mostly ASCII. The viewer, which draws arbitrary
+// clip text, does not.
 func (b *Browser) drawText(x, y int, style tcell.Style, text string) {
 	width, _ := b.Screen.Size()
 	column := x
-	for _, r := range text {
+	graphemes := uniseg.NewGraphemes(text)
+	for graphemes.Next() {
 		if column >= width {
 			return
 		}
-		b.Screen.SetContent(column, y, r, nil, style)
-		column++
+		runes := graphemes.Runes()
+		b.Screen.SetContent(column, y, runes[0], runes[1:], style)
+		column += displayWidth(graphemes.Str())
 	}
 }
 
@@ -466,12 +500,17 @@ func (b *Browser) drawText(x, y int, style tcell.Style, text string) {
 // better.
 func (b *Browser) drawLine(y int, style tcell.Style, text string) {
 	width, _ := b.Screen.Size()
-	runes := []rune(text)
-	for column := 0; column < width; column++ {
-		if column < len(runes) {
-			b.Screen.SetContent(column, y, runes[column], nil, style)
-			continue
+	column := 0
+	graphemes := uniseg.NewGraphemes(text)
+	for graphemes.Next() {
+		if column >= width {
+			break
 		}
+		runes := graphemes.Runes()
+		b.Screen.SetContent(column, y, runes[0], runes[1:], style)
+		column += displayWidth(graphemes.Str())
+	}
+	for ; column < width; column++ {
 		b.Screen.SetContent(column, y, ' ', nil, tcell.StyleDefault)
 	}
 }
@@ -482,6 +521,21 @@ func (b *Browser) draw() {
 	listRows := b.layout()
 
 	plain := tcell.StyleDefault
+
+	// The viewer replaces the list but keeps the chrome above it, so the entry
+	// rows are still the last thing written on every frame.
+	if b.mode == modeView {
+		b.ensureViewRows()
+		b.drawLine(headingRow, plain.Bold(true), b.viewerHeading())
+		b.drawLine(statusRow, plain, b.status)
+		b.drawLine(previewLabelRow, plain.Bold(true), "Clip text")
+		b.drawLine(previewRow, plain, "")
+		b.drawLine(debugRow, plain, b.debugText())
+		b.drawViewer(listRows)
+		b.placeCursor()
+		b.Screen.Show()
+		return
+	}
 
 	b.drawLine(headingRow, plain.Bold(true), b.heading())
 
@@ -503,13 +557,7 @@ func (b *Browser) draw() {
 
 	// The debug row shows where the previous draw put the caret, on a line of
 	// its own so it can be found by review navigation.
-	debugText := ""
-	if b.debugging() {
-		column, row := b.caretPosition()
-		debugText = fmt.Sprintf("DEBUG caret row %d column %d, mode %s, writing %s",
-			row, column, b.modeName(), b.DebugPath)
-	}
-	b.drawLine(debugRow, plain, debugText)
+	b.drawLine(debugRow, plain, b.debugText())
 
 	if b.mode == modeHelp {
 		b.drawHelp(listRows)
@@ -580,6 +628,9 @@ func (b *Browser) caretPosition() (column, row int) {
 	if label, typed, asking := b.promptParts(); asking {
 		return len([]rune(label)) + len([]rune(typed)), statusRow
 	}
+	if b.mode == modeView {
+		return b.caretColumn(), firstListRow + (b.viewCursor - b.viewTop)
+	}
 	if b.mode == modeHelp || len(b.visible()) == 0 {
 		return b.caretColumn(), firstListRow
 	}
@@ -608,19 +659,41 @@ func (b *Browser) rowText(row int) string {
 // The column is derived from the row rather than fixed, so it stays correct as
 // the number widens from 1 to 199.
 func (b *Browser) caretColumn() int {
-	entries := b.visible()
-	if b.selected < 0 || b.selected >= len(entries) {
-		return len([]rune(selectedMarker))
-	}
-	return spaceAfterNumber(selectedMarker + output.Describe(b.selected, entries[b.selected], b.now()))
+	return spaceAfterNumber(b.currentRowText())
 }
 
-// spaceAfterNumber finds the space following the leading "N." of a row. The
-// entry number is always first, so the first ". " in the row is that boundary.
+// currentRowText is the row the caret is resting on, whichever mode drew it.
+//
+// The column is derived from the row's own text rather than from a constant, so
+// it stays right as an entry number widens from 1 to 199 or a viewer line
+// number from 9 to 1000. Every mode answers here, so there is one place that
+// knows what the caret is sitting on — the same shape as promptParts.
+func (b *Browser) currentRowText() string {
+	if b.mode == modeView {
+		if b.viewCursor >= 0 && b.viewCursor < len(b.viewRows) {
+			row := b.viewRows[b.viewCursor]
+			return selectedMarker + row.label() + row.text
+		}
+		return selectedMarker
+	}
+	entries := b.visible()
+	if b.selected < 0 || b.selected >= len(entries) {
+		return selectedMarker
+	}
+	return selectedMarker + output.Describe(b.selected, entries[b.selected], b.now())
+}
+
+// spaceAfterNumber finds the space following the leading number of a row. The
+// number is always first, so the first ". " or "+ " in the row is that boundary.
+//
+// Both separators are matched because the viewer marks a wrapped line's
+// continuation rows with "+" instead of ".". Without "+" here the caret would
+// jump three columns left the moment a line wrapped, which reads as the caret
+// slipping off the text rather than as a different kind of row.
 func spaceAfterNumber(row string) int {
 	runes := []rune(row)
 	for index := 0; index+1 < len(runes); index++ {
-		if runes[index] == '.' && runes[index+1] == ' ' {
+		if (runes[index] == '.' || runes[index] == '+') && runes[index+1] == ' ' {
 			return index + 1
 		}
 	}
@@ -632,6 +705,7 @@ var helpLines = []string{
 	"  Up, Down, Page Up, Page Down, Home, End   move through the list",
 	"  g            go to an entry by number",
 	"  Enter        write the selected clip to standard output and exit",
+	"  v            read the whole clip; q closes it",
 	"  /            filter the list; Escape clears it",
 	"  Tab          switch between history, templates, and both",
 	"  d            delete the selected entry after confirmation",
@@ -695,6 +769,11 @@ func (b *Browser) handleKey(ctx context.Context, event *tcell.EventKey) error {
 		return b.handleConfirmKey(ctx, event)
 	case modeConfirmSwitch:
 		b.handleSwitchKey(event)
+		return nil
+	case modeView:
+		// Routed here rather than falling through to the list, which would mean
+		// d in the viewer deletes the entry being read. Silent and destructive.
+		b.handleViewKey(event)
 		return nil
 	case modeHelp:
 		b.mode = modeList
@@ -857,6 +936,10 @@ func (b *Browser) handleListKey(ctx context.Context, event *tcell.EventKey) erro
 		}
 		b.entries = entries
 		b.setStatus("Reloaded. %s", b.heading())
+	case 'v':
+		if b.selected < len(entries) {
+			b.openViewer(entries[b.selected])
+		}
 	case 'u':
 		// pick writes one clip and exits. Switching out of it would land the
 		// user in the line interface's picker, and saving an interface

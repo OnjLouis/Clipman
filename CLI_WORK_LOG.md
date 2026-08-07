@@ -85,8 +85,30 @@ write the clip to a file, and `x` to run a command against it.
 
 ### Built so far
 
-`internal/clipexec` — command-line parsing and clip substitution, 13 tests, no
-UI. This is the security-critical half and it is done.
+- `internal/clipexec` — command-line parsing, `@clip` substitution, and the
+  runner. 24 tests. The security-critical half, done.
+- `internal/clipfile` — path resolution with `~/` expansion, existence checks,
+  and a verbatim `0600` write. 10 tests.
+- **The viewer**, wired and working: `v` opens it, arrows move a line at a time,
+  Page Up/Down and space/`b` page, Home/End jump, `q` closes, Enter still emits.
+  Rows are numbered by logical line with `+` marking continuations, wrapped by
+  display width, control characters shown in caret notation.
+- `drawLine` and `drawText` now advance by display width instead of one column
+  per rune, so wide characters and combining marks no longer corrupt every
+  column after them. This fixes the list too, where short ASCII previews were
+  hiding it.
+- `spaceAfterNumber` matches `+ ` as well as `. `, so the caret does not jump
+  three columns left when a line wraps.
+- `caretColumn` now derives from `currentRowText()`, which every mode answers —
+  one place that knows what the caret is sitting on, the same shape as
+  `promptParts`.
+
+### Still to build
+
+`w` and `x` are not yet wired into either interface. The packages underneath
+them are done and tested; what remains is the prompt machinery, the mode
+handling, and the announcements — including prompt line editing (item 5 below),
+which `x` needs far more than the filter did.
 
 ### Constraints that are settled
 
