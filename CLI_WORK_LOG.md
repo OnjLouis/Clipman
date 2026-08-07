@@ -238,8 +238,6 @@ Decide and document both rather than failing cryptically.
 
 ## Open items
 
-- `debugRow` reserves one entry row permanently (`firstListRow = 5`) whether or
-  not `--debug` is on — 19 rows instead of 20 on a 24-row terminal.
 - Man page is unrendered; no `groff` on the development machine.
 - macOS, Android, and iOS fixture generators absent — no Xcode, JDK, or reachable
   Mac.

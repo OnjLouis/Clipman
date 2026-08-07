@@ -216,8 +216,8 @@ func (b *Browser) openDebugLog() {
 	b.debugFile = file
 	fmt.Fprintf(file, "Clipman CLI full-screen interface caret trace, %s\n",
 		b.now().Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(file, "layout rows: heading=%d status=%d previewLabel=%d preview=%d debug=%d firstList=%d\n\n",
-		headingRow, statusRow, previewLabelRow, previewRow, debugRow, firstListRow)
+	fmt.Fprintf(file, "layout rows: heading=%d status=%d previewLabel=%d preview=%d firstList=%d\n\n",
+		headingRow, statusRow, previewLabelRow, previewRow, firstListRow)
 }
 
 func (b *Browser) writeDebug(text string) {
@@ -247,16 +247,6 @@ func (b *Browser) applyArrival() {
 	}
 	b.filter = b.Arrival.Filter
 	b.selected = b.Arrival.Selected
-}
-
-// debugText is the caret diagnostic drawn on its own row, blank in normal use.
-func (b *Browser) debugText() string {
-	if !b.debugging() {
-		return ""
-	}
-	column, row := b.caretPosition()
-	return fmt.Sprintf("DEBUG caret row %d column %d, mode %s, writing %s",
-		row, column, b.modeName(), b.DebugPath)
 }
 
 // setInitialStatus writes the line the interface opens with.
@@ -480,11 +470,7 @@ const (
 	statusRow       = 1
 	previewLabelRow = 2
 	previewRow      = 3
-	// debugRow is blank in normal use and carries the caret diagnostic when
-	// --debug is given. It is the line immediately above the first
-	// entry, which makes it easy to find by review navigation.
-	debugRow     = 4
-	firstListRow = 5
+	firstListRow    = 4
 )
 
 // layout returns how many rows the list may use for the current window size.
@@ -583,7 +569,6 @@ func (b *Browser) draw() {
 		b.drawLine(statusRow, plain, b.status)
 		b.drawLine(previewLabelRow, plain.Bold(true), "Clip text")
 		b.drawLine(previewRow, plain, "")
-		b.drawLine(debugRow, plain, b.debugText())
 		b.drawViewer(listRows)
 		b.placeCursor()
 		b.Screen.Show()
@@ -618,7 +603,6 @@ func (b *Browser) draw() {
 
 	// The debug row shows where the previous draw put the caret, on a line of
 	// its own so it can be found by review navigation.
-	b.drawLine(debugRow, plain, b.debugText())
 
 	now := b.now()
 	for offset := 0; offset < listRows; offset++ {

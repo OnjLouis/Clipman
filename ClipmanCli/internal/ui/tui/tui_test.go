@@ -1149,41 +1149,6 @@ func TestDefaultDebugPathIsBesideTheProgram(t *testing.T) {
 	}
 }
 
-// TestDebugRowIsBlankWhenNotDebugging keeps the diagnostic out of ordinary use.
-func TestDebugRowIsBlankWhenNotDebugging(t *testing.T) {
-	store := &fakeStore{entries: sampleEntries(3)}
-	var stdout strings.Builder
-	browser, screen := newTestBrowser(store, &stdout, runeKey('q'))
-	if err := browser.loop(context.Background()); !errors.Is(err, ErrCancelled) {
-		t.Fatalf("loop: %v", err)
-	}
-	if row := screenRows(t, screen)[debugRow]; row != "" {
-		t.Fatalf("the debug row should be blank in normal use, got %q", row)
-	}
-}
-
-// TestDebugRowNamesTheCaretPosition checks the on-screen line, for when the
-// file is inconvenient to reach.
-func TestDebugRowNamesTheCaretPosition(t *testing.T) {
-	store := &fakeStore{entries: sampleEntries(3)}
-	var stdout strings.Builder
-	browser, screen := newTestBrowser(store, &stdout, key(tcell.KeyDown), runeKey('q'))
-	browser.DebugPath = filepath.Join(t.TempDir(), "trace.txt")
-	if err := browser.loop(context.Background()); !errors.Is(err, ErrCancelled) {
-		t.Fatalf("loop: %v", err)
-	}
-	row := screenRows(t, screen)[debugRow]
-	if !strings.HasPrefix(row, "DEBUG caret row ") {
-		t.Fatalf("debug row = %q", row)
-	}
-	if !strings.Contains(row, fmt.Sprintf("row %d", firstListRow+1)) {
-		t.Errorf("debug row should name the selected entry's row: %q", row)
-	}
-	if !strings.Contains(row, "mode list") {
-		t.Errorf("debug row should name the mode: %q", row)
-	}
-}
-
 // TestTheInterfaceNamesItselfOnTheFirstFrame is the tui half of the
 // discoverability guard. Two interchangeable interfaces ship; a user dropped
 // into one of them with nothing naming it has no reason to look for the other.
