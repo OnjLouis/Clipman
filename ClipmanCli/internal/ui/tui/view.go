@@ -363,6 +363,15 @@ func (b *Browser) handleViewKey(event *tcell.EventKey) {
 		b.moveView(page)
 	case 'b':
 		b.moveView(-page)
+	case 'w':
+		// Bound here as well as in the list, because being told to close the
+		// clip you are reading in order to save it is two steps for a one-step
+		// task. The prompt names the entry, since the viewer draws no marker.
+		if b.PickOnly {
+			b.setStatus("pick cannot write files. Use menu to save a clip to a file.")
+			return
+		}
+		b.beginSave()
 	}
 }
 

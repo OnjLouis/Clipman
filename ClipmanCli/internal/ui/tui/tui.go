@@ -81,6 +81,9 @@ const (
 	modeConfirmDelete
 	modeConfirmSwitch
 	modeView
+	modeSavePath
+	modeConfirmOverwrite
+	modeNotice
 	modeHelp
 )
 
@@ -135,6 +138,13 @@ type Browser struct {
 	viewWidth  int
 	viewCursor int
 	viewTop    int
+
+	// saveLabel is the question w is asking, savePath the file an overwrite
+	// confirmation is about, and returnMode where a prompt or notice goes back
+	// to, so w behaves the same from the list and from the viewer.
+	saveLabel  string
+	savePath   string
+	returnMode mode
 
 	// switching records that the user left for the other interface rather than
 	// leaving altogether, so the caller starts the other one instead of exiting.
@@ -258,6 +268,12 @@ func (b *Browser) modeName() string {
 		return "delete confirmation"
 	case modeConfirmSwitch:
 		return "interface switch confirmation"
+	case modeSavePath:
+		return "save prompt"
+	case modeConfirmOverwrite:
+		return "overwrite confirmation"
+	case modeNotice:
+		return "notice"
 	case modeView:
 		return "clip viewer"
 	case modeHelp:
@@ -297,7 +313,9 @@ func (b *Browser) promptParts() (label, typed string, cursor int, asking bool) {
 		return "Filter by text: ", b.prompt.String(), b.prompt.at(), true
 	case modeGoto:
 		return "Go to entry number: ", b.prompt.String(), b.prompt.at(), true
-	case modeConfirmDelete, modeConfirmSwitch:
+	case modeSavePath:
+		return b.saveLabel, b.prompt.String(), b.prompt.at(), true
+	case modeConfirmDelete, modeConfirmSwitch, modeConfirmOverwrite, modeNotice:
 		return b.status, "", 0, true
 	}
 	return "", "", 0, false
@@ -727,6 +745,7 @@ var helpLines = []string{
 	"  g            go to an entry by number",
 	"  Enter        write the selected clip to standard output and exit",
 	"  v            read the whole clip; q closes it",
+	"  w            save the selected clip to a file",
 	"  /            filter the list; Escape clears it",
 	"  Tab          switch between history, templates, and both",
 	"  d            delete the selected entry after confirmation",
@@ -794,6 +813,15 @@ func (b *Browser) handleKey(ctx context.Context, event *tcell.EventKey) error {
 		return b.handleConfirmKey(ctx, event)
 	case modeConfirmSwitch:
 		b.handleSwitchKey(event)
+		return nil
+	case modeSavePath:
+		b.handleSaveKey(event)
+		return nil
+	case modeConfirmOverwrite:
+		b.handleOverwriteKey(event)
+		return nil
+	case modeNotice:
+		b.dismissNotice()
 		return nil
 	case modeView:
 		// Routed here rather than falling through to the list, which would mean
@@ -1000,6 +1028,14 @@ func (b *Browser) handleListKey(ctx context.Context, event *tcell.EventKey) erro
 		if b.selected < len(entries) {
 			b.openViewer(entries[b.selected])
 		}
+	case 'w':
+		// pick has exactly one output and its caller chose it. Writing a file a
+		// pipeline knows nothing about is not that output.
+		if b.PickOnly {
+			b.setStatus("pick cannot write files. Use menu to save a clip to a file.")
+			return nil
+		}
+		b.beginSave()
 	case 'u':
 		// pick writes one clip and exits. Switching out of it would land the
 		// user in the line interface's picker, and saving an interface

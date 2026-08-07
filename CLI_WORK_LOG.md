@@ -105,7 +105,8 @@ write the clip to a file, and `x` to run a command against it.
 
 ### Still to build
 
-`w` and `x` are not yet wired into either interface. The packages underneath
+`w` is wired into the full-screen interface; `x` is not, and neither is wired
+into the line interface. The packages underneath
 them are done and tested; what remains is the prompt machinery, the mode
 handling, and the announcements — including prompt line editing (item 5 below),
 which `x` needs far more than the filter did.
@@ -178,8 +179,9 @@ available, but make line motion primary.
    a logical line so a resize does not move the reader.
 3. ~~`caretPosition`/`caretColumn` assume list geometry.~~ **Done.** Both go
    through `currentRowText()`, which every mode answers.
-4. `promptParts` must own the new prompts (file path, command, overwrite
-   confirm, running state).
+4. ~~`promptParts` must own the new prompts.~~ **Done for `w`.** File path,
+   overwrite confirm, and a `modeNotice` whose prompt is the message. The
+   running-state prompt arrives with `x`.
 5. ~~**Prompt line editing.**~~ **Done.** `promptEditor` in `prompt.go` owns the
    typed line and the caret inside it; `promptParts` returns that offset and
    `caretPosition` uses it instead of `len(typed)`. Left, Right, Home, End,
