@@ -36,6 +36,8 @@ aspirational. Sections describing work that has not been done are marked
 | TLS trust for private authorities: <code>--ca-cert</code>, <code>--insecure</code>, connection-file CA | Complete (added after the original draft) |
 | Full-screen renderer, <code>--renderer</code>/<code>--tui</code>/<code>--line</code>, <code>renderer</code> config key | Complete (section 8.2) |
 | Interface self-naming, <code>u</code> switching with carried place, <code>status</code> <code>Interface:</code> | Complete (section 8.3) |
+| Reading, saving, and running a clip (<code>v</code>, <code>w</code>, <code>x</code>) in both interfaces | Complete (section 8.4) |
+| Editable prompts, display-width drawing and caret placement | Complete (section 8.2) |
 | Windows interoperability fixture corpus and generator | Complete; macOS, Android, iOS generators absent (section 0.3 item 5) |
 | <code>Manual.html</code>, <code>clipman-cli.1</code>, built-in help | Complete and in sync with the code |
 | Cross-build to 7 targets in per-platform directories | Complete |
@@ -1094,9 +1096,16 @@ Command set: <code>NUMBER</code> view, <code>o NUMBER</code> emit and exit,
 <code>d NUMBER</code> delete after confirmation, <code>/TEXT</code> search,
 <code>/</code> clear search, <code>n</code>/<code>p</code> page,
 <code>a</code> add, <code>r</code> reload, <code>u</code> (also <code>ui</code>,
-<code>renderer</code>) switch interface, <code>?</code> help,
+<code>renderer</code>) switch interface, <code>v</code>/<code>w</code>/<code>x</code>
+<code>NUMBER</code> read, save, and run (section 8.4), <code>?</code> help,
 <code>q</code> quit. The search prefix is handled before the command is split
 on whitespace, so search text may contain spaces.
+
+A bare <code>NUMBER</code> opens the paged reader rather than announcing the
+whole clip. It used to call <code>Console.Say(b.text(entry))</code>, so a
+five-thousand-line clip arrived as one unstoppable announcement with no way to
+slow down, go back, or leave — the listening equivalent of a wall of text with
+no scrollbar, in the interface built for listening.
 
 Viewing, prompts, selection, and errors remain on the terminal. Only
 <code>o</code> or the final <code>pick</code> result writes payload text to
@@ -1145,8 +1154,22 @@ by number; Enter emits and exits; <code>/</code> filters live with Escape to
 clear; Tab cycles history → templates → all; <code>d</code> deletes after
 confirmation and is refused under <code>pick</code>; <code>r</code> reloads;
 <code>u</code> switches to the line interface after a <code>y</code>
-confirmation and is refused under <code>pick</code>; <code>?</code> shows keys;
-<code>q</code> or Escape quits.
+confirmation and is refused under <code>pick</code>; <code>v</code> reads the
+whole clip, <code>w</code> saves it, <code>x</code> runs a program on it
+(section 8.4); <code>?</code> shows keys; <code>q</code> or Escape quits.
+
+Layout rows are heading, status, preview label, preview, then the list from row
+four. A diagnostic row above the list was removed once the caret was proven and
+the file trace existed: it cost one entry row on every session for something
+almost nobody enables.
+
+Prompts are editable rather than backspace-only. <code>promptEditor</code> holds
+the typed line and a caret offset within it, <code>promptParts</code> returns
+that offset, and <code>caretPosition</code> uses it, so the caret rests on the
+character being edited and moving back through a line reads it out. Left, Right,
+Home, End, Delete, Ctrl+U, Ctrl+A, and Ctrl+E work in every prompt through one
+shared <code>editPrompt</code>. Correcting a forty-character command line by
+destroying everything after the mistake is the cost this removes.
 
 ### 8.3 Switching interface, and saying which one you are in
 
@@ -1257,6 +1280,86 @@ Simulation-screen tests assert cursor position, complete row text, focus order,
 and restoration of terminal state after exit or panic.
 
 ---
+
+### 8.4 Reading, saving, and running a clip
+
+Both interfaces offer the same three things on the selected entry, and they are
+the same code underneath, so a clip behaves identically in each.
+
+**Reading.** The full-screen interface opens a viewer with <code>v</code>; the
+line interface opens a paged reader with a bare number or <code>v NUMBER</code>.
+Line motion is primary in the viewer even though Page Up/Down, space, and
+<code>b</code> page: a page key repaints the content area and resends a
+screenful of text to a screen reader, while an arrow rewrites two markers. Rows
+are numbered by logical line so position is spoken as part of the row the caret
+lands on rather than announced separately, and continuation rows of a wrapped
+line use <code>+</code> instead of <code>.</code>. Position is held as a logical
+line, never a row index, so re-wrapping on a resize leaves the reader on the same
+text. Help renders through the same viewer, which is what stopped it being
+clipped once the key list outgrew a standard terminal.
+
+Clip text passes through <code>output.PlainLines</code> in both interfaces: line
+endings normalised so a stray carriage return cannot move the cursor
+mid-announcement, tabs expanded because a terminal's own tab handling moves the
+cursor without the program knowing, and control characters shown in caret
+notation rather than dropped — dropping them would make what is displayed
+disagree with what <code>w</code> writes and Enter emits.
+
+**Saving** (<code>w</code>) writes verbatim through <code>internal/clipfile</code>:
+no added newline, mode <code>0600</code> because a clip may be a credential, a
+leading <code>~/</code> expanded because there is no shell to do it, and a
+directory refused with a sentence rather than the operating system's message. A
+new path is not confirmed — it was typed, and typing is deliberation — but an
+existing one is, because that is the only branch which destroys something the
+user did not name.
+
+**Running** (<code>x</code>) has no shell anywhere.
+<code>internal/clipexec</code> splits the typed line into argv, the clip
+replaces whole arguments that are never re-split, and <code>os/exec</code> runs
+the result. A clip is untrusted data: substituting it into a command string for
+<code>sh -c</code> would mean a clip containing <code>; rm -rf ~</code> ran when
+the user asked to echo it. Unquoted shell operators, and the spellings
+<code>{}</code>, <code>{clip}</code>, <code>$clip</code>, <code>%clip%</code>,
+are refused with an explanation rather than passed through, because quoting is a
+clean escape hatch so a refusal fires only on the real mistake. The placeholder
+is <code>@clip</code> and must be an argument on its own; with none present the
+clip is piped to standard input.
+
+A child process never receives <code>os.Stdout</code>. That stream may be a pipe
+belonging to the user — <code>pick --tui | ssh host 'cat &gt; f'</code> has one —
+and child output written into it would be injected into the payload and corrupt
+the file at the far end. Output is captured, capped at 1 MiB, and presented in
+the viewer, because the alternate screen is repainted on return and anything
+printed to the terminal would be gone: one unrepeatable pass at output with no
+scrollback. The exit status is always reported, including for a command that
+printed nothing, which must not read as never having run. The clip never travels
+in an environment variable.
+
+In the full-screen interface the command runs on a goroutine and reports back by
+posting an event, so the loop keeps turning and Escape stops a program that will
+not finish; a still-running command says so every ten seconds with a changing
+number, since an identical line would be redrawn into identical cells and never
+spoken again. The line interface runs it synchronously — there is no event loop
+to keep alive, and Ctrl+C is the terminal's own way out.
+
+**Announcing completion.** The caret returns to the row being read, by design,
+so a status line written on the way past is very likely never spoken. That is
+tolerable for "reloaded" and not for "was my file written" or "was that entry
+deleted". Both are held in a mode whose prompt is the message, which puts the
+caret on it and costs one keypress on the branches that matter.
+
+**<code>pick</code> allows <code>v</code> and refuses <code>w</code> and
+<code>x</code>.** The principle is that pick has exactly one output and its
+caller chose it. Confirming which clip is about to go down the pipe is what pick
+most needs; writing a file the pipeline knows nothing about is not that output,
+and an arbitrary-program affordance reachable from inside a pipeline stage is a
+wider surface than the same key in an interactive menu.
+
+**Windows.** With no shell, a <code>.cmd</code> or <code>.bat</code> target
+needs its interpreter named (<code>x cmd /c mytask.cmd</code>), and Go 1.19+
+removed the working directory from <code>LookPath</code>, so a program there
+needs an explicit path. Both are documented rather than left to fail
+cryptically.
 
 ## 9. Merge and normalization
 
@@ -1865,8 +1968,10 @@ real server against a real desktop client.
 
 Line <code>menu</code> and <code>pick</code>, controlling-terminal I/O
 separation, template/history switching, single-entry delete selection. Search,
-paging, and multiline new-entry input were subsequently built; save-to-file
-(<code>s</code>) remains the one deferred affordance. See section 8.1.
+paging, multiline new-entry input, and later reading, saving, and running a clip
+were all subsequently built. Nothing from this phase remains deferred: the
+save-to-file affordance shipped as <code>w</code>, and the pipe-to-command one
+as <code>x</code> with no shell (section 8.4). See section 8.1.
 
 ### Phase 4 — TUI — **done**
 

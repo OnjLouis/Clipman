@@ -77,7 +77,7 @@ existed.
 
 ---
 
-## Designed, not built: clip viewer, `w` save, `x` run
+## 2026-08-07 — clip viewer, save, and run (shipped)
 
 Requested: the full-screen interface's Enter "doesn't do much other than
 display" when not piped. Wanted a full-clip viewer with paging and `q`, `w` to
@@ -228,16 +228,37 @@ own sub-prompt (`n`, `p`, `w`, `x`, `q`), following the `clip>` precedent in
 `addEntry`. `v NUMBER`, `w NUMBER`, and `x NUMBER` collect their arguments the
 same way.
 
-### Verify on Windows before shipping
+### Windows — decided and documented
 
-With no shell, `.cmd`/`.bat` targets may not run via `CreateProcess`, and Go
-1.19+ removed cwd from `LookPath`, so `x ./script.sh` needs an explicit path.
-Decide and document both rather than failing cryptically.
+With no shell, a `.cmd`/`.bat` target needs its interpreter named
+(`x cmd /c mytask.cmd`), and Go 1.19+ removed cwd from `LookPath`, so a program
+in the working directory needs an explicit path. Both are stated in
+`Manual.html` and the man page rather than left to fail cryptically. **Neither
+has been exercised on real Windows.**
 
 ---
 
+## Resuming
+
+Branch `cli/0.3.0-dev-interfaces`, 12+ commits ahead of `main`, suite green at
+every one. `go test ./...` from `ClipmanCli/` is the check.
+
+**Both interfaces are feature-complete for this work.** There is no half-built
+code and no failing test. What is left is verification and things blocked on
+tooling this machine does not have.
+
+The highest-value next action is not code: **open the full-screen interface in
+PowerShell with `--debug` and use `v`, `w`, and `x` against NVDA.** Everything
+in this branch was verified against a simulation screen, and the one thing that
+started it all — a caret that behaved correctly in tests — was still wrong in
+practice for a reason no test could see.
+
 ## Open items
 
+- **Nothing in this branch has been used with `w` or `x` against a screen
+  reader.** The caret model has, on NVDA, and it works.
+- Windows console resize is tcell's code path and is unverified on real
+  hardware. `--debug` records resize events and the caret after each one.
 - Man page is unrendered; no `groff` on the development machine.
 - macOS, Android, and iOS fixture generators absent — no Xcode, JDK, or reachable
   Mac.
