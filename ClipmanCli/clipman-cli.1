@@ -139,12 +139,38 @@ to page,
 to add a new clip,
 .B r
 to reload from the server,
+.BI "v " NUMBER
+to read an entry a page at a time, which is also what a bare number does,
+.BI "w " NUMBER
+to save an entry to a file,
+.BI "x " NUMBER
+to run a program on an entry,
 .B u
 to switch to the full-screen interface,
 .B ?
 for the command list, and
 .B q
 to quit.
+.IP
+Reading an entry opens a paged reader with its own prompt, where
+.B n
+and
+.B p
+page,
+.B w
+saves,
+.B x
+runs a program, and
+.B q
+closes it. A clip is never announced in one block: a long one would otherwise
+arrive as a single unstoppable announcement.
+.B pick
+allows
+.B v
+but refuses
+.B w
+and
+.BR x .
 .IP
 The history is downloaded once when the menu opens and reused for every
 command, so browsing does not wait on the network. Use
