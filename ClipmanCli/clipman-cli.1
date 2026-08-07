@@ -112,12 +112,131 @@ are equivalent.
 .TP
 .B pick
 Display a numbered list on the controlling terminal and write the selected
-entry only to standard output.
+entry only to standard output. Type
+.BR n " or " p
+to move between pages, or
+.B q
+to cancel. Accepts the renderer options described under
+.BR menu .
 .TP
 .B menu
-Open the line-based history manager. Enter a number to view, "o NUMBER" to
-output, "d NUMBER" to delete after confirmation, "r" to refresh, or "q" to
-quit.
+Browse history interactively. This is what runs when no command is given at
+all, and it opens the line interface or the full-screen interface according to
+your configuration. In the line interface, commands are a number to view an entry,
+.BI "o " NUMBER
+to write it to standard output and exit,
+.BI "d " NUMBER
+to delete it after confirmation,
+.BI / TEXT
+to show only matching entries,
+.B /
+alone to clear the search,
+.B n
+and
+.B p
+to page,
+.B a
+to add a new clip,
+.B r
+to reload from the server,
+.B u
+to switch to the full-screen interface,
+.B ?
+for the command list, and
+.B q
+to quit.
+.IP
+The history is downloaded once when the menu opens and reused for every
+command, so browsing does not wait on the network. Use
+.B r
+to pick up changes made on another device.
+.IP
+Entry numbers are positions in the current filtered list, not in the current
+page, so a number stays valid after paging. When a search is active the numbers
+refer to the matches.
+.IP
+.B a
+reads a clip over several lines. Finish with a single period on a line by
+itself, write two periods for a line holding one period, or type
+.B !cancel
+on a line by itself to abandon it. The new clip joins whichever kind is being
+browsed, so adding one under
+.B "--kind templates"
+creates a template.
+.IP
+Two renderers are available. The line renderer above is the default.
+.BI --renderer " tui"
+or
+.B --tui
+selects a full-screen list with arrow-key navigation, a live filter, a preview
+of the selected clip, and
+.B Tab
+to switch between history and templates.
+.BI --renderer " line"
+or
+.B --line
+selects the line renderer, and
+.B renderer
+in the configuration file sets the default. An option on the command line
+always wins.
+.IP
+Both renderers describe an entry with the same words. In the full-screen
+renderer,
+.B g
+goes to an entry by number and
+.B Tab
+switches kind.
+.IP
+Because the choice is yours to make, each interface says which one it is. The
+line interface opens with
+.BR "Clipman line interface" ,
+the full-screen interface names itself on its status line, and
+.B ?
+in either one describes the other.
+.B "clipman-cli status"
+reports the configured one as
+.BR Interface: ,
+which answers the question without opening either.
+.IP
+.B u
+switches to the other interface, after a confirmation: type
+.B yes
+in the line interface, or press
+.B y
+in the full-screen one. The entry you were resting on, the active search, and
+the selected kind all travel with you, and the already-downloaded history is
+handed over so the switch does not wait on the network. The choice is saved as
+your default. A terminal that cannot run the full-screen interface leaves you
+where you are and changes nothing; a configuration file that cannot be written
+costs the saved preference rather than the session.
+.B pick
+refuses to switch, because it offers one choice and exits.
+.IP
+The cursor sits in whatever is being moved through or typed into, because a
+screen reader reads the line the cursor is on. Moving through the list keeps
+the cursor on the selected row, in the space just after the entry number, so
+each arrow key reads out the newly selected entry; it never rests on the status
+line while browsing. A question puts the cursor at the end of the answer on
+the same line as the question, so the line reads
+.RB \(dq "Go to entry number: 12" \(dq .
+The selected row is marked with
+.B ->
+in the text itself rather than by colour alone.
+.IP
+The heading, status line, and preview sit above the list, which runs to the
+bottom of the window. A terminal receives a redrawn screen from top to bottom,
+so this ordering makes the entry rows the last text written on each frame.
+.IP
+Redrawing is kept to a minimum, because everything redrawn is sent to the
+terminal again and read again. Moving through the list changes only the two
+markers and the preview line, leaving the entry text, heading, and status line
+untouched; the selected row carries no reverse-video highlight, which would
+resend every character of two rows on each arrow key. Paging and scrolling
+repaint the list, after which the cursor returns to the selected row.
+.IP
+Clipman does not attempt to detect a screen reader, and a terminal that cannot
+run the full-screen interface is told so by name rather than silently falling
+back.
 .TP
 .B sync
 Download and validate the current server history. This stateless edition has
@@ -163,17 +282,56 @@ takes precedence.
 .B --version
 Show the CLI version.
 .SH CONFIGURATION
-The default configuration is
+The configuration file is found in this order, first match winning:
+.IP 1. 4
+the path given to
+.BR --config ;
+.IP 2. 4
+.BR CLIPMAN_CONFIG ;
+.IP 3. 4
+.I config.toml
+inside the directory named by
+.BR CLIPMAN_HOME ;
+.IP 4. 4
+.I config.toml
+beside the
+.B clipman-cli
+program, when one is present;
+.IP 5. 4
+the per-user default:
 .I ~/.clipman/config.toml
-on Linux and macOS, and
+on Linux and macOS,
 .I %LOCALAPPDATA%\eClipman CLI\econfig.toml
 on Windows.
-.B CLIPMAN_HOME
-changes the data directory.
-.B CLIPMAN_CONFIG
+.PP
+On an interactive run,
+.B init
+asks
+.RB \(dq "Save them beside this program instead, so only this copy uses them?" \(dq
+after explaining that settings are normally saved for the user account and
+shared by every copy. Answering yes, or passing
+.BR --portable ,
+writes the configuration beside the program, so that copy keeps its own
+settings and two builds can use two servers without interfering. The question
+is skipped when
+.BR --config ,
+.BR CLIPMAN_CONFIG ,
 or
-.B --config
-selects another configuration file.
+.B CLIPMAN_HOME
+has already named a location, and on
+.B --non-interactive
+runs. The file is adopted only once it exists, leaving an ordinary
+installation on the per-user location. The search covers the directory holding the
+program, never the current working directory: a configuration file names a
+server and carries a token, so an unrelated
+.I config.toml
+must not take over a session.
+.PP
+.B clipman-cli status
+reports which configuration is in use on its first line, and as
+.B config_path
+under
+.BR --json .
 .PP
 The history password is resolved from
 .BR --password ,
@@ -207,7 +365,7 @@ credential because it contains the server token.
 Success.
 .TP
 .B 1
-Local input or output failure.
+Local input, output, or data-format failure, and anything not covered below.
 .TP
 .B 2
 Usage, selection, or confirmation error.
@@ -216,7 +374,8 @@ Usage, selection, or confirmation error.
 Configuration, permission, or server-authentication error.
 .TP
 .B 4
-Network, server, or synchronization failure.
+Network, TLS, or server failure, including timeouts, unreachable servers, and
+HTTP 413 or 5xx.
 .TP
 .B 5
 History password required or incorrect, or database authentication failed.

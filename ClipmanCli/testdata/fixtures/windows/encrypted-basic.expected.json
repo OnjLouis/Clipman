@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "updatedUnixMs": 1780000000000,
+  "entries": [
+    { "id": "0123456789abcdef0123456789abcdef", "text": "kubectl get pods -A", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "11111111222222223333333344444444", "text": "export DATABASE_URL=postgres://localhost/app", "name": "database url", "group": "ops", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000060000, "pinned": false, "isTemplate": false, "manualOrder": 2, "hasRichText": false },
+    { "id": "99999999888888887777777766666666", "text": "{{year_full}}-{{month_num_padded}}-{{day_of_month_padded}}", "name": "today", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": true, "manualOrder": 4, "hasRichText": false },
+    { "id": "aaaaaaaabbbbbbbbccccccccdddddddd", "text": "ssh web-01", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": true, "isTemplate": false, "manualOrder": 3, "hasRichText": false }
+  ],
+  "deleted": [
+  ]
+}

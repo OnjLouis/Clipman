@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updatedUnixMs": 1780000000000,
+  "entries": [
+    { "id": "20000000000000000000000000000001", "text": "styled text", "name": "rich", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": true },
+    { "id": "20000000000000000000000000000002", "text": "ordinary text", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 2, "hasRichText": false }
+  ],
+  "deleted": [
+  ]
+}

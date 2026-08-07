@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "updatedUnixMs": 1780000000000,
+  "entries": [
+    { "id": "30000000000000000000000000000001", "text": "surviving entry", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false }
+  ],
+  "deleted": [
+    { "id": "30000000000000000000000000000002", "textHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "deletedUnixMs": 1780000000000, "sourceMachine": "windows-fixture" },
+    { "id": "30000000000000000000000000000003", "textHash": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03", "deletedUnixMs": 1772310400000, "sourceMachine": "windows-fixture" },
+    { "id": "30000000000000000000000000000004", "textHash": "", "deletedUnixMs": 1780000000000, "sourceMachine": "" }
+  ]
+}

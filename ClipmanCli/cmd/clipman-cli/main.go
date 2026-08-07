@@ -15,12 +15,14 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/gdamore/tcell/v2"
 	"golang.org/x/term"
 
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/clipdb"
@@ -29,10 +31,14 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/merge"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/model"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/operation"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/output"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/platform"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/server"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/syncengine"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/template"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/ui/handoff"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/ui/line"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/ui/tui"
 )
 
 var version = "0.3.0-dev"
@@ -523,6 +529,7 @@ func runInit(g globals, args []string) error {
 	machine := fs.String("machine", "", "source machine name")
 	nonInteractive := fs.Bool("non-interactive", false, "do not prompt")
 	force := fs.Bool("force", false, "replace existing configuration")
+	portable := fs.Bool("portable", false, "write the configuration beside this executable")
 	if err := parseCommandFlags(fs, "init", args); err != nil {
 		return err
 	}
@@ -532,9 +539,39 @@ func runInit(g globals, args []string) error {
 			savePasswordExplicit = true
 		}
 	})
-	path, err := platform.ConfigPath(g.configPath)
-	if err != nil {
-		return fail(3, "cannot locate configuration: %v", err)
+	// Where the settings go is asked before anything else, because it decides
+	// which file the rest of this command is about to write.
+	//
+	// The question avoids "system wide", which would be wrong — nothing here
+	// writes machine-wide, only to this user account — and "portable", which
+	// is jargon that does not say portable relative to what. What a person
+	// answering actually needs to know is which copies end up sharing the
+	// settings.
+	saveBesideProgram := *portable
+	if !saveBesideProgram && shouldAskWhereToSave(g, *nonInteractive) {
+		fmt.Fprintln(os.Stderr, "Settings are normally saved for your user account, where every copy of Clipman CLI shares them.")
+		answer, promptErr := promptYesNo("Save them beside this program instead, so only this copy uses them?", false)
+		if promptErr != nil {
+			return promptErr
+		}
+		saveBesideProgram = answer
+	}
+
+	var path string
+	var err error
+	if saveBesideProgram {
+		if g.configPath != "" {
+			return fail(2, "--portable and --config cannot be used together")
+		}
+		path, err = platform.PortableConfigPath()
+		if err != nil {
+			return fail(3, "cannot locate this executable: %v", err)
+		}
+	} else {
+		path, err = platform.ConfigPath(g.configPath)
+		if err != nil {
+			return fail(3, "cannot locate configuration: %v", err)
+		}
 	}
 	if config.Exists(path) && !*force {
 		return fail(2, "configuration already exists at %s; use --force to replace it", path)
@@ -771,6 +808,20 @@ func runInit(g globals, args []string) error {
 	return nil
 }
 
+// shouldAskWhereToSave reports whether init should ask where the settings
+// belong. It stays quiet whenever the location has already been decided —
+// by --config, CLIPMAN_CONFIG, or CLIPMAN_HOME — because asking after the
+// user has named a location invites contradicting themselves.
+func shouldAskWhereToSave(g globals, nonInteractive bool) bool {
+	if nonInteractive || g.configPath != "" {
+		return false
+	}
+	if os.Getenv("CLIPMAN_CONFIG") != "" || os.Getenv("CLIPMAN_HOME") != "" {
+		return false
+	}
+	return platform.IsInteractive()
+}
+
 func runStatus(ctx *appContext, args []string) error {
 	fs := newFlagSet("status")
 	addOutputFlags(fs, &ctx.globals)
@@ -803,11 +854,16 @@ func runStatus(ctx *appContext, args []string) error {
 		}
 		entries = len(state.Database.Entries)
 	}
-	result := map[string]any{"server": ctx.client.BaseURL, "bucket_fingerprint": fingerprint(ctx.databaseID), "database_exists": exists, "revision": metadata.Revision, "length": metadata.Length, "entries": entries, "health": health}
+	result := map[string]any{"config_path": ctx.configPath, "server": ctx.client.BaseURL, "bucket_fingerprint": fingerprint(ctx.databaseID), "database_exists": exists, "revision": metadata.Revision, "length": metadata.Length, "entries": entries, "health": health, "interface": ctx.config.Renderer}
 	if ctx.globals.json {
 		return writeJSON(result)
 	}
-	if _, err = fmt.Printf("Server: %s\nDatabase: %s\n", ctx.client.BaseURL, map[bool]string{true: "available", false: "not yet created"}[exists]); err != nil {
+	// The configuration path leads, because with several profiles in play the
+	// first question is which one this command is using.
+	// The interface is reported here because it is the one question an
+	// interactive session cannot answer for you: it names which of the two
+	// browsers `menu` will open, from outside either of them.
+	if _, err = fmt.Printf("Configuration: %s\nServer: %s\nDatabase: %s\nInterface: %s\n", ctx.configPath, ctx.client.BaseURL, map[bool]string{true: "available", false: "not yet created"}[exists], ctx.config.Renderer); err != nil {
 		return fail(1, "cannot write output: %v", err)
 	}
 	if exists {
@@ -893,31 +949,18 @@ func runList(ctx *appContext, args []string) error {
 	if ctx.globals.json {
 		items := make([]map[string]any, 0, len(entries))
 		for index, entry := range entries {
-			items = append(items, entryJSON(index, entry))
+			items = append(items, output.EntryJSON(index, entry))
 		}
 		return writeJSON(items)
 	}
-	nowUnixMs := time.Now().UnixMilli()
+	now := time.Now()
 	for index, entry := range entries {
+		row := output.ListRow(index, entry, now)
 		if *porcelain {
-			if _, err = fmt.Printf("%d\t%s\t%d\t%s\t%s\t%s\n", index, entry.ID, nowUnixMs-entry.LastUsedUnixMs, escape(entry.SourceMachine), escape(entry.Name), escape(oneLine(entry.Text))); err != nil {
-				return fail(1, "cannot write output: %v", err)
-			}
-		} else {
-			flags := "--"
-			if entry.Pinned {
-				flags = "P-"
-			}
-			if entry.IsTemplate {
-				flags = strings.Replace(flags, "-", "T", 1)
-			}
-			label := entry.Name
-			if label == "" {
-				label = oneLine(entry.Text)
-			}
-			if _, err = fmt.Printf("%d  %s  %s  %s  %s\n", index, flags, age(entry.LastUsedUnixMs), emptyDash(entry.SourceMachine), label); err != nil {
-				return fail(1, "cannot write output: %v", err)
-			}
+			row = output.PorcelainRow(index, entry, now)
+		}
+		if _, err = fmt.Println(row); err != nil {
+			return fail(1, "cannot write output: %v", err)
 		}
 	}
 	return nil
@@ -948,7 +991,7 @@ func runGet(ctx *appContext, args []string) error {
 		entry = result.(model.Entry)
 	}
 	if ctx.globals.json {
-		value := entryJSON(index, entry)
+		value := output.EntryJSON(index, entry)
 		if entry.IsTemplate && !raw {
 			value["ResolvedText"] = template.Resolve(entry.Text, time.Now())
 		}
@@ -1060,7 +1103,7 @@ func runRemove(ctx *appContext, args []string) error {
 		return selectionError(err)
 	}
 	if !*yes {
-		answer, askErr := promptLine(fmt.Sprintf("Delete entry %d (%s)? Type yes to confirm: ", index, preview(entry)))
+		answer, askErr := promptLine(fmt.Sprintf("Delete entry %d (%s)? Type yes to confirm: ", index, output.Preview(entry)))
 		if askErr != nil {
 			return askErr
 		}
@@ -1085,165 +1128,354 @@ func runRemove(ctx *appContext, args []string) error {
 	return nil
 }
 
-func runPick(ctx *appContext, args []string) error {
-	entries, err := interactiveEntries(ctx, args, "pick")
+// cliStore adapts the sync engine to the browsers' Store interface. Load is
+// the only network read a browser performs unless the user asks to refresh, so
+// a session costs one download rather than one per command.
+//
+// It is a pointer receiver for SetKind alone: the full-screen renderer can
+// switch between history and templates, and the store has to follow.
+type cliStore struct {
+	ctx         *appContext
+	kind        operation.Kind
+	pinnedFirst bool
+	// last is the database the most recent download produced, kept so switching
+	// interfaces can hand it to the next one.
+	last *model.Database
+	// reuse, when set, is that database being handed over. Switching tears the
+	// screen down before the new interface draws anything, and a download plus a
+	// PBKDF2 decrypt in that gap is silence with nothing to explain it. It is
+	// consumed once, so an explicit reload still asks the server.
+	reuse *model.Database
+}
+
+func (s *cliStore) SetKind(kind operation.Kind) { s.kind = kind }
+
+func (s *cliStore) Load(context.Context) ([]model.Entry, error) {
+	if s.reuse != nil {
+		database := *s.reuse
+		s.reuse = nil
+		// Re-derived rather than reused wholesale: the view is rebuilt for the
+		// kind now in force, which Tab may have changed on the way out.
+		return operation.View(database, s.kind, s.pinnedFirst), nil
+	}
+	state, err := readState(s.ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(entries) == 0 {
-		return fail(6, "no matching entries")
+	database := state.Database
+	s.last = &database
+	return operation.View(database, s.kind, s.pinnedFirst), nil
+}
+
+// handOver arms the next Load with what has already been downloaded.
+func (s *cliStore) handOver() { s.reuse = s.last }
+
+func (s *cliStore) Delete(callCtx context.Context, id string) error {
+	_, err := s.ctx.engine.Mutate(callCtx, func(database *model.Database, now int64) (bool, any, error) {
+		removed, deleteErr := operation.Delete(database, id, s.ctx.config.Machine, now)
+		return deleteErr == nil, removed, deleteErr
+	})
+	if err != nil {
+		return mapRuntimeError("delete failed", err)
 	}
+	return nil
+}
+
+func (s *cliStore) Create(callCtx context.Context, text, name string) (model.Entry, error) {
+	// A clip typed into the browser belongs to the kind being browsed, so
+	// adding one while viewing templates creates a template.
+	isTemplate := s.kind == operation.Templates
+	newID := merge.NewID()
+	result, err := s.ctx.engine.Mutate(callCtx, func(database *model.Database, now int64) (bool, any, error) {
+		entry, outcome := operation.Put(database, text, name, "", s.ctx.config.Machine, "movetotop", newID, false, isTemplate, now)
+		return outcome != "ignored", entry, nil
+	})
+	if err != nil {
+		return model.Entry{}, mapRuntimeError("add failed", err)
+	}
+	return result.(model.Entry), nil
+}
+
+// terminalConsole routes the browser's prompts and announcements to the
+// controlling terminal, keeping them out of the payload stream.
+type terminalConsole struct{}
+
+func (terminalConsole) Say(text string) {
 	console, err := platform.OpenConsoleOutput()
 	if err != nil {
-		return fail(2, "interactive terminal is unavailable")
+		fmt.Fprintln(os.Stderr, text)
+		return
 	}
-	printEntryLines(console, entries)
-	console.Close()
-	answer, err := promptLine("Select an entry number, or q to cancel: ")
+	defer console.Close()
+	fmt.Fprintln(console, text)
+}
+
+func (terminalConsole) ReadLine(prompt string) (string, error) { return promptLine(prompt) }
+
+func runPick(ctx *appContext, args []string) error {
+	options, err := parseInteractiveOptions(ctx, args, "pick")
 	if err != nil {
 		return err
 	}
-	if strings.EqualFold(strings.TrimSpace(answer), "q") {
-		return fail(2, "selection cancelled")
+	if options.renderer == rendererTUI {
+		return interactiveError(runTUI(options, true))
 	}
-	index, err := strconv.Atoi(strings.TrimSpace(answer))
-	if err != nil || index < 0 || index >= len(entries) {
-		return fail(2, "selection must be a listed entry number")
-	}
-	text := entries[index].Text
-	if entries[index].IsTemplate {
-		text = template.Resolve(text, time.Now())
-	}
-	_, err = os.Stdout.Write([]byte(text))
-	return err
+	return interactiveError(options.lineBrowser().Pick(context.Background()))
 }
 
 func runMenu(ctx *appContext, args []string) error {
 	if ctx.globals.json {
 		return fail(2, "menu does not support JSON output")
 	}
+	options, err := parseInteractiveOptions(ctx, args, "menu")
+	if err != nil {
+		return err
+	}
+	return interactiveError(browseUntilDone(ctx, options))
+}
+
+// browseUntilDone runs the configured interface, and starts the other one when
+// the user asks to switch.
+//
+// The loop turns only on a deliberate keystroke that has already been confirmed,
+// so it cannot spin: nothing in here retries on its own, and a terminal that
+// cannot run what was asked for stops the switch rather than repeating it.
+func browseUntilDone(ctx *appContext, options interactiveOptions) error {
 	for {
-		entries, err := interactiveEntries(ctx, args, "menu")
-		if err != nil {
+		var err error
+		if options.renderer == rendererTUI {
+			err = runTUI(options, false)
+		} else {
+			err = options.lineBrowser().Run(context.Background())
+		}
+		// A switch is not a failure; it is the only channel a browser has back
+		// to its caller. Everything else, including success, ends the session.
+		var request *handoff.Request
+		if !errors.As(err, &request) {
 			return err
 		}
-		console, err := platform.OpenConsoleOutput()
-		if err != nil {
-			return fail(2, "interactive terminal is unavailable")
-		}
-		fmt.Fprintln(console, "\nClipman history")
-		printEntryLines(console, entries)
-		console.Close()
-		answer, err := promptLine("Command: number to view, o number to output, d number to delete, r to refresh, q to quit: ")
-		if err != nil {
-			return err
-		}
-		answer = strings.TrimSpace(answer)
-		if strings.EqualFold(answer, "q") {
-			return nil
-		}
-		if strings.EqualFold(answer, "r") {
-			continue
-		}
-		action := "view"
-		value := answer
-		parts := strings.Fields(answer)
-		if len(parts) == 2 {
-			action = strings.ToLower(parts[0])
-			value = parts[1]
-		}
-		index, conversionErr := strconv.Atoi(value)
-		if conversionErr != nil || index < 0 || index >= len(entries) {
-			writeConsoleLine("That command does not identify a listed entry.")
-			continue
-		}
-		entry := entries[index]
-		switch action {
-		case "view":
-			text := entry.Text
-			if entry.IsTemplate {
-				text = template.Resolve(text, time.Now())
-			}
-			writeConsoleLine("\n" + text + "\n")
-		case "o":
-			text := entry.Text
-			if entry.IsTemplate {
-				text = template.Resolve(text, time.Now())
-			}
-			_, err = os.Stdout.Write([]byte(text))
-			return err
-		case "d":
-			confirmation, askErr := promptLine(fmt.Sprintf("Delete %s? Type yes to confirm: ", preview(entry)))
-			if askErr != nil {
-				return askErr
-			}
-			if !strings.EqualFold(strings.TrimSpace(confirmation), "yes") {
-				writeConsoleLine("Deletion cancelled.")
-				continue
-			}
-			_, err = ctx.engine.Mutate(context.Background(), func(database *model.Database, now int64) (bool, any, error) {
-				removed, deleteErr := operation.Delete(database, entry.ID, ctx.config.Machine, now)
-				return deleteErr == nil, removed, deleteErr
-			})
-			if err != nil {
-				return mapRuntimeError("delete failed", err)
-			}
-			writeConsoleLine("Entry deleted.")
-		default:
-			writeConsoleLine("Unknown action. Use a number, o, d, r, or q.")
-		}
+		options = switchTo(ctx, options, request)
 	}
 }
 
-func interactiveEntries(ctx *appContext, args []string, command string) ([]model.Entry, error) {
+// switchTo prepares the other interface. Three things happen here, and each of
+// them is what keeps a switch from costing the user something:
+//
+//   - the terminal is proven able to run what is being asked for before the
+//     choice is committed, so an unusable one costs no session and no setting;
+//   - the history already downloaded is handed to the next interface, because
+//     the screen is torn down before the new one draws and a download in that
+//     gap is silence with nothing to explain it;
+//   - the preference is written to the configuration file, so the next run
+//     starts where this one ended.
+func switchTo(ctx *appContext, options interactiveOptions, request *handoff.Request) interactiveOptions {
+	options.arrival = request
+	options.kind = request.Kind
+	options.store.SetKind(request.Kind)
+	options.store.handOver()
+	options.screen = nil
+
+	if options.renderer == rendererTUI {
+		options.renderer = rendererLine
+		saveRenderer(ctx, "line")
+		return options
+	}
+	// Created before the choice is saved. A terminal that cannot take a
+	// full-screen interface must lose the user nothing: they stay where they
+	// are, the configuration is untouched, and they are told why.
+	screen, err := tcell.NewScreen()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "The full-screen interface is unavailable on this terminal (%v).\nStaying in the line interface.\n", err)
+		return options
+	}
+	options.renderer = rendererTUI
+	options.screen = screen
+	saveRenderer(ctx, "tui")
+	return options
+}
+
+// saveRenderer records the choice so the next run starts in the same interface.
+//
+// A failure to write is announced and then ignored. The user asked to move, not
+// to save; refusing the move because a preference file could not be written
+// would cost them the session over something they did not ask for.
+func saveRenderer(ctx *appContext, name string) {
+	updated := ctx.config
+	updated.Renderer = name
+	if err := config.Save(ctx.configPath, updated); err != nil {
+		fmt.Fprintf(os.Stderr, "Switched, but the choice could not be saved: %v\nUse --renderer %s to make it permanent.\n", err, name)
+		return
+	}
+	ctx.config = updated
+}
+
+// interactiveError maps a renderer's sentinel outcomes onto exit codes. Both
+// renderers report the same conditions, so the mapping lives in one place.
+func interactiveError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, line.ErrCancelled), errors.Is(err, tui.ErrCancelled):
+		return fail(2, "selection cancelled")
+	case errors.Is(err, line.ErrNoEntries), errors.Is(err, tui.ErrNoEntries):
+		return fail(6, "no matching entries")
+	}
+	return err
+}
+
+type rendererChoice int
+
+const (
+	rendererLine rendererChoice = iota
+	rendererTUI
+)
+
+type interactiveOptions struct {
+	ctx         *appContext
+	store       *cliStore
+	kind        operation.Kind
+	renderer    rendererChoice
+	pageSize    int
+	pinnedFirst bool
+	debugPath   string
+	// arrival carries the user's place across a switch between interfaces.
+	arrival *handoff.Request
+	// screen, when set, is a terminal screen already proven to work. A switch
+	// creates it up front so an unusable terminal is discovered before the
+	// choice is committed, rather than after the session has been lost.
+	screen tcell.Screen
+}
+
+func (o interactiveOptions) lineBrowser() *line.Browser {
+	return &line.Browser{
+		Store:       o.store,
+		Console:     terminalConsole{},
+		Stdout:      os.Stdout,
+		PageSize:    o.pageSize,
+		PinnedFirst: o.pinnedFirst,
+		Now:         time.Now,
+		Kind:        o.kind,
+		Arrival:     o.arrival,
+	}
+}
+
+// runTUI starts the full-screen renderer. A terminal that cannot run it is
+// reported plainly, with the line renderer offered by name: silently falling
+// back would change where output goes without the user asking.
+func runTUI(options interactiveOptions, pickOnly bool) error {
+	screen := options.screen
+	if screen == nil {
+		created, err := tcell.NewScreen()
+		if err != nil {
+			return fail(1, "the full-screen interface is unavailable on this terminal (%v); rerun with --renderer line", err)
+		}
+		screen = created
+	}
+	// Where the trace is going is announced before the screen is taken over,
+	// so it is on the terminal before the interface starts and still in the
+	// scrollback afterwards. Anything printed on the way out is discarded when
+	// the screen is restored.
+	if options.debugPath != "" {
+		fmt.Fprintf(os.Stderr, "Writing a caret trace to %s\n", options.debugPath)
+	}
+	browser := &tui.Browser{
+		Store: options.store, Screen: screen, Stdout: os.Stdout,
+		PinnedFirst: options.pinnedFirst, Kind: options.kind,
+		Now: time.Now, PickOnly: pickOnly, DebugPath: options.debugPath,
+		Arrival: options.arrival,
+	}
+	err := browser.Run(context.Background())
+	// A switch request travels back as an error and must reach the caller
+	// untouched; wrapping it here would report a deliberate move as a failure.
+	var switching *handoff.Request
+	if errors.As(err, &switching) {
+		return err
+	}
+	if err != nil && !errors.Is(err, tui.ErrCancelled) && !errors.Is(err, tui.ErrNoEntries) {
+		var appErr appError
+		if !errors.As(err, &appErr) {
+			return fail(1, "%v; rerun with --renderer line if this terminal cannot run it", err)
+		}
+	}
+	return err
+}
+
+// parseInteractiveOptions parses the options menu and pick share. For the line
+// renderer -n is the page size and every entry stays reachable by paging; for
+// pick, which offers one choice and exits, it bounds the whole list.
+func parseInteractiveOptions(ctx *appContext, args []string, command string) (interactiveOptions, error) {
 	fs := newFlagSet(command)
-	count := fs.Int("n", 20, "maximum entries")
-	all := fs.Bool("all", false, "show all entries")
+	count := fs.Int("n", 20, "entries announced at once")
+	all := fs.Bool("all", false, "announce every entry without paging")
 	kindValue := fs.String("kind", ctx.config.DefaultKind, "history, templates, or all")
 	pinned := fs.Bool("pinned-first", ctx.config.PinnedFirst, "show pinned entries first")
+	rendererValue := fs.String("renderer", ctx.config.Renderer, "line or tui")
+	useTUI := fs.Bool("tui", false, "shorthand for --renderer tui")
+	useLine := fs.Bool("line", false, "shorthand for --renderer line")
+	debug := fs.Bool("debug", false, "write a caret trace beside this program")
+	debugLog := fs.String("debug-log", "", "write the caret trace to this file")
 	if err := parseCommandFlags(fs, command, args); err != nil {
-		return nil, err
+		return interactiveOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return nil, fail(2, "%s takes no positional arguments", command)
+		return interactiveOptions{}, fail(2, "%s takes no positional arguments", command)
+	}
+	if *useTUI && *useLine {
+		return interactiveOptions{}, fail(2, "--tui and --line cannot be used together")
 	}
 	kind, err := operation.ParseKind(*kindValue)
 	if err != nil {
-		return nil, fail(2, "%v", err)
+		return interactiveOptions{}, fail(2, "%v", err)
 	}
-	state, err := readState(ctx)
-	if err != nil {
-		return nil, err
+	renderer := rendererLine
+	switch {
+	case *useTUI:
+		renderer = rendererTUI
+	case *useLine:
+		renderer = rendererLine
+	default:
+		switch strings.ToLower(strings.TrimSpace(*rendererValue)) {
+		case "", "line":
+			renderer = rendererLine
+		case "tui":
+			renderer = rendererTUI
+		default:
+			return interactiveOptions{}, fail(2, "--renderer must be line or tui")
+		}
 	}
-	entries := operation.View(state.Database, kind, *pinned)
-	if !*all && *count >= 0 && len(entries) > *count {
-		entries = entries[:*count]
+	if !platform.IsInteractive() {
+		return interactiveOptions{}, fail(2, "%s needs a controlling terminal", command)
 	}
-	return entries, nil
+	pageSize := *count
+	if *all || pageSize == 0 {
+		pageSize = -1
+	}
+	return interactiveOptions{
+		ctx:         ctx,
+		store:       &cliStore{ctx: ctx, kind: kind, pinnedFirst: *pinned},
+		kind:        kind,
+		renderer:    renderer,
+		pageSize:    pageSize,
+		pinnedFirst: *pinned,
+		debugPath:   debugTracePath(*debug, *debugLog),
+	}, nil
 }
 
-func printEntryLines(out io.Writer, entries []model.Entry) {
-	for index, entry := range entries {
-		flags := ""
-		if entry.Pinned {
-			flags += " pinned"
+// debugTracePath resolves where a caret trace should go. --debug-log names the
+// file, --debug takes the default beside the program, and neither can be
+// defeated by the difference between cmd and PowerShell quoting the way an
+// environment variable can.
+func debugTracePath(enabled bool, explicit string) string {
+	if value := strings.TrimSpace(explicit); value != "" {
+		if absolute, err := filepath.Abs(value); err == nil {
+			return absolute
 		}
-		if entry.IsTemplate {
-			flags += " template"
-		}
-		label := preview(entry)
-		fmt.Fprintf(out, "%d. %s;%s group: %s; device: %s; last used: %s\n", index, label, flags, emptyDash(entry.Group), emptyDash(entry.SourceMachine), time.UnixMilli(entry.LastUsedUnixMs).Format("2006-01-02 15:04:05"))
+		return value
 	}
-}
-
-func writeConsoleLine(value string) {
-	console, err := platform.OpenConsoleOutput()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, value)
-		return
+	if !enabled {
+		return ""
 	}
-	defer console.Close()
-	fmt.Fprintln(console, value)
+	return tui.DefaultDebugPath()
 }
 
 func parseGet(args []string, cfg config.Config, g *globals) (operation.Selector, operation.Kind, bool, bool, bool, bool, error) {
@@ -1328,11 +1560,37 @@ func mapRuntimeError(prefix string, err error) error {
 	case errors.Is(err, clipdb.ErrPasswordRequired), errors.Is(err, clipdb.ErrPasswordOrData):
 		return fail(5, "%s: %v", prefix, err)
 	}
-	var netErr interface{ Timeout() bool }
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if isNetworkFailure(err) {
 		return fail(4, "%s: %v", prefix, err)
 	}
-	return fail(4, "%s: %v", prefix, err)
+	// Anything left is local: an encode, decode, merge, or normalization failure
+	// that happened to surface through a call which also touches the network.
+	// Reporting those as 4 told a script to retry something that retrying cannot
+	// fix, and told a user the network was at fault when it was not.
+	return fail(1, "%s: %v", prefix, err)
+}
+
+// isNetworkFailure reports whether err is the network's or the server's fault,
+// which is what exit code 4 means. Everything it does not claim is local, and
+// falls to 1.
+func isNetworkFailure(err error) bool {
+	// net.Error covers timeouts, refused connections, DNS failures, and the
+	// *url.Error the HTTP client wraps its transport errors in — including TLS
+	// handshake failures, which reach us through that wrapper.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// A TLS trust failure that arrives unwrapped is still a connection that
+	// could not be established.
+	if isCertificateTrustError(err) {
+		return true
+	}
+	var statusErr *server.StatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.Remote()
+	}
+	return false
 }
 
 func promptPassword(label string) (string, error) {
@@ -1412,64 +1670,21 @@ func writeJSON(value any) error {
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(value)
 }
-func entryJSON(index int, entry model.Entry) map[string]any {
-	return map[string]any{"Index": index, "Id": entry.ID, "Text": entry.Text, "Name": entry.Name, "Group": entry.Group, "SourceMachine": entry.SourceMachine, "CreatedUnixMs": entry.CreatedUnixMs, "LastUsedUnixMs": entry.LastUsedUnixMs, "Pinned": entry.Pinned, "IsTemplate": entry.IsTemplate, "ManualOrder": entry.ManualOrder}
-}
-func oneLine(value string) string {
-	value = strings.ReplaceAll(value, "\r\n", " ")
-	value = strings.ReplaceAll(value, "\n", " ")
-	value = strings.ReplaceAll(value, "\r", " ")
-	value = strings.TrimSpace(value)
-	runes := []rune(value)
-	if len(runes) > 80 {
-		return string(runes[:77]) + "..."
-	}
-	return value
-}
-func preview(entry model.Entry) string {
-	if entry.Name != "" {
-		return entry.Name
-	}
-	return oneLine(entry.Text)
-}
-func age(unixMs int64) string {
-	duration := time.Since(time.UnixMilli(unixMs))
-	if duration < time.Minute {
-		return "now"
-	}
-	if duration < time.Hour {
-		return fmt.Sprintf("%dm", int(duration.Minutes()))
-	}
-	if duration < 24*time.Hour {
-		return fmt.Sprintf("%dh", int(duration.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(duration.Hours()/24))
-}
-func emptyDash(value string) string {
-	if value == "" {
-		return "-"
-	}
-	return value
-}
-func escape(value string) string {
-	replacer := strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\n", "\\n", "\r", "\\r")
-	return replacer.Replace(value)
-}
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Open the accessible line-based history manager\n  sync     Download and validate current history\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --verbose         Write diagnostic messages to standard error\n  --version         Show version information")
+	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Browse history interactively; the default when no command is given\n  sync     Download and validate current history\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --verbose         Write diagnostic messages to standard error\n  --version         Show version information")
 }
 
 func printCommandUsage(out io.Writer, command string) bool {
 	usage := map[string]string{
-		"init":   "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force]\n  (use the global --ca-cert FILE or --insecure option before init to trust a self-signed server certificate)\n  (without --save-password, an interactive run asks whether to save the history password)",
+		"init":   "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force] [--portable]\n  (use the global --ca-cert FILE or --insecure option before init to trust a self-signed server certificate)\n  (without --save-password, an interactive run asks whether to save the history password)\n  (--portable writes config.toml beside this executable; it is then used automatically by that copy)",
 		"status": "Usage: clipman-cli [global options] status [--refresh] [--json]",
 		"list":   "Usage: clipman-cli [global options] list [-n COUNT | --all] [--group NAME] [--search TEXT] [--kind history|templates|all] [--pinned-first] [--porcelain] [--json]",
 		"get":    "Usage: clipman-cli [global options] get [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--first] [--touch] [--newline] [--raw] [--json]",
 		"put":    "Usage: clipman-cli [global options] put [--file FILE | --text TEXT] [--name NAME] [--group NAME] [--pin] [--template] [--duplicate ignore|movetotop|keep] [--json]",
 		"rm":     "Usage: clipman-cli [global options] rm [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--case-sensitive] [--yes] [--json]",
 		"sync":   "Usage: clipman-cli [global options] sync [--json] [--quiet]",
-		"pick":   "Usage: clipman-cli [global options] pick [-n COUNT | --all] [--kind history|templates|all] [--pinned-first]",
-		"menu":   "Usage: clipman-cli [global options] menu [-n COUNT | --all] [--kind history|templates|all] [--pinned-first]",
+		"pick":   "Usage: clipman-cli [global options] pick [-n COUNT | --all] [--kind history|templates|all] [--pinned-first] [--renderer line|tui | --tui | --line]\n  (-n sets how many entries are announced at once; n and p move between pages)",
+		"menu":   "Usage: clipman-cli [global options] menu [-n COUNT | --all] [--kind history|templates|all] [--pinned-first] [--renderer line|tui | --tui | --line]\n  (-n sets the page size; every entry stays reachable by paging, and --all announces them at once)\n  (line renderer: NUMBER views, o NUMBER outputs, d NUMBER deletes, /TEXT searches, n and p page, a adds, r reloads, u switches interface, ? helps, q quits)\n  (full-screen renderer: arrows move, g goes to a number, Enter outputs, / filters, Tab switches kind, d deletes, r reloads, u switches interface, ? shows keys, q quits)\n  (--debug writes a caret trace beside this program; --debug-log FILE chooses where)",
 		"help":   "Usage: clipman-cli help",
 	}
 	text, ok := usage[command]
