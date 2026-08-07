@@ -212,6 +212,30 @@ costs the saved preference rather than the session.
 .B pick
 refuses to switch, because it offers one choice and exits.
 .IP
+Whenever Clipman asks something, the line being typed can be edited rather than
+only backspaced.
+.B Left
+and
+.B Right
+move through it,
+.B Home
+and
+.B End
+jump to its ends,
+.B Delete
+removes the character under the cursor, and
+.B Ctrl+U
+clears the line.
+.B Ctrl+A
+and
+.B Ctrl+E
+also work as
+.B Home
+and
+.BR End .
+The cursor stays on the character being edited rather than at the end of the
+line, so moving back through what was typed reads it out on the way.
+.IP
 The cursor sits in whatever is being moved through or typed into, because a
 screen reader reads the line the cursor is on. Moving through the list keeps
 the cursor on the selected row, in the space just after the entry number, so

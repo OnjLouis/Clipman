@@ -279,7 +279,7 @@ func TestCursorStaysInTheListAfterEveryAction(t *testing.T) {
 // answer, so reading the caret's line gives both.
 func assertPromptHoldsCaret(t *testing.T, browser *Browser, screen tcell.SimulationScreen, wantTyped string) {
 	t.Helper()
-	label, typed, asking := browser.promptParts()
+	label, typed, _, asking := browser.promptParts()
 	if !asking {
 		t.Fatal("expected the interface to be asking something")
 	}
@@ -1493,5 +1493,149 @@ func TestArrowInTheViewerRedrawsAlmostNothing(t *testing.T) {
 	}
 	if changed > 3 {
 		t.Fatalf("one arrow key rewrote %d rows; only the two markers should change", changed)
+	}
+}
+
+// feedKeys drives events through the real handler and redraws, which is how
+// these assertions stay about the interface rather than about the editor.
+func feedKeys(t *testing.T, browser *Browser, events ...tcell.Event) {
+	t.Helper()
+	for _, event := range events {
+		if _, err := browser.handle(context.Background(), event); err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		browser.draw()
+	}
+}
+
+func openFilter(t *testing.T, text string) (*Browser, tcell.SimulationScreen) {
+	t.Helper()
+	store := &fakeStore{entries: sampleEntries(4)}
+	var stdout strings.Builder
+	browser, screen := newTestBrowser(store, &stdout, runeKey('/'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	for _, r := range text {
+		feedKeys(t, browser, runeKey(r))
+	}
+	return browser, screen
+}
+
+// TestTheCaretFollowsTheEditingPosition is the whole point of item 5. Until
+// this, the caret sat at the end of the line no matter where the user was
+// working, so moving back to a mistake read as nothing happening.
+func TestTheCaretFollowsTheEditingPosition(t *testing.T) {
+	browser, screen := openFilter(t, "clip")
+	endX, _, _ := screen.GetCursor()
+
+	feedKeys(t, browser, key(tcell.KeyLeft), key(tcell.KeyLeft))
+
+	x, y, visible := screen.GetCursor()
+	if !visible || y != statusRow {
+		t.Fatalf("the caret must stay on the question: (%d,%d) visible %v", x, y, visible)
+	}
+	if x != endX-2 {
+		t.Fatalf("caret column = %d, want %d after moving left twice", x, endX-2)
+	}
+}
+
+// TestTypingInsertsWhereTheCaretIs, end to end through the key handler, and the
+// live filter must see the edited line rather than the old one.
+func TestTypingInsertsWhereTheCaretIs(t *testing.T) {
+	browser, _ := openFilter(t, "cip")
+	feedKeys(t, browser, key(tcell.KeyLeft), key(tcell.KeyLeft), runeKey('l'))
+	if browser.filter != "clip" {
+		t.Fatalf("filter = %q, want %q; the live filter must see the edit", browser.filter, "clip")
+	}
+	_, typed, cursor, asking := browser.promptParts()
+	if !asking || typed != "clip" {
+		t.Fatalf("prompt shows %q, want %q", typed, "clip")
+	}
+	if cursor != 2 {
+		t.Errorf("caret offset = %d, want 2, just after what was typed", cursor)
+	}
+}
+
+// TestBackspaceReachesAMistakeInTheMiddle without destroying what follows it.
+func TestBackspaceReachesAMistakeInTheMiddle(t *testing.T) {
+	browser, _ := openFilter(t, "cllip")
+	feedKeys(t, browser, key(tcell.KeyLeft), key(tcell.KeyLeft), key(tcell.KeyBackspace))
+	if browser.filter != "clip" {
+		t.Fatalf("filter = %q, want %q", browser.filter, "clip")
+	}
+}
+
+// TestDeleteRemovesForward so a mistake can be reached from either side.
+func TestDeleteRemovesForward(t *testing.T) {
+	browser, _ := openFilter(t, "cllip")
+	feedKeys(t, browser, key(tcell.KeyHome), key(tcell.KeyRight), key(tcell.KeyDelete))
+	if browser.filter != "clip" {
+		t.Fatalf("filter = %q, want %q", browser.filter, "clip")
+	}
+}
+
+// TestControlUStartsOver. Correcting a long command line one character at a
+// time is the thing this key exists to avoid.
+func TestControlUStartsOver(t *testing.T) {
+	browser, screen := openFilter(t, "a long mistaken line")
+	feedKeys(t, browser, key(tcell.KeyCtrlU))
+	if browser.filter != "" {
+		t.Fatalf("filter = %q, want it cleared", browser.filter)
+	}
+	label, _, _, _ := browser.promptParts()
+	x, y, _ := screen.GetCursor()
+	if y != statusRow || x != len([]rune(label)) {
+		t.Fatalf("caret at (%d,%d), want it just after the question at column %d", x, y, len([]rune(label)))
+	}
+	// The question must still be on the row, or clearing reads as the prompt
+	// vanishing rather than emptying.
+	if row := screenRows(t, screen)[statusRow]; !strings.HasPrefix(row, "Filter by text:") {
+		t.Fatalf("status row = %q, want the question still there", row)
+	}
+}
+
+func TestHomeAndEndCrossTheLineInOneKey(t *testing.T) {
+	browser, _ := openFilter(t, "clip")
+	feedKeys(t, browser, key(tcell.KeyHome))
+	if _, _, cursor, _ := browser.promptParts(); cursor != 0 {
+		t.Fatalf("caret offset after Home = %d, want 0", cursor)
+	}
+	feedKeys(t, browser, key(tcell.KeyEnd))
+	if _, _, cursor, _ := browser.promptParts(); cursor != 4 {
+		t.Fatalf("caret offset after End = %d, want 4", cursor)
+	}
+}
+
+// TestGoToPromptEditsToo, because the same editing applies to every question.
+func TestGoToPromptEditsToo(t *testing.T) {
+	store := &fakeStore{entries: sampleEntries(30)}
+	var stdout strings.Builder
+	browser, _ := newTestBrowser(store, &stdout, runeKey('g'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	feedKeys(t, browser, runeKey('1'), runeKey('3'), key(tcell.KeyLeft), runeKey('2'))
+	if browser.gotoText != "123" {
+		t.Fatalf("gotoText = %q, want %q", browser.gotoText, "123")
+	}
+	feedKeys(t, browser, key(tcell.KeyCtrlU), runeKey('7'), key(tcell.KeyEnter))
+	if browser.selected != 7 {
+		t.Fatalf("selected = %d, want 7 after correcting the number", browser.selected)
+	}
+}
+
+// TestResumingAFilterPutsTheCaretAtTheEnd, which is where someone continuing an
+// existing filter expects to carry on from.
+func TestResumingAFilterPutsTheCaretAtTheEnd(t *testing.T) {
+	browser, _ := openFilter(t, "clip")
+	feedKeys(t, browser, key(tcell.KeyEnter))
+	feedKeys(t, browser, runeKey('/'))
+	_, typed, cursor, asking := browser.promptParts()
+	if !asking || typed != "clip" {
+		t.Fatalf("reopened filter shows %q, want the existing filter", typed)
+	}
+	if cursor != 4 {
+		t.Errorf("caret offset = %d, want 4, the end of the existing text", cursor)
 	}
 }

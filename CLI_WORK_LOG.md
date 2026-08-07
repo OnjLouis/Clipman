@@ -181,10 +181,12 @@ available, but make line motion primary.
    mode supplies.
 4. `promptParts` must own the new prompts (file path, command, overwrite
    confirm, running state).
-5. **Prompt line editing.** `handleFilterKey`/`handleGotoKey` handle only
-   Escape/Enter/Backspace/Rune. Backspace-only correction of a 40-character
-   command line is punishing. Needs a cursor offset within the typed text, which
-   `caretPosition` must use instead of `len(typed)`.
+5. ~~**Prompt line editing.**~~ **Done.** `promptEditor` in `prompt.go` owns the
+   typed line and the caret inside it; `promptParts` returns that offset and
+   `caretPosition` uses it instead of `len(typed)`. Left, Right, Home, End,
+   Delete, Ctrl+U, Ctrl+A, and Ctrl+E work in every prompt, shared through
+   `editPrompt`. The caret rests on the character being edited, so moving back
+   through a line reads it out. Any new prompt gets all of this for free.
 6. **Double-width runes.** `drawLine`/`caretColumn` advance one column per rune;
    CJK and emoji corrupt every column after them. The list hides this because
    previews are short; a viewer over arbitrary clip text will not.

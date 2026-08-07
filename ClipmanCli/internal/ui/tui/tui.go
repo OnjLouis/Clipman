@@ -114,8 +114,12 @@ type Browser struct {
 	// row they were already on.
 	Arrival *handoff.Request
 
-	entries  []model.Entry
-	filter   string
+	entries []model.Entry
+	filter  string
+	// prompt is whatever question is currently open, and where the caret sits
+	// inside the answer. One editor rather than one per prompt: only one
+	// question is ever open at a time.
+	prompt   promptEditor
 	gotoText string
 	selected int
 	top      int
@@ -282,16 +286,21 @@ func (b *Browser) caretReport() string {
 // line the caret is on, so keeping them together means the user hears both
 // what was asked and what they have typed so far; splitting them across two
 // lines would leave the question unread while typing the answer.
-func (b *Browser) promptParts() (label, typed string, asking bool) {
+// It also reports where the caret sits within the typed text. A question that
+// can only be corrected with Backspace forces the user to destroy everything
+// after a mistake to reach it; the caret offset is what lets them move to it
+// instead. A confirmation has nothing typed, so its caret rests at the end of
+// the question.
+func (b *Browser) promptParts() (label, typed string, cursor int, asking bool) {
 	switch b.mode {
 	case modeFilter:
-		return "Filter by text: ", b.filter, true
+		return "Filter by text: ", b.prompt.String(), b.prompt.at(), true
 	case modeGoto:
-		return "Go to entry number: ", b.gotoText, true
+		return "Go to entry number: ", b.prompt.String(), b.prompt.at(), true
 	case modeConfirmDelete, modeConfirmSwitch:
-		return b.status, "", true
+		return b.status, "", 0, true
 	}
-	return "", "", false
+	return "", "", 0, false
 }
 
 func (b *Browser) now() time.Time {
@@ -541,7 +550,7 @@ func (b *Browser) draw() {
 
 	// The question and the answer typed so far share one line, so the caret's
 	// line carries both.
-	if label, typed, asking := b.promptParts(); asking {
+	if label, typed, _, asking := b.promptParts(); asking {
 		b.drawLine(statusRow, plain, label+typed)
 	} else {
 		b.drawLine(statusRow, plain, b.status)
@@ -625,8 +634,10 @@ func (b *Browser) placeCursor() {
 // caretPosition is the placement decision on its own, so a test can check it
 // without a screen and the debug report can describe it.
 func (b *Browser) caretPosition() (column, row int) {
-	if label, typed, asking := b.promptParts(); asking {
-		return len([]rune(label)) + len([]rune(typed)), statusRow
+	if label, _, cursor, asking := b.promptParts(); asking {
+		// The caret lands on the character being edited, not at the end of the
+		// line, so moving through what you typed reads it back to you.
+		return len([]rune(label)) + cursor, statusRow
 	}
 	if b.mode == modeView {
 		return b.caretColumn(), firstListRow + (b.viewCursor - b.viewTop)
@@ -714,6 +725,10 @@ var helpLines = []string{
 	"  ?            show these keys",
 	"  q or Escape  quit without writing anything",
 	"",
+	"While answering a question: Left and Right move through what you typed,",
+	"Home and End jump to its ends, Delete removes forward, and Ctrl+U clears",
+	"the line.",
+	"",
 	"This is the full-screen interface. The line interface asks for a command",
 	"and answers in whole sentences instead. Press u to switch to it; the choice",
 	"is remembered as your default.",
@@ -787,22 +802,55 @@ func (b *Browser) handleFilterKey(event *tcell.EventKey) {
 	switch event.Key() {
 	case tcell.KeyEscape:
 		b.filter = ""
+		b.prompt.clear()
 		b.mode = modeList
 		b.selected, b.top = 0, 0
 		b.setStatus("Filter cleared. %s", b.heading())
+		return
 	case tcell.KeyEnter:
 		b.mode = modeList
 		b.setStatus("%s", b.heading())
-	case tcell.KeyBackspace, tcell.KeyBackspace2:
-		if b.filter != "" {
-			runes := []rune(b.filter)
-			b.filter = string(runes[:len(runes)-1])
-			b.selected, b.top = 0, 0
-		}
-	case tcell.KeyRune:
-		b.filter += string(event.Rune())
-		b.selected, b.top = 0, 0
+		return
 	}
+	if !b.editPrompt(event) {
+		return
+	}
+	// The filter narrows the list as it is typed, so the edited line has to
+	// reach the field the list reads on every keystroke.
+	b.filter = b.prompt.String()
+	b.selected, b.top = 0, 0
+}
+
+// editPrompt applies one editing keystroke to the open prompt and reports
+// whether the text changed.
+//
+// It is shared by every prompt because they are all the same problem: a line
+// being typed by someone who cannot see it. Left and Right so a mistake can be
+// reached, Home and End so a long line can be crossed in one key, Delete so it
+// can be reached from either side, and Ctrl+U to start over. Ctrl+A and Ctrl+E
+// are here because terminals send them and fingers expect them.
+func (b *Browser) editPrompt(event *tcell.EventKey) bool {
+	switch event.Key() {
+	case tcell.KeyLeft:
+		b.prompt.left()
+	case tcell.KeyRight:
+		b.prompt.right()
+	case tcell.KeyHome, tcell.KeyCtrlA:
+		b.prompt.home()
+	case tcell.KeyEnd, tcell.KeyCtrlE:
+		b.prompt.end()
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		b.prompt.backspace()
+	case tcell.KeyDelete:
+		b.prompt.deleteForward()
+	case tcell.KeyCtrlU:
+		b.prompt.clear()
+	case tcell.KeyRune:
+		b.prompt.insert(event.Rune())
+	default:
+		return false
+	}
+	return true
 }
 
 // handleGotoKey collects an entry number. Jumping by number matters most in a
@@ -811,8 +859,10 @@ func (b *Browser) handleGotoKey(event *tcell.EventKey) {
 	switch event.Key() {
 	case tcell.KeyEscape:
 		b.gotoText = ""
+		b.prompt.clear()
 		b.mode = modeList
 		b.setStatus("Cancelled. %s", b.heading())
+		return
 	case tcell.KeyEnter:
 		target, err := strconv.Atoi(strings.TrimSpace(b.gotoText))
 		entries := b.visible()
@@ -831,14 +881,12 @@ func (b *Browser) handleGotoKey(event *tcell.EventKey) {
 			b.setStatus("%s", b.heading())
 		}
 		b.gotoText = ""
+		b.prompt.clear()
 		b.mode = modeList
-	case tcell.KeyBackspace, tcell.KeyBackspace2:
-		if b.gotoText != "" {
-			runes := []rune(b.gotoText)
-			b.gotoText = string(runes[:len(runes)-1])
-		}
-	case tcell.KeyRune:
-		b.gotoText += string(event.Rune())
+		return
+	}
+	if b.editPrompt(event) {
+		b.gotoText = b.prompt.String()
 	}
 }
 
@@ -922,9 +970,11 @@ func (b *Browser) handleListKey(ctx context.Context, event *tcell.EventKey) erro
 	case 'q':
 		b.quit = true
 	case '/':
+		b.prompt.set(b.filter)
 		b.mode = modeFilter
 	case 'g':
 		b.gotoText = ""
+		b.prompt.set("")
 		b.mode = modeGoto
 	case '?':
 		b.mode = modeHelp
