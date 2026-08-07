@@ -212,6 +212,52 @@ costs the saved preference rather than the session.
 .B pick
 refuses to switch, because it offers one choice and exits.
 .IP
+.B v
+opens the whole clip in a viewer that wraps and scrolls;
+.B q
+closes it.
+.B ?
+shows the key list in the same viewer.
+.IP
+.B w
+saves the selected clip to a file, asking where and confirming before it
+overwrites. The file is written verbatim with owner-only permissions, and a
+leading
+.B ~/
+is expanded because there is no shell to do it.
+.IP
+.B x
+runs a program on the selected clip. No shell is involved: what is typed is
+split into a program and its arguments and run directly, so
+.BR | ,
+.BR > ,
+.B ;
+and
+.B &&
+are not operators, and typing one is refused with an explanation rather than
+passed on as an ordinary argument. A clip is text copied from elsewhere, and
+building a command line out of it for a shell would mean a clip containing
+.B "; rm -rf ~"
+ran when the user asked to echo it. Write
+.B @clip
+as an argument of its own where the clip text should go; with no
+.B @clip
+the clip is piped to standard input. Output is captured and shown in the
+viewer, the exit status is always reported even when nothing was printed, and
+.B Escape
+stops a command that does not finish. On Windows a
+.B .cmd
+or
+.B .bat
+file needs its interpreter named, as in
+.BR "cmd /c mytask.cmd" ,
+and a program in the current directory needs an explicit path.
+.B pick
+refuses both
+.B w
+and
+.BR x .
+.IP
 Whenever Clipman asks something, the line being typed can be edited rather than
 only backspaced.
 .B Left
