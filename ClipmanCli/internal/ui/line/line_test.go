@@ -144,7 +144,9 @@ func newBrowser(store *fakeStore, console *fakeConsole, stdout *strings.Builder,
 
 func TestMenuLoadsOnceForManyCommands(t *testing.T) {
 	store := &fakeStore{entries: sampleEntries(3)}
-	console := &fakeConsole{answers: []string{"0", "1", "2", "q"}}
+	// Each number opens the paged reader, so each needs a q to close it before
+	// the final q leaves the browser.
+	console := &fakeConsole{answers: []string{"0", "q", "1", "q", "2", "q", "q"}}
 	var stdout strings.Builder
 	if err := newBrowser(store, console, &stdout, 20).Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -199,12 +201,14 @@ func TestOutputWritesOnlyClipTextToStdout(t *testing.T) {
 
 func TestViewingAnEntryStaysOnTheTerminal(t *testing.T) {
 	store := &fakeStore{entries: sampleEntries(2)}
-	console := &fakeConsole{answers: []string{"1", "q"}}
+	// Viewing opens a paged reader, so the first q closes it and the second
+	// leaves the browser.
+	console := &fakeConsole{answers: []string{"1", "q", "q"}}
 	var stdout strings.Builder
 	if err := newBrowser(store, console, &stdout, 20).Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	console.heard(t, "clip number 1")
+	console.heard(t, "1. clip number 1")
 	if stdout.String() != "" {
 		t.Fatalf("viewing must not reach stdout, got %q", stdout.String())
 	}

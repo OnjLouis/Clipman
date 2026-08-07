@@ -103,11 +103,12 @@ write the clip to a file, and `x` to run a command against it.
   one place that knows what the caret is sitting on, the same shape as
   `promptParts`.
 
-### Still to build
+### Built
 
-The full-screen interface is complete: `v`, `w`, and `x` all work, help renders
-through the viewer, and `d` announces itself. **Neither `v`, `w`, nor `x` exists
-in the line interface**, which still has the bare-`NUMBER` defect below. The packages underneath
+Both interfaces now have `v`, `w`, and `x`, and the bare-`NUMBER` defect is
+fixed: viewing pages instead of announcing a whole clip in one block. Clip text
+is sanitised through `output.PlainLines` in both, so a clip reads the same way
+in each. The packages underneath
 them are done and tested; what remains is the prompt machinery, the mode
 handling, and the announcements — including prompt line editing (item 5 below),
 which `x` needs far more than the filter did.
@@ -219,13 +220,13 @@ available, but make line motion primary.
   a document you can scroll must not close on an arrow. `viewIsHelp` keeps Enter
   and `w` from treating the key list as a clip.
 
-### Known pre-existing defect, prerequisite for parity
+### ~~Known pre-existing defect~~ Fixed
 
-Line interface bare `NUMBER` calls `Console.Say(b.text(entry))` — a 5000-line
-clip announced in one unstoppable block. Needs a paged sub-loop following the
-`clip>` precedent in `addEntry`. Line spellings `v NUMBER`, `w NUMBER`,
-`x NUMBER`, each collecting arguments at a sub-prompt to dodge `dispatch`'s
-split-on-first-space.
+Line interface bare `NUMBER` called `Console.Say(b.text(entry))` — a 5000-line
+clip announced in one unstoppable block. It now opens a paged reader with its
+own sub-prompt (`n`, `p`, `w`, `x`, `q`), following the `clip>` precedent in
+`addEntry`. `v NUMBER`, `w NUMBER`, and `x NUMBER` collect their arguments the
+same way.
 
 ### Verify on Windows before shipping
 

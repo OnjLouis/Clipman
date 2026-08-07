@@ -187,7 +187,10 @@ func (b *Browser) announceList() {
 }
 
 const helpText = `Commands:
-  NUMBER      view an entry
+  NUMBER      view an entry, a page at a time
+  v NUMBER    the same as typing the number
+  w NUMBER    save an entry to a file
+  x NUMBER    run a program on an entry
   o NUMBER    write an entry to standard output and exit
   d NUMBER    delete an entry after confirmation
   /TEXT       show only entries matching TEXT
@@ -352,6 +355,24 @@ func (b *Browser) dispatch(ctx context.Context, answer string) (bool, error) {
 		return false, nil
 	case "a", "add", "new":
 		return false, b.addEntry(ctx)
+	case "v", "view":
+		entry, ok := b.resolveIndex(argument)
+		if !ok {
+			return false, nil
+		}
+		return false, b.viewEntry(ctx, entry)
+	case "w", "save":
+		entry, ok := b.resolveIndex(argument)
+		if !ok {
+			return false, nil
+		}
+		return false, b.saveEntry(entry)
+	case "x", "run":
+		entry, ok := b.resolveIndex(argument)
+		if !ok {
+			return false, nil
+		}
+		return false, b.runOnEntry(ctx, entry)
 	case "o", "out", "output":
 		entry, ok := b.resolveIndex(argument)
 		if !ok {
@@ -372,8 +393,9 @@ func (b *Browser) dispatch(ctx context.Context, answer string) (bool, error) {
 		if !ok {
 			return false, nil
 		}
-		b.Console.Say(b.text(entry))
-		return false, nil
+		// Paged rather than announced whole. A long clip used to arrive as one
+		// unstoppable block with no way to slow down, go back, or leave.
+		return false, b.viewEntry(ctx, entry)
 	}
 }
 
@@ -533,11 +555,35 @@ func (b *Browser) Pick(ctx context.Context) error {
 	}
 	b.announceList()
 	for {
-		answer, err := b.Console.ReadLine("Select an entry number, n or p to page, or q to cancel: ")
+		answer, err := b.Console.ReadLine("Select an entry number, v NUMBER to read one, n or p to page, or q to cancel: ")
 		if err != nil {
 			return err
 		}
 		answer = strings.TrimSpace(answer)
+		// A word followed by a number is split before the exact-match switch,
+		// because pick's commands are whole lines and "v 2" is two words.
+		action, argument, _ := strings.Cut(answer, " ")
+		argument = strings.TrimSpace(argument)
+		switch strings.ToLower(action) {
+		case "v", "view":
+			// Allowed in pick, unlike w and x: it mutates nothing, writes
+			// nothing to standard output, and confirming which clip is about to
+			// go down the pipe is what pick most needs.
+			entry, ok := b.resolveIndex(argument)
+			if !ok {
+				continue
+			}
+			if err := b.viewEntry(ctx, entry); err != nil {
+				return err
+			}
+			continue
+		case "w", "save":
+			b.Console.Say("pick cannot write files. Use menu to save a clip to a file.")
+			continue
+		case "x", "run":
+			b.Console.Say("pick cannot run commands. Use menu to run a command on a clip.")
+			continue
+		}
 		switch strings.ToLower(answer) {
 		case "q", "quit":
 			return ErrCancelled

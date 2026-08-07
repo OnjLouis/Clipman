@@ -136,3 +136,52 @@ func Count(number int, singular, plural string) string {
 	}
 	return fmt.Sprintf("%d %s", number, plural)
 }
+
+// PlainLines turns arbitrary clip text into lines that are safe to announce.
+//
+// Clip text is whatever the user copied, which makes it the least trustworthy
+// thing either interface handles. Line endings are normalised so a lone carriage
+// return cannot move the terminal's cursor mid-announcement, tabs are expanded
+// because a terminal's own tab handling moves the cursor without the program
+// knowing, and remaining control characters are shown in caret notation rather
+// than dropped — dropping them would make what is displayed disagree with what
+// is written to a file or emitted to standard output.
+//
+// Both renderers use this, so a clip reads the same way in each.
+func PlainLines(text string) []string {
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	for index, line := range lines {
+		lines[index] = PlainLine(line)
+	}
+	return lines
+}
+
+// TabWidth is how far a tab is expanded when clip text is displayed.
+const TabWidth = 4
+
+// PlainLine makes one line safe to display.
+func PlainLine(line string) string {
+	var out strings.Builder
+	column := 0
+	for _, r := range line {
+		switch {
+		case r == '\t':
+			width := TabWidth - (column % TabWidth)
+			out.WriteString(strings.Repeat(" ", width))
+			column += width
+		case r == 0x7f:
+			out.WriteString("^?")
+			column += 2
+		case r < 0x20:
+			out.WriteByte('^')
+			out.WriteRune(r + '@')
+			column += 2
+		default:
+			out.WriteRune(r)
+			column++
+		}
+	}
+	return out.String()
+}
