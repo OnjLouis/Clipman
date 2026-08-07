@@ -247,7 +247,7 @@ func TestCursorStaysInTheListAfterEveryAction(t *testing.T) {
 		"after a reload":          {runeKey('r')},
 		"after a kind switch":     {key(tcell.KeyTab)},
 		"after clearing a filter": {runeKey('/'), runeKey('c'), key(tcell.KeyEnter), key(tcell.KeyEscape)},
-		"after dismissing help":   {runeKey('?'), runeKey('x')},
+		"after closing help":      {runeKey('?'), runeKey('q')},
 		"after a rejected key":    {runeKey('z')},
 	}
 	for name, events := range cases {
@@ -602,11 +602,11 @@ func TestPickReportsAnEmptyView(t *testing.T) {
 func TestHelpListsEveryKey(t *testing.T) {
 	store := &fakeStore{entries: sampleEntries(2)}
 	var stdout strings.Builder
-	browser, screen := newTestBrowser(store, &stdout, runeKey('?'), runeKey('x'), runeKey('q'))
+	browser, screen := newTestBrowser(store, &stdout, runeKey('?'), runeKey('q'), runeKey('q'))
 	if err := browser.loop(context.Background()); !errors.Is(err, ErrCancelled) {
 		t.Fatalf("Run: %v", err)
 	}
-	// The help is dismissed before the final draw, so assert on what the help
+	// Help is closed before the final draw, so assert on what the key list
 	// itself contains rather than on the screen after it closed.
 	for _, want := range []string{"Enter", "Tab", "filter", "delete", "reload", "quit"} {
 		found := false

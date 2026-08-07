@@ -84,7 +84,6 @@ const (
 	modeSavePath
 	modeConfirmOverwrite
 	modeNotice
-	modeHelp
 )
 
 // selectedMarker and unselectedMarker prefix every row. Reverse video alone
@@ -138,6 +137,9 @@ type Browser struct {
 	viewWidth  int
 	viewCursor int
 	viewTop    int
+	// viewIsHelp separates reading the key list from reading a clip. Enter and w
+	// act on a clip, and help is not one.
+	viewIsHelp bool
 
 	// saveLabel is the question w is asking, savePath the file an overwrite
 	// confirmation is about, and returnMode where a prompt or notice goes back
@@ -276,8 +278,6 @@ func (b *Browser) modeName() string {
 		return "notice"
 	case modeView:
 		return "clip viewer"
-	case modeHelp:
-		return "help"
 	}
 	return "list"
 }
@@ -586,13 +586,6 @@ func (b *Browser) draw() {
 	// its own so it can be found by review navigation.
 	b.drawLine(debugRow, plain, b.debugText())
 
-	if b.mode == modeHelp {
-		b.drawHelp(listRows)
-		b.placeCursor()
-		b.Screen.Show()
-		return
-	}
-
 	now := b.now()
 	for offset := 0; offset < listRows; offset++ {
 		row := firstListRow + offset
@@ -666,7 +659,7 @@ func (b *Browser) caretPosition() (column, row int) {
 	if b.mode == modeView {
 		return b.caretColumn(), firstListRow + (b.viewCursor - b.viewTop)
 	}
-	if b.mode == modeHelp || len(b.visible()) == 0 {
+	if len(b.visible()) == 0 {
 		return b.caretColumn(), firstListRow
 	}
 	return b.caretColumn(), firstListRow + (b.selected - b.top)
@@ -763,16 +756,6 @@ var helpLines = []string{
 	"is remembered as your default.",
 }
 
-func (b *Browser) drawHelp(listRows int) {
-	for offset := 0; offset < listRows; offset++ {
-		text := ""
-		if offset < len(helpLines) {
-			text = helpLines[offset]
-		}
-		b.drawLine(firstListRow+offset, tcell.StyleDefault, text)
-	}
-}
-
 func (b *Browser) text(entry model.Entry) string {
 	if entry.IsTemplate {
 		return template.Resolve(entry.Text, b.now())
@@ -827,10 +810,6 @@ func (b *Browser) handleKey(ctx context.Context, event *tcell.EventKey) error {
 		// Routed here rather than falling through to the list, which would mean
 		// d in the viewer deletes the entry being read. Silent and destructive.
 		b.handleViewKey(event)
-		return nil
-	case modeHelp:
-		b.mode = modeList
-		b.setStatus("%s", b.heading())
 		return nil
 	}
 	return b.handleListKey(ctx, event)
@@ -1015,8 +994,7 @@ func (b *Browser) handleListKey(ctx context.Context, event *tcell.EventKey) erro
 		b.prompt.set("")
 		b.mode = modeGoto
 	case '?':
-		b.mode = modeHelp
-		b.setStatus("Showing keys. Press any key to return.")
+		b.openHelp()
 	case 'r':
 		entries, err := b.Store.Load(ctx)
 		if err != nil {

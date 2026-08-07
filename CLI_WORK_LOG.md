@@ -212,8 +212,11 @@ available, but make line motion primary.
 - `pick` gets `v` (it mutates nothing and confirming *which* clip is about to go
   down the pipe is what `pick` most needs) but not `w` or `x`. The principle is
   "`pick` has exactly one output and its caller chose it."
-- Render help through the viewer — `helpLines` already truncates silently on
-  short terminals and has no navigation.
+- ~~Render help through the viewer.~~ **Done.** `?` opens the key list in the
+  viewer, so it scrolls and wraps instead of being clipped. The old flat-slice
+  path and `modeHelp` are gone. Help closes with `q` rather than any key, since
+  a document you can scroll must not close on an arrow. `viewIsHelp` keeps Enter
+  and `w` from treating the key list as a clip.
 
 ### Known pre-existing defect, prerequisite for parity
 
