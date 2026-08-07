@@ -243,7 +243,7 @@ func TestCursorReturnsToTheListAfterAMessage(t *testing.T) {
 // what made the cursor feel stuck.
 func TestCursorStaysInTheListAfterEveryAction(t *testing.T) {
 	cases := map[string][]tcell.Event{
-		"after a delete":          {runeKey('d'), runeKey('y')},
+		"after a delete":          {runeKey('d'), runeKey('y'), runeKey('z')},
 		"after a reload":          {runeKey('r')},
 		"after a kind switch":     {key(tcell.KeyTab)},
 		"after clearing a filter": {runeKey('/'), runeKey('c'), key(tcell.KeyEnter), key(tcell.KeyEscape)},
@@ -558,18 +558,34 @@ func TestDeleteAsksBeforeActing(t *testing.T) {
 func TestDeleteRemovesTheEntryWithoutReloading(t *testing.T) {
 	store := &fakeStore{entries: sampleEntries(3)}
 	var stdout strings.Builder
-	browser, screen := newTestBrowser(store, &stdout, runeKey('d'), runeKey('y'), runeKey('q'))
-	if err := browser.loop(context.Background()); !errors.Is(err, ErrCancelled) {
-		t.Fatalf("Run: %v", err)
+	browser, screen := newTestBrowser(store, &stdout, runeKey('d'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
 	}
+	feedKeys(t, browser, runeKey('y'))
+
 	if len(store.deleted) != 1 || store.deleted[0] != "id00" {
 		t.Fatalf("expected id00 deleted, got %v", store.deleted)
 	}
 	if store.loads != 1 {
 		t.Fatalf("a delete must not trigger a reload, got %d loads", store.loads)
 	}
-	if !rowsContain(screenRows(t, screen), "Deleted clip number 0") {
-		t.Fatal("the deletion was not announced")
+	// The deletion is announced as a notice rather than as a passing status
+	// line, because the caret returns to the row being read and a status line
+	// written on the way past is very likely never spoken.
+	if browser.mode != modeNotice {
+		t.Fatalf("mode = %v, want a notice the user has to acknowledge", browser.mode)
+	}
+	if row := screenRows(t, screen)[statusRow]; !strings.Contains(row, "Deleted clip number 0") {
+		t.Fatalf("status = %q, want the deletion announced", row)
+	}
+	if _, y, _ := screen.GetCursor(); y != statusRow {
+		t.Fatalf("caret at row %d, want it on the notice at row %d", y, statusRow)
+	}
+
+	feedKeys(t, browser, runeKey('z'))
+	if browser.mode != modeList {
+		t.Fatalf("mode = %v, want the list back", browser.mode)
 	}
 }
 

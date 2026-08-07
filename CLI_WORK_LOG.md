@@ -105,8 +105,9 @@ write the clip to a file, and `x` to run a command against it.
 
 ### Still to build
 
-`w` is wired into the full-screen interface; `x` is not, and neither is wired
-into the line interface. The packages underneath
+The full-screen interface is complete: `v`, `w`, and `x` all work, help renders
+through the viewer, and `d` announces itself. **Neither `v`, `w`, nor `x` exists
+in the line interface**, which still has the bare-`NUMBER` defect below. The packages underneath
 them are done and tested; what remains is the prompt machinery, the mode
 handling, and the announcements — including prompt line editing (item 5 below),
 which `x` needs far more than the filter did.

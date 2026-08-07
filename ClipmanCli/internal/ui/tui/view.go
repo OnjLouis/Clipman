@@ -197,7 +197,8 @@ func rowIndexForLine(rows []viewRow, line int) int {
 // being able to move through it matters.
 func (b *Browser) openViewer(entry model.Entry) {
 	b.viewText = b.text(entry)
-	b.viewIsHelp = false
+	b.viewIsClip = true
+	b.viewTitle = ""
 	b.viewRows = nil
 	b.viewWidth = 0
 	b.viewCursor = 0
@@ -208,7 +209,8 @@ func (b *Browser) openViewer(entry model.Entry) {
 
 func (b *Browser) closeViewer() {
 	b.mode = modeList
-	b.viewIsHelp = false
+	b.viewIsClip = false
+	b.viewTitle = ""
 	b.viewText = ""
 	b.viewRows = nil
 	b.viewWidth = 0
@@ -276,8 +278,11 @@ func (b *Browser) viewerHeading() string {
 	if len(b.viewRows) > 0 {
 		lines = b.viewRows[len(b.viewRows)-1].line
 	}
-	if b.viewIsHelp {
-		return fmt.Sprintf("Clipman keys: %s.", output.Count(lines, "line", "lines"))
+	// A title means the document is not a clip: help, or the output of a
+	// command. Calling either of those "Viewing entry 0" would be a lie, and the
+	// heading is the first thing a reader hears.
+	if b.viewTitle != "" {
+		return fmt.Sprintf("%s: %s.", b.viewTitle, output.Count(lines, "line", "lines"))
 	}
 	entries := b.visible()
 	if b.selected < 0 || b.selected >= len(entries) {
@@ -349,9 +354,10 @@ func (b *Browser) handleViewKey(event *tcell.EventKey) {
 		// written, so making it mean something else here would be the one
 		// inconsistency the user cannot afford to discover in a pipeline.
 		//
-		// Help is not a clip, so it emits nothing. Writing the key list down a
-		// pipeline is never what anyone meant.
-		if b.viewIsHelp {
+		// Only a clip is emitted. The key list and a command's output are not
+		// what Enter promises, and sending either down a pipeline is never what
+		// anyone meant by pressing it.
+		if !b.viewIsClip {
 			return
 		}
 		b.chosen = b.viewText
@@ -378,7 +384,7 @@ func (b *Browser) handleViewKey(event *tcell.EventKey) {
 		// Bound here as well as in the list, because being told to close the
 		// clip you are reading in order to save it is two steps for a one-step
 		// task. The prompt names the entry, since the viewer draws no marker.
-		if b.viewIsHelp {
+		if !b.viewIsClip {
 			return
 		}
 		if b.PickOnly {
@@ -386,6 +392,15 @@ func (b *Browser) handleViewKey(event *tcell.EventKey) {
 			return
 		}
 		b.beginSave()
+	case 'x':
+		if !b.viewIsClip {
+			return
+		}
+		if b.PickOnly {
+			b.setStatus("pick cannot run commands. Use menu to run a command on a clip.")
+			return
+		}
+		b.beginRun()
 	}
 }
 
@@ -417,7 +432,8 @@ func runesBefore(text string, count int) string {
 // caret on the line being read. Help is just another document.
 func (b *Browser) openHelp() {
 	b.viewText = strings.Join(helpLines, "\n")
-	b.viewIsHelp = true
+	b.viewIsClip = false
+	b.viewTitle = "Clipman keys"
 	b.viewRows = nil
 	b.viewWidth = 0
 	b.viewCursor = 0

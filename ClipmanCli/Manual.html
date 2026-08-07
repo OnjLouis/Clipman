@@ -154,11 +154,22 @@ clipman-cli rm 3 --yes</code></pre>
         <tr><td><code>d</code></td><td>Delete the selected entry after confirmation. <code>pick</code> refuses this.</td></tr>
         <tr><td><code>r</code></td><td>Reload from the server</td></tr>
         <tr><td><code>w</code></td><td>Save the selected clip to a file. You are asked where; an existing file is only overwritten after confirming with <code>y</code>. The file is written exactly as the clip is, with owner-only permissions, and a leading <code>~/</code> is expanded. <code>pick</code> refuses this.</td></tr>
+        <tr><td><code>x</code></td><td>Run a program on the selected clip. See <a href="#running">Running a program on a clip</a>. <code>pick</code> refuses this.</td></tr>
         <tr><td><code>u</code></td><td>Switch to the line interface, after confirming with <code>y</code>. Your place, search, and view are carried across, and the choice becomes your default. <code>pick</code> refuses this.</td></tr>
         <tr><td><code>?</code></td><td>Show the key list. It opens in the same viewer as <code>v</code>, so it scrolls and wraps rather than being cut off on a short window. <code>q</code> closes it.</td></tr>
         <tr><td><code>q</code> or Escape</td><td>Quit without writing anything</td></tr>
       </tbody>
     </table>
+
+    <h4 id="running">Running a program on a clip</h4>
+    <p>Press <code>x</code> and type a command. <strong>No shell is involved.</strong> Clipman splits what you typed into a program and its arguments and runs that program directly, so <code>|</code>, <code>&gt;</code>, <code>;</code> and <code>&amp;&amp;</code> are not operators. Typing one is refused with an explanation rather than passed on as an ordinary argument, because running it would do something you did not ask for. If you meant one literally, put it in quotes.</p>
+    <p>This is deliberate. A clip is text you copied from somewhere else, and building a command line out of it and handing that to a shell would mean a clip containing <code>; rm -rf ~</code> ran when you asked to echo it. Instead the clip becomes exactly one argument that is never split again, whatever it contains.</p>
+    <p>Write <code>@clip</code> where the clip text should go; it must be an argument on its own. With no <code>@clip</code> anywhere, the clip is piped to the program's standard input instead, which is usually what you want:</p>
+    <pre><code>x wc -w            count the words in the clip
+x xdg-open @clip   open a clip that is a URL
+x clip.exe         put the clip back on the Windows clipboard</code></pre>
+    <p>Output is captured and shown in the viewer rather than printed to the terminal, so you can move through it and read it again. The exit status is always reported, including when a program prints nothing at all. Output longer than 1&nbsp;MB is cut off and says so. A command that does not finish can be stopped with <kbd>Escape</kbd>; while one is running Clipman says so every ten seconds.</p>
+    <p>On Windows a <code>.cmd</code> or <code>.bat</code> file cannot be started directly because there is no shell to interpret it. Name the interpreter instead, as in <code>x cmd /c mytask.cmd</code>. A program in the current directory needs an explicit path, such as <code>x ./script.sh</code>, since the current directory is not searched.</p>
 
     <h4 id="tui-editing">Correcting what you typed</h4>
     <p>Whenever Clipman asks something — the filter, an entry number, a file name — the line you are typing can be edited rather than only backspaced. <kbd>Left</kbd> and <kbd>Right</kbd> move through it, <kbd>Home</kbd> and <kbd>End</kbd> jump to its ends, <kbd>Delete</kbd> removes the character under the cursor, and <kbd>Ctrl+U</kbd> clears the line so you can start again. <kbd>Ctrl+A</kbd> and <kbd>Ctrl+E</kbd> also work as <kbd>Home</kbd> and <kbd>End</kbd>.</p>

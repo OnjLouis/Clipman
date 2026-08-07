@@ -84,6 +84,8 @@ const (
 	modeSavePath
 	modeConfirmOverwrite
 	modeNotice
+	modeRunCommand
+	modeRunning
 )
 
 // selectedMarker and unselectedMarker prefix every row. Reverse video alone
@@ -137,9 +139,11 @@ type Browser struct {
 	viewWidth  int
 	viewCursor int
 	viewTop    int
-	// viewIsHelp separates reading the key list from reading a clip. Enter and w
-	// act on a clip, and help is not one.
-	viewIsHelp bool
+	// viewIsClip separates reading a clip from reading the key list or a
+	// command's output. Enter and w act on a clip; the others are documents.
+	// viewTitle names those documents in the heading.
+	viewIsClip bool
+	viewTitle  string
 
 	// saveLabel is the question w is asking, savePath the file an overwrite
 	// confirmation is about, and returnMode where a prompt or notice goes back
@@ -147,6 +151,15 @@ type Browser struct {
 	saveLabel  string
 	savePath   string
 	returnMode mode
+
+	// The run in progress: its question, the program's name for messages, when
+	// it started, and how to stop it. runRefused keeps a rejected command line on
+	// screen so it can be corrected rather than retyped.
+	runLabel   string
+	runProgram string
+	runStarted time.Time
+	runCancel  func()
+	runRefused bool
 
 	// switching records that the user left for the other interface rather than
 	// leaving altogether, so the caller starts the other one instead of exiting.
@@ -276,6 +289,10 @@ func (b *Browser) modeName() string {
 		return "overwrite confirmation"
 	case modeNotice:
 		return "notice"
+	case modeRunCommand:
+		return "run prompt"
+	case modeRunning:
+		return "running a command"
 	case modeView:
 		return "clip viewer"
 	}
@@ -315,6 +332,15 @@ func (b *Browser) promptParts() (label, typed string, cursor int, asking bool) {
 		return "Go to entry number: ", b.prompt.String(), b.prompt.at(), true
 	case modeSavePath:
 		return b.saveLabel, b.prompt.String(), b.prompt.at(), true
+	case modeRunCommand:
+		// A refusal is shown in place of the question until the next keystroke,
+		// so the reason is on the line the caret is on.
+		if b.runRefused {
+			return b.status, "", 0, true
+		}
+		return b.runLabel, b.prompt.String(), b.prompt.at(), true
+	case modeRunning:
+		return b.status, "", 0, true
 	case modeConfirmDelete, modeConfirmSwitch, modeConfirmOverwrite, modeNotice:
 		return b.status, "", 0, true
 	}
@@ -564,7 +590,15 @@ func (b *Browser) draw() {
 		return
 	}
 
-	b.drawLine(headingRow, plain.Bold(true), b.heading())
+	// The run prompt explains its rules in the heading, for as long as it is
+	// open. Every other program that takes a command line hands it to a shell
+	// and this one does not, which is worth saying once where it is read when
+	// the screen changes rather than after each rejected attempt.
+	heading := b.heading()
+	if b.mode == modeRunCommand {
+		heading = b.runHeading()
+	}
+	b.drawLine(headingRow, plain.Bold(true), heading)
 
 	// The question and the answer typed so far share one line, so the caret's
 	// line carries both.
@@ -739,6 +773,7 @@ var helpLines = []string{
 	"  Enter        write the selected clip to standard output and exit",
 	"  v            read the whole clip; q closes it",
 	"  w            save the selected clip to a file",
+	"  x            run a program on the selected clip",
 	"  /            filter the list; Escape clears it",
 	"  Tab          switch between history, templates, and both",
 	"  d            delete the selected entry after confirmation",
@@ -776,6 +811,14 @@ func (b *Browser) handle(ctx context.Context, event tcell.Event) (bool, error) {
 	case *tcell.EventKey:
 		b.writeDebug(fmt.Sprintf("event: key %v rune %q", typed.Key(), typed.Rune()))
 		return true, b.handleKey(ctx, typed)
+	case *runFinished:
+		b.writeDebug("event: command finished")
+		b.handleRunFinished(typed)
+		return true, nil
+	case *runProgress:
+		b.writeDebug(fmt.Sprintf("event: command still running, %ds", typed.seconds))
+		b.handleRunProgress(typed)
+		return true, nil
 	default:
 		// Recorded rather than acted on, so a terminal that emits something
 		// unexpected shows up in the trace instead of quietly causing redraws.
@@ -805,6 +848,15 @@ func (b *Browser) handleKey(ctx context.Context, event *tcell.EventKey) error {
 		return nil
 	case modeNotice:
 		b.dismissNotice()
+		return nil
+	case modeRunCommand:
+		// The next keystroke after a refusal puts the question back, so the
+		// reason is heard once and then the line is editable again.
+		b.runRefused = false
+		b.handleRunKey(event)
+		return nil
+	case modeRunning:
+		b.handleRunningKey(event)
 		return nil
 	case modeView:
 		// Routed here rather than falling through to the list, which would mean
@@ -929,8 +981,12 @@ func (b *Browser) handleConfirmKey(ctx context.Context, event *tcell.EventKey) e
 		}
 	}
 	b.entries = remaining
-	b.mode = modeList
-	b.setStatus("Deleted %s. %s", output.Preview(entry), b.heading())
+	// Held until acknowledged, for the same reason a save is. The caret returns
+	// to the row being read, so a status line written on the way past is very
+	// likely never spoken — and a deletion is the last thing that should
+	// complete silently.
+	b.returnMode = modeList
+	b.notice("Deleted %s. Press any key to continue.", output.Preview(entry))
 	return nil
 }
 
@@ -1014,6 +1070,16 @@ func (b *Browser) handleListKey(ctx context.Context, event *tcell.EventKey) erro
 			return nil
 		}
 		b.beginSave()
+	case 'x':
+		// Same principle, and a larger blast radius: pick is the form that
+		// appears inside pipelines and scripts, so an arbitrary-program
+		// affordance reachable from one is a wider surface than the same key in
+		// an interactive menu.
+		if b.PickOnly {
+			b.setStatus("pick cannot run commands. Use menu to run a command on a clip.")
+			return nil
+		}
+		b.beginRun()
 	case 'u':
 		// pick writes one clip and exits. Switching out of it would land the
 		// user in the line interface's picker, and saving an interface
