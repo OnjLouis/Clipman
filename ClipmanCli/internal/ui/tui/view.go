@@ -365,3 +365,19 @@ func (b *Browser) handleViewKey(event *tcell.EventKey) {
 		b.moveView(-page)
 	}
 }
+
+// runesBefore returns the first count runes of text.
+//
+// It exists so a caret offset, which is counted in characters, can be turned
+// into the text those characters occupy and measured in columns. Slicing the
+// string directly would cut it at a byte and produce a broken rune.
+func runesBefore(text string, count int) string {
+	runes := []rune(text)
+	if count < 0 {
+		count = 0
+	}
+	if count > len(runes) {
+		count = len(runes)
+	}
+	return string(runes[:count])
+}

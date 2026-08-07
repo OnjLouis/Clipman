@@ -1639,3 +1639,87 @@ func TestResumingAFilterPutsTheCaretAtTheEnd(t *testing.T) {
 		t.Errorf("caret offset = %d, want 4, the end of the existing text", cursor)
 	}
 }
+
+// TestCaretColumnIsMeasuredInColumnsNotCharacters. A wide character occupies
+// two cells, so a caret placed by counting characters lands short by one column
+// for every one of them — and the screen reader is then reading a different
+// place than the user is editing.
+func TestCaretColumnIsMeasuredInColumnsNotCharacters(t *testing.T) {
+	browser, screen := openFilter(t, "日本語")
+
+	label, typed, cursor, asking := browser.promptParts()
+	if !asking || typed != "日本語" {
+		t.Fatalf("prompt shows %q, want the typed text", typed)
+	}
+	if cursor != 3 {
+		t.Fatalf("caret offset = %d, want 3 characters", cursor)
+	}
+
+	x, y, visible := screen.GetCursor()
+	if !visible || y != statusRow {
+		t.Fatalf("caret at (%d,%d) visible %v, want the question row", x, y, visible)
+	}
+	// Three double-width characters occupy six columns, not three.
+	want := displayWidth(label) + 6
+	if x != want {
+		t.Fatalf("caret column = %d, want %d; a rune count is not a column", x, want)
+	}
+}
+
+// TestCaretColumnTracksAWideCharacterAsItMoves, so moving left over one steps
+// back two columns rather than one.
+func TestCaretColumnTracksAWideCharacterAsItMoves(t *testing.T) {
+	browser, screen := openFilter(t, "日本")
+	before, _, _ := screen.GetCursor()
+	feedKeys(t, browser, key(tcell.KeyLeft))
+	after, _, _ := screen.GetCursor()
+	if before-after != 2 {
+		t.Fatalf("moving left over a wide character moved %d columns, want 2", before-after)
+	}
+}
+
+// TestMixedWidthTextPlacesTheCaretCorrectly covers the realistic case: a filter
+// that is part ASCII and part not.
+func TestMixedWidthTextPlacesTheCaretCorrectly(t *testing.T) {
+	browser, screen := openFilter(t, "ab日c")
+	label, _, _, _ := browser.promptParts()
+	x, _, _ := screen.GetCursor()
+	// a, b, c are one column each and 日 is two.
+	if want := displayWidth(label) + 5; x != want {
+		t.Fatalf("caret column = %d, want %d", x, want)
+	}
+}
+
+// TestSpaceAfterNumberReportsAColumn, not a character count. Everything before
+// the caret on a row is ASCII today, so this is a guard against that changing
+// silently rather than a live bug.
+func TestSpaceAfterNumberReportsAColumn(t *testing.T) {
+	if got, want := spaceAfterNumber("-> 12. anything"), 6; got != want {
+		t.Errorf("spaceAfterNumber = %d, want %d", got, want)
+	}
+	// A wide character before the separator would make the two disagree.
+	if got, want := spaceAfterNumber("日. text"), 3; got != want {
+		t.Errorf("spaceAfterNumber with a wide prefix = %d, want %d columns", got, want)
+	}
+}
+
+// TestViewerCaretOnAWideLine checks the row path as well as the prompt path.
+func TestViewerCaretOnAWideLine(t *testing.T) {
+	browser, screen := viewerBrowser(t, "日本語のテキスト\nsecond", runeKey('v'), runeKey('q'))
+	if err := browser.loopUntil(context.Background(), 1); err != nil {
+		t.Fatalf("loopUntil: %v", err)
+	}
+	x, y, visible := screen.GetCursor()
+	if !visible || y != firstListRow {
+		t.Fatalf("caret at (%d,%d) visible %v", x, y, visible)
+	}
+	if want := browser.caretColumn(); x != want {
+		t.Fatalf("caret column = %d, want %d", x, want)
+	}
+	// The row's own text must not overflow the window either.
+	row := screenRows(t, screen)[firstListRow]
+	width, _ := screen.Size()
+	if displayWidth(row) > width {
+		t.Fatalf("row occupies %d columns, window is %d", displayWidth(row), width)
+	}
+}

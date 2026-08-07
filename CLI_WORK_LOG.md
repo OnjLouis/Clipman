@@ -172,13 +172,12 @@ available, but make line motion primary.
 
 ### Caret-model work this requires
 
-1. `handleKey` falls through to `handleListKey` — a missing `case modeView`
-   routes `d` in the viewer into deleting the entry. Silent and destructive.
-2. Viewer position needs its own `viewLine`/`viewTop`; reusing `selected`/`top`
-   corrupts the list selection on return.
-3. `caretPosition` and `caretColumn` assume list geometry and
-   `output.Describe(b.selected, ...)`. Refactor to one `currentRowText()` each
-   mode supplies.
+1. ~~`handleKey` falls through to `handleListKey`.~~ **Done.** `case modeView`
+   added and tested; without it `d` in the viewer deleted the entry being read.
+2. ~~Viewer needs its own position.~~ **Done.** `viewCursor`/`viewTop`, held as
+   a logical line so a resize does not move the reader.
+3. ~~`caretPosition`/`caretColumn` assume list geometry.~~ **Done.** Both go
+   through `currentRowText()`, which every mode answers.
 4. `promptParts` must own the new prompts (file path, command, overwrite
    confirm, running state).
 5. ~~**Prompt line editing.**~~ **Done.** `promptEditor` in `prompt.go` owns the
@@ -187,11 +186,15 @@ available, but make line motion primary.
    Delete, Ctrl+U, Ctrl+A, and Ctrl+E work in every prompt, shared through
    `editPrompt`. The caret rests on the character being edited, so moving back
    through a line reads it out. Any new prompt gets all of this for free.
-6. **Double-width runes.** `drawLine`/`caretColumn` advance one column per rune;
-   CJK and emoji corrupt every column after them. The list hides this because
-   previews are short; a viewer over arbitrary clip text will not.
-7. Sanitise control characters for **display only**. Bytes written by `w`, piped
-   to `x`, and emitted by Enter stay raw.
+6. ~~**Double-width runes.**~~ **Done, in two parts.** `drawLine`/`drawText`
+   advance by display width and pass combining runes to the cell they modify.
+   Caret columns were a separate half, missed the first time: `caretPosition`
+   added a rune offset to a column, so a filter containing CJK left the caret
+   short by one column per character, and `spaceAfterNumber` returned a rune
+   index as a column. Both now measure display width.
+7. ~~Sanitise control characters for display only.~~ **Done.** Caret notation
+   for controls, tabs expanded, line endings normalised. Bytes written by `w`,
+   piped to `x`, and emitted by Enter stay raw.
 
 ### Other rulings
 

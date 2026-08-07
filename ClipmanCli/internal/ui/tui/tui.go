@@ -634,10 +634,16 @@ func (b *Browser) placeCursor() {
 // caretPosition is the placement decision on its own, so a test can check it
 // without a screen and the debug report can describe it.
 func (b *Browser) caretPosition() (column, row int) {
-	if label, _, cursor, asking := b.promptParts(); asking {
+	if label, typed, cursor, asking := b.promptParts(); asking {
 		// The caret lands on the character being edited, not at the end of the
 		// line, so moving through what you typed reads it back to you.
-		return len([]rune(label)) + cursor, statusRow
+		//
+		// The column is the width of what precedes the caret on screen, not the
+		// number of characters. A question is ASCII, but the answer is whatever
+		// the user typed: a filter containing CJK occupies two columns per
+		// character, and counting runes would leave the caret short by one
+		// column for every one of them.
+		return displayWidth(label) + displayWidth(runesBefore(typed, cursor)), statusRow
 	}
 	if b.mode == modeView {
 		return b.caretColumn(), firstListRow + (b.viewCursor - b.viewTop)
@@ -701,14 +707,18 @@ func (b *Browser) currentRowText() string {
 // continuation rows with "+" instead of ".". Without "+" here the caret would
 // jump three columns left the moment a line wrapped, which reads as the caret
 // slipping off the text rather than as a different kind of row.
+// The result is a column, so it is measured in display width rather than in
+// runes. Those agree for every prefix this program draws today, since markers
+// and numbers are ASCII, but returning a rune count as a column is the bug that
+// only shows up once something upstream changes.
 func spaceAfterNumber(row string) int {
 	runes := []rune(row)
 	for index := 0; index+1 < len(runes); index++ {
 		if (runes[index] == '.' || runes[index] == '+') && runes[index+1] == ' ' {
-			return index + 1
+			return displayWidth(string(runes[:index+1]))
 		}
 	}
-	return len([]rune(selectedMarker))
+	return displayWidth(selectedMarker)
 }
 
 var helpLines = []string{
