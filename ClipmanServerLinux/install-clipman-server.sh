@@ -67,6 +67,32 @@ case "$INIT_SYSTEM" in
     ;;
 esac
 
+systemd_linger_enabled() {
+  [ "$INIT_SYSTEM" = systemd ] || return 0
+  command -v loginctl >/dev/null 2>&1 || return 1
+  user_name=$(id -un)
+  linger_state=$(loginctl show-user "$user_name" -p Linger --value 2>/dev/null || true)
+  [ "$linger_state" = yes ] || [ "$linger_state" = Linger=yes ]
+}
+
+ensure_systemd_linger() {
+  [ "$INIT_SYSTEM" = systemd ] || return 0
+  if systemd_linger_enabled; then
+    return 0
+  fi
+  user_name=$(id -un)
+  if command -v loginctl >/dev/null 2>&1 &&
+      loginctl --no-ask-password enable-linger "$user_name" >/dev/null 2>&1 &&
+      systemd_linger_enabled; then
+    echo "Enabled systemd user lingering so Clipman Server can start at boot without a login."
+    return 0
+  fi
+  echo "Warning: systemd user lingering is not enabled for $user_name." >&2
+  echo "Clipman Server can stop when the last login ends and will not start at boot until lingering is enabled." >&2
+  echo "Run: sudo loginctl enable-linger $user_name" >&2
+  return 1
+}
+
 for value in "$APP_DIR" "$BIN_DIR" "$CONFIG_DIR" "$SERVICE_FILE" "$UPDATE_SERVICE_FILE"; do
   case "$value" in
     *'"'*|*'$'*|*'`'*|*'\'*|*"
@@ -112,6 +138,42 @@ APP_DIR="$APP_DIR"
 SERVICE_FILE="$SERVICE_FILE"
 INIT_SYSTEM="$INIT_SYSTEM"
 UPDATE_SERVICE_FILE="$UPDATE_SERVICE_FILE"
+
+systemd_linger_enabled() {
+  [ "\$INIT_SYSTEM" = systemd ] || return 0
+  command -v loginctl >/dev/null 2>&1 || return 1
+  user_name=\$(id -un)
+  linger_state=\$(loginctl show-user "\$user_name" -p Linger --value 2>/dev/null || true)
+  [ "\$linger_state" = yes ] || [ "\$linger_state" = Linger=yes ]
+}
+
+ensure_systemd_linger() {
+  [ "\$INIT_SYSTEM" = systemd ] || return 0
+  if systemd_linger_enabled; then
+    return 0
+  fi
+  user_name=\$(id -un)
+  if command -v loginctl >/dev/null 2>&1 &&
+      loginctl --no-ask-password enable-linger "\$user_name" >/dev/null 2>&1 &&
+      systemd_linger_enabled; then
+    echo "Enabled systemd user lingering so Clipman Server can start at boot without a login."
+    return 0
+  fi
+  echo "Warning: systemd user lingering is not enabled for \$user_name." >&2
+  echo "Clipman Server can stop when the last login ends and will not start at boot until lingering is enabled." >&2
+  echo "Run: sudo loginctl enable-linger \$user_name" >&2
+  return 1
+}
+
+report_systemd_linger() {
+  [ "\$INIT_SYSTEM" = systemd ] || return 0
+  if systemd_linger_enabled; then
+    echo "Start at boot without login: enabled"
+  else
+    echo "Start at boot without login: disabled"
+    echo "Enable it with: sudo loginctl enable-linger \$(id -un)"
+  fi
+}
 
 usage() {
   cat <<USAGE
@@ -202,9 +264,18 @@ runit_command() {
 
 service_command() {
   case "\$INIT_SYSTEM:\$1" in
-    systemd:start) systemctl --user daemon-reload; systemctl --user enable --now "\$SERVICE" ;;
+    systemd:start)
+      ensure_systemd_linger || true
+      systemctl --user daemon-reload
+      systemctl --user enable --now "\$SERVICE"
+      ;;
     systemd:stop) systemctl --user stop "\$SERVICE" ;;
-    systemd:status) systemctl --user status "\$SERVICE" --no-pager ;;
+    systemd:status)
+      status_code=0
+      systemctl --user status "\$SERVICE" --no-pager || status_code=\$?
+      report_systemd_linger
+      return "\$status_code"
+      ;;
     runit:start) runit_command start "\$SERVICE_FILE" ;;
     runit:stop) runit_command stop "\$SERVICE_FILE" ;;
     runit:status) runit_command status "\$SERVICE_FILE" ;;
@@ -493,6 +564,7 @@ echo "Run now with:"
 echo "  clipmanserver start"
 
 if [ "$INIT_SYSTEM" = systemd ]; then
+  ensure_systemd_linger || true
   mkdir -p "$SERVICE_DIR"
   cat > "$SERVICE_FILE" <<EOF
 [Unit]

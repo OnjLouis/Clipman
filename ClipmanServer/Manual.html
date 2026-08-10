@@ -115,7 +115,7 @@ Settings:           ~/.config/clipman-server/clipman-server-settings.json
 Importable connection: ~/.config/clipman-server/clipman-server-connection.clpconf
 Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</code></pre>
 
-  <p>The installer supports systemd and runit. With user systemd, it writes a service and update timer under <code>~/.config/systemd/user</code>. On a runit system such as Void Linux, a persistent per-user service requires turnstile; when turnstile is installed, the installer writes native runit service directories under <code>~/.config/service</code>. The installer detects the service manager automatically, or it can be selected explicitly with <code>CLIPMAN_SERVER_INIT_SYSTEM=systemd</code> or <code>CLIPMAN_SERVER_INIT_SYSTEM=runit</code>. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
+  <p>The installer supports systemd and runit. With user systemd, it writes a service and update timer under <code>~/.config/systemd/user</code> and enables user lingering so they continue running after the last login ends and start during boot without an interactive login. If system policy prevents the installer from enabling lingering, it prints the exact administrator command required. On a runit system such as Void Linux, a persistent per-user service requires turnstile; when turnstile is installed, the installer writes native runit service directories under <code>~/.config/service</code>. The installer detects the service manager automatically, or it can be selected explicitly with <code>CLIPMAN_SERVER_INIT_SYSTEM=systemd</code> or <code>CLIPMAN_SERVER_INIT_SYSTEM=runit</code>. This keeps the extracted download folder disposable and leaves the home directory tidy.</p>
 
   <p>If runit is available without turnstile, the program and command-line helpers are still installed, but no persistent per-user service is created. On Void Linux, install turnstile with <code>sudo xbps-install -S turnstile</code>, enable its system service, and run the Clipman Server installer again.</p>
 
@@ -261,14 +261,19 @@ py -3 clipman_server.py          # Windows with the Python launcher</code></pre>
 
   <pre><code>clipmanserver start</code></pre>
 
-  <p>On systemd, the equivalent direct command is:</p>
+  <p>On systemd, <code>clipmanserver start</code> also checks user lingering and attempts to enable it. The equivalent direct setup is:</p>
 
-  <pre><code>systemctl --user enable --now clipman-server.service</code></pre>
+  <pre><code>sudo loginctl enable-linger "$USER"
+systemctl --user enable --now clipman-server.service</code></pre>
+
+  <p><code>clipmanserver status</code> reports whether start-at-boot without login is enabled. The installer does not later disable lingering automatically because other per-user services may depend on it. To disable it deliberately after removing all such services, run <code>sudo loginctl disable-linger "$USER"</code>.</p>
 
   <p>On runit, the service is supervised from <code>~/.config/service/clipman-server</code>. Use <code>clipmanserver status</code>, <code>clipmanserver restart</code>, and <code>clipmanserver stop</code> for everyday service control with either service manager.</p>
 
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
+
+  <p>Server 2.6.3 makes user-systemd installations genuinely persistent on headless systems such as Raspberry Pi OS Lite. The installer and <code>clipmanserver start</code> detect and enable user lingering when permitted, <code>clipmanserver status</code> reports whether boot-without-login is enabled, and a blocked setup receives the exact administrator command required. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/60">issue #60</a> without adding unnecessary keep-alive traffic.</p>
 
   <p>Server 2.6.2 fixes updates on runit systems such as Void Linux. Update backups preserve persistent service definitions without trying to copy the live <code>supervise</code> directory or its named pipes, and rollback retains active supervision state instead of deleting it. Users affected while running an older updater can install the current server package once with the normal Linux installer; later <code>clipmanserver update</code> commands use the corrected updater. This closes <a href="https://github.com/OnjLouis/Clipman/issues/54">issue #54</a>.</p>
 
