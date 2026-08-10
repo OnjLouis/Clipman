@@ -26,6 +26,7 @@ namespace Clipman.Tests
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
             Run("copied image files use the bounded Rich Text image path", CopiedImageFilesUseBoundedRichTextPath);
+            Run("single-modifier hotkey warning preference defaults and round trips", SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
             Run("ClipMerge requires a deliberate matching second clipboard event", ClipMergeRequiresMatchingSecondEvent);
@@ -270,6 +271,19 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips()
+        {
+            Assert(new AppSettings().ConfirmSingleModifierHotkeys,
+                "New settings must warn before saving a single-modifier global hotkey.");
+            Assert(JsonUtil.Deserialize<AppSettings>("{}").ConfirmSingleModifierHotkeys,
+                "Settings created before the preference existed must retain the warning by default.");
+
+            var settings = new AppSettings { ConfirmSingleModifierHotkeys = false };
+            var restored = JsonUtil.Deserialize<AppSettings>(JsonUtil.SerializePretty(settings));
+            Assert(!restored.ConfirmSingleModifierHotkeys,
+                "Suppressing the single-modifier warning did not survive settings serialization.");
         }
 
         private static void HistoryWindowConstructsWithoutSelection()

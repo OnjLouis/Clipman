@@ -430,6 +430,7 @@ namespace Clipman
             settings.DeviceFilter = updated.DeviceFilter;
             settings.DeviceName = updated.DeviceName;
             settings.ConfirmDeletions = updated.ConfirmDeletions;
+            settings.ConfirmSingleModifierHotkeys = updated.ConfirmSingleModifierHotkeys;
             settings.ConfirmWebsiteTitleRequests = updated.ConfirmWebsiteTitleRequests;
             settings.AutoNameCopiedWebsiteLinks = updated.AutoNameCopiedWebsiteLinks;
             settings.DuplicateMode = updated.DuplicateMode;

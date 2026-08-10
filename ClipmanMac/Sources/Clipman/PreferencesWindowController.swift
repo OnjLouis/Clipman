@@ -92,6 +92,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let alsoAddCopiedImageFilesCheckbox = NSButton(checkboxWithTitle: "Also add copied PNG and JPEG files to Rich Text history", target: nil, action: nil)
     private let includeImagesPrivacyLabel = NSTextField(wrappingLabelWithString: imageMetadataPrivacyText)
     private let confirmDeletionsCheckbox = NSButton(checkboxWithTitle: "Confirm before deleting entries", target: nil, action: nil)
+    private let confirmSingleModifierHotkeysCheckbox = NSButton(checkboxWithTitle: "Warn before saving single-modifier global hotkeys", target: nil, action: nil)
     private let confirmWebsiteTitleRequestsCheckbox = NSButton(checkboxWithTitle: "Ask before contacting a website for its title", target: nil, action: nil)
     private let autoNameCopiedWebsiteLinksCheckbox = NSButton(checkboxWithTitle: "Automatically name copied website links from page headings", target: nil, action: nil)
     private let installUpdatesSilentlyCheckbox = NSButton(checkboxWithTitle: "Install updates silently", target: nil, action: nil)
@@ -182,6 +183,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("Save current clipboard hotkey, optional", saveCurrentClipboardHotkeyField)
+        confirmSingleModifierHotkeysCheckbox.setAccessibilityLabel("Warn before saving single-modifier global hotkeys")
+        confirmSingleModifierHotkeysCheckbox.setAccessibilityHelp("When checked, Clipman warns before saving an allowed global hotkey that uses only one modifier. You can also turn this warning off from its confirmation dialog.")
+        grid.addRow(with: [NSGridCell.emptyContentView, confirmSingleModifierHotkeysCheckbox])
         addRow("History password", passwordField)
         rememberPasswordCheckbox.setAccessibilityLabel("Remember history password in Keychain")
         rememberPasswordCheckbox.setAccessibilityHelp("When checked, Clipman stores the history password in this Mac user's Keychain. When unchecked, Clipman asks for the password each app session and keeps it only in memory.")
@@ -367,6 +371,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         alsoAddCopiedImageFilesCheckbox.state = settings.alsoAddCopiedImageFilesToRichTextHistory ? .on : .off
         updateImageHistoryAvailability()
         confirmDeletionsCheckbox.state = settings.confirmDeletions ? .on : .off
+        confirmSingleModifierHotkeysCheckbox.state = settings.confirmSingleModifierHotkeys ? .on : .off
         confirmWebsiteTitleRequestsCheckbox.state = settings.confirmWebsiteTitleRequests ? .on : .off
         autoNameCopiedWebsiteLinksCheckbox.state = settings.autoNameCopiedWebsiteLinks ? .on : .off
         installUpdatesSilentlyCheckbox.state = settings.installUpdatesSilently ? .on : .off
@@ -671,6 +676,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             alsoAddCopiedImageFilesEnabled: alsoAddCopiedImageFilesCheckbox.state == .on
         )
         settings.confirmDeletions = confirmDeletionsCheckbox.state == .on
+        settings.confirmSingleModifierHotkeys = confirmSingleModifierHotkeysCheckbox.state == .on
         settings.confirmWebsiteTitleRequests = confirmWebsiteTitleRequestsCheckbox.state == .on
         settings.autoNameCopiedWebsiteLinks = autoNameCopiedWebsiteLinksCheckbox.state == .on
         settings.lastSelectedHistoryTab = HistoryTabID.normalize(settings.lastSelectedHistoryTab, linksEnabled: settings.linksHistoryEnabled, richTextEnabled: settings.richTextHistoryEnabled)
@@ -694,6 +700,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     }
 
     private func confirmSingleModifierHotkeys(show: HotkeyDescriptor, toggle: HotkeyDescriptor, saveCurrentClipboard: HotkeyDescriptor?) -> Bool {
+        guard confirmSingleModifierHotkeysCheckbox.state == .on else {
+            return true
+        }
         guard show.usesSingleModifier || toggle.usesSingleModifier || saveCurrentClipboard?.usesSingleModifier == true else {
             return true
         }
@@ -703,8 +712,14 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         alert.informativeText = "One of your global hotkeys uses only one modifier. Clipman allows this for compatibility, but it is more likely to conflict with other apps or keyboard layouts."
         alert.addButton(withTitle: "Keep")
         alert.addButton(withTitle: "Go Back")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Do not show this warning again"
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
+            if alert.suppressionButton?.state == .on {
+                confirmSingleModifierHotkeysCheckbox.state = .off
+                settings.confirmSingleModifierHotkeys = false
+            }
             return true
         }
         statusLabel.stringValue = "Single-modifier hotkey not saved."

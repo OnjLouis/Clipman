@@ -235,6 +235,7 @@ namespace Clipman
         public string HistoryFilterType { get; set; }
         public string DeviceFilter { get; set; }
         public bool ConfirmDeletions { get; set; }
+        public bool ConfirmSingleModifierHotkeys { get; set; }
         public bool ConfirmWebsiteTitleRequests { get; set; }
         public bool AutoNameCopiedWebsiteLinks { get; set; }
         public string DuplicateMode { get; set; }
@@ -304,6 +305,7 @@ namespace Clipman
             HistoryFilterType = "Group";
             DeviceFilter = "All";
             ConfirmDeletions = true;
+            ConfirmSingleModifierHotkeys = true;
             ConfirmWebsiteTitleRequests = true;
             AutoNameCopiedWebsiteLinks = false;
             DuplicateMode = "MoveToTop";
