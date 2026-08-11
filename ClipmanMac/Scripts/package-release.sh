@@ -15,6 +15,9 @@ EXPECTED_TEAM_ID="83NN3HS237"
 NOTARY_PROFILE="${CLIPMAN_MAC_NOTARY_PROFILE:-ClipmanNotary}"
 NOTARY_KEYCHAIN="${CLIPMAN_MAC_NOTARY_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 NOTARIZE="${CLIPMAN_MAC_NOTARIZE:-1}"
+NOTARY_TIMEOUT_SECONDS="${CLIPMAN_MAC_NOTARY_TIMEOUT_SECONDS:-1800}"
+NOTARY_POLL_SECONDS="${CLIPMAN_MAC_NOTARY_POLL_SECONDS:-10}"
+RESUME_SUBMISSION_ID="${CLIPMAN_MAC_RESUME_SUBMISSION_ID:-}"
 completed=false
 
 remove_owned_tree() {
@@ -123,10 +126,102 @@ fi
 )
 
 if [[ "$NOTARIZE" == "1" ]]; then
-  xcrun notarytool submit "$ZIP" \
-    --keychain-profile "$NOTARY_PROFILE" \
-    --keychain "$NOTARY_KEYCHAIN" \
-    --wait
+  SUBMISSION_JSON="$SCRATCH/notary-submission.json"
+  SUBMISSION_ERROR="$SCRATCH/notary-submission.err"
+  HISTORY_JSON="$SCRATCH/notary-history.json"
+  HISTORY_ERROR="$SCRATCH/notary-history.err"
+  INFO_JSON="$SCRATCH/notary-info.json"
+  INFO_ERROR="$SCRATCH/notary-info.err"
+  SUBMISSION_NAME="$(basename "$ZIP")"
+  SUBMIT_STARTED_EPOCH="$(date -u +%s)"
+  SUBMISSION_ID="$RESUME_SUBMISSION_ID"
+  if [[ -n "$SUBMISSION_ID" ]]; then
+    echo "Resuming Apple notarization submission $SUBMISSION_ID."
+  elif xcrun notarytool submit "$ZIP" \
+      --keychain-profile "$NOTARY_PROFILE" \
+      --keychain "$NOTARY_KEYCHAIN" \
+      --output-format json >"$SUBMISSION_JSON" 2>"$SUBMISSION_ERROR"; then
+    SUBMISSION_ID="$(plutil -extract id raw -o - "$SUBMISSION_JSON" 2>/dev/null || true)"
+  else
+    echo "Apple notarization submission response failed; checking whether Apple received the upload." >&2
+    cat "$SUBMISSION_ERROR" >&2
+  fi
+
+  if [[ -z "$SUBMISSION_ID" ]]; then
+    for _ in {1..6}; do
+      if xcrun notarytool history \
+          --keychain-profile "$NOTARY_PROFILE" \
+          --keychain "$NOTARY_KEYCHAIN" \
+          --output-format json >"$HISTORY_JSON" 2>"$HISTORY_ERROR"; then
+        SUBMISSION_ID="$(/usr/bin/python3 - "$HISTORY_JSON" "$SUBMISSION_NAME" "$SUBMIT_STARTED_EPOCH" <<'PY'
+import datetime
+import json
+import sys
+
+history_path, expected_name, started_epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(history_path, encoding="utf-8") as source:
+    history = json.load(source).get("history", [])
+for item in history:
+    if item.get("name") != expected_name or not item.get("id"):
+        continue
+    created = str(item.get("createdDate", "")).replace("Z", "+00:00")
+    try:
+        created_epoch = datetime.datetime.fromisoformat(created).timestamp()
+    except ValueError:
+        continue
+    if created_epoch >= started_epoch - 30:
+        print(item["id"])
+        break
+PY
+)"
+        if [[ -n "$SUBMISSION_ID" ]]; then
+          echo "Recovered Apple notarization submission $SUBMISSION_ID from submission history."
+          break
+        fi
+      else
+        echo "Apple notarization history check failed temporarily; retrying." >&2
+        cat "$HISTORY_ERROR" >&2
+      fi
+      sleep "$NOTARY_POLL_SECONDS"
+    done
+  fi
+  if [[ -z "$SUBMISSION_ID" ]]; then
+    echo "Apple notarization did not return a submission ID." >&2
+    exit 1
+  fi
+
+  echo "Waiting for Apple notarization submission $SUBMISSION_ID."
+  NOTARY_DEADLINE=$((SECONDS + NOTARY_TIMEOUT_SECONDS))
+  NOTARY_STATUS="In Progress"
+  while (( SECONDS < NOTARY_DEADLINE )); do
+    if xcrun notarytool info "$SUBMISSION_ID" \
+        --keychain-profile "$NOTARY_PROFILE" \
+        --keychain "$NOTARY_KEYCHAIN" \
+        --output-format json >"$INFO_JSON" 2>"$INFO_ERROR"; then
+      NOTARY_STATUS="$(plutil -extract status raw -o - "$INFO_JSON")"
+      case "$NOTARY_STATUS" in
+        Accepted)
+          break
+          ;;
+        Invalid|Rejected)
+          cat "$INFO_JSON" >&2
+          xcrun notarytool log "$SUBMISSION_ID" \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --keychain "$NOTARY_KEYCHAIN" >&2 || true
+          exit 1
+          ;;
+      esac
+    else
+      echo "Apple notarization status check failed temporarily; retrying." >&2
+      cat "$INFO_ERROR" >&2
+    fi
+    sleep "$NOTARY_POLL_SECONDS"
+  done
+  if [[ "$NOTARY_STATUS" != "Accepted" ]]; then
+    echo "Apple notarization did not finish within $NOTARY_TIMEOUT_SECONDS seconds; last status: $NOTARY_STATUS." >&2
+    exit 1
+  fi
+
   xcrun stapler staple "$APP"
   xcrun stapler validate "$APP"
   rm -f "$ZIP"

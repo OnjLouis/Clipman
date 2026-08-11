@@ -1016,13 +1016,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     private func handleServerSyncFailure(_ error: Error) {
         let message = "Server sync is unavailable: \(error.localizedDescription)"
-        let wasEmpty = serverSyncWarning.isEmpty
         serverSyncWarning = message
         updateStatusItem()
         rebuildMenu()
-        if wasEmpty && storageUnavailableReason.isEmpty {
-            sounds.play(.skip)
-        }
+        // Background connectivity failures are status information, not skipped clipboard actions.
     }
 
     private func clearServerSyncWarningIfNeeded() {
