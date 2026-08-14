@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 
@@ -318,6 +319,20 @@ namespace Clipman.Tests
                     () => string.Empty))
                 {
                     Assert(form.MainMenuStrip != null, "The history window did not finish constructing its menu.");
+                    var textList = (ListView)typeof(HistoryForm)
+                        .GetField("list", BindingFlags.Instance | BindingFlags.NonPublic)
+                        .GetValue(form);
+                    var fileList = (ListView)typeof(HistoryForm)
+                        .GetField("fileEventsList", BindingFlags.Instance | BindingFlags.NonPublic)
+                        .GetValue(form);
+                    Assert(textList.AccessibleName == "Text history",
+                        "The text history list did not expose its current section name.");
+                    Assert(string.IsNullOrEmpty(textList.AccessibleDescription),
+                        "The text history list exposed stale keyboard instructions to screen readers.");
+                    Assert(fileList.AccessibleName == "File history",
+                        "The file history list did not expose its current section name.");
+                    Assert(string.IsNullOrEmpty(fileList.AccessibleDescription),
+                        "The file history list exposed verbose keyboard instructions to screen readers.");
                 }
             }
             finally

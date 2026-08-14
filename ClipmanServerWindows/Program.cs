@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -8,6 +9,7 @@ using System.Net;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
@@ -339,10 +341,42 @@ namespace ClipmanServerWrapper
 
         private void CreateHttpsCertificate()
         {
+            tray.ShowBalloonTip(2500, "Clipman Server", "Checking network addresses for the HTTPS certificate.", ToolTipIcon.Info);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var detected = RunPythonUtility("--list-certificate-ips", 10000);
+                uiContext.Post(delegate
+                {
+                    if (!detected.Succeeded)
+                    {
+                        LogLine(detected.Output);
+                        MessageBox.Show(detected.Output, "Clipman Server HTTPS", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    var addresses = detected.Output
+                        .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(value => value.Trim())
+                        .Where(value => { IPAddress parsed; return IPAddress.TryParse(value, out parsed); })
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    using (var dialog = new CertificateOptionsDialog(addresses))
+                    {
+                        if (dialog.ShowDialog() != DialogResult.OK) return;
+                        BeginHttpsCertificateGeneration(dialog.SelectedAddresses, dialog.AdditionalHostnames);
+                    }
+                }, null);
+            });
+        }
+
+        private void BeginHttpsCertificateGeneration(IEnumerable<string> addresses, IEnumerable<string> hostnames)
+        {
+            var arguments = new StringBuilder("--create-tls-certificate");
+            foreach (var address in addresses) arguments.Append(" --cert-ip ").Append(Quote(address));
+            foreach (var hostname in hostnames) arguments.Append(" --cert-host ").Append(Quote(hostname));
             tray.ShowBalloonTip(2500, "Clipman Server", "Creating the HTTPS certificate.", ToolTipIcon.Info);
             ThreadPool.QueueUserWorkItem(delegate
             {
-                var result = RunPythonUtility("--create-tls-certificate", 120000);
+                var result = RunPythonUtility(arguments.ToString(), 120000);
                 uiContext.Post(delegate
                 {
                     if (!result.Succeeded)
@@ -897,7 +931,7 @@ namespace ClipmanServerWrapper
             };
             var cancel = new Button
             {
-                Text = "&Cancel",
+                Text = "Ca&ncel",
                 DialogResult = DialogResult.Cancel,
                 Location = new Point(278, 108),
                 Size = new Size(100, 30)
@@ -906,6 +940,96 @@ namespace ClipmanServerWrapper
             CancelButton = cancel;
             Controls.AddRange(new Control[] { explanation, label, portField, save, cancel });
             Shown += delegate { portField.Focus(); portField.Select(0, portField.Text.Length); };
+        }
+    }
+
+    internal sealed class CertificateOptionsDialog : Form
+    {
+        private readonly CheckedListBox addressList;
+        private readonly TextBox hostnameField;
+        private string[] additionalHostnames = new string[0];
+
+        public IEnumerable<string> SelectedAddresses
+        {
+            get { return addressList.CheckedItems.Cast<string>().ToArray(); }
+        }
+
+        public IEnumerable<string> AdditionalHostnames { get { return additionalHostnames; } }
+
+        public CertificateOptionsDialog(IEnumerable<string> detectedAddresses)
+        {
+            Text = "Create HTTPS Certificate";
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            ClientSize = new Size(560, 390);
+
+            var explanation = new Label
+            {
+                AutoSize = false,
+                Location = new Point(12, 12),
+                Size = new Size(536, 48),
+                Text = "Choose the detected addresses clients may use. Localhost, configured addresses, and the computer name are included automatically."
+            };
+            var addressesLabel = new Label { AutoSize = true, Location = new Point(12, 68), Text = "Detected &IP addresses:" };
+            addressList = new CheckedListBox
+            {
+                Location = new Point(12, 91),
+                Size = new Size(536, 170),
+                CheckOnClick = true,
+                AccessibleName = "Detected IP addresses"
+            };
+            foreach (var address in detectedAddresses)
+            {
+                addressList.Items.Add(address, true);
+            }
+            var hostnamesLabel = new Label { AutoSize = true, Location = new Point(12, 276), Text = "Additional &hostnames, comma-separated:" };
+            hostnameField = new TextBox
+            {
+                Location = new Point(12, 299),
+                Size = new Size(536, 24),
+                AccessibleName = "Additional hostnames, comma-separated"
+            };
+            var save = new Button
+            {
+                Text = "&Create Certificate",
+                Location = new Point(300, 342),
+                Size = new Size(130, 32)
+            };
+            var cancel = new Button
+            {
+                Text = "&Cancel",
+                DialogResult = DialogResult.Cancel,
+                Location = new Point(438, 342),
+                Size = new Size(110, 32)
+            };
+            save.Click += delegate
+            {
+                var values = hostnameField.Text
+                    .Split(new[] { ',', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(value => value.Trim().TrimEnd('.'))
+                    .Where(value => value.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var invalid = values.FirstOrDefault(value =>
+                    value.Length > 253 || value.Split('.').Any(label =>
+                        label.Length == 0 || label.Length > 63 || !Regex.IsMatch(label, @"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$")));
+                if (invalid != null)
+                {
+                    MessageBox.Show(this, "Invalid hostname: " + invalid, "Create HTTPS Certificate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    hostnameField.Focus();
+                    return;
+                }
+                additionalHostnames = values;
+                DialogResult = DialogResult.OK;
+                Close();
+            };
+            AcceptButton = save;
+            CancelButton = cancel;
+            Controls.AddRange(new Control[] { explanation, addressesLabel, addressList, hostnamesLabel, hostnameField, save, cancel });
+            Shown += delegate { addressList.Focus(); };
         }
     }
 

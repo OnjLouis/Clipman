@@ -1,13 +1,19 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum SettingsFileImport {
+    case serverConnection
+    case privateAuthority
+    case historyBackup
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var app: ClipmanAppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ClipmanSettings.empty
     @State private var showServerConnection = false
-    @State private var showConnectionImporter = false
-    @State private var showAuthorityImporter = false
+    @State private var activeFileImport: SettingsFileImport?
+    @State private var showFileImporter = false
     @State private var showConnectionExportWarning = false
     @State private var showConnectionExporter = false
     @State private var connectionDocument: ServerConnectionDocument?
@@ -18,7 +24,6 @@ struct SettingsView: View {
     @State private var connectionImportError = ""
     @State private var connectionExportError = ""
     @State private var showBackupFolderPicker = false
-    @State private var showBackupRestoreImporter = false
     @State private var backupError = ""
     @State private var backupMessage = ""
     @State private var settingsValidationError = ""
@@ -143,40 +148,11 @@ struct SettingsView: View {
                 applyPendingConnectionImport()
             }
             .fileImporter(
-                isPresented: $showConnectionImporter,
-                allowedContentTypes: [.clipmanServerConnection, .json, .data],
+                isPresented: $showFileImporter,
+                allowedContentTypes: allowedFileImportTypes,
                 allowsMultipleSelection: false
             ) { result in
-                do {
-                    guard let url = try result.get().first else { return }
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                    guard fileSize <= 65_536 else { throw ConnectionConfigError.fileTooLarge }
-                    pendingConnection = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
-                } catch {
-                    connectionImportError = error.localizedDescription
-                }
-            }
-            .fileImporter(
-                isPresented: $showAuthorityImporter,
-                allowedContentTypes: [.x509Certificate, .data],
-                allowsMultipleSelection: false
-            ) { result in
-                do {
-                    guard let url = try result.get().first else { return }
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                    guard fileSize <= 32 * 1024 else { throw ConnectionConfigError.authorityTooLarge }
-                    let pem = try String(contentsOf: url, encoding: .utf8)
-                    guard let authority = try ServerSettingsSanitizer.parseCertificateAuthority(pem, address: draft.serverURL) else {
-                        throw ConnectionConfigError.invalidAuthority
-                    }
-                    pendingAuthority = authority
-                } catch {
-                    connectionImportError = error.localizedDescription
-                }
+                handleFileImport(result)
             }
             .sheet(isPresented: $showBackupFolderPicker) {
                 BackupFolderPicker(
@@ -194,33 +170,6 @@ struct SettingsView: View {
                     onCancel: { showBackupFolderPicker = false }
                 )
                 .ignoresSafeArea()
-            }
-            .fileImporter(
-                isPresented: $showBackupRestoreImporter,
-                allowedContentTypes: [.data],
-                allowsMultipleSelection: false
-            ) { result in
-                do {
-                    guard !draft.historyPassword.isEmpty else {
-                        throw CloudHistoryBackupError.unencryptedBackup
-                    }
-                    guard draft.historyPassword == app.settings.historyPassword else {
-                        settingsValidationError = "Save the history password before restoring an encrypted backup."
-                        return
-                    }
-                    guard let url = try result.get().first else { return }
-                    let data = try CloudHistoryBackup.read(url)
-                    Task {
-                        do {
-                            try await app.mergeHistoryBackup(data)
-                            backupMessage = "History backup merged."
-                        } catch {
-                            backupError = error.localizedDescription
-                        }
-                    }
-                } catch {
-                    backupError = error.localizedDescription
-                }
             }
             .fileExporter(
                 isPresented: $showConnectionExporter,
@@ -352,7 +301,7 @@ struct SettingsView: View {
                 showBackupFolderPicker = true
             }
             Button("Restore and merge history backup") {
-                showBackupRestoreImporter = true
+                beginFileImport(.historyBackup)
             }
             Text("Clipman writes one encrypted history file after successful changes. Restoring merges entries and deletions; it does not replace newer history. Server details, tokens, settings, and passwords are never included.")
                 .font(.footnote)
@@ -371,7 +320,7 @@ struct SettingsView: View {
                 showServerConnection.toggle()
             }
             Button("Import server connection file") {
-                showConnectionImporter = true
+                beginFileImport(.serverConnection)
             }
             .accessibilityHint("Choose a Clipman Server connection file, review its address, then save settings.")
             Button("Export server connection file") {
@@ -389,7 +338,7 @@ struct SettingsView: View {
             }
             .accessibilityHint("Save the current server address and private access token to a Clipman Server connection file.")
             Button("Import private authority") {
-                showAuthorityImporter = true
+                beginFileImport(.privateAuthority)
             }
             .accessibilityHint("Choose a public certificate authority for the current HTTPS server host.")
             if !draft.serverCaCertPEM.isEmpty {
@@ -458,6 +407,75 @@ struct SettingsView: View {
             pendingConnection = details
         } else if !errorMessage.isEmpty {
             connectionImportError = errorMessage
+        }
+    }
+
+    private var allowedFileImportTypes: [UTType] {
+        switch activeFileImport {
+        case .serverConnection:
+            return [.clipmanServerConnection, .json, .data]
+        case .privateAuthority:
+            return [.x509Certificate, .data]
+        case .historyBackup, .none:
+            return [.data]
+        }
+    }
+
+    private func beginFileImport(_ kind: SettingsFileImport) {
+        activeFileImport = kind
+        showFileImporter = true
+    }
+
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        guard let kind = activeFileImport else { return }
+        activeFileImport = nil
+
+        do {
+            guard let url = try result.get().first else { return }
+
+            switch kind {
+            case .serverConnection:
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                guard fileSize <= 65_536 else { throw ConnectionConfigError.fileTooLarge }
+                pendingConnection = try ServerSettingsSanitizer.parseConnectionConfig(Data(contentsOf: url))
+            case .privateAuthority:
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                guard fileSize <= 32 * 1024 else { throw ConnectionConfigError.authorityTooLarge }
+                let pem = try String(contentsOf: url, encoding: .utf8)
+                guard let authority = try ServerSettingsSanitizer.parseCertificateAuthority(pem, address: draft.serverURL) else {
+                    throw ConnectionConfigError.invalidAuthority
+                }
+                pendingAuthority = authority
+            case .historyBackup:
+                guard !draft.historyPassword.isEmpty else {
+                    throw CloudHistoryBackupError.unencryptedBackup
+                }
+                guard draft.historyPassword == app.settings.historyPassword else {
+                    settingsValidationError = "Save the history password before restoring an encrypted backup."
+                    return
+                }
+                let data = try CloudHistoryBackup.read(url)
+                Task {
+                    do {
+                        try await app.mergeHistoryBackup(data)
+                        backupMessage = "History backup merged."
+                    } catch {
+                        backupError = error.localizedDescription
+                    }
+                }
+            }
+        } catch {
+            if (error as NSError).code == NSUserCancelledError { return }
+            switch kind {
+            case .historyBackup:
+                backupError = error.localizedDescription
+            case .serverConnection, .privateAuthority:
+                connectionImportError = error.localizedDescription
+            }
         }
     }
 

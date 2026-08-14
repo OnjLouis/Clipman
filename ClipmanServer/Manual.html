@@ -273,6 +273,8 @@ systemctl --user enable --now clipman-server.service</code></pre>
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
 
+  <p>Server 2.6.4 improves private HTTPS certificate creation. Interactive Linux setup detects active non-loopback IPv4 and IPv6 addresses, lists them and asks whether to include them; Windows presents an accessible checked address list; and Mac offers Include All, Skip or Cancel. Each platform also accepts additional comma-separated hostnames. Existing explicit <code>--cert-host</code> and <code>--cert-ip</code> commands remain non-interactive for scripts and containers.</p>
+
   <p>Server 2.6.3 makes user-systemd installations genuinely persistent on headless systems such as Raspberry Pi OS Lite. The installer and <code>clipmanserver start</code> detect and enable user lingering when permitted, <code>clipmanserver status</code> reports whether boot-without-login is enabled, and a blocked setup receives the exact administrator command required. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/60">issue #60</a> without adding unnecessary keep-alive traffic.</p>
 
   <p>Server 2.6.2 fixes updates on runit systems such as Void Linux. Update backups preserve persistent service definitions without trying to copy the live <code>supervise</code> directory or its named pipes, and rollback retains active supervision state instead of deleting it. Users affected while running an older updater can install the current server package once with the normal Linux installer; later <code>clipmanserver update</code> commands use the corrected updater. This closes <a href="https://github.com/OnjLouis/Clipman/issues/54">issue #54</a>.</p>
@@ -486,9 +488,11 @@ clipmanserver update-status</code></pre>
 
   <p>On Windows, choose <strong>Create or renew HTTPS certificate</strong> from the Clipman Server notification-area menu. On macOS, use the same command in the menu-bar menu. On an installed Linux server, run:</p>
 
-  <pre><code>clipmanserver cert --cert-host server-name --cert-ip 100.64.0.10</code></pre>
+  <pre><code>clipmanserver cert</code></pre>
 
-  <p>Repeat <code>--cert-host</code> and <code>--cert-ip</code> for every DNS name or address clients use. The server reuses its existing private authority during normal renewal, creates a new server certificate valid for 397 days, updates its HTTPS settings, and rewrites the connection files with an <code>https://</code> address. Creating a new authority with <code>--new-ca</code> is an explicit recovery operation because every connected client must import the replacement authority.</p>
+  <p>Interactive certificate creation detects the computer's active non-loopback IP addresses, shows the complete list, and asks whether to include them. It then accepts optional additional hostnames as a comma-separated list. Localhost, the configured listening and advertised addresses, and the computer name remain included automatically. Review detected addresses before accepting them, especially on computers with temporary VPN or IPv6 addresses.</p>
+
+  <p>For scripts and unattended setup, repeat <code>--cert-host</code> and <code>--cert-ip</code> explicitly for every DNS name or address clients use, for example <code>clipmanserver cert --cert-host server-name --cert-ip 100.64.0.10</code>. Supplying either option keeps the command non-interactive. The server reuses its existing private authority during normal renewal, creates a new server certificate valid for 397 days, updates its HTTPS settings, and rewrites the connection files with an <code>https://</code> address. Creating a new authority with <code>--new-ca</code> is an explicit recovery operation because every connected client must import the replacement authority.</p>
 
   <h3>Connect Current Clients</h3>
   <ol>

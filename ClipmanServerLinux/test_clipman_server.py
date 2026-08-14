@@ -487,6 +487,66 @@ class CertificateTests(unittest.TestCase):
         self.assertIn("192.0.2.7", addresses)
         with self.assertRaises(ValueError):
             clipman_server.normalized_certificate_names(self.settings, ["bad.example\nkeyUsage=CA:TRUE"], [])
+        for hostname in ["bad..example", "-bad.example", "bad-.example", "bad_example"]:
+            with self.subTest(hostname=hostname), self.assertRaises(ValueError):
+                clipman_server.normalized_certificate_names(self.settings, [hostname], [])
+
+    def test_discovered_certificate_addresses_are_normalized_and_bounded(self) -> None:
+        values = []
+        for candidate in ["192.0.2.8/24", "192.0.2.8", "fe80::1234%en0", "127.0.0.1", "0.0.0.0", "ff02::1", "invalid"]:
+            clipman_server._append_certificate_ip(values, candidate)
+        self.assertEqual(["192.0.2.8", "fe80::1234"], values)
+
+    def test_interface_address_output_formats_are_parsed(self) -> None:
+        outputs = {
+            "plain": "192.0.2.8 fe80::1234%7 127.0.0.1\n",
+            "ip": "2: eth0 inet 192.0.2.8/24 scope global eth0\n2: eth0 inet6 fe80::1234/64 scope link\n",
+            "ifconfig": "\tinet 192.0.2.8 netmask 0xffffff00\n\tinet6 fe80::1234%en0 prefixlen 64\n",
+        }
+        for style, output in outputs.items():
+            with self.subTest(style=style), mock.patch.object(
+                clipman_server.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(["network-tool"], 0, stdout=output, stderr=""),
+            ):
+                self.assertEqual(
+                    ["192.0.2.8", "fe80::1234"],
+                    clipman_server._interface_command_addresses(["network-tool"], style),
+                )
+
+    def test_certificate_prompt_accepts_detected_addresses_and_comma_delimited_hosts(self) -> None:
+        answers = iter(["yes", "server.example, pi.local, server.example"])
+        output = []
+        hosts, addresses = clipman_server.prompt_certificate_names(
+            ["192.0.2.8", "2001:db8::8"],
+            read=lambda _prompt: next(answers),
+            write=output.append,
+        )
+        self.assertEqual(["server.example", "pi.local", "server.example"], hosts)
+        self.assertEqual(["192.0.2.8", "2001:db8::8"], addresses)
+        self.assertIn("Detected non-loopback IP addresses:", output)
+
+    def test_certificate_prompt_can_skip_detected_addresses(self) -> None:
+        answers = iter(["no", ""])
+        hosts, addresses = clipman_server.prompt_certificate_names(
+            ["192.0.2.8"],
+            read=lambda _prompt: next(answers),
+            write=lambda _message: None,
+        )
+        self.assertEqual([], hosts)
+        self.assertEqual([], addresses)
+
+    def test_certificate_prompt_repeats_after_an_unrecognized_answer(self) -> None:
+        answers = iter(["perhaps", "yes", ""])
+        output = []
+        hosts, addresses = clipman_server.prompt_certificate_names(
+            ["192.0.2.8"],
+            read=lambda _prompt: next(answers),
+            write=output.append,
+        )
+        self.assertEqual([], hosts)
+        self.assertEqual(["192.0.2.8"], addresses)
+        self.assertIn("Please answer yes or no.", output)
 
     def test_partial_or_missing_tls_configuration_cannot_downgrade_to_http(self) -> None:
         self.settings["CertFile"] = str(self.root / "missing.crt")

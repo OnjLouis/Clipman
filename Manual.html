@@ -90,6 +90,11 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.8.3</h3>
+  <ul>
+    <li>Windows history lists now announce only the active Text, Links, Rich Text or File History section instead of repeating a long keyboard tutorial whenever focus enters the list. The manual remains the complete shortcut reference.</li>
+  </ul>
+
   <h3>2.8.2</h3>
   <ul>
     <li>Mac no longer plays the skip sound when a background Clipman Server poll fails because the network or server is temporarily unavailable. The status menu still reports the outage, retry and recovery continue automatically with backoff, and deliberate clipboard actions keep their normal sound feedback.</li>
@@ -129,6 +134,11 @@
   <h3>2.6.2</h3>
   <ul>
     <li>Fixed Clipman Server updates on runit systems such as Void Linux. Update backups now preserve persistent service definitions without trying to copy runit's live named pipes, and rollback retains active supervision state instead of deleting it. This closes <a href="https://github.com/OnjLouis/Clipman/issues/54">issue #54</a>.</li>
+  </ul>
+
+  <h3>2.6.2 Mobile</h3>
+  <ul>
+    <li>Fixed the iOS Settings import controls so <strong>Import Clipman Server Connection File</strong>, <strong>Import Private Authority</strong> and encrypted backup restore each open the correct Files picker and retain their existing validation and confirmation flow. Android already used independent document pickers and is unchanged.</li>
   </ul>
 
   <h3>2.6.1</h3>

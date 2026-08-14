@@ -34,7 +34,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.6.3"
+APP_VERSION = "2.6.4"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 SETUP_LOG_PATTERN = re.compile(r"(/setup/)[A-Za-z0-9_-]+")
@@ -739,6 +739,111 @@ def tls_certificate_expiry(settings: Dict[str, Any]) -> str:
         return ""
 
 
+def _usable_certificate_ip(value: str) -> str:
+    clean = (value or "").strip().split("%", 1)[0].split("/", 1)[0]
+    try:
+        address = ipaddress.ip_address(clean)
+    except ValueError:
+        return ""
+    if address.is_unspecified or address.is_multicast or address.is_loopback:
+        return ""
+    return str(address)
+
+
+def _append_certificate_ip(values: List[str], value: str) -> None:
+    clean = _usable_certificate_ip(value)
+    if clean and clean not in values:
+        values.append(clean)
+
+
+def _interface_command_addresses(command: List[str], style: str) -> List[str]:
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if completed.returncode != 0:
+        return []
+
+    values: List[str] = []
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if style == "plain":
+            for part in parts:
+                _append_certificate_ip(values, part)
+        elif style == "ip":
+            for index, part in enumerate(parts[:-1]):
+                if part in {"inet", "inet6"}:
+                    _append_certificate_ip(values, parts[index + 1])
+        elif style == "ifconfig" and parts and parts[0] in {"inet", "inet6"} and len(parts) > 1:
+            _append_certificate_ip(values, parts[1])
+    return values
+
+
+def discover_certificate_ip_addresses() -> List[str]:
+    """Return active non-loopback interface addresses suitable for IP SAN entries."""
+    values: List[str] = []
+    try:
+        for result in socket.getaddrinfo(socket.gethostname(), None, socket.AF_UNSPEC, socket.SOCK_STREAM):
+            _append_certificate_ip(values, str(result[4][0]))
+    except (OSError, socket.gaierror):
+        pass
+
+    if os.name == "nt":
+        command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | "
+            "Where-Object { $_.OperationalStatus -eq [System.Net.NetworkInformation.OperationalStatus]::Up } | "
+            "ForEach-Object { $_.GetIPProperties().UnicastAddresses | ForEach-Object { $_.Address.IPAddressToString } }",
+        ]
+        discovered = _interface_command_addresses(command, "plain")
+    elif sys.platform == "darwin":
+        discovered = _interface_command_addresses(["/sbin/ifconfig"], "ifconfig")
+    else:
+        discovered = _interface_command_addresses(["ip", "-o", "address", "show", "up"], "ip")
+        if not discovered:
+            discovered = _interface_command_addresses(["hostname", "-I"], "plain")
+    for value in discovered:
+        _append_certificate_ip(values, value)
+    return sorted(values, key=lambda value: (ipaddress.ip_address(value).version, ipaddress.ip_address(value).packed))
+
+
+def prompt_certificate_names(
+    detected_ips: List[str],
+    read: Callable[[str], str] = input,
+    write: Callable[[str], None] = print,
+) -> Tuple[List[str], List[str]]:
+    selected_ips: List[str] = []
+    if detected_ips:
+        write("Detected non-loopback IP addresses:")
+        for value in detected_ips:
+            write(f"  {value}")
+        while True:
+            answer = read("Include all detected addresses in the certificate? [Y/n] ").strip().lower()
+            if answer in {"", "y", "yes"}:
+                selected_ips.extend(detected_ips)
+                break
+            if answer in {"n", "no"}:
+                break
+            write("Please answer yes or no.")
+    else:
+        write("No non-loopback IP addresses were detected. Localhost remains included automatically.")
+
+    raw_hosts = read("Additional hostnames, comma-separated (blank for none): ")
+    hosts = [value.strip() for value in raw_hosts.split(",") if value.strip()]
+    return hosts, selected_ips
+
+
 def normalized_certificate_names(settings: Dict[str, Any], extra_hosts: List[str], extra_ips: List[str]) -> Tuple[List[str], List[str]]:
     dns_names: List[str] = []
     ip_addresses: List[str] = []
@@ -755,7 +860,13 @@ def normalized_certificate_names(settings: Dict[str, Any], extra_hosts: List[str
         except ValueError:
             if force_ip:
                 raise ValueError(f"Invalid certificate IP address: {clean}")
-        if len(clean) > 253 or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", clean):
+        labels = clean.split(".")
+        if len(clean) > 253 or any(
+            not label
+            or len(label) > 63
+            or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?", label)
+            for label in labels
+        ):
             raise ValueError(f"Invalid certificate DNS name: {clean}")
         lowered = clean.lower()
         if lowered not in dns_names:
@@ -1821,6 +1932,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cert-file", help="TLS certificate PEM file for direct HTTPS and save it.")
     parser.add_argument("--key-file", help="TLS private key PEM file for direct HTTPS and save it.")
     parser.add_argument("--create-tls-certificate", action="store_true", help="Create or renew a private-CA HTTPS certificate, update settings, and exit.")
+    parser.add_argument("--list-certificate-ips", action="store_true", help="Print detected non-loopback IP addresses suitable for a generated HTTPS certificate and exit.")
     parser.add_argument("--cert-host", action="append", default=[], help="Add a DNS name to a generated HTTPS certificate. May be repeated.")
     parser.add_argument("--cert-ip", action="append", default=[], help="Add an IP address to a generated HTTPS certificate. May be repeated.")
     parser.add_argument("--new-ca", action="store_true", help="Replace the private certificate authority when generating HTTPS. Existing clients must trust the new authority.")
@@ -1918,6 +2030,10 @@ def main() -> int:
     if args.suggest_port:
         print(find_available_server_port())
         return 0
+    if args.list_certificate_ips:
+        for address in discover_certificate_ip_addresses():
+            print(address)
+        return 0
     if args.port is not None and not 1 <= args.port <= 65535:
         print("The listening port must be between 1 and 65535.", file=sys.stderr)
         return 2
@@ -1980,8 +2096,16 @@ def main() -> int:
         return 0
 
     if args.create_tls_certificate:
+        certificate_hosts = list(args.cert_host)
+        certificate_ips = list(args.cert_ip)
+        if not certificate_hosts and not certificate_ips and sys.stdin.isatty():
+            try:
+                certificate_hosts, certificate_ips = prompt_certificate_names(discover_certificate_ip_addresses())
+            except (EOFError, KeyboardInterrupt):
+                print("Certificate creation cancelled.", file=sys.stderr)
+                return 130
         try:
-            result = create_tls_certificate(config_path, settings, args.cert_host, args.cert_ip, args.new_ca)
+            result = create_tls_certificate(config_path, settings, certificate_hosts, certificate_ips, args.new_ca)
         except (OSError, RuntimeError, ValueError) as error:
             print(f"Could not create the HTTPS certificate: {error}", file=sys.stderr)
             return 1

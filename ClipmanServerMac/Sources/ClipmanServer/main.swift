@@ -224,8 +224,73 @@ final class ServerController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func createHTTPSCertificate() {
+        showNotification("Checking network addresses for the HTTPS certificate.")
+        runPythonUtility(["--list-certificate-ips"], timeout: 10) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.appendLog(error.localizedDescription + "\n")
+                self.showAlert(error.localizedDescription)
+            case .success(let output):
+                let detectedAddresses = output == "The operation completed." ? [] : output
+                    .components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard let arguments = self.certificateCreationArguments(detectedAddresses: detectedAddresses) else {
+                    self.showNotification("HTTPS certificate creation cancelled.")
+                    return
+                }
+                self.beginHTTPSCertificateGeneration(arguments)
+            }
+        }
+    }
+
+    private func certificateCreationArguments(detectedAddresses: [String]) -> [String]? {
+        var includeAddresses = false
+        if !detectedAddresses.isEmpty {
+            let addressAlert = NSAlert()
+            addressAlert.messageText = "Include Detected IP Addresses?"
+            addressAlert.informativeText = "Clipman found these active non-loopback addresses:\n\n\(detectedAddresses.joined(separator: "\n"))\n\nInclude all of them in the certificate? Localhost, configured addresses, and the computer name are included automatically."
+            addressAlert.addButton(withTitle: "Include All")
+            addressAlert.addButton(withTitle: "Skip")
+            addressAlert.addButton(withTitle: "Cancel")
+            switch addressAlert.runModal() {
+            case .alertFirstButtonReturn: includeAddresses = true
+            case .alertSecondButtonReturn: break
+            default: return nil
+            }
+        }
+
+        let hostnameAlert = NSAlert()
+        hostnameAlert.messageText = "Additional Hostnames"
+        hostnameAlert.informativeText = "Enter any additional DNS names clients use, separated by commas. Leave this blank if none are needed."
+        hostnameAlert.addButton(withTitle: "Create Certificate")
+        hostnameAlert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = "server.example, clipman.local"
+        field.setAccessibilityLabel("Additional hostnames, comma-separated")
+        hostnameAlert.accessoryView = field
+        guard hostnameAlert.runModal() == .alertFirstButtonReturn else { return nil }
+
+        var arguments = ["--create-tls-certificate"]
+        if includeAddresses {
+            for address in detectedAddresses {
+                arguments.append(contentsOf: ["--cert-ip", address])
+            }
+        }
+        let hostnames = field.stringValue
+            .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "\r" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        for hostname in hostnames {
+            arguments.append(contentsOf: ["--cert-host", hostname])
+        }
+        return arguments
+    }
+
+    private func beginHTTPSCertificateGeneration(_ arguments: [String]) {
         showNotification("Creating the HTTPS certificate.")
-        runPythonUtility(["--create-tls-certificate"], timeout: 120) { [weak self] result in
+        runPythonUtility(arguments, timeout: 120) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let output):

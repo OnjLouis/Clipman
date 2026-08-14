@@ -31,7 +31,9 @@
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/x-clipman-server-connection" />
+                <data
+                    android:scheme="content"
+                    android:mimeType="application/x-clipman-server-connection" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

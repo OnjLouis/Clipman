@@ -164,7 +164,7 @@ namespace Clipman
                 HideSelection = false,
                 MultiSelect = true,
                 AccessibleName = "Text history",
-                AccessibleDescription = "Text clipboard entries. Press Enter to copy the selected entry to the clipboard.",
+                AccessibleDescription = string.Empty,
                 TabIndex = 0
             };
             list.Columns.Add(string.Empty, 730);
@@ -188,7 +188,7 @@ namespace Clipman
                 HideSelection = false,
                 MultiSelect = true,
                 AccessibleName = "File history",
-                AccessibleDescription = "Recent file and non-text clipboard events. Select one or more events with standard Windows list selection. Press Enter to put selected files back on the clipboard, Shift Enter to pin or unpin, Control Enter to go to one selected file or folder, Delete to remove selected unpinned events, Control Delete to clear normal file history, or Alt Delete to remove unavailable unpinned events."
+                AccessibleDescription = string.Empty
             };
             fileEventsList.Columns.Add("Event", 420);
             fileEventsList.Columns.Add("Operation", 90);
@@ -3696,18 +3696,16 @@ namespace Clipman
             if (IsLinksHistoryTabActive())
             {
                 list.AccessibleName = "Links history";
-                list.AccessibleDescription = "HTTP and HTTPS link clipboard entries. Press Enter to copy the selected link entry to the clipboard.";
             }
             else if (IsRichTextHistoryTabActive())
             {
                 list.AccessibleName = "Rich text history";
-                list.AccessibleDescription = "Clipboard entries with preserved HTML or RTF formatting. Press Enter to copy the selected entry with its plain-text fallback and available formatting.";
             }
             else
             {
                 list.AccessibleName = "Text history";
-                list.AccessibleDescription = "Text clipboard entries. Press Enter to copy the selected entry to the clipboard.";
             }
+            list.AccessibleDescription = string.Empty;
         }
 
         private void SelectHistoryTab(string tabId, bool focus)
