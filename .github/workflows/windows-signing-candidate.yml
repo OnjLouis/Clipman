@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Read version
         id: version
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload unsigned signing candidate
         if: steps.version.outputs.build_windows == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Clipman-${{ steps.version.outputs.value }}-windows-unsigned
           path: ${{ runner.temp }}/Clipman-${{ steps.version.outputs.value }}-unsigned.zip
