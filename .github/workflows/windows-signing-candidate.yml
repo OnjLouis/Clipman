@@ -25,24 +25,29 @@ jobs:
           if (-not $match.Success) {
             throw 'Could not read the Clipman version.'
           }
-          "value=$($match.Groups['version'].Value)" >> $env:GITHUB_OUTPUT
+          $version = $match.Groups['version'].Value
+          $expectedTag = "v$version"
+          $isTagBuild = $env:GITHUB_REF -like 'refs/tags/*'
+          $buildWindows = -not $isTagBuild -or $env:GITHUB_REF_NAME -eq $expectedTag
+          "value=$version" >> $env:GITHUB_OUTPUT
+          "build_windows=$($buildWindows.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
-      - name: Verify tag version
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Explain non-Windows client tag
+        if: steps.version.outputs.build_windows != 'true'
         shell: pwsh
         run: |
           $expected = "v${{ steps.version.outputs.value }}"
-          if ($env:GITHUB_REF_NAME -ne $expected) {
-            throw "Tag $env:GITHUB_REF_NAME does not match source version $expected."
-          }
+          Write-Host "Tag $env:GITHUB_REF_NAME is not the Windows release tag $expected. Skipping the Windows signing candidate."
 
       - name: Build Windows application
+        if: steps.version.outputs.build_windows == 'true'
         shell: pwsh
         run: |
           $output = Join-Path $env:RUNNER_TEMP 'Clipman/clipman.exe'
           ./Build.ps1 -OutputPath $output -DesktopOnly
 
       - name: Verify and package candidate
+        if: steps.version.outputs.build_windows == 'true'
         shell: pwsh
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'Clipman'
@@ -64,6 +69,7 @@ jobs:
           Compress-Archive -LiteralPath (Get-ChildItem -LiteralPath $stage).FullName -DestinationPath $archive
 
       - name: Upload unsigned signing candidate
+        if: steps.version.outputs.build_windows == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Clipman-${{ steps.version.outputs.value }}-windows-unsigned
