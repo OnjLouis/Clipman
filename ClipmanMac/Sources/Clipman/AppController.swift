@@ -94,6 +94,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
         historyWindow = HistoryWindowController()
         historyWindow.historyDelegate = self
+        historyWindow.configureSteadyStatusProvider { [weak self] in
+            self?.historySteadyStatusText() ?? "Ready."
+        }
         historyWindow.configureSort(
             textSortMode: settings.sortMode,
             textDescending: settings.sortDescending,
@@ -405,6 +408,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         sounds.play(settings.monitoringEnabled ? .on : .off)
         updateStatusItem()
         rebuildMenu()
+        historyWindow.refreshSteadyStatus()
     }
 
     private func quickPasteEntry(id: String) {
@@ -1009,6 +1013,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         updateStatusItem()
         rebuildMenu()
+        historyWindow.refreshSteadyStatus()
         if wasAvailable {
             sounds.play(.skip)
         }
@@ -1019,6 +1024,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         serverSyncWarning = message
         updateStatusItem()
         rebuildMenu()
+        historyWindow.refreshSteadyStatus()
         // Background connectivity failures are status information, not skipped clipboard actions.
     }
 
@@ -1027,6 +1033,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         serverSyncWarning = ""
         updateStatusItem()
         rebuildMenu()
+        historyWindow.refreshSteadyStatus()
     }
 
     private func recoverHistoryPassword(after _: Error, area: String) {
@@ -1058,6 +1065,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         guard storageUnavailableReason.isEmpty else {
             updateStatusItem()
             rebuildMenu()
+            historyWindow.refreshSteadyStatus()
             return
         }
         updateStatusItem()
@@ -1066,6 +1074,28 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             monitor.isEnabled = settings.monitoringEnabled
         }
         rebuildMenu()
+        historyWindow.refreshSteadyStatus()
+    }
+
+    private func historySteadyStatusText() -> String {
+        let monitoring = settings.monitoringEnabled ? "" : "Monitoring off. "
+        if !storageUnavailableReason.isEmpty {
+            return monitoring + "Storage unavailable."
+        }
+        if isServerStorageEnabled(settings) {
+            let status = store.serverSyncStatus()
+            if !serverSyncWarning.isEmpty || status.consecutiveFailures > 0 {
+                return monitoring + "Server unavailable; using local cache."
+            }
+            if !status.configured {
+                return monitoring + "Server is not configured; using local cache."
+            }
+            if status.lastSuccessUnixMs <= 0 {
+                return monitoring + "Connecting to Clipman Server."
+            }
+            return settings.monitoringEnabled ? "Ready. Server sync connected." : "Monitoring off. Server sync connected."
+        }
+        return settings.monitoringEnabled ? "Ready. Using local or shared-folder history." : "Monitoring off. Using local or shared-folder history."
     }
 
     private func isRecoverableStorageError(_ error: Error) -> Bool {

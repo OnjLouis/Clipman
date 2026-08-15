@@ -181,7 +181,7 @@ namespace Clipman
             var created = false;
             if (historyForm == null || historyForm.IsDisposed)
             {
-                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, CopyPlainTextToClipboard, PasteClipboardIntoPreviousApplication, SaveCurrentClipboardToHistory, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, () => sounds.Skip(settings.SoundsEnabled), BuildDiagnosticsText);
+                historyForm = new HistoryForm(store, settings, SaveSettings, RegisterHotkeys, CopyEntryToClipboard, CopyEntriesToClipboard, CopyPlainTextToClipboard, PasteClipboardIntoPreviousApplication, SaveCurrentClipboardToHistory, GetRecentClipboardEvents, DeleteRecentClipboardEvents, ClearRecentClipboardEvents, RemoveUnavailableRecentClipboardEvents, ToggleRecentClipboardEventPinned, MoveRecentClipboardEvents, ClearTextHistory, ShowPreferences, ShowSecrets, ToggleActive, ExitThread, () => sounds.Skip(settings.SoundsEnabled), BuildDiagnosticsText, HistorySteadyStatusText);
                 created = true;
             }
 
@@ -2279,6 +2279,42 @@ namespace Clipman
             notifyIcon.Text = TrayText();
             notifyIcon.Icon = BuildIcon(settings.Active);
             notifyIcon.ContextMenuStrip = BuildTrayMenu();
+            if (historyForm != null && !historyForm.IsDisposed && historyForm.IsHandleCreated)
+            {
+                historyForm.BeginInvoke(new Action(historyForm.RefreshSteadyStatus));
+            }
+        }
+
+        private string HistorySteadyStatusText()
+        {
+            var monitoring = settings.Active ? string.Empty : "Monitoring off. ";
+            var fileStorageError = fileEventStore == null ? string.Empty : fileEventStore.LastStorageError;
+            var sync = store == null ? null : store.GetServerSyncStatus();
+            if (IsServerStorageEnabled())
+            {
+                if (sync == null || !sync.Enabled || !sync.Configured)
+                {
+                    return monitoring + "Server is not configured; using local cache.";
+                }
+                if (sync.ConsecutiveFailures > 0)
+                {
+                    return monitoring + "Server unavailable; using local cache.";
+                }
+                if (sync.LastSuccessUnixMs <= 0)
+                {
+                    return monitoring + "Connecting to Clipman Server.";
+                }
+                if (!string.IsNullOrWhiteSpace(fileStorageError))
+                {
+                    return monitoring + "File history storage unavailable.";
+                }
+                return settings.Active ? "Ready. Server sync connected." : "Monitoring off. Server sync connected.";
+            }
+            if ((store != null && !string.IsNullOrWhiteSpace(store.LastStorageError)) || !string.IsNullOrWhiteSpace(fileStorageError))
+            {
+                return monitoring + "Storage unavailable.";
+            }
+            return settings.Active ? "Ready. Using local or shared-folder history." : "Monitoring off. Using local or shared-folder history.";
         }
 
         protected override void Dispose(bool disposing)

@@ -1483,6 +1483,8 @@ class ClipmanApplication(Gtk.Application):
         self.remote_entry_stamps = {}
         self.remote_baseline_ready = False
         self.offline = False
+        self.status_reset_source_id = 0
+        self.transient_status_active = False
         self.busy = False
         self.last_clipboard_text = None
         self.last_clipboard_files = None
@@ -2552,12 +2554,7 @@ class ClipmanApplication(Gtk.Application):
             self.file_events = incoming_file_events
         if changed or history_changed or (not self.entries and not self.file_events):
             self.rebuild_list()
-        rich_count = sum(1 for entry in self.entries if entry.get("rich_text"))
-        plain_entries = [entry for entry in self.entries if not entry.get("rich_text")]
-        text_count = sum(1 for entry in plain_entries if entry["section"] == "text")
-        link_count = sum(1 for entry in plain_entries if entry["section"] == "links")
-        prefix = "Offline read-only cache" if self.offline else "Updated"
-        self.set_status(f"{prefix}: {len(self.entries)} entries, {text_count} text, {link_count} links, {rich_count} rich text, {len(self.file_events)} file events.", announce)
+        self.set_steady_status(force=announce, announce=announce)
 
     def _maybe_copy_remote_entry(self, entries):
         stamps = {entry.get("id", ""): entry.get("created_unix_ms", 0) for entry in entries if entry.get("id")}
@@ -3042,8 +3039,7 @@ class ClipmanApplication(Gtk.Application):
         self.preferences.values["last_section"] = section
         self.preferences.save()
         self.rebuild_list()
-        names = {"text": "Text", "links": "Links", "rich": "Rich Text", "files": "File"}
-        self.set_status(names[section] + " clipboard history.", True)
+        self.set_steady_status(force=True)
         if focus_history:
             self.focus_history()
 
@@ -5009,11 +5005,69 @@ class ClipmanApplication(Gtk.Application):
 
     def _fatal_error(self, message): self.show_error(message)
 
-    def set_status(self, message, announce=False):
+    def _cancel_status_reset(self):
+        if self.status_reset_source_id:
+            GLib.source_remove(self.status_reset_source_id)
+            self.status_reset_source_id = 0
+
+    def _active_section_total(self):
+        if self.section == "files":
+            return len(self.file_events)
+        count = 0
+        for entry in self.entries:
+            has_rich_text = bool(entry.get("rich_text"))
+            if self.preferences.values["rich_text_history_enabled"]:
+                if self.section == "rich":
+                    if has_rich_text:
+                        count += 1
+                    continue
+                if has_rich_text:
+                    continue
+            section = entry.get("section", "text")
+            if section == "links" and not self.preferences.values["links_history_enabled"]:
+                section = "text"
+            if section == self.section:
+                count += 1
+        return count
+
+    def _steady_status_text(self):
+        visible_count = len(self.visible_entries())
+        total_count = self._active_section_total()
+        descriptions = {
+            "text": ("clipboard entry", "clipboard entries"),
+            "links": ("link entry", "link entries"),
+            "rich": ("rich text entry", "rich text entries"),
+            "files": ("file history event", "file history events"),
+        }
+        singular, plural = descriptions.get(self.section, descriptions["text"])
+        description = singular if total_count == 1 else plural
+        count_text = (f"{visible_count} {description}." if visible_count == total_count
+                      else f"Showing {visible_count} of {total_count} {description}.")
+        state = "Offline. Using read-only cache." if self.offline else "Ready. Server sync connected."
+        return f"{state} {count_text}"
+
+    def set_steady_status(self, force=False, announce=False):
+        if self.transient_status_active and not force:
+            return
+        self._cancel_status_reset()
+        self.transient_status_active = False
+        self.set_status(self._steady_status_text(), announce, transient=False)
+
+    def _restore_steady_status(self):
+        self.status_reset_source_id = 0
+        self.transient_status_active = False
+        self.set_steady_status(force=True)
+        return GLib.SOURCE_REMOVE
+
+    def set_status(self, message, announce=False, transient=True):
         if self.status.get_text() != message:
             self.status.set_text(message)
         if announce:
             self.status.update_property([Gtk.AccessibleProperty.LABEL], [message])
+        if transient:
+            self._cancel_status_reset()
+            self.transient_status_active = True
+            self.status_reset_source_id = GLib.timeout_add_seconds(8, self._restore_steady_status)
 
     def _hide_window(self, *_args):
         self.window.set_visible(False)

@@ -791,6 +791,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let actionsButton = NSButton(title: "Clipman", target: nil, action: nil)
     private let toolbarStack = NSStackView()
     private let statusLabel = NSTextField(labelWithString: "Text History: no entries.")
+    private var steadyStatusProvider: () -> String = { "Ready." }
+    private var transientStatusResetWorkItem: DispatchWorkItem?
+    private var transientStatusActive = false
     private let groupButton = NSButton(title: "Set Group...", target: nil, action: nil)
     private let setToFilterButton = NSButton(title: "Set to Filter", target: nil, action: nil)
     private let groupFilterButton = NSButton(title: "Filter: All", target: nil, action: nil)
@@ -1413,7 +1416,22 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         rememberSelectionForCurrentMode()
     }
 
-    private func updateStatusBar() {
+    func configureSteadyStatusProvider(_ provider: @escaping () -> String) {
+        steadyStatusProvider = provider
+        updateStatusBar(force: true)
+    }
+
+    func refreshSteadyStatus() {
+        updateStatusBar(force: true)
+    }
+
+    private func updateStatusBar(force: Bool = false) {
+        if transientStatusActive && !force { return }
+        if force {
+            transientStatusResetWorkItem?.cancel()
+            transientStatusResetWorkItem = nil
+            transientStatusActive = false
+        }
         let visibleCount: Int
         let totalCount: Int
 
@@ -1435,21 +1453,34 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             }
         }
 
-        let itemDescription = mode == .files
-            ? (totalCount == 1 ? "file history event" : "file history events")
-            : (totalCount == 1 ? "entry" : "entries")
-        let text: String
-        if visibleCount == totalCount {
-            text = "\(modeTitle(for: mode)): \(visibleCount) \(itemDescription)."
-        } else {
-            text = "\(modeTitle(for: mode)): showing \(visibleCount) of \(totalCount) \(itemDescription)."
+        let itemDescription: String
+        switch mode {
+        case .files:
+            itemDescription = totalCount == 1 ? "file history event" : "file history events"
+        case .richText:
+            itemDescription = totalCount == 1 ? "rich text entry" : "rich text entries"
+        case .links:
+            itemDescription = totalCount == 1 ? "link entry" : "link entries"
+        case .text:
+            itemDescription = totalCount == 1 ? "clipboard entry" : "clipboard entries"
         }
+        let countText: String
+        if visibleCount == totalCount {
+            countText = "\(visibleCount) \(itemDescription)."
+        } else {
+            countText = "Showing \(visibleCount) of \(totalCount) \(itemDescription)."
+        }
+        let state = steadyStatusProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedState = state.isEmpty || state.hasSuffix(".") ? state : state + "."
+        let text = normalizedState.isEmpty ? countText : normalizedState + " " + countText
         statusLabel.stringValue = text
         statusLabel.toolTip = text
         statusLabel.setAccessibilityValue(text)
     }
 
     func reportPasteStatus(_ text: String) {
+        transientStatusResetWorkItem?.cancel()
+        transientStatusActive = true
         statusLabel.stringValue = text
         statusLabel.toolTip = text
         statusLabel.setAccessibilityValue(text)
@@ -1461,6 +1492,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 .priority: NSAccessibilityPriorityLevel.medium.rawValue
             ]
         )
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.transientStatusActive = false
+            self.transientStatusResetWorkItem = nil
+            self.updateStatusBar(force: true)
+        }
+        transientStatusResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: workItem)
     }
 
     private func filterEntries(_ entries: [ClipEntry]) -> [ClipEntry] {

@@ -35,6 +35,7 @@ namespace Clipman
         private readonly Action exitApp;
         private readonly Action playSkipSound;
         private readonly Func<string> diagnosticsText;
+        private readonly Func<string> steadyStatusText;
         private readonly TabControl tabs;
         private readonly TabPage textTab;
         private readonly TabPage linksTab;
@@ -47,6 +48,7 @@ namespace Clipman
         private MenuStrip menuStrip;
         private readonly StatusStrip status;
         private readonly ToolStripStatusLabel statusText;
+        private readonly Timer statusResetTimer;
         private readonly ContextMenuStrip historyContextMenu;
         private readonly ContextMenuStrip fileEventsContextMenu;
         private ToolStripMenuItem preferencesMenuItem;
@@ -74,9 +76,10 @@ namespace Clipman
         private bool pendingHistoryFocus;
         private bool updatingGroupFilter;
         private bool listPositionSaveFailureLogged;
+        private bool settingSteadyStatus;
         private readonly HashSet<string> linkTitleFetches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<string, List<ClipEntry>, bool> copyPlainText, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Action playSkipSound, Func<string> diagnosticsText)
+        public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<string, List<ClipEntry>, bool> copyPlainText, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Action playSkipSound, Func<string> diagnosticsText, Func<string> steadyStatusText)
         {
             this.store = store;
             this.settings = settings;
@@ -100,6 +103,7 @@ namespace Clipman
             this.exitApp = exitApp;
             this.playSkipSound = playSkipSound;
             this.diagnosticsText = diagnosticsText;
+            this.steadyStatusText = steadyStatusText;
 
             Text = "Clipman";
             StartPosition = FormStartPosition.CenterScreen;
@@ -251,6 +255,14 @@ namespace Clipman
             Controls.Add(tabs);
 
             statusText = new ToolStripStatusLabel("Ready");
+            statusResetTimer = new Timer { Interval = 8000 };
+            statusResetTimer.Tick += (s, e) => ShowSteadyStatus();
+            statusText.TextChanged += (s, e) =>
+            {
+                if (settingSteadyStatus) return;
+                statusResetTimer.Stop();
+                statusResetTimer.Start();
+            };
             status = new StatusStrip();
             status.Items.Add(statusText);
             Controls.Add(status);
@@ -334,6 +346,7 @@ namespace Clipman
                 fileEventsList.Items[selectedIndex].Focused = true;
                 fileEventsList.Items[selectedIndex].EnsureVisible();
             }
+            if (IsFileClipboardTabActive()) ShowSteadyStatus();
         }
 
         private void Reload(string preferredSelectedId, int preferredIndex)
@@ -394,7 +407,7 @@ namespace Clipman
             if (index < 0 && preferredIndex >= 0) index = preferredIndex;
             if (list.Items.Count == 0)
             {
-                statusText.Text = entries.Count + TextHistoryStatusSuffix();
+                ShowSteadyStatus();
                 return;
             }
             if (index >= list.Items.Count)
@@ -407,7 +420,7 @@ namespace Clipman
             }
             index = NormalizeSelectableIndex(index);
             SelectIndex(index);
-            statusText.Text = entries.Count + TextHistoryStatusSuffix();
+            ShowSteadyStatus();
         }
 
         public void RefreshTabsAndReload()
@@ -437,6 +450,49 @@ namespace Clipman
         {
             if (IsRichTextHistoryTabActive()) return " rich text entries.";
             return IsLinksHistoryTabActive() ? " link entries." : " clipboard entries.";
+        }
+
+        public void RefreshSteadyStatus()
+        {
+            ShowSteadyStatus();
+        }
+
+        private void ShowSteadyStatus()
+        {
+            if (statusText == null) return;
+            statusResetTimer.Stop();
+            var state = steadyStatusText == null ? "Ready." : (steadyStatusText() ?? string.Empty).Trim();
+            if (state.Length > 0 && !state.EndsWith(".", StringComparison.Ordinal)) state += ".";
+            var count = IsFileClipboardTabActive()
+                ? fileEventsList.Items.Cast<ListViewItem>().Count(item => item.Tag is ClipboardEventSummary)
+                : entries.Count;
+            var countText = IsFileClipboardTabActive()
+                ? count + (count == 1 ? " file history event." : " file history events.")
+                : IsRichTextHistoryTabActive()
+                    ? count + (count == 1 ? " rich text entry." : " rich text entries.")
+                    : IsLinksHistoryTabActive()
+                        ? count + (count == 1 ? " link entry." : " link entries.")
+                        : count + (count == 1 ? " clipboard entry." : " clipboard entries.");
+            var newText = string.IsNullOrEmpty(state) ? countText : state + " " + countText;
+            if (!string.Equals(statusText.Text, newText, StringComparison.Ordinal))
+            {
+                settingSteadyStatus = true;
+                try
+                {
+                    statusText.Text = newText;
+                }
+                finally
+                {
+                    settingSteadyStatus = false;
+                }
+            }
+            statusResetTimer.Start();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && statusResetTimer != null) statusResetTimer.Dispose();
+            base.Dispose(disposing);
         }
 
         public void FocusHistoryList()
@@ -3740,7 +3796,7 @@ namespace Clipman
             if (tabs == null || tabs.TabPages.Count == 0) return;
             SelectHistoryTab(HistoryTabs.Text, false);
             FocusHistoryListNow();
-            statusText.Text = "Text history tab.";
+            ShowSteadyStatus();
         }
 
         private void SelectLinksTab()
@@ -3752,7 +3808,7 @@ namespace Clipman
             }
             SelectHistoryTab(HistoryTabs.Links, false);
             FocusHistoryListNow();
-            statusText.Text = "Links history tab.";
+            ShowSteadyStatus();
         }
 
         private void SelectFileClipboardTab()
@@ -3760,7 +3816,7 @@ namespace Clipman
             if (tabs == null || tabs.TabPages.Count < 1) return;
             SelectHistoryTab(HistoryTabs.Files, false);
             FocusFileClipboardListNow();
-            statusText.Text = "File history tab.";
+            ShowSteadyStatus();
         }
 
         private void SelectRichTextTab()
@@ -3772,7 +3828,7 @@ namespace Clipman
             }
             SelectHistoryTab(HistoryTabs.RichText, false);
             FocusHistoryListNow();
-            statusText.Text = "Rich text history tab.";
+            ShowSteadyStatus();
         }
 
         private void FocusHistoryTabControlNow()

@@ -67,6 +67,35 @@ class LinkLabelTests(unittest.TestCase):
             "Release notes\nResolved first\n\nResolved second",
         )
 
+    def test_desktop_status_combines_connection_state_and_active_count(self):
+        app = clipman.ClipmanApplication.__new__(clipman.ClipmanApplication)
+        app.section = "links"
+        app.entries = [
+            {"section": "links", "rich_text": None},
+            {"section": "links", "rich_text": None},
+            {"section": "text", "rich_text": None},
+        ]
+        app.file_events = []
+        app.offline = False
+        app.preferences = mock.Mock(values={
+            "links_history_enabled": True,
+            "rich_text_history_enabled": False,
+        })
+        app.visible_entries = lambda: app.entries[:1]
+        self.assertEqual(
+            app._steady_status_text(),
+            "Ready. Server sync connected. Showing 1 of 2 link entries.",
+        )
+
+        app.section = "files"
+        app.file_events = [{"id": "one"}]
+        app.visible_entries = lambda: app.file_events
+        app.offline = True
+        self.assertEqual(
+            app._steady_status_text(),
+            "Offline. Using read-only cache. 1 file history event.",
+        )
+
     def test_name_wins_and_destination_omits_scheme(self):
         label, destination = clipman.link_display_parts(
             "https://www.ableton.com/en/release-notes/move-1-beta/?tracking=ignored",

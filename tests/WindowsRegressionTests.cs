@@ -316,7 +316,8 @@ namespace Clipman.Tests
                     () => { },
                     () => { },
                     () => { },
-                    () => string.Empty))
+                    () => string.Empty,
+                    () => "Ready. Using local or shared-folder history."))
                 {
                     Assert(form.MainMenuStrip != null, "The history window did not finish constructing its menu.");
                     var textList = (ListView)typeof(HistoryForm)
@@ -333,6 +334,11 @@ namespace Clipman.Tests
                         "The file history list did not expose its current section name.");
                     Assert(string.IsNullOrEmpty(fileList.AccessibleDescription),
                         "The file history list exposed verbose keyboard instructions to screen readers.");
+                    var statusText = (ToolStripStatusLabel)typeof(HistoryForm)
+                        .GetField("statusText", BindingFlags.Instance | BindingFlags.NonPublic)
+                        .GetValue(form);
+                    Assert(statusText.Text == "Ready. Using local or shared-folder history. 0 clipboard entries.",
+                        "The history status did not combine storage state with the active section count.");
                 }
             }
             finally
