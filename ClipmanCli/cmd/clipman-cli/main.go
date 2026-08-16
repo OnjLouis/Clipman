@@ -41,7 +41,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/ui/tui"
 )
 
-var version = "0.3.0-dev"
+var version = "0.9.0"
 
 type appError struct {
 	code int
