@@ -66,6 +66,12 @@ class LinkLabelTests(unittest.TestCase):
             clipman.name_and_content_text(entries, ["Resolved first", "Resolved second"]),
             "Release notes\nResolved first\n\nResolved second",
         )
+        self.assertEqual(
+            clipman.name_and_content_text(entries, separator="\n"),
+            "Release notes\nhttps://example.com/release\nUnnamed text",
+        )
+        self.assertEqual(clipman.decode_multiple_entry_separator("none", "ignored"), "")
+        self.assertEqual(clipman.decode_multiple_entry_separator("custom", "\\n--\\t"), "\n--\t")
 
     def test_desktop_status_combines_connection_state_and_active_count(self):
         app = clipman.ClipmanApplication.__new__(clipman.ClipmanApplication)
@@ -84,7 +90,7 @@ class LinkLabelTests(unittest.TestCase):
         app.visible_entries = lambda: app.entries[:1]
         self.assertEqual(
             app._steady_status_text(),
-            "Ready. Server sync connected. Showing 1 of 2 link entries.",
+            "Showing 1 of 2 link entries. Ready. Server sync connected.",
         )
 
         app.section = "files"
@@ -93,7 +99,7 @@ class LinkLabelTests(unittest.TestCase):
         app.offline = True
         self.assertEqual(
             app._steady_status_text(),
-            "Offline. Using read-only cache. 1 file history event.",
+            "1 file history event. Offline. Using read-only cache.",
         )
 
     def test_name_wins_and_destination_omits_scheme(self):

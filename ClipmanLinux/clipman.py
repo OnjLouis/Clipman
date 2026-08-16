@@ -163,14 +163,29 @@ def entry_summary(entry, limit=240):
     return name or text or str(entry.get("display", "Empty entry"))
 
 
-def name_and_content_text(entries, resolved_texts=None):
+def decode_multiple_entry_separator(mode, custom):
+    key = str(mode or "").casefold()
+    if key == "none":
+        return ""
+    if key == "newline":
+        return "\n"
+    if key == "space":
+        return " "
+    if key == "commaspace":
+        return ", "
+    if key == "custom":
+        return str(custom or "").replace("\\r\\n", "\r\n").replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+    return "\n\n"
+
+
+def name_and_content_text(entries, resolved_texts=None, separator="\n\n"):
     values = list(resolved_texts) if resolved_texts is not None else [str(entry.get("text", "")) for entry in entries]
     blocks = []
     for index, entry in enumerate(entries):
         content = values[index] if index < len(values) else str(entry.get("text", ""))
         name = str(entry.get("name", "")).strip()
         blocks.append(f"{name}\n{content}" if name else content)
-    return "\n\n".join(blocks)
+    return str(separator or "").join(blocks)
 
 
 def _url_within_link_limit(value):
@@ -1144,6 +1159,8 @@ class Preferences:
             "clipmerge_window_ms": 500,
             "clipmerge_separator_mode": "newline",
             "clipmerge_custom_separator": "",
+            "multiple_entry_separator_mode": "blankline",
+            "multiple_entry_custom_separator": "",
             "last_section": "text",
             "history_tab_order": DEFAULT_HISTORY_TAB_ORDER.copy(),
             "last_received_section": "text",
@@ -1198,6 +1215,10 @@ class Preferences:
             self.values["clipmerge_separator_mode"] = "newline"
         if not isinstance(self.values["clipmerge_custom_separator"], str):
             self.values["clipmerge_custom_separator"] = ""
+        if self.values["multiple_entry_separator_mode"] not in ("none", "newline", "blankline", "space", "commaspace", "custom"):
+            self.values["multiple_entry_separator_mode"] = "blankline"
+        if not isinstance(self.values["multiple_entry_custom_separator"], str):
+            self.values["multiple_entry_custom_separator"] = ""
         if not self.values["rich_text_history_enabled"]:
             self.values["include_images_in_rich_text_history"] = False
         if not (self.values["rich_text_history_enabled"] and self.values["include_images_in_rich_text_history"]):
@@ -3124,6 +3145,12 @@ class ClipmanApplication(Gtk.Application):
         action = "file_swap" if self.section == "files" else "swap"
         self.backend.call(action, {"id": entry["id"], "other_id": other["id"]}, self._history_response)
 
+    def _multiple_entry_separator(self):
+        return decode_multiple_entry_separator(
+            self.preferences.values["multiple_entry_separator_mode"],
+            self.preferences.values["multiple_entry_custom_separator"],
+        )
+
     def copy_selected(self, *_args, close=False):
         entries = self.selected_entries()
         if not entries: self.sounds.play("skip"); return
@@ -3143,7 +3170,7 @@ class ClipmanApplication(Gtk.Application):
         if any(entry.get("is_template") for entry in entries):
             self.backend.call("resolve_many", {"ids": [entry["id"] for entry in entries]}, lambda message: self._copy_result(message, entries, close))
         else:
-            text = "\n".join(entry.get("text", "") for entry in entries)
+            text = self._multiple_entry_separator().join(entry.get("text", "") for entry in entries)
             rich_text = entries[0].get("rich_text") if len(entries) == 1 else None
             self._set_clipboard(text, rich_text, entries[0] if len(entries) == 1 else None); self._after_copy(entries, close)
 
@@ -3163,7 +3190,7 @@ class ClipmanApplication(Gtk.Application):
             )
             return
         try:
-            self._set_clipboard(name_and_content_text(entries))
+            self._set_clipboard(name_and_content_text(entries, separator=self._multiple_entry_separator()))
         except (GLib.Error, RuntimeError, ValueError):
             self.sounds.play("skip")
             self.set_status("Could not copy the selected name and content.", True)
@@ -3177,7 +3204,7 @@ class ClipmanApplication(Gtk.Application):
         result = message["result"]
         texts = result.get("texts", []) if "texts" in result else [result.get("text", "")]
         try:
-            self._set_clipboard(name_and_content_text(entries, texts))
+            self._set_clipboard(name_and_content_text(entries, texts, self._multiple_entry_separator()))
         except (GLib.Error, RuntimeError, ValueError):
             self.sounds.play("skip")
             self.set_status("Could not copy the selected name and content.", True)
@@ -3430,7 +3457,7 @@ class ClipmanApplication(Gtk.Application):
 
     def _push_entries(self, entries, texts):
         rich_text = entries[0].get("rich_text") if len(entries) == 1 and not entries[0].get("is_template") else None
-        self._set_clipboard("\n".join(texts), rich_text, entries[0] if len(entries) == 1 else None)
+        self._set_clipboard(self._multiple_entry_separator().join(texts), rich_text, entries[0] if len(entries) == 1 else None)
         self.backend.call("push", {"ids": [entry["id"] for entry in entries]}, lambda message: self._operation_response(message, "Pushed selected entries to other devices and copied them to this clipboard."))
 
     def _operation_response(self, message, status):
@@ -3970,7 +3997,7 @@ class ClipmanApplication(Gtk.Application):
     def _transform_response(self, message, transformed, status):
         if not message.get("ok"): self.show_error(message.get("error")); return
         self._history_response(message)
-        self._set_clipboard("\n".join(transformed)); self.sounds.play("copy")
+        self._set_clipboard(self._multiple_entry_separator().join(transformed)); self.sounds.play("copy")
         self.set_status(status + " Copied transformed text to the clipboard.", True)
 
     def delete_selected(self, *_args):
@@ -4563,6 +4590,17 @@ class ClipmanApplication(Gtk.Application):
         clipmerge.connect("toggled", update_clipmerge_availability)
         clipmerge_separator.connect("notify::selected", update_clipmerge_availability)
         update_clipmerge_availability()
+        multiple_separator_keys = ["none", "newline", "blankline", "space", "commaspace", "custom"]
+        multiple_separator = Gtk.DropDown(model=Gtk.StringList.new(["No separator", "New line", "Blank line", "Space", "Comma and space", "Custom"]))
+        multiple_separator.set_selected(multiple_separator_keys.index(self.preferences.values["multiple_entry_separator_mode"]))
+        multiple_separator.update_property([Gtk.AccessibleProperty.LABEL], ["Multiple selected entries separator"])
+        multiple_custom = Gtk.Entry(text=self.preferences.values["multiple_entry_custom_separator"])
+        multiple_custom.update_property([Gtk.AccessibleProperty.LABEL], ["Custom multiple-entry separator"])
+        multiple_custom.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Backslash n, backslash r backslash n, and backslash t are supported."])
+        def update_multiple_separator_availability(*_args):
+            multiple_custom.set_sensitive(multiple_separator.get_selected() == 5)
+        multiple_separator.connect("notify::selected", update_multiple_separator_availability)
+        update_multiple_separator_availability()
         auto_group = Gtk.CheckButton(label="Automatically group new clips by source application", active=self.preferences.values["auto_group_by_app"])
         auto_remote = Gtk.CheckButton(label="Put new text received from another device on the clipboard", active=self.preferences.values["auto_copy_remote_text"])
         paste_enter = Gtk.CheckButton(label="After Enter, paste into the previous application", active=self.preferences.values["paste_after_enter"])
@@ -4621,6 +4659,11 @@ class ClipmanApplication(Gtk.Application):
         clipmerge_custom_label = Gtk.Label(label="Custom separator", xalign=0); clipmerge_custom_label.set_mnemonic_widget(clipmerge_custom)
         general.append(clipmerge_custom_label); general.append(clipmerge_custom)
         general.append(Gtk.Label(label="ClipMerge accepts 200 to 2000 milliseconds. Files merge only when copy or cut operations match.", wrap=True, xalign=0))
+        multiple_separator_label = Gtk.Label(label="Multiple-entry separator", xalign=0); multiple_separator_label.set_mnemonic_widget(multiple_separator)
+        general.append(multiple_separator_label); general.append(multiple_separator)
+        multiple_custom_label = Gtk.Label(label="Custom multiple-entry separator", xalign=0); multiple_custom_label.set_mnemonic_widget(multiple_custom)
+        general.append(multiple_custom_label); general.append(multiple_custom)
+        general.append(Gtk.Label(label="This separator is inserted when copying or pasting more than one selected Text, Links or Rich Text entry. Custom separators accept \\n, \\r\\n, \\r and \\t.", wrap=True, xalign=0))
         for control in (auto_group, auto_remote, paste_enter, dynamic, remove_tracking, links_enabled, rich_enabled, include_images, add_copied_image_files):
             general.append(control)
         general.append(image_privacy)
@@ -4717,6 +4760,8 @@ class ClipmanApplication(Gtk.Application):
                     "clipmerge_window_ms": clipmerge_window.get_value_as_int(),
                     "clipmerge_separator_mode": separator_keys[clipmerge_separator.get_selected()],
                     "clipmerge_custom_separator": clipmerge_custom.get_text(),
+                    "multiple_entry_separator_mode": multiple_separator_keys[multiple_separator.get_selected()],
+                    "multiple_entry_custom_separator": multiple_custom.get_text(),
                     "auto_group_by_app": auto_group.get_active(), "auto_copy_remote_text": auto_remote.get_active(),
                     "paste_after_enter": paste_enter.get_active(), "dynamic_history_mode": dynamic.get_active(),
                     "auto_remove_url_tracking": remove_tracking.get_active(), "keep_duplicate_entries": duplicates.get_active(),
@@ -5044,7 +5089,7 @@ class ClipmanApplication(Gtk.Application):
         count_text = (f"{visible_count} {description}." if visible_count == total_count
                       else f"Showing {visible_count} of {total_count} {description}.")
         state = "Offline. Using read-only cache." if self.offline else "Ready. Server sync connected."
-        return f"{state} {count_text}"
+        return f"{count_text} {state}"
 
     def set_steady_status(self, force=False, announce=False):
         if self.transient_status_active and not force:

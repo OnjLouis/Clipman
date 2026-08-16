@@ -81,7 +81,7 @@ clipman-cli get --name deploy-command &gt; command.txt</code></pre>
         <tr><td><code>put</code></td><td>Add UTF-8 text from standard input, <code>--file</code>, or <code>--text</code>. Standard input avoids exposing text in the process list.</td></tr>
         <tr><td><code>rm</code></td><td>Delete exactly one entry and create the same synchronization tombstone used by Clipman desktop.</td></tr>
         <tr><td><code>pick</code></td><td>Show a numbered accessible list on the controlling terminal and write the chosen entry only to standard output.</td></tr>
-        <tr><td><code>menu</code></td><td>Open the line-based history manager for viewing, outputting, deleting, and refreshing entries.</td></tr>
+        <tr><td><code>menu</code></td><td>Browse history for viewing, searching, paging, outputting, adding, and deleting entries. This is what runs when you give no command at all. It opens the line interface or the full-screen interface according to your configuration; see <a href="#renderers">Choosing a renderer</a>.</td></tr>
         <tr><td><code>sync</code></td><td>Download and validate current server history. This stateless edition has no offline write queue.</td></tr>
       </tbody>
     </table>
@@ -100,14 +100,93 @@ clipman-cli rm 3 --yes</code></pre>
     <p>Clipman CLI preserves optional HTML and RTF fields created by Windows or Mac Rich Text history when it reads, merges, and writes shared entries. CLI output remains the authoritative plain-text fallback and does not emit rich clipboard formats.</p>
 
     <h2 id="interactive">Interactive Use</h2>
-    <p>Run <code>clipman-cli menu</code>, or run <code>clipman-cli</code> without arguments in an interactive terminal. The line renderer avoids full-screen cursor movement and is suitable for screen readers.</p>
+    <p>Run <code>clipman-cli menu</code>, or run <code>clipman-cli</code> without arguments in an interactive terminal. Each row is a complete sentence naming the entry, its group, the device it came from, and how long ago it was used, so a row read on its own makes sense without column headings.</p>
+
+    <h3 id="renderers">Choosing a renderer</h3>
+    <p>Two renderers are available and both describe entries with the same words.</p>
     <ul>
-      <li>Type an entry number to view it.</li>
+      <li><strong>Line</strong> is the default. It prints numbered rows and reads typed commands, and avoids full-screen cursor movement entirely.</li>
+      <li><strong>Full screen</strong> draws a scrolling list with arrow-key navigation, a live filter, and a preview of the selected clip.</li>
+    </ul>
+    <p>Select one with <code>--renderer line</code> or <code>--renderer tui</code>, or the shorthands <code>--line</code> and <code>--tui</code>. Setting <code>renderer</code> in the configuration file changes the default; an option on the command line always wins.</p>
+    <p>Clipman does not try to detect a screen reader. No portable way to do that exists, and guessing wrong would silently change how the program behaves, so the choice is yours to make and the line renderer remains the default. If a terminal cannot run the full-screen interface, Clipman says so and names <code>--renderer line</code> rather than quietly switching, because the two renderers do not put the same things in the same places.</p>
+    <p>Because the choice is yours, each interface says which one it is. The line interface opens with <samp>Clipman line interface. Type ? for commands.</samp>, and the full-screen interface names itself on its status line. In both, <code>?</code> describes the other interface. <code>clipman-cli status</code> reports the configured one as <samp>Interface:</samp>, which answers the question without opening either.</p>
+
+    <h3 id="switching">Switching interface while you work</h3>
+    <p>Press <code>u</code> in either interface to move to the other one. You are asked to confirm first: the full-screen interface takes over the whole window, and in it <code>u</code> is a single key with no Enter behind it, so a stray press should not be able to rearrange your screen. In the line interface answer <kbd>yes</kbd>; in the full-screen interface press <kbd>y</kbd>.</p>
+    <p>The switch carries your place across. The entry you were resting on, the search you had typed, and the history-or-templates view you had selected all travel with you, so the interface you arrive in is showing the same thing you left. In the full-screen interface the cursor lands directly on the row you were on; the line interface has no cursor to land, so it says <samp>You were on entry 12.</samp> after the list instead.</p>
+    <p>The history already downloaded is handed to the interface being started, so switching does not wait on the network. The choice is also written to your configuration file, so the next run opens where this one ended. If that file cannot be written, Clipman says so and switches anyway; a preference that could not be saved is not worth losing your session over. If the terminal cannot run the full-screen interface, Clipman says so and leaves you where you are, without changing anything.</p>
+    <p><code>pick</code> refuses to switch. It offers one choice and exits, so switching out of it would strand you in a picker you could not switch back from.</p>
+
+    <h3 id="menu-commands">Menu commands</h3>
+    <ul>
+      <li>Type an entry number to read the entry, a page at a time. Inside it, <code>n</code> and <code>p</code> page, <code>w</code> saves, <code>x</code> runs a program, and <code>q</code> closes. <code>v NUMBER</code> does the same thing.</li>
+      <li>Type <code>w</code>, a space, and an entry number to save it to a file.</li>
+      <li>Type <code>x</code>, a space, and an entry number to run a program on it. The same rules apply as in the full-screen interface; see <a href="#running">Running a program on a clip</a>.</li>
       <li>Type <code>o</code>, a space, and an entry number to write that entry to standard output and exit.</li>
       <li>Type <code>d</code>, a space, and an entry number to delete it after confirmation.</li>
-      <li>Type <code>r</code> to refresh or <code>q</code> to quit.</li>
+      <li>Type <code>/</code> followed by text to show only matching entries. The text may contain spaces.</li>
+      <li>Type <code>/</code> on its own to clear the search.</li>
+      <li>Type <code>n</code> for the next page or <code>p</code> for the previous page.</li>
+      <li>Type <code>a</code> to add a new clip.</li>
+      <li>Type <code>r</code> to reload from the server.</li>
+      <li>Type <code>u</code> to switch to the full-screen interface. You are asked to confirm first, because it takes over the whole window. <code>ui</code> and <code>renderer</code> do the same thing.</li>
+      <li>Type <code>?</code> for the command list, or <code>q</code> to quit.</li>
     </ul>
-    <p><code>pick</code> presents one numbered choice and then exits. Prompts use the controlling terminal, so piped clip text remains separate.</p>
+    <p>The history is downloaded once when the menu opens and reused for every command afterward, so moving through the list never waits on the network. Deleting or adding an entry updates the list in place. Type <code>r</code> when you want to pick up changes made on another device.</p>
+    <p>Entry numbers are positions in the current filtered list rather than in the current page, so a number you heard stays valid after paging. While a search is active the numbers refer to the matches, and clearing the search restores the full numbering.</p>
+
+    <h3 id="menu-add">Adding a clip from the menu</h3>
+    <p><code>a</code> reads a clip over as many lines as you need. Finish with a single period on a line by itself. To store a line that holds only one period, type two periods instead. To abandon the clip without storing it, type <code>!cancel</code> on a line by itself. Clipman then offers an optional name; press Enter to skip it. The new clip joins whichever kind you are browsing, so adding one under <code>--kind templates</code> creates a template.</p>
+
+    <h3 id="menu-size">How much is announced at once</h3>
+    <p><code>-n COUNT</code> sets how many entries are announced at a time; the default is 20. Every entry remains reachable by paging with <code>n</code> and <code>p</code>. Use <code>--all</code> to announce the whole list at once without paging. This applies to the line renderer; the full-screen renderer scrolls to fit the window.</p>
+    <p><code>pick</code> presents a numbered list, takes one choice, and exits. It accepts <code>n</code> and <code>p</code> to page and <code>q</code> to cancel. Prompts use the controlling terminal, so piped clip text remains separate.</p>
+
+    <h3 id="tui">The full-screen renderer</h3>
+    <p>Run <code>clipman-cli menu --tui</code>. The list scrolls, a preview of the selected clip sits below it, and a status line reports what just happened.</p>
+    <table>
+      <thead><tr><th>Key</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td>Up, Down, Page Up, Page Down, Home, End</td><td>Move through the list</td></tr>
+        <tr><td><code>g</code></td><td>Go to an entry by number</td></tr>
+        <tr><td>Enter</td><td>Write the selected clip to standard output and exit</td></tr>
+        <tr><td><code>/</code></td><td>Filter the list as you type; Enter keeps the filter, Escape clears it</td></tr>
+        <tr><td>Tab</td><td>Switch between history, templates, and both</td></tr>
+        <tr><td><code>d</code></td><td>Delete the selected entry after confirmation. <code>pick</code> refuses this.</td></tr>
+        <tr><td><code>r</code></td><td>Reload from the server</td></tr>
+        <tr><td><code>w</code></td><td>Save the selected clip to a file. You are asked where; an existing file is only overwritten after confirming with <code>y</code>. The file is written exactly as the clip is, with owner-only permissions, and a leading <code>~/</code> is expanded. <code>pick</code> refuses this.</td></tr>
+        <tr><td><code>x</code></td><td>Run a program on the selected clip. See <a href="#running">Running a program on a clip</a>. <code>pick</code> refuses this.</td></tr>
+        <tr><td><code>u</code></td><td>Switch to the line interface, after confirming with <code>y</code>. Your place, search, and view are carried across, and the choice becomes your default. <code>pick</code> refuses this.</td></tr>
+        <tr><td><code>?</code></td><td>Show the key list. It opens in the same viewer as <code>v</code>, so it scrolls and wraps rather than being cut off on a short window. <code>q</code> closes it.</td></tr>
+        <tr><td><code>q</code> or Escape</td><td>Quit without writing anything</td></tr>
+      </tbody>
+    </table>
+
+    <h4 id="running">Running a program on a clip</h4>
+    <p>Press <code>x</code> and type a command. <strong>No shell is involved.</strong> Clipman splits what you typed into a program and its arguments and runs that program directly, so <code>|</code>, <code>&gt;</code>, <code>;</code> and <code>&amp;&amp;</code> are not operators. Typing one is refused with an explanation rather than passed on as an ordinary argument, because running it would do something you did not ask for. If you meant one literally, put it in quotes.</p>
+    <p>This is deliberate. A clip is text you copied from somewhere else, and building a command line out of it and handing that to a shell would mean a clip containing <code>; rm -rf ~</code> ran when you asked to echo it. Instead the clip becomes exactly one argument that is never split again, whatever it contains.</p>
+    <p>Write <code>@clip</code> where the clip text should go; it must be an argument on its own. With no <code>@clip</code> anywhere, the clip is piped to the program's standard input instead, which is usually what you want:</p>
+    <pre><code>x wc -w            count the words in the clip
+x xdg-open @clip   open a clip that is a URL
+x clip.exe         put the clip back on the Windows clipboard</code></pre>
+    <p>Output is captured and shown in the viewer rather than printed to the terminal, so you can move through it and read it again. The exit status is always reported, including when a program prints nothing at all. Output longer than 1&nbsp;MB is cut off and says so. A command that does not finish can be stopped with <kbd>Escape</kbd>; while one is running Clipman says so every ten seconds.</p>
+    <p>On Windows a <code>.cmd</code> or <code>.bat</code> file cannot be started directly because there is no shell to interpret it. Name the interpreter instead, as in <code>x cmd /c mytask.cmd</code>. A program in the current directory needs an explicit path, such as <code>x ./script.sh</code>, since the current directory is not searched.</p>
+
+    <h4 id="tui-editing">Correcting what you typed</h4>
+    <p>Whenever Clipman asks something — the filter, an entry number, a file name — the line you are typing can be edited rather than only backspaced. <kbd>Left</kbd> and <kbd>Right</kbd> move through it, <kbd>Home</kbd> and <kbd>End</kbd> jump to its ends, <kbd>Delete</kbd> removes the character under the cursor, and <kbd>Ctrl+U</kbd> clears the line so you can start again. <kbd>Ctrl+A</kbd> and <kbd>Ctrl+E</kbd> also work as <kbd>Home</kbd> and <kbd>End</kbd>.</p>
+    <p>The cursor stays on the character you are editing rather than at the end of the line, so moving back through what you typed reads it to you as you go.</p>
+
+    <h4 id="tui-cursor">Where the cursor goes</h4>
+    <p>One rule decides it: the cursor sits in whatever you are moving through or typing into, because a screen reader reads the line the cursor is on.</p>
+    <ul>
+      <li>While you move through the list, the cursor rests on the selected row, in the space just after the entry number, so each arrow key reads out the entry that is now selected. It never rests on the status line while you are browsing.</li>
+      <li>When Clipman asks a question, the cursor moves to the end of your answer on the same line as the question. Typing an entry number reads as <code>Go to entry number: 12</code>, so you hear both what was asked and what you have typed so far.</li>
+    </ul>
+    <p>The selected row is also marked with <code>-&gt;</code> in the text itself, and unselected rows are indented to match. A highlight that only changed colours would tell a screen reader nothing, and would be lost in review-mode navigation.</p>
+    <p>The heading, status line, and preview of the selected clip sit above the list, and the list runs to the bottom of the window. That ordering is deliberate: a terminal receives a redrawn screen from top to bottom, so keeping everything else above the list means the entry rows are the last text written, and a screen reader that reads newly written text finishes on the row you moved to rather than on the status line.</p>
+    <p>Clipman also redraws as little as it can, because everything redrawn is sent to the terminal again and therefore read again. Moving through the list changes only the two <code>-&gt;</code> markers and the preview line; the entry text, heading, and status line are left alone. The selected row is not highlighted in reverse video for the same reason — a colour change across a whole row would resend every character of it on each arrow key, so only the marker is highlighted. Paging and scrolling have to repaint the list, and after they do the cursor returns to the selected row.</p>
+    <p>As in the line renderer, only Enter writes to standard output, so <code>clipman-cli pick --tui | ssh web-02 'cat &gt; /tmp/snippet'</code> still transfers the clip and nothing else. The terminal is restored on exit, including if the interface stops unexpectedly.</p>
 
     <h2 id="templates">Templates</h2>
     <p>Use <code>put --template</code> to create a template entry. <code>get</code>, <code>pick</code>, and menu output resolve the established Clipman date, time, time-zone, operating-system, and username variables. <code>get --raw</code> returns the stored text unchanged. Unknown variables remain unchanged.</p>
@@ -119,6 +198,26 @@ clipman-cli get --kind templates --name today</code></pre>
     <p><code>--newline</code> adds one LF only when the selected text does not already end in LF. <code>--json</code> provides structured output where documented.</p>
 
     <h2 id="configuration">Configuration</h2>
+    <h3 id="config-location">Where the configuration lives</h3>
+    <p>Clipman CLI looks for <code>config.toml</code> in this order and uses the first it finds:</p>
+    <ol>
+      <li>the path given to <code>--config</code>;</li>
+      <li>the path in the <code>CLIPMAN_CONFIG</code> environment variable;</li>
+      <li><code>config.toml</code> inside the directory named by <code>CLIPMAN_HOME</code>;</li>
+      <li><code>config.toml</code> sitting beside the <code>clipman-cli</code> program, if one is there;</li>
+      <li>the per-user location: <code>%LOCALAPPDATA%\Clipman CLI\config.toml</code> on Windows, <code>~/.clipman/config.toml</code> elsewhere.</li>
+    </ol>
+
+    <h3 id="config-portable">Keeping settings beside the program</h3>
+    <p>Step 4 lets one copy of Clipman CLI keep its own settings. On an interactive run, <code>init</code> asks:</p>
+    <pre><code>Settings are normally saved for your user account, where every copy of Clipman CLI shares them.
+Save them beside this program instead, so only this copy uses them? [y/N]</code></pre>
+    <p>Answering <code>y</code> writes the configuration next to the program; that copy then uses it automatically. Two builds in two directories can point at two different servers without interfering, which is useful when testing a new version against a spare server while the installed one keeps working.</p>
+    <p><code>init --portable</code> does the same without being asked, for scripts and <code>--non-interactive</code> runs. The question is skipped when <code>--config</code>, <code>CLIPMAN_CONFIG</code>, or <code>CLIPMAN_HOME</code> has already named a location.</p>
+    <p>The file is adopted only if it already exists, so an ordinary installation is unaffected and the per-user location remains the default. Answering the question or passing <code>--portable</code> is the only way to create one, because creating it should be deliberate.</p>
+    <p>Clipman looks beside the <em>program</em>, not in the directory you happen to be working in. A configuration file names a server and carries a token, so an unrelated <code>config.toml</code> in some other folder must never quietly take over a session.</p>
+    <p>Run <code>clipman-cli status</code> to see which configuration is in use; it is the first line of the report and appears as <code>config_path</code> under <code>--json</code>. <code>--verbose</code> also reports it.</p>
+
     <p>The default configuration file is <code>~/.clipman/config.toml</code> on Linux and macOS, and <code>%LOCALAPPDATA%\Clipman CLI\config.toml</code> on Windows. <code>CLIPMAN_HOME</code> changes the data directory. <code>CLIPMAN_CONFIG</code> or <code>--config</code> selects a particular config file.</p>
     <p>The nonblank history password is resolved from <code>--password</code>, <code>CLIPMAN_PASSWORD</code>, saved configuration when explicitly enabled, or a no-echo controlling-terminal prompt. This allows clip text to be read from standard input without consuming the password prompt.</p>
 
@@ -140,10 +239,10 @@ clipman-cli get --kind templates --name today</code></pre>
       <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
       <tbody>
         <tr><td>0</td><td>Success</td></tr>
-        <tr><td>1</td><td>Local input or output failure</td></tr>
+        <tr><td>1</td><td>Local input, output, or data-format failure, and anything not covered below</td></tr>
         <tr><td>2</td><td>Usage, selection, or confirmation error</td></tr>
         <tr><td>3</td><td>Configuration, permission, or server-authentication error</td></tr>
-        <tr><td>4</td><td>Network, server, or synchronization failure</td></tr>
+        <tr><td>4</td><td>Network, TLS, or server failure, including timeouts, unreachable servers, and HTTP 413 or 5xx</td></tr>
         <tr><td>5</td><td>History password required, incorrect, or database authentication failed</td></tr>
         <tr><td>6</td><td>Requested entry or database not found</td></tr>
       </tbody>
@@ -171,6 +270,18 @@ clipman-cli get --kind templates --name today</code></pre>
     <h2 id="changelog">Changelog</h2>
     <h3>0.3.0 development preview</h3>
     <ul>
+      <li>A <code>config.toml</code> sitting beside the <code>clipman-cli</code> program is now used in preference to the per-user one, so one copy of Clipman CLI can keep its own settings. An interactive <code>init</code> asks whether to save settings beside the program or for your user account; <code>init --portable</code> chooses the former without asking. The per-user location remains the default when no such file exists.</li>
+      <li><code>status</code> now reports which configuration file is in use, as its first line and as <code>config_path</code> under <code>--json</code>.</li>
+      <li>Exit code 4 now means only what it says. A local failure — a malformed database, a decode error, a merge problem — that happened to surface through a command which also talks to the server used to exit 4, reporting a network fault that had not occurred and telling a script to retry something retrying could not fix. Those now exit 1. Code 4 is reserved for timeouts, unreachable servers, TLS failures, and HTTP 413 or 5xx.</li>
+      <li>Press <code>u</code> in either interface to switch to the other one, after confirming. Your place, your search, and your history-or-templates view travel with you, the already-downloaded history is handed over so the switch does not wait on the network, and the choice is saved as your default. A terminal that cannot run the full-screen interface leaves you where you are with a spoken reason and no change to your settings, and a configuration file that cannot be written costs a saved preference rather than the session. <code>pick</code> refuses to switch, because it offers one choice and exits.</li>
+      <li>Each interface now says which one it is. Two interchangeable interfaces ship, but nothing named the one you were in, so there was no reason to suspect the other existed. The line interface now opens with <samp>Clipman line interface</samp>, the full-screen interface names itself on its status line, and <code>?</code> in either one describes the other and how to reach it. <code>status</code> reports the configured interface as <samp>Interface:</samp> and as <code>interface</code> under <code>--json</code>. <code>clipman-cli --help</code> no longer describes <code>menu</code> as the line-based manager, which was wrong whenever the full-screen interface was configured, and now says that <code>menu</code> is what runs when no command is given.</li>
+      <li>Added an optional full-screen renderer: <code>menu --tui</code> and <code>pick --tui</code>, or <code>renderer = "tui"</code> in the configuration file. The line renderer remains the default. Both describe entries with the same words, and Clipman does not attempt to detect a screen reader. The cursor sits in whatever you are moving through or typing into: on the selected row while you arrow through the list, and at the end of your answer on the same line as the question when Clipman asks something. The selected row is marked with <code>-&gt;</code> in the text, not by colour alone. Press <code>g</code> to go to an entry by number.</li>
+      <li>The menu now downloads the history once when it opens and reuses it for every command. Previously every command downloaded the whole database again, so each keystroke waited on the network.</li>
+      <li>Added searching in the menu with <code>/TEXT</code>, and <code>/</code> alone to clear the search.</li>
+      <li>Added paging in the menu and in <code>pick</code> with <code>n</code> and <code>p</code>. Every entry is now reachable; previously <code>-n</code> hid the entries past its limit entirely. <code>-n</code> now sets the page size, and <code>--all</code> announces the whole list at once.</li>
+      <li>Added <code>a</code> to write a new clip from inside the menu, over as many lines as needed.</li>
+      <li>Added <code>?</code> for the menu command list, so the prompt no longer has to spell every command out on each line.</li>
+      <li>Menu and <code>pick</code> rows now name each field and give a relative time, so a row read on its own is understandable. Out-of-range and unrecognized commands now say what is valid instead of giving one generic message.</li>
       <li>Restructured the release package so each platform has its own directory holding a program simply called <code>clipman-cli</code>. Installing it is now a move instead of a rename.</li>
       <li>Added a Windows ARM64 build.</li>
       <li>Moved the manual and manual page into a <code>manual</code> directory.</li>

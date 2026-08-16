@@ -1192,7 +1192,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry]) {
-        let text = entries.map(TemplateResolver.resolveEntryText).joined(separator: "\n---\n")
+        let text = entries.map(TemplateResolver.resolveEntryText).joined(separator: selectedEntriesSeparator())
         monitor.writeInternalText(
             text,
             richText: entries.count == 1 ? resolvedRichText(entries[0]) : nil,
@@ -1211,7 +1211,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             let content = TemplateResolver.resolveEntryText(entry)
             let name = entry.Name.trimmingCharacters(in: .whitespacesAndNewlines)
             return name.isEmpty ? content : name + "\n" + content
-        }.joined(separator: "\n\n")
+        }.joined(separator: selectedEntriesSeparator())
         guard monitor.writeInternalText(text) else {
             sounds.play(.skip)
             controller.reportPasteStatus("Could not copy the selected name and content.")
@@ -2005,8 +2005,15 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             return
         }
         store.replaceTexts(transformed.map { (id: $0.0, text: $0.1) })
-        monitor.writeInternalText(transformed.map { $0.1 }.joined(separator: "\n\n"))
+        monitor.writeInternalText(transformed.map { $0.1 }.joined(separator: selectedEntriesSeparator()))
         sounds.play(.copy)
+    }
+
+    private func selectedEntriesSeparator() -> String {
+        ClipmanSettings.multipleEntrySeparator(
+            mode: settings.multipleEntrySeparatorMode,
+            custom: settings.multipleEntryCustomSeparator
+        )
     }
 
     private func showInformationalAlert(title: String, message: String) {

@@ -22,6 +22,8 @@ namespace Clipman
         private readonly NumericUpDown clipMergeWindow;
         private readonly ComboBox clipMergeSeparator;
         private readonly TextBox clipMergeCustomSeparator;
+        private readonly ComboBox multipleEntrySeparator;
+        private readonly TextBox multipleEntryCustomSeparator;
         private readonly CheckBox autoGroupByApp;
         private readonly CheckBox autoCopyLatestRemoteText;
         private readonly CheckBox pasteAfterEnter;
@@ -135,6 +137,19 @@ namespace Clipman
             clipMergeEnabled.CheckedChanged += (s, e) => updateClipMergeAvailability();
             clipMergeSeparator.SelectedIndexChanged += (s, e) => updateClipMergeAvailability();
             updateClipMergeAvailability();
+            multipleEntrySeparator = NewComboBox(
+                "Multiple selected entries separator",
+                new[] { "No separator", "New line", "Blank line", "Space", "Comma and space", "Custom" },
+                DisplayMultipleEntrySeparator(settings.MultipleEntrySeparatorMode));
+            multipleEntryCustomSeparator = NewTextBox(settings.MultipleEntryCustomSeparator);
+            multipleEntryCustomSeparator.AccessibleName = "Custom multiple-entry separator";
+            multipleEntryCustomSeparator.AccessibleDescription = "Text inserted between selected clipboard entries when Custom is selected. Backslash n, backslash r backslash n, and backslash t are supported.";
+            Action updateMultipleEntrySeparatorAvailability = () =>
+            {
+                multipleEntryCustomSeparator.Enabled = string.Equals(Convert.ToString(multipleEntrySeparator.SelectedItem), "Custom", StringComparison.OrdinalIgnoreCase);
+            };
+            multipleEntrySeparator.SelectedIndexChanged += (s, e) => updateMultipleEntrySeparatorAvailability();
+            updateMultipleEntrySeparatorAvailability();
             autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
             autoCopyLatestRemoteText = NewCheckBox("Put new text received from another devi&ce on the clipboard", settings.AutoCopyLatestRemoteText);
             autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another device onto this device's clipboard. Reusing an older entry on another device does not trigger this. This is off by default.";
@@ -187,6 +202,9 @@ namespace Clipman
             AddRow(generalLayout, "Text separator &kind:", clipMergeSeparator);
             AddRow(generalLayout, "Custom separator se&quence:", clipMergeCustomSeparator);
             AddFullRow(generalLayout, NewNote("ClipMerge accepts 200 to 2000 milliseconds. Merged formatted text becomes plain text. Files merge only when copy or cut operations match."));
+            AddRow(generalLayout, "Selected-clips &join:", multipleEntrySeparator);
+            AddRow(generalLayout, "Custom join string:", multipleEntryCustomSeparator);
+            AddFullRow(generalLayout, NewNote("This separator is inserted when copying or pasting more than one selected Text, Links, or Rich Text entry. Custom separators accept \\n, \\r\\n, \\r, and \\t."));
             AddFullRow(generalLayout, autoGroupByApp);
             AddFullRow(generalLayout, autoCopyLatestRemoteText);
             AddFullRow(generalLayout, pasteAfterEnter);
@@ -452,6 +470,8 @@ namespace Clipman
             clipMergeWindow.ValueChanged += (s, e) => ApplyNow();
             clipMergeSeparator.SelectedIndexChanged += (s, e) => ApplyNow();
             clipMergeCustomSeparator.TextChanged += (s, e) => ApplyNow();
+            multipleEntrySeparator.SelectedIndexChanged += (s, e) => ApplyNow();
+            multipleEntryCustomSeparator.TextChanged += (s, e) => ApplyNow();
             autoGroupByApp.CheckedChanged += (s, e) => ApplyNow();
             autoCopyLatestRemoteText.CheckedChanged += (s, e) => ApplyNow();
             pasteAfterEnter.CheckedChanged += (s, e) => ApplyNow();
@@ -506,6 +526,8 @@ namespace Clipman
             settings.ClipMergeWindowMilliseconds = Convert.ToInt32(clipMergeWindow.Value);
             settings.ClipMergeSeparatorMode = StoredClipMergeSeparator(Convert.ToString(clipMergeSeparator.SelectedItem));
             settings.ClipMergeCustomSeparator = clipMergeCustomSeparator.Text ?? string.Empty;
+            settings.MultipleEntrySeparatorMode = StoredMultipleEntrySeparator(Convert.ToString(multipleEntrySeparator.SelectedItem));
+            settings.MultipleEntryCustomSeparator = multipleEntryCustomSeparator.Text ?? string.Empty;
             settings.AutoGroupByApp = autoGroupByApp.Checked;
             settings.AutoCopyLatestRemoteText = autoCopyLatestRemoteText.Checked;
             settings.PasteAfterEnter = pasteAfterEnter.Checked;
@@ -1113,6 +1135,8 @@ namespace Clipman
                 ClipMergeWindowMilliseconds = current.ClipMergeWindowMilliseconds,
                 ClipMergeSeparatorMode = current.ClipMergeSeparatorMode,
                 ClipMergeCustomSeparator = current.ClipMergeCustomSeparator,
+                MultipleEntrySeparatorMode = current.MultipleEntrySeparatorMode,
+                MultipleEntryCustomSeparator = current.MultipleEntryCustomSeparator,
                 SaveListPosition = current.SaveListPosition,
                 Active = current.Active,
                 DatabasePath = current.DatabasePath,
@@ -1388,6 +1412,29 @@ namespace Clipman
             if (string.Equals(value, "Comma and space", StringComparison.OrdinalIgnoreCase)) return "CommaSpace";
             if (string.Equals(value, "Custom", StringComparison.OrdinalIgnoreCase)) return "Custom";
             return "NewLine";
+        }
+
+        private static string DisplayMultipleEntrySeparator(string value)
+        {
+            switch (MultipleEntrySeparator.NormalizeMode(value))
+            {
+                case "None": return "No separator";
+                case "NewLine": return "New line";
+                case "Space": return "Space";
+                case "CommaSpace": return "Comma and space";
+                case "Custom": return "Custom";
+                default: return "Blank line";
+            }
+        }
+
+        private static string StoredMultipleEntrySeparator(string value)
+        {
+            if (string.Equals(value, "No separator", StringComparison.OrdinalIgnoreCase)) return "None";
+            if (string.Equals(value, "New line", StringComparison.OrdinalIgnoreCase)) return "NewLine";
+            if (string.Equals(value, "Space", StringComparison.OrdinalIgnoreCase)) return "Space";
+            if (string.Equals(value, "Comma and space", StringComparison.OrdinalIgnoreCase)) return "CommaSpace";
+            if (string.Equals(value, "Custom", StringComparison.OrdinalIgnoreCase)) return "Custom";
+            return "BlankLine";
         }
 
         private static string DisplayStorageMode(string value)

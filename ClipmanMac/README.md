@@ -40,12 +40,10 @@ Ignored applications are machine-specific settings. Add one Mac app name, bundle
 
 ## Smoke Test
 
-Run:
+The normal development build runs all three smoke executables and keeps compiler output beneath `~/Projects/Codex/Temp/clipman`:
 
 ```bash
-swift run ClipmanCodecSmoke
-swift run ClipmanSyncSmoke
-swift run ClipmanFileHistorySmoke
+Scripts/build-dev-app.sh
 ```
 
 When database compatibility changes, also perform a manual cross-platform smoke:
@@ -109,7 +107,7 @@ Scripts/build-dev-app.sh --restart
 
 This is an ad-hoc signed development app, not a notarized public release.
 
-## Tester Zip
+## Release Zip
 
 Build a release app zip for testers with:
 
@@ -117,12 +115,12 @@ Build a release app zip for testers with:
 Scripts/package-release.sh
 ```
 
-The zip is created at:
+The signed and notarized zip is created at:
 
 ```text
-dist/ClipmanMac-<version>.zip
+dist/Clipman-macOS-<version>.zip
 ```
 
-Testers should unzip it, move or drag `Clipman.app` into `/Applications`, then open it with Control-click or Option-click and choose Open if macOS Gatekeeper blocks the unsigned app on first launch. VoiceOver users can use `VO+Shift+M` on the app in Finder to open the same context menu, then choose Open.
+Testers should unzip it, move or drag `Clipman.app` into `/Applications`, and open it normally. The package is Developer ID signed, notarized by Apple, stapled, and verified with Gatekeeper before release.
 
 In Preferences, enable `Run Clipman at login` after the app is in `/Applications`. This writes a per-user LaunchAgent pointing at the current app bundle path, so if the app is moved later, save Preferences again to refresh the login item.

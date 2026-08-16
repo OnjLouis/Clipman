@@ -78,9 +78,25 @@ func TestValidateRejectsPasswordlessServerProfile(t *testing.T) {
 	}
 }
 
+// TestValidateAcceptsBothRenderers covers the full-screen renderer now that it
+// exists. It was previously rejected as unimplemented.
+func TestValidateAcceptsBothRenderers(t *testing.T) {
+	for _, renderer := range []string{"line", "tui", "TUI", " line "} {
+		value := Default()
+		value.Renderer = renderer
+		if err := Validate(value); err != nil {
+			t.Errorf("renderer %q should be accepted: %v", renderer, err)
+		}
+	}
+	value := Default()
+	value.Renderer = "curses"
+	if err := Validate(value); err == nil || !strings.Contains(err.Error(), "line or tui") {
+		t.Fatalf("unknown renderer error = %v", err)
+	}
+}
+
 func TestValidateRejectsUnimplementedModesAndAmbiguousPassword(t *testing.T) {
 	for name, mutate := range map[string]func(*Config){
-		"tui":     func(value *Config) { value.Renderer = "tui" },
 		"keyring": func(value *Config) { value.PasswordMode = "keyring" },
 		"ambiguous password": func(value *Config) {
 			value.PasswordMode = "config"

@@ -45,19 +45,27 @@ func View(database model.Database, kind Kind, pinnedFirst bool) []model.Entry {
 		}
 		result = append(result, entry)
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		if pinnedFirst && result[i].Pinned != result[j].Pinned {
-			return result[i].Pinned
-		}
-		if result[i].LastUsedUnixMs != result[j].LastUsedUnixMs {
-			return result[i].LastUsedUnixMs > result[j].LastUsedUnixMs
-		}
-		if result[i].CreatedUnixMs != result[j].CreatedUnixMs {
-			return result[i].CreatedUnixMs > result[j].CreatedUnixMs
-		}
-		return result[i].ID < result[j].ID
-	})
+	SortView(result, pinnedFirst)
 	return result
+}
+
+// SortView applies the canonical view order in place. It is exported so that a
+// caller holding an already-loaded view can restore the order after changing
+// an entry locally, instead of downloading the database again purely to have
+// the server-side read path re-sort it.
+func SortView(entries []model.Entry, pinnedFirst bool) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		if pinnedFirst && entries[i].Pinned != entries[j].Pinned {
+			return entries[i].Pinned
+		}
+		if entries[i].LastUsedUnixMs != entries[j].LastUsedUnixMs {
+			return entries[i].LastUsedUnixMs > entries[j].LastUsedUnixMs
+		}
+		if entries[i].CreatedUnixMs != entries[j].CreatedUnixMs {
+			return entries[i].CreatedUnixMs > entries[j].CreatedUnixMs
+		}
+		return entries[i].ID < entries[j].ID
+	})
 }
 
 func Select(entries []model.Entry, selector Selector) (model.Entry, int, error) {

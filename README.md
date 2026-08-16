@@ -6,7 +6,7 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 
 ## Get Clipman
 
-- [Download the latest Windows, macOS, Linux, Android, and server builds](https://github.com/OnjLouis/Clipman/releases/latest).
+- [Browse current Windows, macOS, Linux, Android, and server downloads](https://github.com/OnjLouis/Clipman/releases).
 - [Join the public iPhone and iPad beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
 - [Read the complete Clipman manual](https://onjlouis.github.io/clipman/manual.html).
 - [Read the Clipman Server manual](https://github.com/OnjLouis/Clipman/blob/main/ClipmanServer/Manual.html).
@@ -43,7 +43,7 @@ The server cannot decrypt clipboard history. A server connection file can carry 
 
 ## More Ways To Use It
 
-The [Clipman CLI preview](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.3.0-dev) provides terminal and headless access to server-backed text history on Windows, macOS, and Linux. It follows the same encrypted format and synchronization rules as the graphical clients.
+The [Clipman CLI preview](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.9.0) provides terminal and headless access to server-backed text history on Windows, macOS, and Linux. It follows the same encrypted format and synchronization rules as the graphical clients.
 
 ## Project
 

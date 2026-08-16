@@ -30,6 +30,7 @@ namespace Clipman.Tests
             Run("single-modifier hotkey warning preference defaults and round trips", SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
+            Run("multiple-entry separators are configurable", MultipleEntrySeparatorsAreConfigurable);
             Run("ClipMerge requires a deliberate matching second clipboard event", ClipMergeRequiresMatchingSecondEvent);
             Run("ClipMerge coalesces duplicates and rejects stale cut sources", ClipMergeCoalescesDuplicatesAndRejectsStaleCuts);
             Run("ClipMerge rejects mixed and mismatched file operations", ClipMergeRejectsUnsafeCombinations);
@@ -337,8 +338,8 @@ namespace Clipman.Tests
                     var statusText = (ToolStripStatusLabel)typeof(HistoryForm)
                         .GetField("statusText", BindingFlags.Instance | BindingFlags.NonPublic)
                         .GetValue(form);
-                    Assert(statusText.Text == "Ready. Using local or shared-folder history. 0 clipboard entries.",
-                        "The history status did not combine storage state with the active section count.");
+                    Assert(statusText.Text == "0 clipboard entries. Ready. Using local or shared-folder history.",
+                        "The history status did not put the active section count before storage state.");
                 }
             }
             finally
@@ -362,6 +363,25 @@ namespace Clipman.Tests
             Assert(
                 HistoryForm.BuildNameAndContentText(new[] { template }) == "Year\r\n" + DateTime.Now.Year.ToString(CultureInfo.InvariantCulture),
                 "Name and content copy did not resolve template text at use time.");
+            Assert(
+                HistoryForm.BuildNameAndContentText(entries, "\r\n") == "Release notes\r\nhttps://example.com/release\r\nUnnamed text",
+                "Name and content copy did not honour the selected separator.");
+        }
+
+        private static void MultipleEntrySeparatorsAreConfigurable()
+        {
+            Assert(new AppSettings().MultipleEntrySeparatorMode == "BlankLine",
+                "Multiple-entry copy must retain its conservative blank-line default.");
+            Assert(JsonUtil.Deserialize<AppSettings>("{}").MultipleEntrySeparatorMode == "BlankLine",
+                "Settings created before the separator preference did not retain the default.");
+            Assert(MultipleEntrySeparator.Resolve("None", "ignored") == string.Empty,
+                "No separator inserted unexpected text.");
+            Assert(MultipleEntrySeparator.Resolve("NewLine", "") == Environment.NewLine,
+                "New-line separation was not available.");
+            Assert(MultipleEntrySeparator.Resolve("BlankLine", "") == Environment.NewLine + Environment.NewLine,
+                "Blank-line separation was not available.");
+            Assert(MultipleEntrySeparator.Resolve("Custom", "\\n--\\t") == "\n--\t",
+                "Custom multiple-entry separator escapes were not decoded.");
         }
 
         private static void ClipMergeRequiresMatchingSecondEvent()

@@ -473,7 +473,7 @@ namespace Clipman
                     : IsLinksHistoryTabActive()
                         ? count + (count == 1 ? " link entry." : " link entries.")
                         : count + (count == 1 ? " clipboard entry." : " clipboard entries.");
-            var newText = string.IsNullOrEmpty(state) ? countText : state + " " + countText;
+            var newText = string.IsNullOrEmpty(state) ? countText : countText + " " + state;
             if (!string.Equals(statusText.Text, newText, StringComparison.Ordinal))
             {
                 settingSteadyStatus = true;
@@ -2466,7 +2466,7 @@ namespace Clipman
             if (selected.Count == 0) return;
             var text = selected.Count == 1
                 ? ResolvedEntryText(selected[0])
-                : string.Join("\r\n\r\n", selected.Select(ResolvedEntryText));
+                : string.Join(MultipleEntrySeparator.Resolve(settings.MultipleEntrySeparatorMode, settings.MultipleEntryCustomSeparator), selected.Select(ResolvedEntryText));
             if (!copyPlainText(text, selected))
             {
                 statusText.Text = "Could not copy the selected entry or entries as plain text.";
@@ -2483,7 +2483,9 @@ namespace Clipman
         {
             var selected = SelectedEntries();
             if (selected.Count == 0) return;
-            var text = BuildNameAndContentText(selected);
+            var text = BuildNameAndContentText(
+                selected,
+                MultipleEntrySeparator.Resolve(settings.MultipleEntrySeparatorMode, settings.MultipleEntryCustomSeparator));
             SaveCurrentListPositionIfEnabled();
             if (!copyPlainText(text, selected))
             {
@@ -2500,9 +2502,9 @@ namespace Clipman
             }
         }
 
-        internal static string BuildNameAndContentText(IEnumerable<ClipEntry> entries)
+        internal static string BuildNameAndContentText(IEnumerable<ClipEntry> entries, string separator = "\r\n\r\n")
         {
-            return string.Join("\r\n\r\n", (entries ?? Enumerable.Empty<ClipEntry>()).Select(entry =>
+            return string.Join(separator ?? string.Empty, (entries ?? Enumerable.Empty<ClipEntry>()).Select(entry =>
             {
                 var content = ResolvedEntryText(entry);
                 var name = entry == null ? string.Empty : (entry.Name ?? string.Empty).Trim();
@@ -3029,7 +3031,9 @@ namespace Clipman
             RestoreSelection(selectedIds);
             if (transformed.Count > 0)
             {
-                Clipboard.SetText(string.Join("\r\n\r\n", transformed), TextDataFormat.UnicodeText);
+                Clipboard.SetText(
+                    string.Join(MultipleEntrySeparator.Resolve(settings.MultipleEntrySeparatorMode, settings.MultipleEntryCustomSeparator), transformed),
+                    TextDataFormat.UnicodeText);
                 statusText.Text = statusMessage + " Copied transformed text to the clipboard.";
             }
             else

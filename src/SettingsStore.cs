@@ -174,6 +174,8 @@ namespace Clipman
             settings.ClipMergeWindowMilliseconds = ClipMergeDetector.NormalizeWindow(settings.ClipMergeWindowMilliseconds);
             settings.ClipMergeSeparatorMode = NormalizeClipMergeSeparatorMode(settings.ClipMergeSeparatorMode);
             settings.ClipMergeCustomSeparator = settings.ClipMergeCustomSeparator ?? string.Empty;
+            settings.MultipleEntrySeparatorMode = MultipleEntrySeparator.NormalizeMode(settings.MultipleEntrySeparatorMode);
+            settings.MultipleEntryCustomSeparator = settings.MultipleEntryCustomSeparator ?? string.Empty;
             if (settings.IgnoredProcesses == null)
             {
                 settings.IgnoredProcesses = new List<string>();

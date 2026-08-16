@@ -9,6 +9,10 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"flag"
+	"fmt"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/clipdb"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/model"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/server"
 	"io"
 	"math/big"
 	"net"
@@ -355,5 +359,150 @@ func TestFetchServerCertificatesUsesAuthorityFingerprint(t *testing.T) {
 	}
 	if certificateFingerprintSHA256(authority) == certificateFingerprintSHA256(leaf) {
 		t.Fatal("authority and leaf fingerprints unexpectedly match")
+	}
+}
+
+// TestWhereToSaveIsNotAskedWhenTheLocationIsSettled covers the cases where init
+// must stay quiet. Asking after the user has already named a location invites
+// them to contradict themselves, and a non-interactive run has nobody to ask.
+func TestWhereToSaveIsNotAskedWhenTheLocationIsSettled(t *testing.T) {
+	t.Setenv("CLIPMAN_CONFIG", "")
+	t.Setenv("CLIPMAN_HOME", "")
+	os.Unsetenv("CLIPMAN_CONFIG")
+	os.Unsetenv("CLIPMAN_HOME")
+
+	if shouldAskWhereToSave(globals{}, true) {
+		t.Error("a non-interactive run must not ask")
+	}
+	if shouldAskWhereToSave(globals{configPath: "some.toml"}, false) {
+		t.Error("--config already names the location, so init must not ask")
+	}
+
+	t.Setenv("CLIPMAN_CONFIG", "from-environment.toml")
+	if shouldAskWhereToSave(globals{}, false) {
+		t.Error("CLIPMAN_CONFIG already names the location, so init must not ask")
+	}
+	os.Unsetenv("CLIPMAN_CONFIG")
+
+	t.Setenv("CLIPMAN_HOME", "somewhere")
+	if shouldAskWhereToSave(globals{}, false) {
+		t.Error("CLIPMAN_HOME already names the location, so init must not ask")
+	}
+}
+
+// TestInitHelpMentionsWhereSettingsGo keeps the built-in help honest about the
+// choice, since the question only appears on an interactive run.
+func TestInitHelpMentionsWhereSettingsGo(t *testing.T) {
+	var out strings.Builder
+	if !printCommandUsage(&out, "init") {
+		t.Fatal("init has no usage text")
+	}
+	if !strings.Contains(out.String(), "--portable") {
+		t.Fatalf("init help does not mention --portable:\n%s", out.String())
+	}
+}
+
+// TestHandingOverAvoidsASilentDownload is the guard for the gap in a switch.
+// The screen is torn down before the new interface draws anything, and a
+// download plus a PBKDF2 decrypt in that gap is silence with nothing to explain
+// it. The store therefore hands the already-loaded database to the interface
+// being started.
+//
+// ctx is deliberately nil: reaching the network path would dereference it, so
+// this test fails loudly rather than passing while quietly downloading.
+func TestHandingOverAvoidsASilentDownload(t *testing.T) {
+	database := model.NewDatabase(1)
+	database.Entries = []model.Entry{{ID: "a", Text: "carried across the switch"}}
+
+	store := &cliStore{kind: operation.History}
+	store.last = &database
+	store.handOver()
+
+	entries, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("a handed-over load must not fail: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != "a" {
+		t.Fatalf("the handed-over database must be what is shown, got %#v", entries)
+	}
+	// One shot only, so an explicit reload still asks the server rather than
+	// replaying what the user already had.
+	if store.reuse != nil {
+		t.Fatal("the handover must be consumed once, or r would stop reloading")
+	}
+}
+
+// TestHandingOverRebuildsTheViewForTheNewKind covers Tab. The full-screen
+// interface can change the kind and the line interface cannot, so the view has
+// to be re-derived on arrival rather than replayed wholesale.
+func TestHandingOverRebuildsTheViewForTheNewKind(t *testing.T) {
+	database := model.NewDatabase(1)
+	database.Entries = []model.Entry{
+		{ID: "plain", Text: "an ordinary clip"},
+		{ID: "tmpl", Text: "a template", IsTemplate: true},
+	}
+
+	store := &cliStore{kind: operation.History}
+	store.last = &database
+	store.SetKind(operation.Templates)
+	store.handOver()
+
+	entries, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != "tmpl" {
+		t.Fatalf("the handed-over view must be rebuilt for the kind now in force, got %#v", entries)
+	}
+}
+
+// TestRuntimeErrorsGetTheRightExitCode pins section 7.2. The fallthrough used to
+// be 4, so a local encode or decode failure that surfaced through a call which
+// also touches the network reported itself as a network failure — telling a
+// script to retry something retrying cannot fix, and telling a user the network
+// was at fault when it was not.
+func TestRuntimeErrorsGetTheRightExitCode(t *testing.T) {
+	for _, item := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"local decode failure", errors.New("trailing garbage after JSON value"), 1},
+		{"unauthorized", server.ErrUnauthorized, 3},
+		{"not found", server.ErrNotFound, 6},
+		{"password required", clipdb.ErrPasswordRequired, 5},
+		{"password or data", clipdb.ErrPasswordOrData, 5},
+		{"timeout", &net.DNSError{Err: "timed out", IsTimeout: true}, 4},
+		{"connection refused", &net.OpError{Op: "dial", Err: errors.New("connection refused")}, 4},
+		{"server error", &server.StatusError{StatusCode: 503, Body: "unavailable"}, 4},
+		{"payload too large", &server.StatusError{StatusCode: 413, Body: "too big"}, 4},
+		// A 4xx that is not one of the sentinels is the request's problem, not
+		// the network's, so it must not claim a network exit code.
+		{"unexpected client status", &server.StatusError{StatusCode: 418, Body: "teapot"}, 1},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			var app appError
+			err := mapRuntimeError("operation failed", item.err)
+			if !errors.As(err, &app) {
+				t.Fatalf("mapRuntimeError must return an appError, got %T", err)
+			}
+			if app.code != item.want {
+				t.Errorf("exit code = %d, want %d, for %v", app.code, item.want, item.err)
+			}
+		})
+	}
+}
+
+// TestWrappedRuntimeErrorsAreStillClassified checks the classification survives
+// wrapping, which is how these errors actually arrive from the sync engine.
+func TestWrappedRuntimeErrorsAreStillClassified(t *testing.T) {
+	wrapped := fmt.Errorf("upload failed: %w", &server.StatusError{StatusCode: 500, Body: "boom"})
+	var app appError
+	if err := mapRuntimeError("sync", wrapped); !errors.As(err, &app) || app.code != 4 {
+		t.Fatalf("a wrapped server fault must still be 4, got %v", err)
+	}
+	wrappedLocal := fmt.Errorf("merge failed: %w", errors.New("duplicate entry id"))
+	if err := mapRuntimeError("sync", wrappedLocal); !errors.As(err, &app) || app.code != 1 {
+		t.Fatalf("a wrapped local failure must be 1, got %v", err)
 	}
 }

@@ -17,6 +17,8 @@ struct ClipmanSettings: Codable, Equatable {
     var clipMergeWindowMilliseconds: Int
     var clipMergeSeparatorMode: String
     var clipMergeCustomSeparator: String
+    var multipleEntrySeparatorMode: String
+    var multipleEntryCustomSeparator: String
     var showHistoryHotkey: HotkeyDescriptor
     var toggleMonitoringHotkey: HotkeyDescriptor
     var saveCurrentClipboardHotkey: HotkeyDescriptor?
@@ -55,7 +57,7 @@ struct ClipmanSettings: Codable, Equatable {
     var sensitiveDataPresetIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, clipMergeEnabled, clipMergeWindowMilliseconds, clipMergeSeparatorMode, clipMergeCustomSeparator, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
+        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, clipMergeEnabled, clipMergeWindowMilliseconds, clipMergeSeparatorMode, clipMergeCustomSeparator, multipleEntrySeparatorMode, multipleEntryCustomSeparator, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, includeImagesInRichTextHistory, alsoAddCopiedImageFilesToRichTextHistory, groupFilter, historyFilterType, deviceFilter, confirmDeletions, confirmSingleModifierHotkeys, confirmWebsiteTitleRequests, autoNameCopiedWebsiteLinks, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
@@ -83,6 +85,8 @@ struct ClipmanSettings: Codable, Equatable {
         clipMergeWindowMilliseconds: Int,
         clipMergeSeparatorMode: String,
         clipMergeCustomSeparator: String,
+        multipleEntrySeparatorMode: String,
+        multipleEntryCustomSeparator: String,
         showHistoryHotkey: HotkeyDescriptor,
         toggleMonitoringHotkey: HotkeyDescriptor,
         saveCurrentClipboardHotkey: HotkeyDescriptor?,
@@ -134,6 +138,8 @@ struct ClipmanSettings: Codable, Equatable {
         self.clipMergeWindowMilliseconds = ClipMergeDetector.normalizeWindow(clipMergeWindowMilliseconds)
         self.clipMergeSeparatorMode = ClipmanSettings.normalizeClipMergeSeparatorMode(clipMergeSeparatorMode)
         self.clipMergeCustomSeparator = clipMergeCustomSeparator
+        self.multipleEntrySeparatorMode = ClipmanSettings.normalizeMultipleEntrySeparatorMode(multipleEntrySeparatorMode)
+        self.multipleEntryCustomSeparator = multipleEntryCustomSeparator
         self.showHistoryHotkey = showHistoryHotkey
         self.toggleMonitoringHotkey = toggleMonitoringHotkey
         self.saveCurrentClipboardHotkey = saveCurrentClipboardHotkey
@@ -193,6 +199,8 @@ struct ClipmanSettings: Codable, Equatable {
         clipMergeWindowMilliseconds = ClipMergeDetector.normalizeWindow(try container.decodeIfPresent(Int.self, forKey: .clipMergeWindowMilliseconds) ?? ClipMergeDetector.defaultWindowMilliseconds)
         clipMergeSeparatorMode = ClipmanSettings.normalizeClipMergeSeparatorMode(try container.decodeIfPresent(String.self, forKey: .clipMergeSeparatorMode) ?? "NewLine")
         clipMergeCustomSeparator = try container.decodeIfPresent(String.self, forKey: .clipMergeCustomSeparator) ?? ""
+        multipleEntrySeparatorMode = ClipmanSettings.normalizeMultipleEntrySeparatorMode(try container.decodeIfPresent(String.self, forKey: .multipleEntrySeparatorMode) ?? "BlankLine")
+        multipleEntryCustomSeparator = try container.decodeIfPresent(String.self, forKey: .multipleEntryCustomSeparator) ?? ""
         showHistoryHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .showHistoryHotkey) ?? fallback.showHistoryHotkey
         toggleMonitoringHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .toggleMonitoringHotkey) ?? fallback.toggleMonitoringHotkey
         saveCurrentClipboardHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .saveCurrentClipboardHotkey)
@@ -267,6 +275,8 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(ClipMergeDetector.normalizeWindow(clipMergeWindowMilliseconds), forKey: .clipMergeWindowMilliseconds)
         try container.encode(ClipmanSettings.normalizeClipMergeSeparatorMode(clipMergeSeparatorMode), forKey: .clipMergeSeparatorMode)
         try container.encode(clipMergeCustomSeparator, forKey: .clipMergeCustomSeparator)
+        try container.encode(ClipmanSettings.normalizeMultipleEntrySeparatorMode(multipleEntrySeparatorMode), forKey: .multipleEntrySeparatorMode)
+        try container.encode(multipleEntryCustomSeparator, forKey: .multipleEntryCustomSeparator)
         try container.encode(showHistoryHotkey, forKey: .showHistoryHotkey)
         try container.encode(toggleMonitoringHotkey, forKey: .toggleMonitoringHotkey)
         try container.encodeIfPresent(saveCurrentClipboardHotkey, forKey: .saveCurrentClipboardHotkey)
@@ -329,6 +339,8 @@ struct ClipmanSettings: Codable, Equatable {
             clipMergeWindowMilliseconds: ClipMergeDetector.defaultWindowMilliseconds,
             clipMergeSeparatorMode: "NewLine",
             clipMergeCustomSeparator: "",
+            multipleEntrySeparatorMode: "BlankLine",
+            multipleEntryCustomSeparator: "",
             showHistoryHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ANSI_Grave), modifiers: [.option, .shift]),
             toggleMonitoringHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ISO_Section), modifiers: [.option, .shift]),
             saveCurrentClipboardHotkey: nil,
@@ -382,6 +394,14 @@ struct ClipmanSettings: Codable, Equatable {
         case "custom": return "Custom"
         default: return "NewLine"
         }
+    }
+
+    static func normalizeMultipleEntrySeparatorMode(_ value: String?) -> String {
+        MultipleEntrySeparator.normalize(value)
+    }
+
+    static func multipleEntrySeparator(mode: String, custom: String) -> String {
+        MultipleEntrySeparator.resolve(mode: mode, custom: custom)
     }
 }
 

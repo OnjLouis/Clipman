@@ -202,6 +202,8 @@ namespace Clipman
         public int ClipMergeWindowMilliseconds { get; set; }
         public string ClipMergeSeparatorMode { get; set; }
         public string ClipMergeCustomSeparator { get; set; }
+        public string MultipleEntrySeparatorMode { get; set; }
+        public string MultipleEntryCustomSeparator { get; set; }
         public bool SaveListPosition { get; set; }
         public bool LinksHistoryEnabled { get; set; }
         public bool RichTextHistoryEnabled { get; set; }
@@ -273,6 +275,8 @@ namespace Clipman
             ClipMergeWindowMilliseconds = ClipMergeDetector.DefaultWindowMilliseconds;
             ClipMergeSeparatorMode = "NewLine";
             ClipMergeCustomSeparator = string.Empty;
+            MultipleEntrySeparatorMode = "BlankLine";
+            MultipleEntryCustomSeparator = string.Empty;
             SaveListPosition = true;
             LinksHistoryEnabled = false;
             RichTextHistoryEnabled = false;

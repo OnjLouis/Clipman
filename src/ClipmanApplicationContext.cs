@@ -409,6 +409,8 @@ namespace Clipman
             settings.ClipMergeWindowMilliseconds = ClipMergeDetector.NormalizeWindow(updated.ClipMergeWindowMilliseconds);
             settings.ClipMergeSeparatorMode = updated.ClipMergeSeparatorMode;
             settings.ClipMergeCustomSeparator = updated.ClipMergeCustomSeparator;
+            settings.MultipleEntrySeparatorMode = updated.MultipleEntrySeparatorMode;
+            settings.MultipleEntryCustomSeparator = updated.MultipleEntryCustomSeparator;
             settings.SaveListPosition = updated.SaveListPosition;
             settings.Active = updated.Active;
             settings.DatabasePath = updated.DatabasePath;
@@ -670,7 +672,11 @@ namespace Clipman
         {
             if (entries == null || entries.Count == 0) return;
             var data = new DataObject();
-            data.SetText(string.Join("\r\n\r\n", entries.Select(ResolvedEntryText)), TextDataFormat.UnicodeText);
+            data.SetText(
+                string.Join(
+                    MultipleEntrySeparator.Resolve(settings.MultipleEntrySeparatorMode, settings.MultipleEntryCustomSeparator),
+                    entries.Select(ResolvedEntryText)),
+                TextDataFormat.UnicodeText);
             data.SetData(ClipmanClipboardData.EntriesFormat, ClipmanClipboardData.SerializeEntries(entries));
             IgnoreClipboardChanges(1);
             Clipboard.SetDataObject(data, true);

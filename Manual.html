@@ -90,6 +90,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.8.5</h3>
+  <ul>
+    <li>Windows, Mac and Linux can now choose how multiple selected clipboard entries are joined when copied, transformed, pushed or used with <strong>Copy Name and Content</strong>. Choose no separator, one new line, one blank line, a space, comma and space, or a custom separator with common escape sequences.</li>
+    <li>Desktop history status bars now put the active section's entry count first, followed by monitoring, storage and synchronization state. For example, <strong>262 clipboard entries. Ready. Server sync connected.</strong></li>
+  </ul>
+
   <h3>2.8.4</h3>
   <ul>
     <li>Windows, Mac and Linux history status bars now combine the active section's entry count with useful storage and synchronization state, such as ready, server connected, server unavailable with local cache, local or shared-folder history, monitoring off, or storage unavailable.</li>
@@ -809,7 +815,7 @@
   <p>Android and iOS can show normal entries in Manual, Newest first, Oldest first, or Text order. Choose the mode directly in mobile Settings, cycle it from the history controls, or long-press the status bar. VoiceOver and TalkBack also expose a named action for each mode. The choice is saved on that phone or tablet and changes only the displayed list; it does not rewrite shared history or disturb pinned-entry order.</p>
 
   <h2 id="cut-copy-and-paste-inside-clipman">Cut, Copy, and Paste Inside Clipman</h2>
-  <p><code>Ctrl+C</code> and <code>Ctrl+X</code> on Windows, or <code>Command+C</code> and <code>Command+X</code> on Mac, put normal text on the system clipboard, so the text can be pasted into other applications. Windows also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries. Mac pastes multiple copied entries back as separate entries when they are separated by Clipman's text separator.</p>
+  <p><code>Ctrl+C</code> and <code>Ctrl+X</code> on Windows, or <code>Command+C</code> and <code>Command+X</code> on Mac, put normal text on the system clipboard, so the text can be pasted into other applications. On Windows, Mac and Linux, General preferences can join multiple selected entries with no separator, one new line, one blank line, a space, comma and space, or a custom separator. Custom separators accept <code>\n</code>, <code>\r\n</code>, <code>\r</code>, and <code>\t</code>. Windows also stores a private clipboard format at the same time, so if multiple entries are copied or cut and then pasted back into Clipman with <code>Ctrl+V</code>, they return as separate history entries regardless of the visible separator.</p>
 
   <h2 id="clipmerge">ClipMerge</h2>
   <p>ClipMerge is an optional Windows, Mac and Linux feature for building one clipboard value while moving through a document or file list. It is off by default. Enable it in General preferences, copy the first text or file selection normally, then copy the next selection twice within the configured merge window. Clipman replaces the clipboard with the combined result and plays <code>merge.wav</code>. The default window is 500 milliseconds and can be set from 200 to 2000 milliseconds.</p>
@@ -828,7 +834,7 @@
 
   <p>On Windows, <strong>Copy as plain text</strong> copies the selected entry using only the Windows plain-text clipboard format. It does not strip HTML tags from stored HTML source. Use <strong>HTML to readable text</strong> when you want Clipman to remove HTML tags and keep the readable text.</p>
 
-  <p>On Windows, Mac and Linux, <strong>Copy Name and Content</strong> puts each selected entry's non-empty Name on one line followed by its content. Template content resolves when copied. Multiple selected entries are separated by one blank line. The command closes history and follows the existing paste-after-Enter preference; in File History, the same shortcut remains <strong>Go to file</strong>.</p>
+  <p>On Windows, Mac and Linux, <strong>Copy Name and Content</strong> puts each selected entry's non-empty Name on one line followed by its content. Template content resolves when copied. Multiple selected entries use the separator chosen in General preferences. The command closes history and follows the existing paste-after-Enter preference; in File History, the same shortcut remains <strong>Go to file</strong>.</p>
 
   <p>Text transforms change the stored plain text and therefore clear any previous Rich Text formatting for that entry. Copy as plain text does not modify the stored entry.</p>
 

@@ -1472,7 +1472,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         let state = steadyStatusProvider().trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedState = state.isEmpty || state.hasSuffix(".") ? state : state + "."
-        let text = normalizedState.isEmpty ? countText : normalizedState + " " + countText
+        let text = normalizedState.isEmpty ? countText : countText + " " + normalizedState
         statusLabel.stringValue = text
         statusLabel.toolTip = text
         statusLabel.setAccessibilityValue(text)

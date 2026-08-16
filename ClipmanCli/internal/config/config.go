@@ -158,9 +158,9 @@ func Validate(value Config) error {
 		return errors.New("saved password values require password_mode config")
 	}
 	switch strings.ToLower(strings.TrimSpace(value.Renderer)) {
-	case "line":
+	case "line", "tui":
 	default:
-		return errors.New("renderer must be line")
+		return errors.New("renderer must be line or tui")
 	}
 	switch strings.ToLower(strings.TrimSpace(value.DefaultKind)) {
 	case "history", "templates", "all":

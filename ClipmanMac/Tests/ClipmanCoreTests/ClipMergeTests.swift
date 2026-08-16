@@ -74,6 +74,14 @@ final class ClipMergeTests: XCTestCase {
         XCTAssertEqual(ClipMergeDetector.separator(mode: "Custom", custom: "\\n--\\t"), "\n--\t")
     }
 
+    func testMultipleEntrySeparatorsAreConfigurable() {
+        XCTAssertEqual(MultipleEntrySeparator.normalize(nil), "BlankLine")
+        XCTAssertEqual(MultipleEntrySeparator.resolve(mode: "None", custom: "ignored"), "")
+        XCTAssertEqual(MultipleEntrySeparator.resolve(mode: "NewLine", custom: ""), "\n")
+        XCTAssertEqual(MultipleEntrySeparator.resolve(mode: "BlankLine", custom: ""), "\n\n")
+        XCTAssertEqual(MultipleEntrySeparator.resolve(mode: "Custom", custom: "\\n--\\t"), "\n--\t")
+    }
+
     func testLateSaveCompletionDoesNotOverwriteMergedState() {
         var detector = ClipMergeDetector()
         _ = detector.observe(text("A", source: "Writer"), nowMilliseconds: 1000, enabled: true, windowMilliseconds: 500, deliberate: false)

@@ -443,6 +443,28 @@ func first(values ...string) string {
 	}
 	return ""
 }
+
+// StatusError is a response the client could not turn into a result and has no
+// sentinel for. The status code is kept rather than only formatted into a
+// message, because the caller has to tell a server fault from a local one to
+// choose an exit code, and parsing that back out of a string would be worse.
+type StatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("Clipman Server returned HTTP %d: %s", e.StatusCode, e.Body)
+}
+
+// Remote reports whether the status is the server's fault rather than the
+// request's. 413 and 5xx are the server declining or failing, which is the same
+// class of problem as an unreachable server: nothing the caller sent is wrong,
+// and retrying later may work.
+func (e *StatusError) Remote() bool {
+	return e.StatusCode == http.StatusRequestEntityTooLarge || e.StatusCode >= 500
+}
+
 func statusError(response *http.Response) error {
 	switch response.StatusCode {
 	case 401, 403:
@@ -453,5 +475,5 @@ func statusError(response *http.Response) error {
 		return ErrConflict
 	}
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-	return fmt.Errorf("Clipman Server returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	return &StatusError{StatusCode: response.StatusCode, Body: strings.TrimSpace(string(body))}
 }

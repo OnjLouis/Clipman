@@ -80,6 +80,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let clipMergeWindowField = NSTextField()
     private let clipMergeSeparatorPopup = NSPopUpButton()
     private let clipMergeCustomSeparatorField = NSTextField()
+    private let multipleEntrySeparatorPopup = NSPopUpButton()
+    private let multipleEntryCustomSeparatorField = NSTextField()
     private let runAtStartupCheckbox = NSButton(checkboxWithTitle: "Run Clipman at login", target: nil, action: nil)
     private let captureClipboardOnStartupCheckbox = NSButton(checkboxWithTitle: "Add current clipboard item to Clipman on start", target: nil, action: nil)
     private let rememberPasswordCheckbox = NSButton(checkboxWithTitle: "Remember history password in Keychain", target: nil, action: nil)
@@ -221,6 +223,14 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         clipMergeCustomSeparatorField.setAccessibilityLabel("Custom ClipMerge text separator")
         clipMergeCustomSeparatorField.setAccessibilityHelp("Backslash n, backslash r backslash n, and backslash t are supported. Merged formatted text becomes plain text.")
         addRow("Custom separator", clipMergeCustomSeparatorField)
+        multipleEntrySeparatorPopup.addItems(withTitles: ["No separator", "New line", "Blank line", "Space", "Comma and space", "Custom"])
+        multipleEntrySeparatorPopup.target = self
+        multipleEntrySeparatorPopup.action = #selector(multipleEntrySeparatorChanged)
+        multipleEntrySeparatorPopup.setAccessibilityLabel("Multiple selected entries separator")
+        addRow("Multiple-entry separator", multipleEntrySeparatorPopup)
+        multipleEntryCustomSeparatorField.setAccessibilityLabel("Custom multiple-entry separator")
+        multipleEntryCustomSeparatorField.setAccessibilityHelp("Backslash n, backslash r backslash n, and backslash t are supported.")
+        addRow("Custom multiple-entry separator", multipleEntryCustomSeparatorField)
 
         runAtStartupCheckbox.target = nil
         runAtStartupCheckbox.action = nil
@@ -359,6 +369,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         clipMergeSeparatorPopup.selectItem(withTitle: displayClipMergeSeparator(settings.clipMergeSeparatorMode))
         clipMergeCustomSeparatorField.stringValue = settings.clipMergeCustomSeparator
         updateClipMergeAvailability()
+        multipleEntrySeparatorPopup.selectItem(withTitle: displayMultipleEntrySeparator(settings.multipleEntrySeparatorMode))
+        multipleEntryCustomSeparatorField.stringValue = settings.multipleEntryCustomSeparator
+        updateMultipleEntrySeparatorAvailability()
         runAtStartupCheckbox.state = settings.runAtStartup ? .on : .off
         captureClipboardOnStartupCheckbox.state = settings.captureClipboardOnStartup ? .on : .off
         rememberPasswordCheckbox.state = settings.rememberDatabasePassword ? .on : .off
@@ -555,11 +568,19 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         updateClipMergeAvailability()
     }
 
+    @objc private func multipleEntrySeparatorChanged() {
+        updateMultipleEntrySeparatorAvailability()
+    }
+
     private func updateClipMergeAvailability() {
         let enabled = clipMergeCheckbox.state == .on
         clipMergeWindowField.isEnabled = enabled
         clipMergeSeparatorPopup.isEnabled = enabled
         clipMergeCustomSeparatorField.isEnabled = enabled && clipMergeSeparatorPopup.titleOfSelectedItem == "Custom"
+    }
+
+    private func updateMultipleEntrySeparatorAvailability() {
+        multipleEntryCustomSeparatorField.isEnabled = multipleEntrySeparatorPopup.titleOfSelectedItem == "Custom"
     }
 
     private func updateImageHistoryAvailability() {
@@ -661,6 +682,8 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.clipMergeWindowMilliseconds = ClipMergeDetector.normalizeWindow(clipMergeWindowField.integerValue)
         settings.clipMergeSeparatorMode = storedClipMergeSeparator(clipMergeSeparatorPopup.titleOfSelectedItem ?? "New line")
         settings.clipMergeCustomSeparator = clipMergeCustomSeparatorField.stringValue
+        settings.multipleEntrySeparatorMode = storedMultipleEntrySeparator(multipleEntrySeparatorPopup.titleOfSelectedItem ?? "Blank line")
+        settings.multipleEntryCustomSeparator = multipleEntryCustomSeparatorField.stringValue
         settings.runAtStartup = runAtStartupCheckbox.state == .on
         settings.captureClipboardOnStartup = captureClipboardOnStartupCheckbox.state == .on
         settings.rememberDatabasePassword = rememberPasswordCheckbox.state == .on
@@ -820,6 +843,28 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         case "comma and space": return "CommaSpace"
         case "custom": return "Custom"
         default: return "NewLine"
+        }
+    }
+
+    private func displayMultipleEntrySeparator(_ value: String) -> String {
+        switch ClipmanSettings.normalizeMultipleEntrySeparatorMode(value) {
+        case "None": return "No separator"
+        case "NewLine": return "New line"
+        case "Space": return "Space"
+        case "CommaSpace": return "Comma and space"
+        case "Custom": return "Custom"
+        default: return "Blank line"
+        }
+    }
+
+    private func storedMultipleEntrySeparator(_ value: String) -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "no separator": return "None"
+        case "new line": return "NewLine"
+        case "space": return "Space"
+        case "comma and space": return "CommaSpace"
+        case "custom": return "Custom"
+        default: return "BlankLine"
         }
     }
 

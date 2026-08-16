@@ -1,6 +1,6 @@
 # Clipman Android
 
-Clipman Android is the Android client for Clipman Server. It lets Android users browse, search, copy, add, edit, pin, delete, and open links from a shared Clipman text history while the app is open.
+Clipman Android is a foreground-only clipboard-history client. It can keep history privately on the Android device or use the same Clipman Server history as the desktop and iOS clients. While the app is open, users can browse, search, copy, add, edit, pin, delete, and open links.
 
 For user setup and testing instructions, read `Manual.html`.
 

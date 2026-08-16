@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "updatedUnixMs": 1780000000000,
+  "entries": [
+    { "id": "10000000000000000000000000000001", "text": "crlf\r\nline\r\nendings", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000002", "text": "lf\nline\nendings", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000003", "text": "trailing whitespace   \t  ", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000004", "text": "no trailing newline", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000005", "text": "with trailing newline\n", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000006", "text": "nul\u0000byte", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000007", "text": "\u65e5\u672c\u8a9e \u0645\u0631\u062d\u0628\u0627 \u0448\u0438\u0431\u0431\u043e\u043b\u0435\u0442", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000008", "text": "emoji \ud83d\udd10\ud83d\udc4d\ud83c\udff3\ufe0f\u200d\ud83c\udf08", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "10000000000000000000000000000009", "text": "quotes \" ' ` and backslash \\ and tab \t", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "1000000000000000000000000000000a", "text": "html <script>alert('x')</script> & ampersand", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false },
+    { "id": "1000000000000000000000000000000b", "text": "json {\"key\": [1, 2, null]}", "name": "", "group": "", "sourceMachine": "windows-fixture", "createdUnixMs": 1780000000000, "lastUsedUnixMs": 1780000000000, "pinned": false, "isTemplate": false, "manualOrder": 1, "hasRichText": false }
+  ],
+  "deleted": [
+  ]
+}
