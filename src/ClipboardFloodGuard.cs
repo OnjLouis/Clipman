@@ -24,11 +24,6 @@ namespace Clipman
         private long lastEventMilliseconds = long.MinValue;
         private bool suppressing;
 
-        public ClipboardFloodGuard()
-            : this(DefaultMaximumEvents, DefaultWindowMilliseconds, DefaultQuietMilliseconds)
-        {
-        }
-
         internal ClipboardFloodGuard(int maximumEvents, int windowMilliseconds, int quietMilliseconds)
         {
             if (maximumEvents < 1) throw new ArgumentOutOfRangeException("maximumEvents");
@@ -40,8 +35,6 @@ namespace Clipman
             this.quietMilliseconds = quietMilliseconds;
         }
 
-        internal long SuppressionCount { get; private set; }
-        internal long SuppressedEventCount { get; private set; }
         internal long LastObservedMilliseconds { get; private set; }
 
         internal ClipboardFloodDecision Observe(long nowMilliseconds)
@@ -59,7 +52,6 @@ namespace Clipman
                 if (nowMilliseconds - lastEventMilliseconds < quietMilliseconds)
                 {
                     lastEventMilliseconds = nowMilliseconds;
-                    SuppressedEventCount++;
                     return ClipboardFloodDecision.SuppressContinued;
                 }
 
@@ -80,8 +72,6 @@ namespace Clipman
             }
 
             suppressing = true;
-            SuppressionCount++;
-            SuppressedEventCount++;
             return ClipboardFloodDecision.SuppressStarted;
         }
 
@@ -127,8 +117,6 @@ namespace Clipman
 
         internal long SuppressionCount { get; private set; }
         internal long SuppressedEventCount { get; private set; }
-        internal int SourceCount { get { return guards.Count; } }
-
         internal ClipboardFloodDecision Observe(string source, long nowMilliseconds)
         {
             var key = string.IsNullOrWhiteSpace(source) ? "Unknown application" : source.Trim();

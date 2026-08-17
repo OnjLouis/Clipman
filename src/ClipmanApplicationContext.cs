@@ -37,6 +37,7 @@ namespace Clipman
         private readonly Thread resumeThread;
         private readonly Thread toggleThread;
         private readonly ClipboardFloodGuardRegistry clipboardFloodGuards = new ClipboardFloodGuardRegistry();
+        private readonly ClipboardNotificationState clipboardNotifications = new ClipboardNotificationState();
         private readonly ClipMergeDetector clipMergeDetector = new ClipMergeDetector();
         private readonly object automaticWebsiteTitleLock = new object();
         private readonly Queue<AutomaticWebsiteTitleRequest> automaticWebsiteTitleQueue = new Queue<AutomaticWebsiteTitleRequest>();
@@ -744,11 +745,15 @@ namespace Clipman
             HandleClipboardUpdate(true);
         }
 
-        internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0)
+        internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0, bool recovery = false)
         {
             if (!deliberate && clipboardSequence == 0)
             {
                 clipboardSequence = NativeMethods.GetClipboardSequenceNumber();
+            }
+            if (!deliberate && !clipboardNotifications.ShouldProcess(clipboardSequence, recovery))
+            {
+                return;
             }
             if (!deliberate && ignoredClipboardChangeCount > 0)
             {
@@ -1014,7 +1019,7 @@ namespace Clipman
         private void ClipboardFloodRecoveryTimerTick(object sender, EventArgs e)
         {
             clipboardFloodRecoveryTimer.Stop();
-            HandleClipboardUpdate();
+            HandleClipboardUpdate(false, NativeMethods.GetClipboardSequenceNumber(), true);
         }
 
         private void RememberReceivedHistoryTab(string tabId)
@@ -2350,6 +2355,7 @@ namespace Clipman
                 notifyIcon.Dispose();
                 store.Dispose();
                 fileEventStore.Dispose();
+                messageWindow.Dispose();
                 messageWindow.DestroyHandle();
             }
             base.Dispose(disposing);
@@ -3021,14 +3027,31 @@ namespace Clipman
             return Icon.FromHandle(bitmap.GetHicon());
         }
 
-        private sealed class MessageWindow : NativeWindow
+        private sealed class MessageWindow : NativeWindow, IDisposable
         {
+            private const int ClipboardSettleMilliseconds = 40;
             private readonly ClipmanApplicationContext app;
+            private readonly System.Windows.Forms.Timer clipboardSettleTimer;
 
             public MessageWindow(ClipmanApplicationContext app)
             {
                 this.app = app;
+                clipboardSettleTimer = new System.Windows.Forms.Timer { Interval = ClipboardSettleMilliseconds };
+                clipboardSettleTimer.Tick += ClipboardSettleTimerTick;
                 CreateHandle(new CreateParams());
+            }
+
+            public void Dispose()
+            {
+                clipboardSettleTimer.Stop();
+                clipboardSettleTimer.Tick -= ClipboardSettleTimerTick;
+                clipboardSettleTimer.Dispose();
+            }
+
+            private void ClipboardSettleTimerTick(object sender, EventArgs e)
+            {
+                clipboardSettleTimer.Stop();
+                app.HandleClipboardUpdate(false, app.clipboardNotifications.TakePending());
             }
 
             protected override void WndProc(ref Message m)
@@ -3041,7 +3064,9 @@ namespace Clipman
 
                 if (m.Msg == NativeMethods.WM_CLIPBOARDUPDATE)
                 {
-                    app.HandleClipboardUpdate(false, NativeMethods.GetClipboardSequenceNumber());
+                    app.clipboardNotifications.Observe(NativeMethods.GetClipboardSequenceNumber());
+                    clipboardSettleTimer.Stop();
+                    clipboardSettleTimer.Start();
                     return;
                 }
 

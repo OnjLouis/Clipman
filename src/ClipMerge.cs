@@ -66,9 +66,6 @@ namespace Clipman
         public const int DefaultWindowMilliseconds = 500;
         public const int MinimumWindowMilliseconds = 200;
         public const int MaximumWindowMilliseconds = 2000;
-        public const int DuplicateNotificationMilliseconds = 60;
-        public const int MozillaDuplicateNotificationMilliseconds = 500;
-
         private ClipMergeObservation current;
         private ClipMergeObservation candidateBase;
         private ClipMergeObservation candidateFirstTap;
@@ -180,23 +177,15 @@ namespace Clipman
 
         private static bool IsDuplicateNotification(ClipMergeObservation left, ClipMergeObservation right, long elapsedMilliseconds)
         {
+            var compatibility = ClipboardApplicationCompatibility.ForProcess(left.SourceApplication);
             if (left.ChangeIdentifier != 0 && right.ChangeIdentifier != 0)
             {
                 if (left.ChangeIdentifier == right.ChangeIdentifier) return true;
-                return IsMozillaApplication(left.SourceApplication) && elapsedMilliseconds >= 0 &&
-                    elapsedMilliseconds < MozillaDuplicateNotificationMilliseconds;
+                return compatibility.AcceptChangingSequenceIdentifiers &&
+                    elapsedMilliseconds >= 0 &&
+                    elapsedMilliseconds < compatibility.DuplicateNotificationMilliseconds;
             }
-            var threshold = IsMozillaApplication(left.SourceApplication)
-                ? MozillaDuplicateNotificationMilliseconds
-                : DuplicateNotificationMilliseconds;
-            return elapsedMilliseconds >= 0 && elapsedMilliseconds < threshold;
-        }
-
-        private static bool IsMozillaApplication(string value)
-        {
-            var source = value ?? string.Empty;
-            return source.IndexOf("firefox", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                source.IndexOf("thunderbird", StringComparison.OrdinalIgnoreCase) >= 0;
+            return elapsedMilliseconds >= 0 && elapsedMilliseconds < compatibility.DuplicateNotificationMilliseconds;
         }
 
         private static bool Compatible(ClipMergeObservation baseItem, ClipMergeObservation incoming)

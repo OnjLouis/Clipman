@@ -31,6 +31,10 @@ namespace Clipman.Tests
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
             Run("multiple-entry separators are configurable", MultipleEntrySeparatorsAreConfigurable);
+            Run("bursts of Windows clipboard notifications settle on the newest sequence", ClipboardNotificationsSettleOnNewestSequence);
+            Run("duplicate Windows clipboard notifications are processed once", ClipboardNotificationStateRejectsDuplicateWindowsNotifications);
+            Run("application-specific clipboard compatibility is centralised", ClipboardApplicationCompatibilityIsCentralised);
+            Run("clipboard flood protection is source-specific and recovers", ClipboardFloodProtectionIsSourceSpecificAndRecovers);
             Run("ClipMerge requires a deliberate matching second clipboard event", ClipMergeRequiresMatchingSecondEvent);
             Run("ClipMerge coalesces duplicates and rejects stale cut sources", ClipMergeCoalescesDuplicatesAndRejectsStaleCuts);
             Run("ClipMerge rejects mixed and mismatched file operations", ClipMergeRejectsUnsafeCombinations);
@@ -404,6 +408,70 @@ namespace Clipman.Tests
                 "Matching text from a different application merged.");
             Assert(!detector.Observe(Observation(ClipMergeKind.Text, "B", "Writer", "", ""), 5000, true, 500, false).ShouldMerge,
                 "A clipboard repeat outside the merge window merged.");
+        }
+
+        private static void ClipboardNotificationStateRejectsDuplicateWindowsNotifications()
+        {
+            var state = new ClipboardNotificationState();
+            Assert(state.ShouldProcess(1940, false), "The first clipboard sequence was rejected.");
+            Assert(!state.ShouldProcess(1940, false),
+                "A repeated Windows notification for the same clipboard sequence was processed twice.");
+            Assert(state.ShouldProcess(1949, false), "A genuinely new clipboard sequence was rejected.");
+            Assert(state.ShouldProcess(1949, true),
+                "Flood recovery could not replay the latest suppressed clipboard sequence.");
+            Assert(!state.ShouldProcess(1949, false),
+                "A notification repeated after flood recovery was processed again.");
+            Assert(state.ShouldProcess(0, false),
+                "A clipboard event without an available sequence identifier was rejected.");
+        }
+
+        private static void ClipboardNotificationsSettleOnNewestSequence()
+        {
+            var state = new ClipboardNotificationState();
+            state.Observe(1941);
+            state.Observe(1947);
+            state.Observe(1949);
+            Assert(state.TakePending() == 1949,
+                "A burst of notifications did not settle on its newest clipboard sequence.");
+            Assert(state.TakePending() == 0,
+                "A settled clipboard notification remained pending for a second capture.");
+        }
+
+        private static void ClipboardApplicationCompatibilityIsCentralised()
+        {
+            Assert(ClipboardApplicationCompatibility.ForProcess("writer").DuplicateNotificationMilliseconds == 60,
+                "An ordinary application did not use the conservative duplicate-notification window.");
+            Assert(ClipboardApplicationCompatibility.ForProcess("firefox").DuplicateNotificationMilliseconds == 500,
+                "Firefox did not receive its known delayed-notification compatibility window.");
+            Assert(ClipboardApplicationCompatibility.ForProcess("THUNDERBIRD").DuplicateNotificationMilliseconds == 500,
+                "Thunderbird compatibility matching was case-sensitive.");
+            Assert(ClipboardApplicationCompatibility.ForProcess("firefox").AcceptChangingSequenceIdentifiers,
+                "Firefox did not retain its changing-sequence compatibility rule.");
+            Assert(!ClipboardApplicationCompatibility.ForProcess("writer").AcceptChangingSequenceIdentifiers,
+                "An ordinary application was allowed to combine different clipboard sequences.");
+        }
+
+        private static void ClipboardFloodProtectionIsSourceSpecificAndRecovers()
+        {
+            var guards = new ClipboardFloodGuardRegistry(4, 2, 100, 50);
+            Assert(guards.Observe("noisy", 0) == ClipboardFloodDecision.Allow,
+                "A source was suppressed before reaching the configured limit.");
+            Assert(guards.Observe("noisy", 10) == ClipboardFloodDecision.Allow,
+                "A source was suppressed at the configured limit rather than above it.");
+            Assert(guards.Observe("noisy", 20) == ClipboardFloodDecision.SuppressStarted,
+                "A rapid third event did not start source-specific suppression.");
+            Assert(guards.Observe("quiet", 25) == ClipboardFloodDecision.Allow,
+                "One noisy application suppressed an unrelated application.");
+            Assert(guards.Observe("noisy", 30) == ClipboardFloodDecision.SuppressContinued,
+                "Continued noise was allowed during the quiet period.");
+            Assert(guards.ActiveSources(30).SequenceEqual(new[] { "noisy" }),
+                "Diagnostics did not report the suppressed source.");
+            Assert(guards.ActiveSources(80).Count == 0,
+                "A source remained marked as suppressed after the quiet period.");
+            Assert(guards.Observe("noisy", 80) == ClipboardFloodDecision.Allow,
+                "A source did not recover after its quiet period.");
+            Assert(guards.SuppressionCount == 1 && guards.SuppressedEventCount == 2,
+                "Registry-level flood diagnostics did not count suppression accurately.");
         }
 
         private static void ClipMergeRejectsUnsafeCombinations()

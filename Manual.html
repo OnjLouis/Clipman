@@ -90,6 +90,11 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.8.6</h3>
+  <ul>
+    <li>Fixed Windows treating a burst of notifications from one clipboard write as separate ClipMerge input. Applications such as Sensor Readout that publish several clipboard formats during one copy now create one history update and one sound, without combining the new value with an unrelated earlier clip. If an application floods the clipboard, Clipman still catches the latest change after activity settles.</li>
+  </ul>
+
   <h3>2.8.5</h3>
   <ul>
     <li>Windows, Mac and Linux can now choose how multiple selected clipboard entries are joined when copied, transformed, pushed or used with <strong>Copy Name and Content</strong>. Choose no separator, one new line, one blank line, a space, comma and space, or a custom separator with common escape sequences.</li>
