@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 final class SoundService {
     private var players: [String: AVAudioPlayer] = [:]
+    private var audioSessionConfigured = false
 
     func play(_ name: String, soundsEnabled: Bool, hapticsEnabled: Bool) {
         if soundsEnabled {
@@ -21,6 +22,7 @@ final class SoundService {
             return
         }
         do {
+            guard configureAudioSession() else { return }
             if let existing = players[name], existing.isPlaying {
                 existing.stop()
                 existing.currentTime = 0
@@ -32,6 +34,20 @@ final class SoundService {
             player.play()
         } catch {
             return
+        }
+    }
+
+    @discardableResult
+    func configureAudioSession() -> Bool {
+        if audioSessionConfigured { return true }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+            audioSessionConfigured = true
+            return true
+        } catch {
+            return false
         }
     }
 }

@@ -855,7 +855,10 @@ enum WebsiteTitleParser {
     }
 
     private static func firstCapture(_ pattern: String, in value: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ),
               let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
               match.numberOfRanges > 1,
               let range = Range(match.range(at: 1), in: value) else { return nil }

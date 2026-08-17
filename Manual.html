@@ -151,6 +151,7 @@
   <h3>2.6.2 Mobile</h3>
   <ul>
     <li>Fixed the iOS Settings import controls so <strong>Import Clipman Server Connection File</strong>, <strong>Import Private Authority</strong> and encrypted backup restore each open the correct Files picker and retain their existing validation and confirmation flow. Android already used independent document pickers and is unchanged.</li>
+    <li>Prevented iOS history lag and crashes caused by very long clipboard entries. History rows and VoiceOver receive a bounded preview, while copying, viewing, editing, searching and synchronizing continue to use the complete unchanged entry. Website titles containing line breaks now pass through the existing bounded sanitizer correctly. Clipman's short feedback sounds now mix with music, video, podcasts and VoiceOver instead of interrupting other audio. This closes <a href="https://github.com/OnjLouis/Clipman/issues/63">issue #63</a>.</li>
   </ul>
 
   <h3>2.6.1</h3>

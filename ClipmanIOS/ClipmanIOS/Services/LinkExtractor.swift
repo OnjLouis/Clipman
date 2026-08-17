@@ -55,6 +55,14 @@ enum LinkExtractor {
     }
 
     private static func pureHTTPURL(in text: String) -> URL? {
+        // A pure link cannot legitimately exceed the URL limit by more than
+        // modest surrounding whitespace. Reject oversized clipboard text
+        // before trimming it, which would otherwise copy the entire string.
+        guard text.unicodeScalars
+            .prefix(LinkPresentationSafety.maximumURLScalars + 65)
+            .count <= LinkPresentationSafety.maximumURLScalars + 64 else {
+            return nil
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("\n"), !trimmed.contains("\r") else { return nil }
         let candidate: String

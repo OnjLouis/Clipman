@@ -312,6 +312,7 @@ private struct HistoryEntryRow: View {
     }
 
     private var singleLink: URL? {
+        guard HistoryRowPreview.canInspectLinks(in: entry.Text) else { return nil }
         let links = LinkExtractor.links(in: entry.Text)
         return links.count == 1 ? links[0] : nil
     }
@@ -602,24 +603,38 @@ private struct HistoryFilterChooser: View {
 }
 
 extension ClipEntry {
-    var displayText: String {
-        let name = Name.trimmingCharacters(in: .whitespacesAndNewlines)
+    var historyPreview: HistoryRowPreview.Value {
+        let name = HistoryRowPreview.metadata(Name)
         if let image = EmbeddedImageCodec.recognize(RichText) {
-            return name.isEmpty ? EmbeddedImageCodec.displayText(filename: image.filename) : name
+            return HistoryRowPreview.make(
+                name.isEmpty ? EmbeddedImageCodec.displayText(filename: image.filename) : name,
+                sourceWasTruncated: HistoryRowPreview.exceedsMetadataLimit(Name)
+            )
         }
         if let url = LinkExtractor.exactHTTPURL(in: self) {
-            return LinkDisplay.rowText(for: url, name: name)
+            return HistoryRowPreview.make(
+                LinkDisplay.rowText(for: url, name: name),
+                sourceWasTruncated: HistoryRowPreview.exceedsMetadataLimit(Name)
+            )
         }
         if !name.isEmpty {
-            return "\(name): \(Text)"
+            return HistoryRowPreview.joined(
+                name: name,
+                nameWasTruncated: HistoryRowPreview.exceedsMetadataLimit(Name),
+                text: Text
+            )
         }
-        return Text
+        return HistoryRowPreview.make(Text)
+    }
+
+    var displayText: String {
+        historyPreview.text
     }
 
     var detailText: String {
         [
-            Group.isEmpty ? nil : "Group: \(Group)",
-            SourceMachine.isEmpty ? nil : "Device: \(SourceMachine)"
+            Group.isEmpty ? nil : "Group: \(HistoryRowPreview.metadata(Group))",
+            SourceMachine.isEmpty ? nil : "Device: \(HistoryRowPreview.metadata(SourceMachine))"
         ]
         .compactMap { $0 }
         .joined(separator: "; ")
@@ -629,8 +644,9 @@ extension ClipEntry {
         [
             Pinned ? "Pinned" : nil,
             displayText,
-            Group.isEmpty ? nil : "Group: \(Group)",
-            SourceMachine.isEmpty ? nil : "Device: \(SourceMachine)"
+            historyPreview.wasTruncated ? "Preview truncated" : nil,
+            Group.isEmpty ? nil : "Group: \(HistoryRowPreview.metadata(Group))",
+            SourceMachine.isEmpty ? nil : "Device: \(HistoryRowPreview.metadata(SourceMachine))"
         ]
         .compactMap { $0 }
         .joined(separator: "; ")
@@ -639,17 +655,72 @@ extension ClipEntry {
 
 private extension LinkExtractor.LinkItem {
     var displayText: String {
-        LinkDisplay.rowText(for: url, name: entry.Name)
+        HistoryRowPreview.make(
+            LinkDisplay.rowText(for: url, name: HistoryRowPreview.metadata(entry.Name)),
+            sourceWasTruncated: HistoryRowPreview.exceedsMetadataLimit(entry.Name)
+        ).text
     }
 
     var accessibilityLabelText: String {
         [
             entry.Pinned ? "Pinned" : nil,
             displayText,
-            entry.Group.isEmpty ? nil : "Group: \(entry.Group)",
-            entry.SourceMachine.isEmpty ? nil : "Device: \(entry.SourceMachine)"
+            HistoryRowPreview.exceedsMetadataLimit(entry.Name) ? "Preview truncated" : nil,
+            entry.Group.isEmpty ? nil : "Group: \(HistoryRowPreview.metadata(entry.Group))",
+            entry.SourceMachine.isEmpty ? nil : "Device: \(HistoryRowPreview.metadata(entry.SourceMachine))"
         ]
         .compactMap { $0 }
         .joined(separator: "; ")
+    }
+}
+
+enum HistoryRowPreview {
+    static let maximumScalars = 240
+    static let maximumMetadataScalars = 80
+    static let maximumLinkInspectionScalars = 16_384
+
+    struct Value: Equatable {
+        let text: String
+        let wasTruncated: Bool
+    }
+
+    static func make(_ value: String, sourceWasTruncated: Bool = false) -> Value {
+        clipped(value, maximumScalars: maximumScalars, sourceWasTruncated: sourceWasTruncated)
+    }
+
+    static func joined(name: String, nameWasTruncated: Bool, text: String) -> Value {
+        let availableTextScalars = max(0, maximumScalars - name.unicodeScalars.count - 2)
+        let textPreview = clipped(text, maximumScalars: availableTextScalars)
+        return Value(
+            text: name + ": " + textPreview.text,
+            wasTruncated: nameWasTruncated || textPreview.wasTruncated
+        )
+    }
+
+    static func metadata(_ value: String) -> String {
+        LinkPresentationSafety.cleanedText(value, maximumScalars: maximumMetadataScalars)
+    }
+
+    static func exceedsMetadataLimit(_ value: String) -> Bool {
+        value.unicodeScalars.prefix(maximumMetadataScalars + 1).count > maximumMetadataScalars
+    }
+
+    static func canInspectLinks(in value: String) -> Bool {
+        value.unicodeScalars.prefix(maximumLinkInspectionScalars + 1).count <= maximumLinkInspectionScalars
+    }
+
+    private static func clipped(
+        _ value: String,
+        maximumScalars: Int,
+        sourceWasTruncated: Bool = false
+    ) -> Value {
+        let safeMaximum = max(0, maximumScalars)
+        let prefix = value.unicodeScalars.prefix(safeMaximum + 1)
+        let truncated = sourceWasTruncated || prefix.count > safeMaximum
+        let visibleScalars = prefix.prefix(safeMaximum)
+        return Value(
+            text: String(visibleScalars) + (truncated ? "..." : ""),
+            wasTruncated: truncated
+        )
     }
 }
