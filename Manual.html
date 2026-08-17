@@ -90,6 +90,11 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.6.3 Android</h3>
+  <ul>
+    <li>Prevented Android history lag and possible Clipman or TalkBack crashes caused by very long clipboard entries. History rows and TalkBack now receive a bounded preview and announce when it was truncated, while copying, viewing, editing, searching and synchronizing continue to use the complete unchanged entry. Oversized rows are no longer scanned for link actions until the user deliberately opens them.</li>
+  </ul>
+
   <h3>2.8.6</h3>
   <ul>
     <li>Fixed Windows treating a burst of notifications from one clipboard write as separate ClipMerge input. Applications such as Sensor Readout that publish several clipboard formats during one copy now create one history update and one sound, without combining the new value with an unrelated earlier clip. If an application floods the clipboard, Clipman still catches the latest change after activity settles.</li>

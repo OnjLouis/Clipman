@@ -2031,7 +2031,7 @@ private fun ConfirmDeleteDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Delete Entry") },
-        text = { Text("Delete this Clipman entry?\n\n${entry.displayText.take(500)}") },
+        text = { Text("Delete this Clipman entry?\n\n${historyRowPreview(entry).text}") },
         confirmButton = {
             TextButton(onClick = onDelete) { Text("Delete") }
         },
@@ -2620,15 +2620,18 @@ private fun ClipEntryCard(
     onDelete: () -> Unit
 ) {
     val embeddedImage = remember(entry.RichText) { EmbeddedImageRichText.parse(entry.RichText) }
-    val rowText = remember(entry) { entryRowText(entry) }
+    val rowPreview = remember(entry) { historyRowPreview(entry) }
+    val rowText = rowPreview.text
+    val groupPreview = remember(entry.Group) { HistoryRowPreview.metadata(entry.Group) }
+    val devicePreview = remember(entry.SourceMachine) { HistoryRowPreview.metadata(entry.SourceMachine) }
     val labelParts = buildList {
         if (entry.Pinned) add("Pinned")
         if (embeddedImage != null) add("Image, ${embeddedImage.width} by ${embeddedImage.height} pixels")
-        if (entry.Group.isNotBlank()) add("Group: ${entry.Group}")
-        if (entry.SourceMachine.isNotBlank()) add("Device: ${entry.SourceMachine}")
+        if (groupPreview.isNotBlank()) add("Group: $groupPreview")
+        if (devicePreview.isNotBlank()) add("Device: $devicePreview")
         add("${index + 1} of $total")
     }
-    val links = remember(entry.Text) { extractLinks(entry.Text) }
+    val links = remember(entry.Text) { extractLinksForHistoryRow(entry.Text) }
     val canOpen = links.size == 1
     val canUseWebsiteTitle = entry.Name.isBlank() && LinkPresentation.isFetchableHttpUrl(entry.Text)
     val actions = clipEntryActionSpecs(
@@ -2653,10 +2656,11 @@ private fun ClipEntryCard(
     }
     val accessibilityText = clipEntryAccessibilityText(
         rowText = rowText,
+        previewWasTruncated = rowPreview.wasTruncated,
         pinned = entry.Pinned,
         imageDescription = embeddedImage?.let { "Image, ${it.width} by ${it.height} pixels" },
-        group = entry.Group,
-        device = entry.SourceMachine,
+        group = groupPreview,
+        device = devicePreview,
         index = index,
         total = total
     )
@@ -2685,7 +2689,7 @@ private fun ClipEntryCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(rowText.take(500))
+            Text(rowText)
             Text(labelParts.joinToString("; "), style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -2693,6 +2697,7 @@ private fun ClipEntryCard(
 
 internal fun clipEntryAccessibilityText(
     rowText: String,
+    previewWasTruncated: Boolean = false,
     pinned: Boolean,
     imageDescription: String?,
     group: String,
@@ -2702,6 +2707,7 @@ internal fun clipEntryAccessibilityText(
 ): String = buildList {
     if (pinned) add("Pinned")
     add(rowText)
+    if (previewWasTruncated) add("Preview truncated")
     if (!imageDescription.isNullOrBlank()) add(imageDescription)
     if (group.isNotBlank()) add("Group: $group")
     if (device.isNotBlank()) add("Device: $device")
@@ -2806,9 +2812,7 @@ private fun ClipEntry.isLinkEntry(): Boolean {
 }
 
 private fun entryRowText(entry: ClipEntry): String {
-    val image = EmbeddedImageRichText.parse(entry.RichText)
-    if (image != null) return entry.Name.trim().ifBlank { image.altText }
-    return if (entry.isLinkEntry()) LinkPresentation.rowText(entry) else entry.displayText
+    return historyRowPreview(entry).text
 }
 
 @Composable
@@ -2923,6 +2927,9 @@ private fun extractLinks(text: String): List<String> =
         .filter { it.isNotBlank() }
         .distinct()
         .toList()
+
+internal fun extractLinksForHistoryRow(text: String): List<String> =
+    if (HistoryRowPreview.canInspectLinks(text)) extractLinks(text) else emptyList()
 
 private val UrlRegex = Regex(
     pattern = """(?i)\b((?:https?://|www\.)[^\s<>"']+)"""
