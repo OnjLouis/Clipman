@@ -12,6 +12,10 @@ namespace Clipman
 {
     internal static partial class Program
     {
+        private const long MaximumLogBytes = 1024L * 1024L;
+        private const int RetainedLogGenerations = 3;
+        private static readonly object LogWriteLock = new object();
+
         public const string MutexName = "Local\\ClipmanPortableSingleInstance";
         public const string CloseEventName = "Local\\ClipmanCloseRequest";
         public const string ShowEventName = "Local\\ClipmanShowHistoryRequest";
@@ -290,29 +294,55 @@ namespace Clipman
             try
             {
                 var path = Path.Combine(LogDirectory(), fileName);
-                using (var writer = new StreamWriter(path, true))
+                lock (LogWriteLock)
                 {
-                    writer.WriteLine("[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "] " + message);
-                    writer.WriteLine("App: " + Assembly.GetExecutingAssembly().Location);
-                    writer.WriteLine("Version: " + Assembly.GetExecutingAssembly().GetName().Version);
-                    writer.WriteLine("Build stamp: " + BuildInfo.BuildStampUtcMs);
-                    writer.WriteLine("OS: " + Environment.OSVersion);
-                    writer.WriteLine(".NET: " + Environment.Version);
-                    writer.WriteLine("Device: " + Environment.MachineName);
-                    if (exception != null)
+                    RotateLogFiles(path, MaximumLogBytes, RetainedLogGenerations);
+                    using (var writer = new StreamWriter(path, true))
                     {
-                        writer.WriteLine(exception);
+                        writer.WriteLine("[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "] " + message);
+                        writer.WriteLine("App: " + Assembly.GetExecutingAssembly().Location);
+                        writer.WriteLine("Version: " + Assembly.GetExecutingAssembly().GetName().Version);
+                        writer.WriteLine("Build stamp: " + BuildInfo.BuildStampUtcMs);
+                        writer.WriteLine("OS: " + Environment.OSVersion);
+                        writer.WriteLine(".NET: " + Environment.Version);
+                        writer.WriteLine("Device: " + Environment.MachineName);
+                        if (exception != null)
+                        {
+                            writer.WriteLine(exception);
+                        }
+                        else
+                        {
+                            writer.WriteLine("(No exception object.)");
+                        }
+                        writer.WriteLine();
                     }
-                    else
-                    {
-                        writer.WriteLine("(No exception object.)");
-                    }
-                    writer.WriteLine();
                 }
             }
             catch
             {
             }
+        }
+
+        internal static void RotateLogFiles(string path, long maximumBytes, int retainedGenerations)
+        {
+            if (string.IsNullOrWhiteSpace(path) || maximumBytes < 1 || retainedGenerations < 1) return;
+            if (!File.Exists(path) || new FileInfo(path).Length < maximumBytes) return;
+
+            for (var generation = retainedGenerations; generation >= 1; generation--)
+            {
+                var destination = RotatedLogPath(path, generation);
+                if (File.Exists(destination)) File.Delete(destination);
+                var source = generation == 1 ? path : RotatedLogPath(path, generation - 1);
+                if (File.Exists(source)) File.Move(source, destination);
+            }
+        }
+
+        private static string RotatedLogPath(string path, int generation)
+        {
+            var directory = Path.GetDirectoryName(path) ?? string.Empty;
+            var name = Path.GetFileNameWithoutExtension(path);
+            var extension = Path.GetExtension(path);
+            return Path.Combine(directory, name + "." + generation + extension);
         }
 
         private static string LogDirectory()

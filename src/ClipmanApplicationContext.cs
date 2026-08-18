@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -121,7 +122,7 @@ namespace Clipman
             notifyIcon.DoubleClick += (s, e) => ToggleHistoryWindow();
             if (settings.CaptureClipboardOnStartup)
             {
-                HandleClipboardUpdate();
+                TryCaptureClipboardOnStartup();
             }
 
             RegisterHotkeys();
@@ -745,6 +746,21 @@ namespace Clipman
             HandleClipboardUpdate(true);
         }
 
+        private void TryCaptureClipboardOnStartup()
+        {
+            try
+            {
+                HandleClipboardUpdate();
+            }
+            catch (ExternalException ex)
+            {
+                if ((uint)ex.ErrorCode != 0x800401D0U) throw;
+                Program.WriteRuntimeLog("The clipboard was busy during startup; Clipman will retry the initial capture.", ex);
+                clipboardFloodRecoveryTimer.Stop();
+                clipboardFloodRecoveryTimer.Start();
+            }
+        }
+
         internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0, bool recovery = false)
         {
             if (!deliberate && clipboardSequence == 0)
@@ -1019,7 +1035,15 @@ namespace Clipman
         private void ClipboardFloodRecoveryTimerTick(object sender, EventArgs e)
         {
             clipboardFloodRecoveryTimer.Stop();
-            HandleClipboardUpdate(false, NativeMethods.GetClipboardSequenceNumber(), true);
+            try
+            {
+                HandleClipboardUpdate(false, NativeMethods.GetClipboardSequenceNumber(), true);
+            }
+            catch (ExternalException ex)
+            {
+                if ((uint)ex.ErrorCode != 0x800401D0U) throw;
+                clipboardFloodRecoveryTimer.Start();
+            }
         }
 
         private void RememberReceivedHistoryTab(string tabId)
@@ -1336,7 +1360,7 @@ namespace Clipman
             menu.Items.Add(saveClipboardText, null, (s, e) => SaveCurrentClipboardToHistory());
             menu.Items.Add("&Secrets...\tCtrl+Shift+E", null, (s, e) => ShowSecrets());
             menu.Items.Add("&Preferences...", null, (s, e) => ShowPreferencesFromTray());
-            menu.Items.Add("Open &settings folder", null, (s, e) => OpenSettingsFolder());
+            menu.Items.Add("Open &settings folder\tCtrl+Shift+O", null, (s, e) => OpenSettingsFolder());
             menu.Items.Add("-");
             menu.Items.Add("E&xit", null, (s, e) => ExitThread());
             return menu;

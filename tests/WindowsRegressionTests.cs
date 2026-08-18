@@ -21,8 +21,10 @@ namespace Clipman.Tests
             Run("bounded exact reads handle partial streams", BoundedExactReadsHandlePartialStreams);
             Run("encrypted database round trip", EncryptedDatabaseRoundTrip);
             Run("URL length is bounded before presentation or fetch", UrlLengthIsBounded);
+            Run("URL labels accept characters that are illegal in Windows paths", UrlLabelsAcceptWindowsPathCharacters);
             Run("website title safety distinguishes readable slugs from capability tokens", WebsiteTitleSafetyDistinguishesReadableSlugs);
             Run("link labels remove unsafe Unicode categories", LinkLabelsRemoveUnsafeUnicode);
+            Run("runtime logs rotate with a bounded generation count", RuntimeLogsRotateWithBoundedGenerations);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
@@ -272,6 +274,47 @@ namespace Clipman.Tests
                 }
                 Assert(RichImageData.CaptureFromFile(mismatchedPath) == null, "A mismatched image extension and payload was accepted.");
                 Assert(!new AppSettings().AutoAddImageFilesToRichText, "Automatic copied-image duplication must default to off.");
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void UrlLabelsAcceptWindowsPathCharacters()
+        {
+            var encodedCharacters = new[] { "%22", "%3C", "%3E", "%7C" };
+            foreach (var encodedCharacter in encodedCharacters)
+            {
+                var uri = new Uri("https://example.org/report" + encodedCharacter + "draft.html", UriKind.Absolute);
+                var label = LinkPresentation.OfflineLabel(uri);
+                Assert(label.Length > 0, "An encoded URL path character prevented an offline label from being generated.");
+                Assert(label.IndexOf(".html", StringComparison.OrdinalIgnoreCase) < 0,
+                    "A known document extension remained in an offline URL label.");
+            }
+        }
+
+        private static void RuntimeLogsRotateWithBoundedGenerations()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanLogRotation-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var path = Path.Combine(directory, "Runtime.log");
+                File.WriteAllText(path, "current");
+                File.WriteAllText(Path.Combine(directory, "Runtime.1.log"), "first");
+                File.WriteAllText(Path.Combine(directory, "Runtime.2.log"), "second");
+                File.WriteAllText(Path.Combine(directory, "Runtime.3.log"), "oldest");
+
+                Program.RotateLogFiles(path, 1, 3);
+
+                Assert(!File.Exists(path), "The full active log was not rotated.");
+                Assert(File.ReadAllText(Path.Combine(directory, "Runtime.1.log")) == "current",
+                    "The active log did not become the newest retained generation.");
+                Assert(File.ReadAllText(Path.Combine(directory, "Runtime.2.log")) == "first",
+                    "The first retained log generation was not advanced.");
+                Assert(File.ReadAllText(Path.Combine(directory, "Runtime.3.log")) == "second",
+                    "The oldest retained generation was not bounded correctly.");
             }
             finally
             {

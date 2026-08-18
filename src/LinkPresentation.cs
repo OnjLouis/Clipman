@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -123,8 +122,15 @@ namespace Clipman
 
         private static string RemoveDocumentExtension(string value)
         {
-            var extension = Path.GetExtension(value ?? string.Empty);
-            return DocumentExtensions.Contains(extension) ? value.Substring(0, value.Length - extension.Length) : value;
+            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+            foreach (var extension in DocumentExtensions)
+            {
+                if (value.Length > extension.Length && value.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    return value.Substring(0, value.Length - extension.Length);
+                }
+            }
+            return value;
         }
 
         private static string MakeReadable(string value)

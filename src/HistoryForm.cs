@@ -529,7 +529,7 @@ namespace Clipman
 
             var file = new ToolStripMenuItem("&File");
             file.DropDownItems.Add("&Import...\tCtrl+I", null, (s, e) => Import(false));
-            file.DropDownItems.Add("Import and &replace...", null, (s, e) => Import(true));
+            file.DropDownItems.Add("Import and &replace...\tCtrl+Shift+I", null, (s, e) => Import(true));
             file.DropDownItems.Add("&Export...\tCtrl+E", null, (s, e) => Export());
             file.DropDownItems.Add("Save current clip&board to history", null, (s, e) => saveCurrentClipboard());
             file.DropDownItems.Add("-");
@@ -577,7 +577,7 @@ namespace Clipman
             toggleMenuItem = new ToolStripMenuItem("&Toggle on/off", null, (s, e) => toggleActive());
             options.DropDownItems.Add(preferencesMenuItem);
             options.DropDownItems.Add("Se&crets...\tCtrl+Shift+E", null, (s, e) => showSecrets());
-            options.DropDownItems.Add("Open &settings folder", null, (s, e) => OpenSettingsFolder());
+            options.DropDownItems.Add("Open &settings folder\tCtrl+Shift+O", null, (s, e) => OpenSettingsFolder());
             options.DropDownItems.Add(toggleMenuItem);
 
             var view = new ToolStripMenuItem("&View");
@@ -1330,6 +1330,16 @@ namespace Clipman
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (keyData == (Keys.Control | Keys.Shift | Keys.I))
+            {
+                Import(true);
+                return true;
+            }
+            if (keyData == (Keys.Control | Keys.Shift | Keys.O))
+            {
+                OpenSettingsFolder();
+                return true;
+            }
             if ((keyData & Keys.Modifiers) == Keys.Alt && (keyData & Keys.KeyCode) == Keys.F4)
             {
                 CloseHistoryWindow();

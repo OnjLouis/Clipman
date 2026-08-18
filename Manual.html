@@ -90,6 +90,14 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.8.7 Windows</h3>
+  <ul>
+    <li>Fixed links containing URL characters that are not valid in Windows file paths interrupting history refreshes. This could leave one history section visible while the status bar retained another section's entry count.</li>
+    <li>If another application temporarily locks the clipboard while Clipman starts, the optional startup capture now waits and retries instead of interrupting startup.</li>
+    <li>Windows diagnostic logs now rotate at 1 MiB and retain three previous generations, keeping fault history without allowing logs to grow indefinitely.</li>
+    <li>Added <code>Ctrl+Shift+I</code> for Import and replace and <code>Ctrl+Shift+O</code> for Open settings folder.</li>
+  </ul>
+
   <h3>2.6.3 Android</h3>
   <ul>
     <li>Prevented Android history lag and possible Clipman or TalkBack crashes caused by very long clipboard entries. History rows and TalkBack now receive a bounded preview and announce when it was truncated, while copying, viewing, editing, searching and synchronizing continue to use the complete unchanged entry. Oversized rows are no longer scanned for link actions until the user deliberately opens them.</li>
@@ -679,6 +687,8 @@
       <tr><td>Move selected entries in manual order</td><td><code>Alt+Up</code> or <code>Alt+Down</code></td><td><code>Option+Up</code> or <code>Option+Down</code></td></tr>
       <tr><td>Delete selected unpinned text entries</td><td><code>Del</code></td><td><code>Command+Backspace</code></td></tr>
       <tr><td>Import clipboard entries</td><td><code>Ctrl+I</code></td><td><code>Command+I</code></td></tr>
+      <tr><td>Import and replace clipboard entries</td><td><code>Ctrl+Shift+I</code></td><td>Not available</td></tr>
+      <tr><td>Open settings folder</td><td><code>Ctrl+Shift+O</code></td><td>Use the Clipman status menu</td></tr>
       <tr><td>Export clipboard entries</td><td><code>Ctrl+E</code></td><td><code>Command+E</code></td></tr>
       <tr><td>Clean URL tracking from selected text</td><td><code>Ctrl+Shift+R</code></td><td><code>Command+Shift+R</code></td></tr>
       <tr><td>Clean link for sharing</td><td><code>Ctrl+Shift+S</code></td><td><code>Command+Shift+S</code></td></tr>
