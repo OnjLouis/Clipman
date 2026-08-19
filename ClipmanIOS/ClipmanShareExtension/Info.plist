@@ -18,6 +18,36 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Clipman connects to a Clipman Server on your local or private network to synchronize shared clipboard items.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true />
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>10.0.0.0/8</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+            <key>100.64.0.0/10</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+            <key>172.16.0.0/12</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+            <key>192.168.0.0/16</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true />
+            </dict>
+        </dict>
+    </dict>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionAttributes</key>
@@ -25,6 +55,10 @@
             <key>NSExtensionActivationRule</key>
             <dict>
                 <key>NSExtensionActivationSupportsImageWithMaxCount</key>
+                <integer>1</integer>
+                <key>NSExtensionActivationSupportsText</key>
+                <true/>
+                <key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
                 <integer>1</integer>
             </dict>
         </dict>

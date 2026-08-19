@@ -143,6 +143,8 @@ struct ClipmanSettings: Equatable, Sendable {
     }
 }
 
+extension ClipmanSettings: ServerStorageSettingsProviding {}
+
 enum SettingsStore {
     private enum Keys {
         static let serverURL = "serverURL"
@@ -210,6 +212,7 @@ enum SettingsStore {
             settings.serverCaHost = ""
         }
         settings.historyPassword = KeychainStore.string(for: Keys.historyPassword)
+        publishShareSettings(settings)
         return settings
     }
 
@@ -234,6 +237,7 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Keys.deviceName)
         KeychainStore.set(settings.serverToken, for: Keys.serverToken)
         KeychainStore.set(settings.historyPassword, for: Keys.historyPassword)
+        publishShareSettings(settings)
     }
 
     static func loadHistorySort(from defaults: UserDefaults) -> HistorySortMode {
@@ -242,5 +246,19 @@ enum SettingsStore {
 
     static func saveHistorySort(_ mode: HistorySortMode, to defaults: UserDefaults) {
         defaults.set(mode.rawValue, forKey: Keys.historySortMode)
+    }
+
+    private static func publishShareSettings(_ settings: ClipmanSettings) {
+        ShareSyncConfigurationStore.publish(
+            storageMode: settings.storageMode.rawValue,
+            serverURL: settings.serverURL,
+            serverToken: settings.serverToken,
+            serverCaCertPEM: settings.serverCaCertPEM,
+            serverCaHost: settings.serverCaHost,
+            historyPassword: settings.historyPassword,
+            deviceName: settings.deviceName,
+            richTextEnabled: settings.richTextEnabled,
+            includeImagesInRichText: settings.includeImagesInRichText
+        )
     }
 }

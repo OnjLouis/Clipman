@@ -312,7 +312,7 @@ final class ClipmanAppModel: ObservableObject {
                 }
                 isUnlocking = false
                 isUnlocked = true
-                processPendingSharedImages()
+                processPendingSharedItems()
                 guard cacheLoaded else {
                     showingSettings = true
                     return
@@ -426,7 +426,7 @@ final class ClipmanAppModel: ObservableObject {
     func sceneBecameActive() {
         isSceneActive = true
         if isUnlocked {
-            processPendingSharedImages()
+            processPendingSharedItems()
             processPendingQuickAction()
         } else {
             unlock()
@@ -754,11 +754,40 @@ final class ClipmanAppModel: ObservableObject {
         return true
     }
 
-    func processPendingSharedImages() {
+    func processPendingSharedItems() {
         guard isUnlocked, pendingShareTask == nil else { return }
         pendingShareTask = Task { [weak self] in
             guard let self else { return }
             defer { pendingShareTask = nil }
+            do {
+                let store = try PendingSharedTextStore()
+                let items = try await Task.detached(priority: .userInitiated) {
+                    try store.pendingItems()
+                }.value
+                for item in items {
+                    try Task.checkCancellation()
+                    let richText = settings.richTextEnabled && !item.html.isEmpty
+                        ? MobileRichTextClipboard.normalize(RichTextPayload(
+                            HtmlFragment: item.html,
+                            PreferredFormat: "Html"
+                        ))
+                        : nil
+                    guard addPastedClipboardPayload(MobileClipboardPayload(
+                        text: item.text,
+                        richText: richText,
+                        importError: nil
+                    )) else { return }
+                    try await Task.detached(priority: .utility) {
+                        try store.remove(item)
+                    }.value
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                setTransientStatus("Shared text could not be read: \(error.localizedDescription)")
+                soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+                return
+            }
             do {
                 let store = try PendingSharedImageStore()
                 let items = try await Task.detached(priority: .userInitiated) {

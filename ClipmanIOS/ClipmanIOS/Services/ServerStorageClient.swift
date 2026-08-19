@@ -1,6 +1,14 @@
 import Foundation
 import Security
 
+protocol ServerStorageSettingsProviding {
+    var serverURL: String { get }
+    var serverToken: String { get }
+    var serverCaCertPEM: String { get }
+    var serverCaHost: String { get }
+    var historyPassword: String { get }
+}
+
 struct ServerDatabaseDownload {
     var revision: String
     var data: Data
@@ -43,11 +51,15 @@ final class ServerStorageClient {
     private let token: String
     private let databaseID: String
     private let displayEndpoint: String
+    private let maximumResponseBytes: Int
     private let session: URLSession
     private let sessionDelegate: ServerSessionDelegate
     private let userAgent = "ClipmanIOS/" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
 
-    init(settings: ClipmanSettings) {
+    init(
+        settings: some ServerStorageSettingsProviding,
+        maximumResponseBytes: Int = ClipDatabaseFile.maximumFileBytes
+    ) {
         let displayURL = ServerSettingsSanitizer.cleanDisplayURL(settings.serverURL)
         let cleanedURL = ServerSettingsSanitizer.cleanTransportURL(settings.serverURL)
         let cleanedToken = ServerSettingsSanitizer.cleanToken(settings.serverToken)
@@ -55,6 +67,7 @@ final class ServerStorageClient {
         self.token = cleanedToken
         self.databaseID = ServerDatabaseIdentity.fromTokenAndPassword(token: cleanedToken, password: settings.historyPassword)
         self.syncCacheIdentity = cleanedURL + "|" + self.databaseID
+        self.maximumResponseBytes = max(0, min(maximumResponseBytes, ClipDatabaseFile.maximumFileBytes))
         let authority = try? ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPEM, address: settings.serverURL)
         let normalizedAuthority = authority ?? nil
         let authorityMatches = normalizedAuthority == nil || settings.serverCaHost.isEmpty || normalizedAuthority?.host.caseInsensitiveCompare(settings.serverCaHost) == .orderedSame
@@ -113,7 +126,7 @@ final class ServerStorageClient {
             (data, response) = try await sessionDelegate.data(
                 for: request,
                 using: session,
-                maximumBytes: ClipDatabaseFile.maximumFileBytes
+                maximumBytes: maximumResponseBytes
             )
         } catch BoundedResponseError.responseTooLarge {
             throw ServerStorageError.responseTooLarge

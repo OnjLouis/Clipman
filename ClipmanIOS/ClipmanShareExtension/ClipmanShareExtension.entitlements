@@ -6,5 +6,10 @@
     <array>
         <string>group.me.onj.clipman.ios</string>
     </array>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)me.onj.clipman.ios.share</string>
+        <string>$(AppIdentifierPrefix)me.onj.clipman.shared</string>
+    </array>
 </dict>
 </plist>

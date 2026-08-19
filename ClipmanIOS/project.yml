@@ -23,7 +23,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios
         PRODUCT_NAME: Clipman
         MARKETING_VERSION: "2.6.2"
-        CURRENT_PROJECT_VERSION: "26202"
+        CURRENT_PROJECT_VERSION: "26207"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanIOS/Support/Info.plist
         SDKROOT: iphoneos
@@ -45,19 +45,33 @@ targets:
     sources:
       - path: ClipmanShareExtension
       - path: Shared
+      - path: ClipmanIOS/Core/ClipDatabaseFile.swift
+      - path: ClipmanIOS/Core/DatabaseWorker.swift
+      - path: ClipmanIOS/Core/EmbeddedImage.swift
+      - path: ClipmanIOS/Core/Gzip.swift
+      - path: ClipmanIOS/Core/MobileRichTextClipboard.swift
+      - path: ClipmanIOS/Core/Models.swift
+      - path: ClipmanIOS/Core/ServerDatabaseIdentity.swift
+      - path: ClipmanIOS/Core/SyncConflictResolver.swift
+      - path: ClipmanIOS/Services/ServerSettingsSanitizer.swift
+      - path: ClipmanIOS/Services/ServerStorageClient.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios.share
         PRODUCT_NAME: Share to Clipman
         MARKETING_VERSION: "2.6.2"
-        CURRENT_PROJECT_VERSION: "26202"
+        CURRENT_PROJECT_VERSION: "26207"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanShareExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: ClipmanShareExtension/ClipmanShareExtension.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: ClipmanIOS/Support/ClipmanIOS-Bridging-Header.h
         APPLICATION_EXTENSION_API_ONLY: "YES"
         SKIP_INSTALL: "YES"
         SDKROOT: iphoneos
         TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - sdk: libz.tbd
+      - sdk: Security.framework
   ClipmanIOSTests:
     type: bundle.unit-test
     platform: iOS
