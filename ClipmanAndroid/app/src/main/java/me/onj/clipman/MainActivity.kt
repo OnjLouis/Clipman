@@ -20,7 +20,6 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -103,6 +102,8 @@ class MainActivity : FragmentActivity() {
     private var nextExternalConnectionImportId = 0L
     private var externalImageImports by mutableStateOf<List<ExternalSharedImageImport>>(emptyList())
     private var nextExternalImageImportId = 0L
+    private var externalTextImports by mutableStateOf<List<ExternalSharedTextImport>>(emptyList())
+    private var nextExternalTextImportId = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,6 +121,10 @@ class MainActivity : FragmentActivity() {
                             externalImageImport = externalImageImports.firstOrNull(),
                             onExternalImageImportConsumed = { id ->
                                 externalImageImports = externalImageImports.filterNot { it.id == id }
+                            },
+                            externalTextImport = externalTextImports.firstOrNull(),
+                            onExternalTextImportConsumed = { id ->
+                                externalTextImports = externalTextImports.filterNot { it.id == id }
                             }
                         )
                     } else {
@@ -176,10 +181,27 @@ class MainActivity : FragmentActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
-        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
-            enqueueSharedImage(intent)
+        when {
+            intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/", ignoreCase = true) == true ->
+                enqueueSharedText(intent)
+            intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE ->
+                enqueueSharedImage(intent)
+            else -> handleConfigurationIntent(intent)
+        }
+    }
+
+    private fun enqueueSharedText(intent: Intent) {
+        val requestId = ++nextExternalTextImportId
+        val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
+        val html = intent.getStringExtra(Intent.EXTRA_HTML_TEXT).orEmpty()
+        val rejection = AndroidTextSharePolicy.rejectionMessage(intent.action, intent.type, text)
+        externalTextImports = externalTextImports + if (rejection == null) {
+            ExternalSharedTextImport(requestId, text = text, html = html)
         } else {
-            handleConfigurationIntent(intent)
+            ExternalSharedTextImport(requestId, errorMessage = rejection)
+        }
+        if (AndroidSettings(this).requireAuthentication) {
+            unlockMessage = "Unlock Clipman to add the shared text."
         }
     }
 
@@ -424,7 +446,9 @@ private fun ClipmanApp(
     externalConnectionImport: ExternalServerConnectionImport?,
     onExternalConnectionImportConsumed: (Long) -> Unit,
     externalImageImport: ExternalSharedImageImport?,
-    onExternalImageImportConsumed: (Long) -> Unit
+    onExternalImageImportConsumed: (Long) -> Unit,
+    externalTextImport: ExternalSharedTextImport?,
+    onExternalTextImportConsumed: (Long) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? MainActivity
@@ -1146,6 +1170,42 @@ private fun ClipmanApp(
         onExternalImageImportConsumed(request.id)
     }
 
+    LaunchedEffect(
+        externalTextImport?.id,
+        hasLoadedHistory,
+        isLoadingHistory,
+        showConnectionSettings
+    ) {
+        val request = externalTextImport ?: return@LaunchedEffect
+        request.errorMessage?.let { message ->
+            setTransientStatus(message)
+            announce(view, message)
+            onExternalTextImportConsumed(request.id)
+            return@LaunchedEffect
+        }
+        if (!hasLoadedHistory || isLoadingHistory || showConnectionSettings) return@LaunchedEffect
+        val richText = if (richTextEnabled && request.html.isNotBlank()) {
+            RichTextClipboard.normalize(
+                RichTextPayload(HtmlFragment = request.html, PreferredFormat = "Html")
+            )
+        } else {
+            null
+        }
+        saveDatabaseChange(
+            actionText = "Adding shared text",
+            completionStatus = "Shared text added to Clipman history.",
+            playCopyFeedback = true
+        ) { current ->
+            SyncConflictResolver.addText(
+                current,
+                request.text,
+                deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
+                richText
+            )
+        }
+        onExternalTextImportConsumed(request.id)
+    }
+
     fun offerWebsiteTitle(entry: ClipEntry) {
         if (entry.Name.isNotBlank() || !LinkPresentation.isFetchableHttpUrl(entry.Text)) return
         websiteTitleCandidate = entry
@@ -1754,17 +1814,17 @@ private fun ClipmanApp(
             section = section,
             sections = visibleSections,
             entriesShown = visibleEntries.size,
-            totalEntries = entries.size,
-            sortMode = sortMode,
-            groupFilter = groupFilter,
-            groups = groups,
+            filterLabel = if (historyFilterKind == HistoryFilterKind.Device) {
+                "Device ${deviceFilter.ifBlank { "All" }}"
+            } else {
+                groupFilter.ifBlank { "All" }
+            },
             onSectionChanged = {
                 section = it
                 groupFilter = ""
             },
             onAddClipboard = { addCurrentClipboardText() },
             onOpenSettings = { showConnectionSettings = true },
-            onSort = { applyHistorySort(nextSortMode(sortMode)) },
             onGroup = { showGroupPicker = true },
             onTop = { scope.launch { selectedListState.animateScrollToItem(0) } }
         )
@@ -1774,10 +1834,6 @@ private fun ClipmanApp(
             label = { Text("Search history") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
-        )
-        Text(
-            text = "${visibleEntries.size} ${section.label.lowercase()} entries shown. Sort: ${sortMode.label}. Filter: ${if (historyFilterKind == HistoryFilterKind.Device) "Device " + deviceFilter else groupFilter.ifBlank { "All" }}.",
-            style = MaterialTheme.typography.bodySmall
         )
         HorizontalPager(
             state = pagerState,
@@ -1878,7 +1934,7 @@ private fun ClipmanApp(
             }
         }
         HistoryStatusBar(
-            status = status,
+            status = historyStatusText(visibleEntries.size, section.label, status),
             onGoToBottom = {
                 scope.launch {
                     if (visibleEntries.isNotEmpty()) {
@@ -2100,40 +2156,65 @@ private fun HistoryToolbar(
     section: HistorySection,
     sections: List<HistorySection>,
     entriesShown: Int,
-    totalEntries: Int,
-    sortMode: HistorySort,
-    groupFilter: String,
-    groups: List<String>,
+    filterLabel: String,
     onSectionChanged: (HistorySection) -> Unit,
     onAddClipboard: () -> Unit,
     onOpenSettings: () -> Unit,
-    onSort: () -> Unit,
     onGroup: () -> Unit,
     onTop: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        TextButton(
-            onClick = {
-                val current = sections.indexOf(section).coerceAtLeast(0)
-                onSectionChanged(sections[(current + 1) % sections.size])
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            TextButton(
+                modifier = Modifier.weight(1f),
+                onClick = onAddClipboard
+            ) {
+                Text("Paste")
             }
-        ) {
-            val current = sections.indexOf(section).coerceAtLeast(0)
-            Text("Switch to ${sections[(current + 1) % sections.size].label}")
+            TextButton(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    val current = sections.indexOf(section).coerceAtLeast(0)
+                    onSectionChanged(sections[(current + 1) % sections.size])
+                }
+            ) {
+                val current = sections.indexOf(section).coerceAtLeast(0)
+                Text("Switch to ${sections[(current + 1) % sections.size].label}")
+            }
         }
-        TextButton(onClick = onAddClipboard) { Text("Paste") }
-        TextButton(onClick = onGroup) {
-            Text("Filter")
+        Row(modifier = Modifier.fillMaxWidth()) {
+            TextButton(
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = "Filter history, current filter $filterLabel" },
+                onClick = onGroup
+            ) {
+                Text("Filter")
+            }
+            TextButton(modifier = Modifier.weight(1f), onClick = onOpenSettings) {
+                Text("Settings")
+            }
+            TextButton(
+                modifier = Modifier.weight(1f),
+                onClick = onTop,
+                enabled = entriesShown > 0
+            ) {
+                Text("Top")
+            }
         }
-        TextButton(onClick = onOpenSettings) { Text("Settings") }
-        TextButton(onClick = onTop, enabled = entriesShown > 0) { Text("Top") }
-        TextButton(onClick = onSort) { Text("Sort: ${sortMode.label}") }
     }
+}
+
+internal fun historyStatusText(entriesShown: Int, sectionLabel: String, status: String): String {
+    val label = sectionLabel.trim().lowercase()
+    val entryLabel = when {
+        label == "rich text" -> "rich text ${if (entriesShown == 1) "entry" else "entries"}"
+        label == "links" -> "${if (entriesShown == 1) "link" else "links"} ${if (entriesShown == 1) "entry" else "entries"}"
+        else -> "$label ${if (entriesShown == 1) "entry" else "entries"}"
+    }
+    val count = "$entriesShown $entryLabel."
+    val detail = status.trim()
+    return if (detail.isEmpty()) count else "$count $detail"
 }
 
 @Composable
