@@ -1,0 +1,52 @@
+name: Publish Clipman manual
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Manual.html
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Prepare manual site
+        shell: bash
+        run: |
+          set -euo pipefail
+          site="$RUNNER_TEMP/clipman-pages"
+          mkdir -p "$site"
+          install -m 0644 Manual.html "$site/index.html"
+          install -m 0644 Manual.html "$site/Manual.html"
+          install -m 0644 Manual.html "$site/manual.html"
+          touch "$site/.nojekyll"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload manual site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/clipman-pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
