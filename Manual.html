@@ -90,6 +90,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.8.8 Windows</h3>
+  <ul>
+    <li>Corrected the History filter mnemonic from the conflicting <code>Alt+F</code> label to <code>Alt+G</code>. The filter shortcut now agrees with the existing command and manual without colliding with the File menu.</li>
+    <li>Changed Clipman Server polling so a slow or unavailable connection cannot queue overlapping background checks. Successful synchronization retains its two-second interval, while failed checks now sleep for the existing retry backoff instead of waking repeatedly.</li>
+  </ul>
+
   <h3>2.6.4 Android</h3>
   <ul>
     <li>Added <strong>Share to Clipman</strong> for text, links and HTML from Android share sheets. Shared HTML retains its formatting when Rich Text history is enabled, while existing photo sharing remains available.</li>

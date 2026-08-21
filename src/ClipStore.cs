@@ -15,6 +15,7 @@ namespace Clipman
         private FileSystemWatcher watcher;
         private Timer reloadTimer;
         private Timer serverPollTimer;
+        private int serverPollGeneration;
         private ClipDatabase database = new ClipDatabase();
         private Func<string> passwordProvider;
         private ServerStorageClient serverClient;
@@ -135,6 +136,7 @@ namespace Clipman
             var queueInitialSync = false;
             lock (sync)
             {
+                serverPollGeneration++;
                 if (serverPollTimer != null)
                 {
                     serverPollTimer.Dispose();
@@ -156,7 +158,12 @@ namespace Clipman
                     return;
                 }
 
-                serverPollTimer = new Timer(delegate { PollServer(); }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+                var pollGeneration = serverPollGeneration;
+                serverPollTimer = new Timer(
+                    delegate { PollServer(pollGeneration); },
+                    null,
+                    CalculateServerPollDelayMilliseconds(TimeUtil.NowUnixMs(), serverNextPollUnixMs),
+                    Timeout.Infinite);
                 queueInitialSync = true;
             }
 
@@ -1144,63 +1151,98 @@ namespace Clipman
             serverNextPollUnixMs = now + delaySeconds * 1000L;
         }
 
-        private void PollServer()
+        internal static int CalculateServerPollDelayMilliseconds(long nowUnixMs, long nextPollUnixMs)
         {
-            var changed = false;
-            lock (sync)
+            const int normalPollMilliseconds = 2000;
+            if (nextPollUnixMs <= nowUnixMs + normalPollMilliseconds)
             {
-                try
-                {
-                    if (serverClient == null || !serverClient.IsConfigured || serverSyncInProgress) return;
-                    var now = TimeUtil.NowUnixMs();
-                    if (serverNextPollUnixMs > now) return;
-                    serverLastPollUnixMs = now;
-                    var metadata = serverClient.GetMetadata();
-                    storageUnavailable = false;
-                    LastStorageError = string.Empty;
-                    MarkServerSuccessLocked(false);
-                    if (!string.IsNullOrWhiteSpace(metadata.Revision) &&
-                        !string.Equals(metadata.Revision, serverRevision, StringComparison.Ordinal))
-                    {
-                        changed = SyncFromServerLocked(false);
-                    }
-                }
-                catch (WebException ex)
-                {
-                    if (serverClient != null && serverClient.IsNotFound(ex))
-                    {
-                        try
-                        {
-                            changed = SyncFromServerLocked(true);
-                            return;
-                        }
-                        catch (WebException retryEx)
-                        {
-                            if (serverClient != null && serverClient.IsNotFound(retryEx)) return;
-                            storageUnavailable = true;
-                            LastStorageError = "Server poll failed: " + retryEx.Message;
-                            MarkServerFailureLocked();
-                            return;
-                        }
-                    }
-                    storageUnavailable = true;
-                    LastStorageError = "Server poll failed: " + ex.Message;
-                    MarkServerFailureLocked();
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    if (!IsRecoverableServerException(ex)) return;
-                    storageUnavailable = true;
-                    LastStorageError = "Server poll failed: " + ex.Message;
-                    MarkServerFailureLocked();
-                    return;
-                }
+                return normalPollMilliseconds;
             }
 
-            if (changed)
+            return (int)Math.Min(int.MaxValue, nextPollUnixMs - nowUnixMs);
+        }
+
+        private void ScheduleNextServerPoll(int pollGeneration)
+        {
+            lock (sync)
             {
-                OnChanged(true);
+                if (pollGeneration != serverPollGeneration ||
+                    serverPollTimer == null ||
+                    serverClient == null ||
+                    !serverClient.IsConfigured)
+                {
+                    return;
+                }
+
+                var delay = CalculateServerPollDelayMilliseconds(TimeUtil.NowUnixMs(), serverNextPollUnixMs);
+                serverPollTimer.Change(delay, Timeout.Infinite);
+            }
+        }
+
+        private void PollServer(int pollGeneration)
+        {
+            var changed = false;
+            try
+            {
+                lock (sync)
+                {
+                    try
+                    {
+                        if (serverClient == null || !serverClient.IsConfigured || serverSyncInProgress) return;
+                        var now = TimeUtil.NowUnixMs();
+                        if (serverNextPollUnixMs > now) return;
+                        serverLastPollUnixMs = now;
+                        var metadata = serverClient.GetMetadata();
+                        storageUnavailable = false;
+                        LastStorageError = string.Empty;
+                        MarkServerSuccessLocked(false);
+                        if (!string.IsNullOrWhiteSpace(metadata.Revision) &&
+                            !string.Equals(metadata.Revision, serverRevision, StringComparison.Ordinal))
+                        {
+                            changed = SyncFromServerLocked(false);
+                        }
+                    }
+                    catch (WebException ex)
+                    {
+                        if (serverClient != null && serverClient.IsNotFound(ex))
+                        {
+                            try
+                            {
+                                changed = SyncFromServerLocked(true);
+                                return;
+                            }
+                            catch (WebException retryEx)
+                            {
+                                if (serverClient != null && serverClient.IsNotFound(retryEx)) return;
+                                storageUnavailable = true;
+                                LastStorageError = "Server poll failed: " + retryEx.Message;
+                                MarkServerFailureLocked();
+                                return;
+                            }
+                        }
+                        storageUnavailable = true;
+                        LastStorageError = "Server poll failed: " + ex.Message;
+                        MarkServerFailureLocked();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!IsRecoverableServerException(ex)) return;
+                        storageUnavailable = true;
+                        LastStorageError = "Server poll failed: " + ex.Message;
+                        MarkServerFailureLocked();
+                        return;
+                    }
+                }
+
+                if (changed)
+                {
+                    OnChanged(true);
+                }
+            }
+            finally
+            {
+                ScheduleNextServerPoll(pollGeneration);
             }
         }
 
@@ -1810,7 +1852,12 @@ namespace Clipman
         {
             if (watcher != null) watcher.Dispose();
             if (reloadTimer != null) reloadTimer.Dispose();
-            if (serverPollTimer != null) serverPollTimer.Dispose();
+            lock (sync)
+            {
+                serverPollGeneration++;
+                if (serverPollTimer != null) serverPollTimer.Dispose();
+                serverPollTimer = null;
+            }
         }
 
         private static bool IsRecoverableServerException(Exception ex)

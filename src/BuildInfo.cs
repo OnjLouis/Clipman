@@ -1,7 +1,7 @@
-namespace Clipman
+﻿namespace Clipman
 {
     internal static class BuildInfo
     {
-        public const long BuildStampUtcMs = 1787081595261L;
+        public const long BuildStampUtcMs = 1787291167868L;
     }
 }

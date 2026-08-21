@@ -135,8 +135,8 @@ namespace Clipman
             };
             var groupLabel = new Label
             {
-                Text = "&Filter:",
-                Width = 52,
+                Text = "Filter (&G):",
+                Width = 72,
                 Height = 24,
                 TextAlign = ContentAlignment.MiddleLeft
             };

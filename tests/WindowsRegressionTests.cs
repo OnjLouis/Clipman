@@ -18,6 +18,7 @@ namespace Clipman.Tests
         private static int Main()
         {
             Run("database container caps are aligned", DatabaseContainerCapsAreAligned);
+            Run("server polls cannot overlap and respect failure backoff", ServerPollSchedulingIsBounded);
             Run("bounded exact reads handle partial streams", BoundedExactReadsHandlePartialStreams);
             Run("encrypted database round trip", EncryptedDatabaseRoundTrip);
             Run("URL length is bounded before presentation or fetch", UrlLengthIsBounded);
@@ -281,6 +282,16 @@ namespace Clipman.Tests
             }
         }
 
+        private static void ServerPollSchedulingIsBounded()
+        {
+            Assert(ClipStore.CalculateServerPollDelayMilliseconds(1000, 0) == 2000,
+                "Healthy server polling should retain the normal two-second interval.");
+            Assert(ClipStore.CalculateServerPollDelayMilliseconds(1000, 2500) == 2000,
+                "A near-term retry should not create a tight polling loop.");
+            Assert(ClipStore.CalculateServerPollDelayMilliseconds(1000, 7000) == 6000,
+                "A failed server poll should sleep until its retry backoff expires.");
+        }
+
         private static void UrlLabelsAcceptWindowsPathCharacters()
         {
             var encodedCharacters = new[] { "%22", "%3C", "%3E", "%7C" };
@@ -382,6 +393,12 @@ namespace Clipman.Tests
                         "The file history list did not expose its current section name.");
                     Assert(string.IsNullOrEmpty(fileList.AccessibleDescription),
                         "The file history list exposed verbose keyboard instructions to screen readers.");
+                    var filterPanel = (FlowLayoutPanel)typeof(HistoryForm)
+                        .GetField("filterPanel", BindingFlags.Instance | BindingFlags.NonPublic)
+                        .GetValue(form);
+                    var filterLabel = filterPanel.Controls.OfType<Label>().Single();
+                    Assert(filterLabel.Text == "Filter (&G):",
+                        "The History filter mnemonic did not agree with its Alt+G command.");
                     var statusText = (ToolStripStatusLabel)typeof(HistoryForm)
                         .GetField("statusText", BindingFlags.Instance | BindingFlags.NonPublic)
                         .GetValue(form);
