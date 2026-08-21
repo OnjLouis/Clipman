@@ -20,6 +20,8 @@ namespace Clipman
         private const int ToggleHotkeyAlternateId = 1004;
         private const int QuickCopyHotkeyBaseId = 2000;
         private const int SecretHotkeyBaseId = 3000;
+        private const int MaximumClipboardSnapshotTextLength = 32 * 1024 * 1024;
+        private const int MaximumClipboardSnapshotStreamLength = 64 * 1024 * 1024;
 
         private readonly string appDirectory;
         private readonly SettingsStore settingsStore;
@@ -2023,7 +2025,11 @@ namespace Clipman
 
         private static IDataObject SnapshotClipboardData()
         {
-            var source = Clipboard.GetDataObject();
+            return SnapshotClipboardData(Clipboard.GetDataObject());
+        }
+
+        internal static IDataObject SnapshotClipboardData(IDataObject source)
+        {
             if (source == null) return null;
 
             var snapshot = new DataObject();
@@ -2032,6 +2038,9 @@ namespace Clipman
             copied |= SnapshotText(source, snapshot, DataFormats.UnicodeText, TextDataFormat.UnicodeText);
             copied |= SnapshotText(source, snapshot, DataFormats.Text, TextDataFormat.Text);
             copied |= SnapshotText(source, snapshot, DataFormats.OemText, TextDataFormat.Text);
+            copied |= SnapshotText(source, snapshot, DataFormats.Rtf, TextDataFormat.Rtf);
+            copied |= SnapshotText(source, snapshot, DataFormats.Html, TextDataFormat.Html);
+            copied |= SnapshotText(source, snapshot, DataFormats.CommaSeparatedValue, TextDataFormat.CommaSeparatedValue);
 
             try
             {
@@ -2051,40 +2060,69 @@ namespace Clipman
             {
             }
 
-            string[] formats;
+            copied |= SnapshotImage(source, snapshot);
+            copied |= SnapshotStream(source, snapshot, DataFormats.WaveAudio, MaximumClipboardSnapshotStreamLength);
+
+            // Explorer uses this small stream to distinguish a cut from a copy. It is
+            // independently cloneable, unlike delayed OLE formats such as metafiles.
+            copied |= SnapshotStream(source, snapshot, "Preferred DropEffect", 64);
+
+            return copied ? snapshot : null;
+        }
+
+        private static bool SnapshotImage(IDataObject source, DataObject snapshot)
+        {
             try
             {
-                formats = source.GetFormats(false) ?? new string[0];
+                if (!source.GetDataPresent(DataFormats.Bitmap, false)) return false;
+                var image = source.GetData(DataFormats.Bitmap, false) as Image;
+                if (image == null) return false;
+                snapshot.SetImage(new Bitmap(image));
+                return true;
             }
             catch
             {
-                formats = new string[0];
+                return false;
             }
+        }
 
-            foreach (var format in formats)
+        private static bool SnapshotStream(IDataObject source, DataObject snapshot, string format, int maximumLength)
+        {
+            try
             {
-                if (string.IsNullOrWhiteSpace(format)) continue;
-                if (string.Equals(format, DataFormats.UnicodeText, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(format, DataFormats.Text, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(format, DataFormats.OemText, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(format, DataFormats.FileDrop, StringComparison.OrdinalIgnoreCase))
+                if (!source.GetDataPresent(format, false)) return false;
+                var data = source.GetData(format, false);
+                var stream = data as Stream;
+                if (stream != null)
                 {
-                    continue;
+                    if (stream.CanSeek && stream.Length > maximumLength) return false;
+                    var copy = new MemoryStream();
+                    var originalPosition = stream.CanSeek ? stream.Position : 0;
+                    try
+                    {
+                        if (stream.CanSeek) stream.Position = 0;
+                        CopyBounded(stream, copy, maximumLength);
+                    }
+                    finally
+                    {
+                        if (stream.CanSeek) stream.Position = originalPosition;
+                    }
+                    copy.Position = 0;
+                    snapshot.SetData(format, false, copy);
+                    return true;
                 }
 
-                try
+                var bytes = data as byte[];
+                if (bytes != null && bytes.Length <= maximumLength)
                 {
-                    var data = source.GetData(format, false);
-                    if (data == null) continue;
-                    snapshot.SetData(format, CloneClipboardFormatData(data));
-                    copied = true;
-                }
-                catch
-                {
+                    snapshot.SetData(format, false, bytes.ToArray());
+                    return true;
                 }
             }
-
-            return copied ? snapshot : null;
+            catch
+            {
+            }
+            return false;
         }
 
         private static bool SnapshotText(IDataObject source, DataObject snapshot, string dataFormat, TextDataFormat textFormat)
@@ -2093,7 +2131,7 @@ namespace Clipman
             {
                 if (!source.GetDataPresent(dataFormat, false)) return false;
                 var text = source.GetData(dataFormat, false) as string;
-                if (text == null) return false;
+                if (text == null || text.Length > MaximumClipboardSnapshotTextLength) return false;
                 snapshot.SetText(text, textFormat);
                 return true;
             }
@@ -2103,29 +2141,18 @@ namespace Clipman
             }
         }
 
-        private static object CloneClipboardFormatData(object data)
+        private static void CopyBounded(Stream source, Stream destination, int maximumLength)
         {
-            var stream = data as MemoryStream;
-            if (stream != null)
+            var buffer = new byte[81920];
+            var total = 0;
+            while (true)
             {
-                var copy = new MemoryStream(stream.ToArray());
-                copy.Position = 0;
-                return copy;
+                var read = source.Read(buffer, 0, Math.Min(buffer.Length, maximumLength - total + 1));
+                if (read <= 0) return;
+                total += read;
+                if (total > maximumLength) throw new InvalidDataException("Clipboard format exceeds the snapshot limit.");
+                destination.Write(buffer, 0, read);
             }
-
-            var bytes = data as byte[];
-            if (bytes != null)
-            {
-                return bytes.ToArray();
-            }
-
-            var strings = data as string[];
-            if (strings != null)
-            {
-                return strings.ToArray();
-            }
-
-            return data;
         }
 
         private void BeginInvokeIfReady(Action action)

@@ -30,6 +30,7 @@ namespace Clipman.Tests
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
             Run("copied image files use the bounded Rich Text image path", CopiedImageFilesUseBoundedRichTextPath);
+            Run("Quick Paste snapshots avoid opaque OLE clipboard formats", QuickPasteSnapshotAvoidsOpaqueOleFormats);
             Run("single-modifier hotkey warning preference defaults and round trips", SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
@@ -773,6 +774,22 @@ namespace Clipman.Tests
             };
         }
 
+        private static void QuickPasteSnapshotAvoidsOpaqueOleFormats()
+        {
+            var source = new GuardedClipboardDataObject();
+            var snapshot = ClipmanApplicationContext.SnapshotClipboardData(source);
+
+            Assert(snapshot != null, "The safe clipboard formats were not captured.");
+            Assert((string)snapshot.GetData(DataFormats.UnicodeText, false) == "safe text",
+                "Unicode text was not preserved by the Quick Paste snapshot.");
+            Assert((string)snapshot.GetData(DataFormats.Rtf, false) == @"{\rtf1 safe}",
+                "Rich Text was not preserved by the Quick Paste snapshot.");
+            Assert(!source.UnsafeFormatRead,
+                "Quick Paste attempted to materialize an opaque OLE clipboard format.");
+            Assert(!source.FormatsEnumerated,
+                "Quick Paste enumerated application-owned clipboard formats.");
+        }
+
         private static ClipMergeObservation Observation(ClipMergeKind kind, string signature, string source, string operation, string historyId)
         {
             return new ClipMergeObservation
@@ -850,6 +867,49 @@ namespace Clipman.Tests
             {
                 return base.Read(buffer, offset, Math.Min(count, maximumRead));
             }
+        }
+
+        private sealed class GuardedClipboardDataObject : IDataObject
+        {
+            public bool UnsafeFormatRead { get; private set; }
+            public bool FormatsEnumerated { get; private set; }
+
+            public object GetData(string format, bool autoConvert)
+            {
+                if (string.Equals(format, DataFormats.EnhancedMetafile, StringComparison.OrdinalIgnoreCase))
+                {
+                    UnsafeFormatRead = true;
+                    throw new InvalidOperationException("Opaque OLE data must not be materialized.");
+                }
+                if (string.Equals(format, DataFormats.UnicodeText, StringComparison.OrdinalIgnoreCase)) return "safe text";
+                if (string.Equals(format, DataFormats.Rtf, StringComparison.OrdinalIgnoreCase)) return @"{\rtf1 safe}";
+                return null;
+            }
+
+            public object GetData(string format) { return GetData(format, true); }
+            public object GetData(Type format) { return null; }
+
+            public bool GetDataPresent(string format, bool autoConvert)
+            {
+                return string.Equals(format, DataFormats.UnicodeText, StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(format, DataFormats.Rtf, StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(format, DataFormats.EnhancedMetafile, StringComparison.OrdinalIgnoreCase);
+            }
+
+            public bool GetDataPresent(string format) { return GetDataPresent(format, true); }
+            public bool GetDataPresent(Type format) { return false; }
+
+            public string[] GetFormats(bool autoConvert)
+            {
+                FormatsEnumerated = true;
+                return new[] { DataFormats.UnicodeText, DataFormats.Rtf, DataFormats.EnhancedMetafile };
+            }
+
+            public string[] GetFormats() { return GetFormats(true); }
+            public void SetData(string format, bool autoConvert, object data) { throw new NotSupportedException(); }
+            public void SetData(string format, object data) { throw new NotSupportedException(); }
+            public void SetData(Type format, object data) { throw new NotSupportedException(); }
+            public void SetData(object data) { throw new NotSupportedException(); }
         }
     }
 }
