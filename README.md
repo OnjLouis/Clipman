@@ -9,7 +9,7 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 - [Browse current Windows, macOS, Linux, Android, and server downloads](https://github.com/OnjLouis/Clipman/releases).
 - [Join the public iPhone and iPad beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
 - [Read the complete Clipman manual](https://onjlouis.github.io/Clipman/manual.html).
-- [Read the Clipman Server manual](https://github.com/OnjLouis/Clipman/blob/main/ClipmanServer/Manual.html).
+- [Read the Clipman Server manual](https://onjlouis.github.io/Clipman/server/manual.html).
 
 Windows is portable, macOS uses a signed and notarized app, Linux includes a per-user installer, and the mobile apps use the normal platform installation flow. Clipman Server is a separate, optional download; ordinary Clipman does not require it.
 

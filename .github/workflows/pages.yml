@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - Manual.html
+      - ClipmanServer/Manual.html
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -33,10 +34,13 @@ jobs:
         run: |
           set -euo pipefail
           site="$RUNNER_TEMP/clipman-pages"
-          mkdir -p "$site"
+          mkdir -p "$site/server"
           install -m 0644 Manual.html "$site/index.html"
           install -m 0644 Manual.html "$site/Manual.html"
           install -m 0644 Manual.html "$site/manual.html"
+          install -m 0644 ClipmanServer/Manual.html "$site/server/index.html"
+          install -m 0644 ClipmanServer/Manual.html "$site/server/Manual.html"
+          install -m 0644 ClipmanServer/Manual.html "$site/server/manual.html"
           touch "$site/.nojekyll"
 
       - name: Configure GitHub Pages
