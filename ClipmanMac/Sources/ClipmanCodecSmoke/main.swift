@@ -332,13 +332,30 @@ do {
             && serverStorageSource.contains("expectedBytes: response.expectedContentLength")
             && serverStorageSource.contains("try buffer.append(data)")
             && !serverStorageSource.contains("dataTask(with: request) {"),
-        "HTTPS server downloads must enforce the database limit incrementally instead of completion-handler buffering"
+        "server downloads must enforce the database limit incrementally instead of completion-handler buffering"
     )
     expect(
-        serverStorageSource.contains("body = try BoundedDataBuffer(")
-            && serverStorageSource.contains("try body.append(chunk)")
-            && serverStorageSource.contains("Database response exceeded the 272 MiB client compatibility limit."),
-        "raw HTTP server downloads must enforce the same exact limit with a clear error"
+        serverStorageSource.contains("let configuration = URLSessionConfiguration.ephemeral")
+            && serverStorageSource.contains("request.cachePolicy = .reloadIgnoringLocalCacheData")
+            && serverStorageSource.contains("session.invalidateAndCancel()"),
+        "HTTPS server requests must use fresh cancellable sessions across network changes"
+    )
+    expect(
+        serverStorageSource.contains("NWConnection(host: host, port: port, using: .tcp)")
+            && serverStorageSource.contains("completionSignal.wait(timeout:")
+            && serverStorageSource.contains("connection.forceCancel()")
+            && !serverStorageSource.contains("Stream.getStreamsToHost")
+            && !serverStorageSource.contains("rawHTTPRequestWithTimeout"),
+        "private HTTP server requests must use cancellable Network framework connections so network changes can recover without restarting Clipman"
+    )
+    let updateServiceSource = try String(
+        contentsOf: sourcesDirectory.appendingPathComponent("Clipman/UpdateService.swift"),
+        encoding: .utf8
+    )
+    expect(
+        updateServiceSource.contains("hasPrefix(\"mac-v\")")
+            && updateServiceSource.contains("dropFirst(\"mac-v\".count)"),
+        "Mac-only release tags must display and compare as ordinary semantic versions"
     )
     let titleFetcherSource = try String(
         contentsOf: sourcesDirectory.appendingPathComponent("Clipman/WebsiteTitleFetcher.swift"),

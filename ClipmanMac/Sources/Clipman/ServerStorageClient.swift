@@ -1,5 +1,6 @@
 import Foundation
 import ClipmanCore
+import Network
 import Security
 
 private final class ServerRequestBox: @unchecked Sendable {
@@ -99,9 +100,10 @@ final class ServerStorageClient: @unchecked Sendable {
         guard let baseURL, isConfigured else { throw ServerStorageError.notConfigured }
         let url = baseURL.appendingPathComponent("api/v1/database/\(databaseID)")
         if url.scheme?.caseInsensitiveCompare("http") == .orderedSame {
-            return try rawHTTPRequestWithTimeout(url: url, method: method, body: body, expectedRevision: expectedRevision)
+            return try privateNetworkRequest(url: url, method: method, body: body, expectedRevision: expectedRevision)
         }
         var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.httpMethod = method
         request.timeoutInterval = 8
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -152,206 +154,61 @@ final class ServerStorageClient: @unchecked Sendable {
         }
     }
 
-    private func rawHTTPRequestWithTimeout(url: URL, method: String, body: Data?, expectedRevision: String?) throws -> (Data, HTTPURLResponse) {
-        let semaphore = DispatchSemaphore(value: 0)
-        let result = ServerRequestBox()
-        DispatchQueue.global(qos: .utility).async {
-            do {
-                let response = try self.rawHTTPRequest(url: url, method: method, body: body, expectedRevision: expectedRevision)
-                result.set(.success(response))
-            } catch {
-                result.set(.failure(error))
-            }
-            semaphore.signal()
-        }
-        if semaphore.wait(timeout: .now() + .seconds(10)) == .timedOut {
-            throw ServerStorageError.timeout
-        }
-        let (data, response) = try result.get()
-        guard let http = response as? HTTPURLResponse else {
-            throw ServerStorageError.httpStatus(0, "No HTTP response.")
-        }
-        return (data, http)
-    }
+    private func privateNetworkRequest(
+        url: URL,
+        method: String,
+        body: Data?,
+        expectedRevision: String?
+    ) throws -> (Data, HTTPURLResponse) {
+        let portValue = url.port ?? 80
+        guard let host = url.host,
+              (1...65_535).contains(portValue),
+              let port = NWEndpoint.Port(rawValue: UInt16(portValue))
+        else { throw ServerStorageError.notConfigured }
 
-    private func rawHTTPRequest(url: URL, method: String, body: Data?, expectedRevision: String?) throws -> (Data, HTTPURLResponse) {
-        guard let host = url.host else { throw ServerStorageError.notConfigured }
-        let port = url.port ?? 80
-        let path = url.path.isEmpty ? "/" : url.path
+        let hostHeader = host.contains(":") ? "[\(host)]" : host
+        var requestTarget = url.path.isEmpty ? "/" : url.path
+        if let query = url.query, !query.isEmpty {
+            requestTarget += "?\(query)"
+        }
         let bodyData = body ?? Data()
-
-        var headerLines = [
-            "\(method) \(path) HTTP/1.1",
-            "Host: \(host):\(port)",
+        var headers = [
+            "\(method) \(requestTarget) HTTP/1.1",
+            "Host: \(hostHeader):\(port.rawValue)",
             "Authorization: Bearer \(token)",
             "User-Agent: \(userAgent)",
+            "Accept-Encoding: identity",
             "Connection: close"
         ]
         if let expectedRevision, !expectedRevision.isEmpty {
-            headerLines.append("If-Match: \(expectedRevision)")
+            headers.append("If-Match: \(expectedRevision)")
         }
         if body != nil {
-            headerLines.append("Content-Type: application/octet-stream")
-            headerLines.append("Content-Length: \(bodyData.count)")
-        } else {
-            headerLines.append("Content-Length: 0")
+            headers.append("Content-Type: application/octet-stream")
         }
-        let header = headerLines.joined(separator: "\r\n") + "\r\n\r\n"
-        guard var requestData = header.data(using: .utf8) else {
+        headers.append("Content-Length: \(bodyData.count)")
+        guard var requestData = (headers.joined(separator: "\r\n") + "\r\n\r\n").data(using: .utf8) else {
             throw ServerStorageError.invalidResponse("Could not encode request.")
         }
         requestData.append(bodyData)
 
-        var readStream: InputStream?
-        var writeStream: OutputStream?
-        Stream.getStreamsToHost(withName: host, port: port, inputStream: &readStream, outputStream: &writeStream)
-        guard let input = readStream, let output = writeStream else {
-            throw ServerStorageError.invalidResponse("Could not open connection.")
-        }
-        input.open()
-        output.open()
-        defer {
-            input.close()
-            output.close()
-        }
-
-        try writeAll(requestData, to: output)
-        return try readRawHTTPResponse(
-            from: input,
-            url: url,
-            expectsBody: ServerHTTPResponsePolicy.expectsBody(forMethod: method)
+        let attempt = ServerHTTPConnectionAttempt(
+            host: NWEndpoint.Host(host),
+            port: port,
+            request: requestData,
+            responseURL: url,
+            expectsBody: method.caseInsensitiveCompare("HEAD") != .orderedSame
         )
-    }
-
-    private func writeAll(_ data: Data, to output: OutputStream) throws {
-        try data.withUnsafeBytes { rawBuffer in
-            guard let base = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
-            var offset = 0
-            while offset < data.count {
-                let written = output.write(base.advanced(by: offset), maxLength: data.count - offset)
-                if written < 0 {
-                    throw output.streamError ?? ServerStorageError.invalidResponse("Socket write failed.")
-                }
-                if written == 0 {
-                    Thread.sleep(forTimeInterval: 0.01)
-                    continue
-                }
-                offset += written
-            }
-        }
-    }
-
-    private func readRawHTTPResponse(
-        from input: InputStream,
-        url: URL,
-        expectsBody: Bool
-    ) throws -> (Data, HTTPURLResponse) {
-        let marker = Data([13, 10, 13, 10])
-        let maximumHeaderBytes = 64 * 1024
-        var pendingHeaders = Data()
-        var response: HTTPURLResponse?
-        var expectedBodyBytes: Int64 = -1
-        var body = BoundedDataBuffer(maximumBytes: maximumServerDatabaseResponseBytes)
-        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
-        while true {
-            let count = input.read(&buffer, maxLength: buffer.count)
-            if count > 0 {
-                let chunk = Data(buffer.prefix(count))
-                if response == nil {
-                    pendingHeaders.append(chunk)
-                    if let headerRange = pendingHeaders.range(of: marker) {
-                        guard headerRange.lowerBound <= maximumHeaderBytes else {
-                            throw ServerStorageError.invalidResponse("Response headers exceeded the 64 KiB limit.")
-                        }
-                        let parsed = try parseRawHTTPHeaders(
-                            Data(pendingHeaders[..<headerRange.lowerBound]),
-                            url: url
-                        )
-                        if !expectsBody {
-                            return try validateRawHTTPStatus(Data(), response: parsed.response)
-                        }
-                        response = parsed.response
-                        expectedBodyBytes = parsed.contentLength
-                        do {
-                            body = try BoundedDataBuffer(
-                                maximumBytes: maximumServerDatabaseResponseBytes,
-                                expectedBytes: expectedBodyBytes
-                            )
-                            try body.append(Data(pendingHeaders[headerRange.upperBound...]))
-                        } catch BoundedDataBufferError.limitExceeded {
-                            throw databaseResponseTooLargeError()
-                        }
-                        pendingHeaders.removeAll(keepingCapacity: false)
-                    } else if pendingHeaders.count > maximumHeaderBytes {
-                        throw ServerStorageError.invalidResponse("Response headers exceeded the 64 KiB limit.")
-                    }
-                } else {
-                    do {
-                        try body.append(chunk)
-                    } catch BoundedDataBufferError.limitExceeded {
-                        throw databaseResponseTooLargeError()
-                    }
-                }
-            } else if count == 0 {
-                break
-            } else {
-                throw input.streamError ?? ServerStorageError.invalidResponse("Socket read failed.")
-            }
-        }
-        guard let response else {
-            throw ServerStorageError.invalidResponse("Missing response headers.")
-        }
-        if expectedBodyBytes >= 0, Int64(body.data.count) != expectedBodyBytes {
-            throw ServerStorageError.invalidResponse("Response body length did not match Content-Length.")
-        }
-        return try validateRawHTTPStatus(body.data, response: response)
-    }
-
-    private func parseRawHTTPHeaders(_ headerData: Data, url: URL) throws -> (response: HTTPURLResponse, contentLength: Int64) {
-        guard let headerText = String(data: headerData, encoding: .isoLatin1) else {
-            throw ServerStorageError.invalidResponse("Response headers were not readable.")
-        }
-        let lines = headerText.components(separatedBy: "\r\n")
-        guard let statusLine = lines.first else {
-            throw ServerStorageError.invalidResponse("Missing status line.")
-        }
-        let parts = statusLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
-        guard parts.count >= 2, let status = Int(parts[1]) else {
-            throw ServerStorageError.invalidResponse("Unreadable status line.")
-        }
-        var headers: [String: String] = [:]
-        var contentLength: Int64 = -1
-        for line in lines.dropFirst() {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let name = String(line[..<colon])
-            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            headers[name] = value
-            if name.caseInsensitiveCompare("Content-Length") == .orderedSame {
-                guard let parsedLength = Int64(value), parsedLength >= 0 else {
-                    throw ServerStorageError.invalidResponse("Content-Length was not a valid byte count.")
-                }
-                contentLength = parsedLength
-            }
-        }
-        guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers) else {
-            throw ServerStorageError.invalidResponse("Could not create response object.")
-        }
-        if contentLength > Int64(maximumServerDatabaseResponseBytes) {
-            throw databaseResponseTooLargeError()
-        }
-        return (response, contentLength)
-    }
-
-    private func validateRawHTTPStatus(_ body: Data, response: HTTPURLResponse) throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try attempt.run(timeoutSeconds: 10)
         switch response.statusCode {
         case 200..<300:
-            return (body, response)
+            return (data, response)
         case 404:
             throw ServerStorageError.notFound
         case 409, 412:
             throw ServerStorageError.conflict
         default:
-            let message = String(data: body, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
+            let message = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
             throw ServerStorageError.httpStatus(response.statusCode, message)
         }
     }
@@ -364,6 +221,223 @@ final class ServerStorageClient: @unchecked Sendable {
         let revision = response.value(forHTTPHeaderField: "X-Clipman-Revision") ?? ""
         let length = Int64(response.value(forHTTPHeaderField: "Content-Length") ?? "") ?? -1
         return ServerDatabaseMetadata(revision: revision, length: length)
+    }
+}
+
+private final class ServerHTTPConnectionAttempt: @unchecked Sendable {
+    private static let maximumHeaderBytes = 64 * 1024
+
+    private let host: NWEndpoint.Host
+    private let port: NWEndpoint.Port
+    private let request: Data
+    private let responseURL: URL
+    private let expectsBody: Bool
+    private let queue = DispatchQueue(label: "Clipman.ServerHTTPConnection")
+    private let completionSignal = DispatchSemaphore(value: 0)
+    private var connection: NWConnection?
+    private var pendingHeaders = Data()
+    private var response: HTTPURLResponse?
+    private var expectedBodyBytes: Int64 = -1
+    private var body = BoundedDataBuffer(maximumBytes: maximumServerDatabaseResponseBytes)
+    private var result: Result<(Data, HTTPURLResponse), Error>?
+    private var finished = false
+
+    init(
+        host: NWEndpoint.Host,
+        port: NWEndpoint.Port,
+        request: Data,
+        responseURL: URL,
+        expectsBody: Bool
+    ) {
+        self.host = host
+        self.port = port
+        self.request = request
+        self.responseURL = responseURL
+        self.expectsBody = expectsBody
+    }
+
+    func run(timeoutSeconds: TimeInterval) throws -> (Data, HTTPURLResponse) {
+        let connection = NWConnection(host: host, port: port, using: .tcp)
+        self.connection = connection
+        connection.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                self.sendRequest()
+            case .failed(let error):
+                self.complete(.failure(error))
+            case .cancelled:
+                if !self.finished {
+                    self.complete(.failure(ServerStorageError.invalidResponse("The private server connection was cancelled.")))
+                }
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+
+        if completionSignal.wait(timeout: .now() + timeoutSeconds) == .timedOut {
+            queue.sync {
+                guard !finished else { return }
+                finished = true
+                connection.stateUpdateHandler = nil
+                connection.forceCancel()
+            }
+            throw ServerStorageError.timeout
+        }
+        guard let result else {
+            throw ServerStorageError.invalidResponse("The private server connection ended without a result.")
+        }
+        return try result.get()
+    }
+
+    private func sendRequest() {
+        connection?.send(content: request, completion: .contentProcessed { [weak self] error in
+            guard let self else { return }
+            if let error {
+                self.complete(.failure(error))
+            } else {
+                self.receiveNext()
+            }
+        })
+    }
+
+    private func receiveNext() {
+        connection?.receive(minimumIncompleteLength: 1, maximumLength: 32 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            if let error {
+                self.complete(.failure(error))
+                return
+            }
+            do {
+                if let data, !data.isEmpty {
+                    try self.consume(data)
+                }
+                if self.finished { return }
+                if isComplete {
+                    try self.finishAtEndOfStream()
+                } else {
+                    self.receiveNext()
+                }
+            } catch {
+                self.complete(.failure(error))
+            }
+        }
+    }
+
+    private func consume(_ data: Data) throws {
+        guard response == nil else {
+            try appendBody(data)
+            return
+        }
+
+        pendingHeaders.append(data)
+        let marker = Data([13, 10, 13, 10])
+        guard let headerRange = pendingHeaders.range(of: marker) else {
+            guard pendingHeaders.count <= Self.maximumHeaderBytes else {
+                throw ServerStorageError.invalidResponse("Response headers exceeded the 64 KiB limit.")
+            }
+            return
+        }
+        guard headerRange.lowerBound <= Self.maximumHeaderBytes else {
+            throw ServerStorageError.invalidResponse("Response headers exceeded the 64 KiB limit.")
+        }
+
+        let parsed = try parseHeaders(Data(pendingHeaders[..<headerRange.lowerBound]))
+        response = parsed.response
+        expectedBodyBytes = parsed.contentLength
+        body = try BoundedDataBuffer(
+            maximumBytes: maximumServerDatabaseResponseBytes,
+            expectedBytes: expectedBodyBytes
+        )
+        let remaining = Data(pendingHeaders[headerRange.upperBound...])
+        pendingHeaders.removeAll(keepingCapacity: false)
+
+        if !expectsBody {
+            complete(.success((Data(), parsed.response)))
+            return
+        }
+        try appendBody(remaining)
+    }
+
+    private func appendBody(_ data: Data) throws {
+        guard !data.isEmpty else { return }
+        if expectedBodyBytes >= 0,
+           Int64(body.data.count) + Int64(data.count) > expectedBodyBytes {
+            throw ServerStorageError.invalidResponse("Response body exceeded Content-Length.")
+        }
+        do {
+            try body.append(data)
+        } catch BoundedDataBufferError.limitExceeded {
+            throw responseTooLargeError()
+        }
+        if expectedBodyBytes >= 0, Int64(body.data.count) == expectedBodyBytes,
+           let response {
+            complete(.success((body.data, response)))
+        }
+    }
+
+    private func finishAtEndOfStream() throws {
+        guard let response else {
+            throw ServerStorageError.invalidResponse("Missing response headers.")
+        }
+        if expectedBodyBytes >= 0, Int64(body.data.count) != expectedBodyBytes {
+            throw ServerStorageError.invalidResponse("Response body length did not match Content-Length.")
+        }
+        complete(.success((body.data, response)))
+    }
+
+    private func parseHeaders(_ data: Data) throws -> (response: HTTPURLResponse, contentLength: Int64) {
+        guard let text = String(data: data, encoding: .isoLatin1) else {
+            throw ServerStorageError.invalidResponse("Response headers were not readable.")
+        }
+        let lines = text.components(separatedBy: "\r\n")
+        guard let statusLine = lines.first else {
+            throw ServerStorageError.invalidResponse("Missing status line.")
+        }
+        let parts = statusLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+        guard parts.count >= 2, let status = Int(parts[1]) else {
+            throw ServerStorageError.invalidResponse("Unreadable status line.")
+        }
+        var fields: [String: String] = [:]
+        var contentLength: Int64 = -1
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon])
+            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            fields[name] = value
+            if name.caseInsensitiveCompare("Content-Length") == .orderedSame {
+                guard let length = Int64(value), length >= 0 else {
+                    throw ServerStorageError.invalidResponse("Content-Length was not a valid byte count.")
+                }
+                contentLength = length
+            }
+        }
+        if contentLength > Int64(maximumServerDatabaseResponseBytes) {
+            throw responseTooLargeError()
+        }
+        guard let response = HTTPURLResponse(
+            url: responseURL,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: fields
+        ) else {
+            throw ServerStorageError.invalidResponse("Could not create response object.")
+        }
+        return (response, contentLength)
+    }
+
+    private func complete(_ result: Result<(Data, HTTPURLResponse), Error>) {
+        guard !finished else { return }
+        finished = true
+        self.result = result
+        connection?.stateUpdateHandler = nil
+        connection?.forceCancel()
+        completionSignal.signal()
+    }
+
+    private func responseTooLargeError() -> ServerStorageError {
+        ServerStorageError.invalidResponse("Database response exceeded the 272 MiB client compatibility limit.")
     }
 }
 

@@ -228,7 +228,11 @@ final class UpdateService {
     }
 
     private func normalizedVersion(_ value: String) -> String {
-        value.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().hasPrefix("mac-v") {
+            return String(trimmed.dropFirst("mac-v".count))
+        }
+        return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
     }
 
     private func isVersion(_ candidate: String, newerThan current: String) -> Bool {
