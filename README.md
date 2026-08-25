@@ -43,7 +43,7 @@ The server cannot decrypt clipboard history. A server connection file can carry 
 
 ## More Ways To Use It
 
-The [Clipman CLI preview](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.9.0) provides terminal and headless access to server-backed text history on Windows, macOS, and Linux. It follows the same encrypted format and synchronization rules as the graphical clients.
+The [Clipman CLI](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.9.0) is the command-line companion for AI agents, shell scripts, terminal workflows, and headless systems on Windows, macOS, and Linux. It can initialize a connection, inspect status, list, retrieve, add, delete and synchronize server-backed text history, with interactive selection and machine-readable JSON output. It follows the same encrypted format and synchronization rules as the graphical clients; its current release remains a pre-1.0 preview while its interface settles.
 
 ## Project
 

@@ -151,8 +151,8 @@ namespace Clipman
             multipleEntrySeparator.SelectedIndexChanged += (s, e) => updateMultipleEntrySeparatorAvailability();
             updateMultipleEntrySeparatorAvailability();
             autoGroupByApp = NewCheckBox("Automatically group &new clips by source application", settings.AutoGroupByApp);
-            autoCopyLatestRemoteText = NewCheckBox("Put new text received from another devi&ce on the clipboard", settings.AutoCopyLatestRemoteText);
-            autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text entries received from another device onto this device's clipboard. Reusing an older entry on another device does not trigger this. This is off by default.";
+            autoCopyLatestRemoteText = NewCheckBox("Put new text received or sent to Clipman on the &clipboard", settings.AutoCopyLatestRemoteText);
+            autoCopyLatestRemoteText.AccessibleDescription = "When checked, Clipman copies newly created text received from another device or added through Windows Send To and command-line additions onto this device's clipboard. Reusing an older entry on another device does not trigger this. This is off by default.";
             pasteAfterEnter = NewCheckBox("After Enter, paste into the pre&vious application", settings.PasteAfterEnter);
             pasteAfterEnter.AccessibleDescription = "When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. This is off by default.";
             dynamicHistoryMode = NewCheckBox("Open history to the most recent clipboard t&ype", settings.DynamicHistoryMode);

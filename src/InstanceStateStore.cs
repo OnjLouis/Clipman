@@ -22,6 +22,17 @@ namespace Clipman
         }
     }
 
+    internal sealed class PendingCommandEntry
+    {
+        public string EntryId { get; set; }
+        public long CreatedAtUtcMs { get; set; }
+
+        public PendingCommandEntry()
+        {
+            EntryId = string.Empty;
+        }
+    }
+
     internal static class InstanceStateStore
     {
         private static string StatePath
@@ -32,6 +43,70 @@ namespace Clipman
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Clipman");
                 return Path.Combine(root, "running-instance.json");
+            }
+        }
+
+        private static string PendingCommandEntryPath
+        {
+            get
+            {
+                var root = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Clipman");
+                return Path.Combine(root, "pending-command-entry.json");
+            }
+        }
+
+        public static void PublishPendingCommandEntry(string entryId)
+        {
+            PublishPendingCommandEntry(PendingCommandEntryPath, entryId);
+        }
+
+        internal static void PublishPendingCommandEntry(string path, string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId)) return;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                JsonUtil.SaveAtomic(path, new PendingCommandEntry
+                {
+                    EntryId = entryId.Trim(),
+                    CreatedAtUtcMs = TimeUtil.NowUnixMs()
+                });
+            }
+            catch
+            {
+            }
+        }
+
+        public static string TakePendingCommandEntry(long maximumAgeMilliseconds)
+        {
+            return TakePendingCommandEntry(PendingCommandEntryPath, maximumAgeMilliseconds);
+        }
+
+        public static bool HasPendingCommandEntry()
+        {
+            return File.Exists(PendingCommandEntryPath);
+        }
+
+        internal static string TakePendingCommandEntry(string path, long maximumAgeMilliseconds)
+        {
+            try
+            {
+                var pending = JsonUtil.Load<PendingCommandEntry>(path);
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+                if (pending == null || string.IsNullOrWhiteSpace(pending.EntryId)) return string.Empty;
+                var age = TimeUtil.NowUnixMs() - pending.CreatedAtUtcMs;
+                return age >= 0 && age <= Math.Max(1, maximumAgeMilliseconds)
+                    ? pending.EntryId.Trim()
+                    : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
             }
         }
 

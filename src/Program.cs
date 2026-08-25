@@ -22,6 +22,8 @@ namespace Clipman
         public const string PauseEventName = "Local\\ClipmanPauseRequest";
         public const string ResumeEventName = "Local\\ClipmanResumeRequest";
         public const string ToggleEventName = "Local\\ClipmanToggleRequest";
+        public const string HistoryChangedEventName = "Local\\ClipmanHistoryChangedRequest";
+        public const string HistoryAddedEventName = "Local\\ClipmanHistoryAddedRequest";
         private static readonly HashSet<string> SupportedTextExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             ".txt", ".log", ".md", ".markdown",
@@ -32,6 +34,10 @@ namespace Clipman
             ".ini", ".cfg", ".conf", ".yaml", ".yml",
             ".cs", ".vb", ".py", ".psm1", ".psd1",
             ".ahk", ".reg", ".rtf"
+        };
+        private static readonly HashSet<string> SupportedExtensionlessTextFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "README", "LICENSE", "LICENCE", "NOTICE", "CHANGELOG", "COPYING", "AUTHORS"
         };
 
         [STAThread]
@@ -83,8 +89,13 @@ namespace Clipman
 
             if (args.Length > 1 && string.Equals(args[0], "--add", StringComparison.OrdinalIgnoreCase))
             {
-                AddText(string.Join(" ", args.Skip(1).ToArray()));
-                SignalEvent(ShowEventName);
+                var entryId = AddText(string.Join(" ", args.Skip(1).ToArray()));
+                if (!string.IsNullOrEmpty(entryId))
+                {
+                    InstanceStateStore.PublishPendingCommandEntry(entryId);
+                    SignalEvent(HistoryAddedEventName);
+                    SignalEvent(ShowEventName);
+                }
                 return;
             }
 
@@ -96,8 +107,11 @@ namespace Clipman
 
             if (args.Length > 1 && string.Equals(args[0], "--import", StringComparison.OrdinalIgnoreCase))
             {
-                ImportDatabase(args[1], false);
-                SignalEvent(ShowEventName);
+                if (ImportDatabase(args[1], false))
+                {
+                    SignalEvent(HistoryChangedEventName);
+                    SignalEvent(ShowEventName);
+                }
                 return;
             }
 
@@ -106,6 +120,7 @@ namespace Clipman
                 var silent = args.Any(arg => string.Equals(arg, "--yes", StringComparison.OrdinalIgnoreCase));
                 if (ImportDatabase(args[1], true, silent))
                 {
+                    SignalEvent(HistoryChangedEventName);
                     SignalEvent(ShowEventName);
                 }
                 return;
@@ -113,9 +128,16 @@ namespace Clipman
 
             if (HasImportFiles(args))
             {
-                if (ImportFiles(args))
+                bool showHistory;
+                string entryId;
+                if (ImportFiles(args, out showHistory, out entryId))
                 {
-                    SignalEvent(ShowEventName);
+                    InstanceStateStore.PublishPendingCommandEntry(entryId);
+                    SignalEvent(HistoryAddedEventName);
+                    if (showHistory)
+                    {
+                        SignalEvent(ShowEventName);
+                    }
                 }
                 return;
             }
@@ -388,29 +410,33 @@ namespace Clipman
             return args != null && args.Any(arg => !IsSwitch(arg) && File.Exists(arg));
         }
 
-        private static bool ImportFiles(string[] args)
+        private static bool ImportFiles(string[] args, out bool showHistory, out string latestEntryId)
         {
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             var settingsStore = new SettingsStore(appDirectory);
             var settings = settingsStore.Load();
+            showHistory = settings.ShowHistoryAfterSendTo;
+            latestEntryId = string.Empty;
             var imported = false;
-            using (var store = new ClipStore(settings.DatabasePath, settingsStore.DatabasePassword(settings)))
+            using (var store = new ClipStore(settingsStore.EffectiveTextHistoryDatabasePath(settings), settingsStore.DatabasePassword(settings), settings.DeviceName))
             {
                 foreach (var file in args.Where(arg => !IsSwitch(arg) && File.Exists(arg)))
                 {
-                    imported = ImportFile(store, file, settings) || imported;
+                    var entry = ImportFile(store, file, settings);
+                    if (entry == null) continue;
+                    imported = true;
+                    latestEntryId = entry.Id ?? string.Empty;
                 }
             }
 
-            return imported && settings.ShowHistoryAfterSendTo;
+            return imported;
         }
 
-        private static bool ImportFile(ClipStore store, string file, AppSettings settings)
+        private static ClipEntry ImportFile(ClipStore store, string file, AppSettings settings)
         {
-            var extension = Path.GetExtension(file);
-            if (!SupportedTextExtensions.Contains(extension))
+            if (!IsSupportedTextFile(file))
             {
-                return false;
+                return null;
             }
 
             string text;
@@ -420,7 +446,7 @@ namespace Clipman
             }
             catch
             {
-                return false;
+                return null;
             }
 
             if (!string.IsNullOrEmpty(text))
@@ -430,26 +456,37 @@ namespace Clipman
                     text = UrlTrackingCleaner.CleanText(text);
                 }
                 var group = settings.AutoGroupByApp ? "Send To" : string.Empty;
-                store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group);
-                return true;
+                return store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group);
             }
 
-            return false;
+            return null;
         }
 
-        private static void AddText(string text)
+        internal static bool IsSupportedTextFile(string file)
         {
-            if (string.IsNullOrEmpty(text)) return;
+            var extension = Path.GetExtension(file);
+            if (!string.IsNullOrEmpty(extension))
+            {
+                return SupportedTextExtensions.Contains(extension);
+            }
+
+            return SupportedExtensionlessTextFiles.Contains(Path.GetFileName(file));
+        }
+
+        private static string AddText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             var settingsStore = new SettingsStore(appDirectory);
             var settings = settingsStore.Load();
-            using (var store = new ClipStore(settings.DatabasePath, settingsStore.DatabasePassword(settings)))
+            using (var store = new ClipStore(settingsStore.EffectiveTextHistoryDatabasePath(settings), settingsStore.DatabasePassword(settings), settings.DeviceName))
             {
                 if (settings.AutoRemoveUrlTracking)
                 {
                     text = UrlTrackingCleaner.CleanText(text);
                 }
-                store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays);
+                var entry = store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays);
+                return entry == null ? string.Empty : (entry.Id ?? string.Empty);
             }
         }
 
@@ -466,7 +503,7 @@ namespace Clipman
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             var settingsStore = new SettingsStore(appDirectory);
             var settings = settingsStore.Load();
-            using (var store = new ClipStore(settings.DatabasePath, settingsStore.DatabasePassword(settings)))
+            using (var store = new ClipStore(settingsStore.EffectiveTextHistoryDatabasePath(settings), settingsStore.DatabasePassword(settings), settings.DeviceName))
             {
                 store.ExportToFile(targetPath);
             }
@@ -489,9 +526,9 @@ namespace Clipman
                 {
                     return false;
                 }
-                BackupDatabase(settings.DatabasePath);
+                BackupDatabase(settingsStore.EffectiveTextHistoryDatabasePath(settings));
             }
-            using (var store = new ClipStore(settings.DatabasePath, settingsStore.DatabasePassword(settings)))
+            using (var store = new ClipStore(settingsStore.EffectiveTextHistoryDatabasePath(settings), settingsStore.DatabasePassword(settings), settings.DeviceName))
             {
                 if (!ImportDatabaseIntoStore(store, sourcePath, replace))
                 {

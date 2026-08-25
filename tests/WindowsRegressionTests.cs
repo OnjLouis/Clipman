@@ -46,6 +46,11 @@ namespace Clipman.Tests
             Run("ClipMerge replaces partial entries without modifying pins", ClipMergePreservesPinnedEntriesAndRemovesPartials);
             Run("ClipMerge combines file events without retaining a partial", ClipMergeCombinesFileEvents);
             Run("shared executable updates require install-local settings", SharedExecutableUpdatesRequireInstallLocalSettings);
+            Run("command-line history operations use the active storage database", CommandLineHistoryOperationsUseActiveStorageDatabase);
+            Run("Send To accepts known extensionless text files", SendToAcceptsKnownExtensionlessTextFiles);
+            Run("running history reloads explicit external changes", RunningHistoryReloadsExplicitExternalChanges);
+            Run("command-line entries retain the configured device identity", CommandLineEntriesRetainConfiguredDeviceIdentity);
+            Run("command-line clipboard handoff is exact, consumable, and bounded", CommandLineClipboardHandoffIsBounded);
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
@@ -276,6 +281,156 @@ namespace Clipman.Tests
                 }
                 Assert(RichImageData.CaptureFromFile(mismatchedPath) == null, "A mismatched image extension and payload was accepted.");
                 Assert(!new AppSettings().AutoAddImageFilesToRichText, "Automatic copied-image duplication must default to off.");
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void CommandLineHistoryOperationsUseActiveStorageDatabase()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var settingsStore = new SettingsStore(directory);
+                var configuredPath = Path.Combine(directory, "configured-history.clipdb");
+                var settings = new AppSettings { DatabasePath = configuredPath, StorageMode = "File" };
+                Assert(settingsStore.EffectiveTextHistoryDatabasePath(settings) == configuredPath,
+                    "File storage did not retain the configured history database path.");
+
+                settings.StorageMode = "Server";
+                var serverPath = settingsStore.EffectiveTextHistoryDatabasePath(settings);
+                Assert(!string.Equals(serverPath, configuredPath, StringComparison.OrdinalIgnoreCase),
+                    "Server storage incorrectly selected the configured file-storage database.");
+                Assert(serverPath.EndsWith(Path.Combine("ServerCache", Environment.MachineName, "clipman-history.clipdb"), StringComparison.OrdinalIgnoreCase),
+                    "Server storage selected an unexpected cache database path: " + serverPath);
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void SendToAcceptsKnownExtensionlessTextFiles()
+        {
+            Assert(Program.IsSupportedTextFile("README"), "An extensionless README should be accepted by Send To.");
+            Assert(Program.IsSupportedTextFile("license"), "An extensionless LICENSE should be accepted by Send To.");
+            Assert(Program.IsSupportedTextFile("notes.txt"), "A .txt file should be accepted by Send To.");
+            Assert(!Program.IsSupportedTextFile("unknown-extensionless-file"),
+                "An arbitrary extensionless file should not be assumed to contain text.");
+
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var databasePath = Path.Combine(directory, "history.clipdb");
+                var files = new Dictionary<string, string>
+                {
+                    { "README", "Extensionless readme content" },
+                    { "notes.txt", "Plain text content" },
+                    { "notes.md", "Markdown content" }
+                };
+                var import = typeof(Program).GetMethod("ImportFile", BindingFlags.Static | BindingFlags.NonPublic);
+                Assert(import != null, "The Send To import entry point could not be found.");
+                var settings = new AppSettings { DuplicateMode = "MoveToTop", MaxHistoryEntries = 100, MaxHistoryDays = 0 };
+                using (var store = new ClipStore(databasePath, string.Empty))
+                {
+                    foreach (var pair in files)
+                    {
+                        var path = Path.Combine(directory, pair.Key);
+                        File.WriteAllText(path, pair.Value);
+                        var imported = (ClipEntry)import.Invoke(null, new object[] { store, path, settings });
+                        Assert(imported != null, "Send To rejected " + pair.Key + ".");
+                    }
+
+                    var importedText = new HashSet<string>(store.GetEntries().Select(entry => entry.Text), StringComparer.Ordinal);
+                    foreach (var expected in files.Values)
+                    {
+                        Assert(importedText.Contains(expected), "Send To did not persist expected text: " + expected);
+                    }
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void RunningHistoryReloadsExplicitExternalChanges()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var databasePath = Path.Combine(directory, "history.clipdb");
+                using (var runningStore = new ClipStore(databasePath, string.Empty))
+                {
+                    using (var commandStore = new ClipStore(databasePath, string.Empty))
+                    {
+                        commandStore.AddText("Explicit external import", "MoveToTop", 100, 0);
+                    }
+
+                    runningStore.ReloadExternalChangeAndSync();
+                    Assert(runningStore.GetEntries().Any(entry => entry.Text == "Explicit external import"),
+                        "The running store did not ingest a command-line history change.");
+                    Assert(!runningStore.LastChangeWasExternal,
+                        "A same-device command-line addition was incorrectly reported as a remote change.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void CommandLineEntriesRetainConfiguredDeviceIdentity()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var databasePath = Path.Combine(directory, "history.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Configured device"))
+                {
+                    var local = store.AddText("Command-line device identity", "MoveToTop", 100, 0);
+                    Assert(local != null &&
+                        local.Text == "Command-line device identity" &&
+                        local.SourceMachine == "Configured device",
+                        "A command-line entry was not attributed to the configured device.");
+                    Assert(store.GetNewestRemoteEntry("Configured device") == null,
+                        "A command-line entry from this device was incorrectly classified as remote.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void CommandLineClipboardHandoffIsBounded()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var path = Path.Combine(directory, "pending-command-entry.json");
+                InstanceStateStore.PublishPendingCommandEntry(path, "exact-entry-id");
+                Assert(InstanceStateStore.TakePendingCommandEntry(path, 60000) == "exact-entry-id",
+                    "The command handoff did not return the exact imported entry ID.");
+                Assert(!File.Exists(path), "The command handoff was not consumed after being read.");
+                Assert(InstanceStateStore.TakePendingCommandEntry(path, 60000) == string.Empty,
+                    "A consumed command handoff was returned more than once.");
+
+                JsonUtil.SaveAtomic(path, new PendingCommandEntry
+                {
+                    EntryId = "stale-entry-id",
+                    CreatedAtUtcMs = TimeUtil.NowUnixMs() - 60001
+                });
+                Assert(InstanceStateStore.TakePendingCommandEntry(path, 60000) == string.Empty,
+                    "An expired command handoff was accepted.");
+                Assert(!File.Exists(path), "An expired command handoff was not cleaned up.");
             }
             finally
             {

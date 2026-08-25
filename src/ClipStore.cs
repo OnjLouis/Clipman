@@ -1366,6 +1366,7 @@ namespace Clipman
             }
             catch
             {
+                serverRevision = string.Empty;
                 MarkServerFailureLocked();
                 throw;
             }
@@ -1618,6 +1619,30 @@ namespace Clipman
             }
 
             OnChanged(true);
+        }
+
+        public void ReloadExternalChangeAndSync()
+        {
+            ReloadExternalChange();
+            SyncExternalChange();
+        }
+
+        public void ReloadExternalChange()
+        {
+            lock (sync)
+            {
+                LoadLocked();
+            }
+
+            OnChanged(false);
+        }
+
+        public void SyncExternalChange()
+        {
+            lock (sync)
+            {
+                UploadToServerLocked();
+            }
         }
 
         private static ClipEntry Clone(ClipEntry entry)

@@ -714,6 +714,23 @@ namespace Clipman
             return Path.Combine(SettingsDirectory, "clipman-history.clipdb");
         }
 
+        public string EffectiveTextHistoryDatabasePath(AppSettings settings)
+        {
+            if (settings == null || !string.Equals(settings.StorageMode, "Server", StringComparison.OrdinalIgnoreCase))
+            {
+                return settings == null || string.IsNullOrWhiteSpace(settings.DatabasePath)
+                    ? DefaultDatabasePath()
+                    : settings.DatabasePath;
+            }
+
+            var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                root = Path.GetTempPath();
+            }
+            return Path.Combine(root, "Clipman", "ServerCache", Environment.MachineName, "clipman-history.clipdb");
+        }
+
         public string DefaultFileHistoryDatabasePath()
         {
             return Path.Combine(SettingsDirectory, MachineNameSafe() + "-file-history.clipdb");

@@ -34,11 +34,15 @@ namespace Clipman
         private readonly EventWaitHandle pauseEvent;
         private readonly EventWaitHandle resumeEvent;
         private readonly EventWaitHandle toggleEvent;
+        private readonly EventWaitHandle historyChangedEvent;
+        private readonly EventWaitHandle historyAddedEvent;
         private readonly Thread closeThread;
         private readonly Thread showThread;
         private readonly Thread pauseThread;
         private readonly Thread resumeThread;
         private readonly Thread toggleThread;
+        private readonly Thread historyChangedThread;
+        private readonly Thread historyAddedThread;
         private readonly ClipboardFloodGuardRegistry clipboardFloodGuards = new ClipboardFloodGuardRegistry();
         private readonly ClipboardNotificationState clipboardNotifications = new ClipboardNotificationState();
         private readonly ClipMergeDetector clipMergeDetector = new ClipMergeDetector();
@@ -136,16 +140,26 @@ namespace Clipman
             pauseEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.PauseEventName);
             resumeEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.ResumeEventName);
             toggleEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.ToggleEventName);
+            historyChangedEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.HistoryChangedEventName);
+            historyAddedEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.HistoryAddedEventName);
             closeThread = new Thread(WaitForClose) { IsBackground = true, Name = "Clipman close event listener" };
             showThread = new Thread(WaitForShow) { IsBackground = true, Name = "Clipman show event listener" };
             pauseThread = new Thread(() => WaitForState(pauseEvent, false)) { IsBackground = true, Name = "Clipman pause event listener" };
             resumeThread = new Thread(() => WaitForState(resumeEvent, true)) { IsBackground = true, Name = "Clipman resume event listener" };
             toggleThread = new Thread(WaitForToggle) { IsBackground = true, Name = "Clipman toggle event listener" };
+            historyChangedThread = new Thread(WaitForHistoryChanged) { IsBackground = true, Name = "Clipman history-change event listener" };
+            historyAddedThread = new Thread(WaitForHistoryAdded) { IsBackground = true, Name = "Clipman history-add event listener" };
             closeThread.Start();
             showThread.Start();
             pauseThread.Start();
             resumeThread.Start();
             toggleThread.Start();
+            historyChangedThread.Start();
+            historyAddedThread.Start();
+            if (InstanceStateStore.HasPendingCommandEntry())
+            {
+                historyAddedEvent.Set();
+            }
             StartSharedUpdateWatchers();
             ScheduleSharedUpdateCheck(5000);
             ScheduleUpdateChecks();
@@ -1712,7 +1726,7 @@ namespace Clipman
                 "Toggle alternate UK key: " + (toggleAlternateHotkeyRegistered ? "registered" : "not registered or not needed") + "\r\n" +
                 "Quick Paste bindings: " + ((settings.QuickCopyHotkeys == null ? 0 : settings.QuickCopyHotkeys.Count) + " configured, " + quickCopyHotkeysRegistered + " registered") + "\r\n" +
                 "Secrets: " + (GetSecretEntriesSafe().Count + " configured, " + secretHotkeysRegistered + " hotkeys registered") + "\r\n" +
-                "Auto-copy latest remote text: " + (settings.AutoCopyLatestRemoteText ? "on" : "off") + "\r\n" +
+                "Auto-copy received and command text: " + (settings.AutoCopyLatestRemoteText ? "on" : "off") + "\r\n" +
                 "Paste after Enter: " + (settings.PasteAfterEnter ? "on" : "off") + "\r\n" +
                 "Dynamic history mode: " + (settings.DynamicHistoryMode ? "on" : "off") + "\r\n" +
                 "Build stamp: " + BuildInfo.BuildStampUtcMs + "\r\n" +
@@ -2271,6 +2285,27 @@ namespace Clipman
             sounds.Remote(settings.SoundsEnabled);
         }
 
+        private void MaybeCopyCommandEntry(string entryId)
+        {
+            if (!settings.AutoCopyLatestRemoteText) return;
+
+            var entry = store.GetEntryById(entryId);
+            if (entry == null || string.IsNullOrEmpty(entry.Text)) return;
+
+            try
+            {
+                IgnoreClipboardChanges(1);
+                SetEntryClipboard(entry);
+                sounds.Copy(settings.SoundsEnabled);
+            }
+            catch (Exception ex)
+            {
+                ClearIgnoredClipboardChanges();
+                Program.WriteRuntimeLog("Could not put a command-line history addition on the clipboard.", ex);
+                sounds.Skip(settings.SoundsEnabled);
+            }
+        }
+
         private static void SetEntryClipboard(ClipEntry entry)
         {
             var text = ResolvedEntryText(entry);
@@ -2388,6 +2423,8 @@ namespace Clipman
                 if (pauseEvent != null) pauseEvent.Dispose();
                 if (resumeEvent != null) resumeEvent.Dispose();
                 if (toggleEvent != null) toggleEvent.Dispose();
+                if (historyChangedEvent != null) historyChangedEvent.Dispose();
+                if (historyAddedEvent != null) historyAddedEvent.Dispose();
                 if (invoker != null) invoker.Dispose();
                 if (sharedStateWatcher != null) sharedStateWatcher.Dispose();
                 if (executableWatcher != null) executableWatcher.Dispose();
@@ -2803,22 +2840,60 @@ namespace Clipman
 
         private string EffectiveTextHistoryDatabasePath()
         {
-            if (!IsServerStorageEnabled())
-            {
-                return settings.DatabasePath;
-            }
+            return settingsStore.EffectiveTextHistoryDatabasePath(settings);
+        }
 
-            return ServerCacheDatabasePath();
+        private void WaitForHistoryChanged()
+        {
+            while (true)
+            {
+                try
+                {
+                    historyChangedEvent.WaitOne();
+                    historyChangedEvent.Reset();
+                    store.ReloadExternalChangeAndSync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Program.WriteRuntimeLog("Could not reload and synchronize an external history change.", ex);
+                }
+            }
+        }
+
+        private void WaitForHistoryAdded()
+        {
+            while (true)
+            {
+                try
+                {
+                    historyAddedEvent.WaitOne();
+                    historyAddedEvent.Reset();
+                    var entryId = InstanceStateStore.TakePendingCommandEntry((long)TimeSpan.FromMinutes(5).TotalMilliseconds);
+                    store.ReloadExternalChange();
+                    if (!string.IsNullOrEmpty(entryId) && invoker != null && invoker.IsHandleCreated)
+                    {
+                        invoker.BeginInvoke(new Action(() => MaybeCopyCommandEntry(entryId)));
+                    }
+                    store.SyncExternalChange();
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Program.WriteRuntimeLog("Could not process and synchronize a command-line history addition.", ex);
+                }
+            }
         }
 
         private string ServerCacheDatabasePath()
         {
-            var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                root = Path.GetTempPath();
-            }
-            return Path.Combine(root, "Clipman", "ServerCache", Environment.MachineName, "clipman-history.clipdb");
+            return settingsStore.EffectiveTextHistoryDatabasePath(new AppSettings { StorageMode = "Server" });
         }
 
         private void MergeServerCacheIntoConfiguredDatabase(string serverCachePath)
