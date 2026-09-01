@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Net;
 using System.Text;
 using System.Windows.Forms;
 
@@ -19,6 +20,9 @@ namespace Clipman.Tests
         {
             Run("database container caps are aligned", DatabaseContainerCapsAreAligned);
             Run("server polls cannot overlap and respect failure backoff", ServerPollSchedulingIsBounded);
+            Run("storage retries contain network failures", StorageRetriesContainNetworkFailures);
+            Run("existing instances have a dedicated recovery signal", ExistingInstancesHaveRecoverySignal);
+            Run("paste input keeps Control active through V", PasteInputKeepsControlActiveThroughV);
             Run("bounded exact reads handle partial streams", BoundedExactReadsHandlePartialStreams);
             Run("encrypted database round trip", EncryptedDatabaseRoundTrip);
             Run("URL length is bounded before presentation or fetch", UrlLengthIsBounded);
@@ -286,6 +290,44 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void StorageRetriesContainNetworkFailures()
+        {
+            var fileReloaded = false;
+            var result = StorageRetryOperation.Execute(
+                delegate { throw new WebException("The operation has timed out", WebExceptionStatus.Timeout); },
+                delegate { fileReloaded = true; });
+
+            Assert(!result.Succeeded, "A timed-out server reload was reported as successful.");
+            Assert(fileReloaded, "A text/server timeout prevented the independent file-history retry.");
+            Assert(result.Error != null && result.Error.Message.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0,
+                "The retry result did not retain a useful timeout explanation.");
+        }
+
+        private static void ExistingInstancesHaveRecoverySignal()
+        {
+            Assert(!string.IsNullOrWhiteSpace(Program.RecoverEventName),
+                "Existing-instance recovery does not have a named signal.");
+            Assert(!string.Equals(Program.RecoverEventName, Program.ShowEventName, StringComparison.Ordinal),
+                "Recovery was collapsed into the ordinary show-history signal.");
+        }
+
+        private static void PasteInputKeepsControlActiveThroughV()
+        {
+            var inputs = KeyboardInput.BuildControlVPasteInputs();
+            var expectedInputSize = IntPtr.Size == 8 ? 40 : 28;
+            Assert(System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.Input)) == expectedInputSize,
+                "The Windows INPUT structure does not include the full native union layout.");
+            Assert(inputs.Length == 4, "The paste chord was not emitted as one four-event input batch.");
+            Assert(inputs[0].Keyboard.VirtualKey == NativeMethods.VK_CONTROL && inputs[0].Keyboard.Flags == 0,
+                "Control was not pressed first.");
+            Assert(inputs[1].Keyboard.VirtualKey == NativeMethods.VK_V && inputs[1].Keyboard.Flags == 0,
+                "V was not pressed while Control remained down.");
+            Assert(inputs[2].Keyboard.VirtualKey == NativeMethods.VK_V && inputs[2].Keyboard.Flags == NativeMethods.KEYEVENTF_KEYUP,
+                "V was not released before Control.");
+            Assert(inputs[3].Keyboard.VirtualKey == NativeMethods.VK_CONTROL && inputs[3].Keyboard.Flags == NativeMethods.KEYEVENTF_KEYUP,
+                "Control was not released last.");
         }
 
         private static void CommandLineHistoryOperationsUseActiveStorageDatabase()

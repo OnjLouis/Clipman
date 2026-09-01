@@ -31,6 +31,7 @@ namespace Clipman
         private readonly NotifyIcon notifyIcon;
         private readonly EventWaitHandle closeEvent;
         private readonly EventWaitHandle showEvent;
+        private readonly EventWaitHandle recoverEvent;
         private readonly EventWaitHandle pauseEvent;
         private readonly EventWaitHandle resumeEvent;
         private readonly EventWaitHandle toggleEvent;
@@ -38,6 +39,7 @@ namespace Clipman
         private readonly EventWaitHandle historyAddedEvent;
         private readonly Thread closeThread;
         private readonly Thread showThread;
+        private readonly Thread recoverThread;
         private readonly Thread pauseThread;
         private readonly Thread resumeThread;
         private readonly Thread toggleThread;
@@ -79,6 +81,7 @@ namespace Clipman
         private IntPtr previousForegroundWindow = IntPtr.Zero;
         private string lastReceivedHistoryTab = HistoryTabs.Text;
         private bool receivedHistoryTabPending;
+        private int storageRetryInProgress;
 
         private sealed class AutomaticWebsiteTitleRequest
         {
@@ -137,6 +140,7 @@ namespace Clipman
 
             closeEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.CloseEventName);
             showEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.ShowEventName);
+            recoverEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.RecoverEventName);
             pauseEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.PauseEventName);
             resumeEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.ResumeEventName);
             toggleEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.ToggleEventName);
@@ -144,6 +148,7 @@ namespace Clipman
             historyAddedEvent = new EventWaitHandle(false, EventResetMode.ManualReset, Program.HistoryAddedEventName);
             closeThread = new Thread(WaitForClose) { IsBackground = true, Name = "Clipman close event listener" };
             showThread = new Thread(WaitForShow) { IsBackground = true, Name = "Clipman show event listener" };
+            recoverThread = new Thread(WaitForRecover) { IsBackground = true, Name = "Clipman storage recovery listener" };
             pauseThread = new Thread(() => WaitForState(pauseEvent, false)) { IsBackground = true, Name = "Clipman pause event listener" };
             resumeThread = new Thread(() => WaitForState(resumeEvent, true)) { IsBackground = true, Name = "Clipman resume event listener" };
             toggleThread = new Thread(WaitForToggle) { IsBackground = true, Name = "Clipman toggle event listener" };
@@ -151,6 +156,7 @@ namespace Clipman
             historyAddedThread = new Thread(WaitForHistoryAdded) { IsBackground = true, Name = "Clipman history-add event listener" };
             closeThread.Start();
             showThread.Start();
+            recoverThread.Start();
             pauseThread.Start();
             resumeThread.Start();
             toggleThread.Start();
@@ -1401,9 +1407,40 @@ namespace Clipman
 
         private void RetryStorage()
         {
-            store.Reload();
-            fileEventStore.Reload();
-            UpdateTray();
+            if (Interlocked.CompareExchange(ref storageRetryInProgress, 1, 0) != 0) return;
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = StorageRetryOperation.Execute(store.Reload, fileEventStore.Reload);
+                if (result.TextHistoryError != null)
+                {
+                    store.RecordServerRetryFailure(result.TextHistoryError);
+                }
+                if (!result.Succeeded) Program.WriteRuntimeLog("The explicit storage retry failed.", result.Error);
+
+                Interlocked.Exchange(ref storageRetryInProgress, 0);
+                try
+                {
+                    if (invoker != null && invoker.IsHandleCreated)
+                    {
+                        invoker.BeginInvoke(new Action(delegate
+                        {
+                            UpdateTray();
+                            if (!result.Succeeded)
+                            {
+                                MessageBox.Show(
+                                    "Clipman could not reconnect to storage. It will keep using the local cache and retry automatically.\r\n\r\n" + result.Error.Message,
+                                    "Clipman storage unavailable",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Warning);
+                            }
+                        }));
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            });
         }
 
         private void RegisterHotkeys()
@@ -2209,10 +2246,10 @@ namespace Clipman
 
         private static void SendCtrlVPaste()
         {
-            NativeMethods.keybd_event((byte)NativeMethods.VK_CONTROL, 0, 0, UIntPtr.Zero);
-            NativeMethods.keybd_event((byte)NativeMethods.VK_V, 0, 0, UIntPtr.Zero);
-            NativeMethods.keybd_event((byte)NativeMethods.VK_V, 0, NativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
-            NativeMethods.keybd_event((byte)NativeMethods.VK_CONTROL, 0, NativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+            if (!KeyboardInput.SendControlVPaste())
+            {
+                throw new InvalidOperationException("Windows did not accept the paste keyboard input.");
+            }
         }
 
         private void RestoreClipboard(IDataObject previousClipboard)
@@ -2420,6 +2457,7 @@ namespace Clipman
             {
                 if (closeEvent != null) closeEvent.Dispose();
                 if (showEvent != null) showEvent.Dispose();
+                if (recoverEvent != null) recoverEvent.Dispose();
                 if (pauseEvent != null) pauseEvent.Dispose();
                 if (resumeEvent != null) resumeEvent.Dispose();
                 if (toggleEvent != null) toggleEvent.Dispose();
@@ -2841,6 +2879,29 @@ namespace Clipman
         private string EffectiveTextHistoryDatabasePath()
         {
             return settingsStore.EffectiveTextHistoryDatabasePath(settings);
+        }
+
+        private void WaitForRecover()
+        {
+            while (true)
+            {
+                try
+                {
+                    recoverEvent.WaitOne();
+                    recoverEvent.Reset();
+                    if (invoker != null && invoker.IsHandleCreated)
+                    {
+                        invoker.BeginInvoke(new Action(delegate
+                        {
+                            if (IsStorageUnavailable()) RetryStorage();
+                        }));
+                    }
+                }
+                catch
+                {
+                    return;
+                }
+            }
         }
 
         private void WaitForHistoryChanged()

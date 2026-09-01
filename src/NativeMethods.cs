@@ -17,6 +17,50 @@ namespace Clipman
         public const int VK_RWIN = 0x5C;
         public const int VK_V = 0x56;
         public const int KEYEVENTF_KEYUP = 0x0002;
+        public const int INPUT_KEYBOARD = 1;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct Input
+        {
+            public int Type;
+            public InputUnion Data;
+
+            public KeyboardInputData Keyboard
+            {
+                get { return Data.Keyboard; }
+            }
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        public struct InputUnion
+        {
+            [FieldOffset(0)]
+            public KeyboardInputData Keyboard;
+
+            [FieldOffset(0)]
+            public MouseInputData Mouse;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KeyboardInputData
+        {
+            public ushort VirtualKey;
+            public ushort ScanCode;
+            public uint Flags;
+            public uint Time;
+            public UIntPtr ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MouseInputData
+        {
+            public int X;
+            public int Y;
+            public uint MouseData;
+            public uint Flags;
+            public uint Time;
+            public UIntPtr ExtraInfo;
+        }
 
         [Flags]
         public enum Modifiers : uint
@@ -90,7 +134,7 @@ namespace Clipman
         public static extern short GetAsyncKeyState(int vKey);
 
         [DllImport("user32.dll", SetLastError = true)]
-        public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, UIntPtr dwExtraInfo);
+        public static extern uint SendInput(uint inputCount, Input[] inputs, int inputSize);
 
     }
 }

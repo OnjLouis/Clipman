@@ -197,6 +197,18 @@ namespace Clipman
             OnChanged();
         }
 
+        public void RecordServerRetryFailure(Exception error)
+        {
+            lock (sync)
+            {
+                storageUnavailable = true;
+                LastStorageError = "Server retry failed: " + (error == null ? "Unknown error." : error.Message);
+                MarkServerFailureLocked();
+            }
+
+            OnChanged();
+        }
+
         public List<ClipEntry> GetEntries()
         {
             return GetEntries("LastUsed", "All", true);

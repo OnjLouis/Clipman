@@ -90,6 +90,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.8.11 Windows</h3>
+  <ul>
+    <li>Fixed Retry storage blocking the Clipman interface and exposing an unhandled timeout when Clipman Server was unavailable. Retry now runs in the background, preserves the local cache, reports failure accessibly, and leaves automatic reconnection active. Starting the same Clipman copy again while storage is unavailable now asks the running instance to recover instead of silently returning to the stuck state.</li>
+    <li>Fixed automatic paste occasionally inserting the letter V instead of pasting in certain edit fields and editable combo boxes. Clipman now sends the complete Control+V chord to Windows as one ordered input operation.</li>
+  </ul>
+
   <h3>2.8.10 Windows</h3>
   <ul>
     <li>Fixed Windows Send To and command-line history operations using the configured file-storage database instead of the active server cache when Clipman Server storage was selected. The running Clipman now reloads and synchronizes successful command-line changes immediately without waiting for history focus or another clipboard event. When the existing received-text clipboard option is enabled, the originating computer also receives the imported text on its clipboard. Send To also accepts common extensionless text documents named README, LICENSE, LICENCE, NOTICE, CHANGELOG, COPYING or AUTHORS.</li>

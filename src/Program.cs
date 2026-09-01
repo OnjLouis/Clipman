@@ -19,6 +19,7 @@ namespace Clipman
         public const string MutexName = "Local\\ClipmanPortableSingleInstance";
         public const string CloseEventName = "Local\\ClipmanCloseRequest";
         public const string ShowEventName = "Local\\ClipmanShowHistoryRequest";
+        public const string RecoverEventName = "Local\\ClipmanRecoverStorageRequest";
         public const string PauseEventName = "Local\\ClipmanPauseRequest";
         public const string ResumeEventName = "Local\\ClipmanResumeRequest";
         public const string ToggleEventName = "Local\\ClipmanToggleRequest";
@@ -185,6 +186,7 @@ namespace Clipman
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             if (InstanceStateStore.IsSameRunningFolder(appDirectory))
             {
+                SignalEvent(RecoverEventName);
                 SignalEvent(ShowEventName);
                 return false;
             }
