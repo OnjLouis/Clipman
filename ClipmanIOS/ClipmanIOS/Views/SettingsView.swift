@@ -85,7 +85,7 @@ struct SettingsView: View {
                 }
 
                 Section("Help") {
-                    Link("Open Manual", destination: URL(string: "https://onjlouis.github.io/clipman/manual.html")!)
+                    Link("Open Manual", destination: URL(string: "https://onjlouis.github.io/Clipman/manual.html")!)
                 }
 
                 Section("Build information") {
