@@ -1561,7 +1561,7 @@ def setup_page_html(code: str, state: Dict[str, Any], user_agent: str) -> bytes:
   <h2>Get Clipman</h2>
   <ul>
     <li><a href="https://github.com/OnjLouis/Clipman/releases/latest">Windows, macOS, Linux and Android downloads</a></li>
-    <li><a href="https://testflight.apple.com/join/HYReZKAk">Clipman for iPhone and iPad on TestFlight</a></li>
+    <li><a href="https://apps.apple.com/app/clipman/id6793250105">Clipman for iPhone and iPad on the App Store</a></li>
   </ul>
   <p>This page does not inspect your device, load external resources or send analytics. Its platform suggestion uses only the browser identification sent with this request.</p>
 </main>

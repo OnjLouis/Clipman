@@ -7,7 +7,7 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 ## Get Clipman
 
 - [Browse current Windows, macOS, Linux, Android, and server downloads](https://github.com/OnjLouis/Clipman/releases).
-- [Join the public iPhone and iPad beta through TestFlight](https://testflight.apple.com/join/HYReZKAk).
+- [Download Clipman for iPhone and iPad from the App Store](https://apps.apple.com/app/clipman/id6793250105).
 - [Read the complete Clipman manual](https://onjlouis.github.io/Clipman/manual.html).
 - [Read the Clipman Server manual](https://onjlouis.github.io/Clipman/server/manual.html).
 
