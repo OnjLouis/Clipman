@@ -194,12 +194,20 @@ Upload (each local mutation):
    pass). Only dirty channels are encrypted and `PUT` (with per-channel
    `If-Match`). The comparison must happen on plaintext: ciphertext differs on
    every encode because the IV is fresh.
-5. Upload ordering: every channel that GAINS an entry in this save (relocation
-   targets, newly created entries) is uploaded before any channel that LOSES
-   that entry (the relocation source with its marker). A partial failure must
-   never leave an entry deleted from its source without having been committed to
-   its target. On a 409 for one channel: `GET` that channel, merge, rebuild,
-   retry.
+5. Upload ordering (add-then-remove two-phase): a partial failure must never
+   leave an entry deleted from its source channel without having been committed
+   to its target. To guarantee this per entry, including for channels that both
+   gain and lose in one save and for relocation chains or cycles, uploads happen
+   in two phases. Phase 1: every channel is uploaded with its rebuilt content
+   EXCEPT that entries departing it are still included and its new relocation
+   markers are withheld (targets receive additions; sources do not yet drop
+   departures). Phase 2: only after every phase-1 upload has committed, each
+   losing channel is rebuilt with departures removed and relocation markers
+   added, and uploaded again. A phase-2 failure is safe: the entry exists in
+   both channels, and view assembly (step 3) resolves the duplicate until the
+   next save repairs it. Channels that lose nothing are uploaded once, in phase
+   1, subject to the dirty check. On a 409 for one channel: `GET` that channel,
+   merge, rebuild for the current phase, retry.
 
 Salt sharing: a channel blob created for the first time copies the core
 database's salt, so one PBKDF2 derivation serves every channel through the
