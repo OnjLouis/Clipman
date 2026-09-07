@@ -328,3 +328,68 @@ func TestSerializeParseRoundTrip(t *testing.T) {
 		t.Fatal("Parse must reject a document whose Clipman field is not \"sync-rules\"")
 	}
 }
+
+func TestParseAcceptsFutureVersionReadOnly(t *testing.T) {
+	future := &Document{
+		Clipman:       "sync-rules",
+		Version:       2,
+		Enabled:       true,
+		UpdatedUnixMs: 1757200000000,
+		UpdatedBy:     "Desktop",
+		Channels: []Channel{
+			{Name: "Work", Route: Route{Groups: []string{"Work"}}},
+			{Name: "Weird", Route: Route{Kind: "SomeFutureKind"}},
+		},
+	}
+	data, err := Serialize(future)
+	if err != nil {
+		t.Fatalf("Serialize error: %v", err)
+	}
+
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse must accept a future-version document leniently, got error: %v", err)
+	}
+	if !ReadOnly(got) {
+		t.Fatal("ReadOnly must be true for a parsed future-version document")
+	}
+	if !reflect.DeepEqual(future, got) {
+		t.Fatalf("round trip mismatch\n want %+v\n got  %+v", future, got)
+	}
+
+	entry := &model.Entry{Group: "Work"}
+	if gotKey := RouteEntry(got, entry); gotKey != "work" {
+		t.Fatalf("RouteEntry via known route on future doc = %q, want %q", gotKey, "work")
+	}
+
+	weirdEntry := &model.Entry{}
+	if gotKey := RouteEntry(got, weirdEntry); gotKey != "" {
+		t.Fatalf("RouteEntry must ignore the unknown-Kind route, got %q", gotKey)
+	}
+
+	if ReadOnly(nil) {
+		t.Fatal("ReadOnly(nil) must be false")
+	}
+	if ReadOnly(&Document{Version: 1}) {
+		t.Fatal("ReadOnly must be false for Version 1")
+	}
+
+	if _, err := Parse([]byte(`{"Clipman":"not-sync-rules","Version":2}`)); err == nil {
+		t.Fatal("Parse must still reject a wrong Clipman field even on a future-version document")
+	}
+}
+
+func TestRouteUnknownKindNeverMatches(t *testing.T) {
+	doc := &Document{
+		Clipman: "sync-rules",
+		Version: 1,
+		Enabled: true,
+		Channels: []Channel{
+			{Name: "Weird", Route: Route{Kind: "SomeFutureKind"}},
+		},
+	}
+	entry := &model.Entry{}
+	if got := RouteEntry(doc, entry); got != "" {
+		t.Fatalf("RouteEntry with unknown Kind = %q, want empty (never matches)", got)
+	}
+}

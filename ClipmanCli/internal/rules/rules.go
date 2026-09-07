@@ -91,6 +91,13 @@ func ChannelKey(name string) string {
 	return key
 }
 
+// ReadOnly reports whether doc is a future-version document that this
+// client must not rewrite (spec section 4): it applies what it understands
+// but never PUTs its own interpretation back.
+func ReadOnly(doc *Document) bool {
+	return doc != nil && doc.Version > 1
+}
+
 // Validate checks doc against the rules in spec section 4: the document
 // marker, channel key grammar and uniqueness, reserved names, route
 // well-formedness, and device channel references.
@@ -293,12 +300,25 @@ func MergeDocuments(local, remote *Document) *Document {
 	return local
 }
 
-// Parse decodes and validates a rules document, rejecting any payload whose
-// Clipman field is not "sync-rules" (Validate enforces this).
+// Parse decodes a rules document, rejecting any payload whose Clipman field
+// is not "sync-rules". A document whose Version is greater than this client
+// understands (see ReadOnly) is not run through Validate: spec section 4
+// requires such a document to be applied leniently rather than rejected
+// outright, since a client must never fail entirely on a future document.
+// Channels whose name yields an invalid key are kept in the returned
+// document but are unroutable (RouteEntry and friends treat them as
+// non-matching). Documents at Version <= 1 keep full strict validation,
+// since editors validate before writing them.
 func Parse(data []byte) (*Document, error) {
 	var doc Document
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, err
+	}
+	if ReadOnly(&doc) {
+		if doc.Clipman != documentKind {
+			return nil, fmt.Errorf("rules: Clipman field must be %q, got %q", documentKind, doc.Clipman)
+		}
+		return &doc, nil
 	}
 	if err := Validate(&doc); err != nil {
 		return nil, err
