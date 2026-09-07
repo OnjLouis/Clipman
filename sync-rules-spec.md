@@ -203,10 +203,16 @@ Upload (each local mutation):
    markers are withheld (targets receive additions; sources do not yet drop
    departures). Phase 1 carries the copy of a departing entry that the source
    channel was fetched with, not the locally modified one, so a channel whose
-   only change is a departure is byte-identical to what the server holds and
-   skips its phase-1 upload; the target receives the modified copy, whose higher
+   only change is a departure is typically byte-identical to what the server
+   holds and skips its phase-1 upload (this is an optimization, not an
+   invariant - ordering renumbering can still dirty such a channel; ports must
+   not assert on the skip); the target receives the modified copy, whose higher
    `ModifiedUnixMs` wins the duplicate resolution of download step 3 for the
-   transient window in which both channels hold the id. Phase 2: only after every phase-1 upload has committed, each
+   transient window in which both channels hold the id. Consequence of the
+   fetched-copy rule: when the target's upload fails, an edit made to the
+   departing entry in the same save is committed nowhere - the mutation is
+   reported as failed and the entry keeps its pre-mutation value at the source;
+   nothing previously committed is lost. Phase 2: only after every phase-1 upload has committed, each
    losing channel is rebuilt with departures removed and relocation markers
    added, and uploaded again. A phase-2 failure is safe: the entry exists in
    both channels, and view assembly (step 3) resolves the duplicate until the
