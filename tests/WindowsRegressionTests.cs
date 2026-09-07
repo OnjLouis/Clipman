@@ -55,6 +55,12 @@ namespace Clipman.Tests
             Run("running history reloads explicit external changes", RunningHistoryReloadsExplicitExternalChanges);
             Run("command-line entries retain the configured device identity", CommandLineEntriesRetainConfiguredDeviceIdentity);
             Run("command-line clipboard handoff is exact, consumable, and bounded", CommandLineClipboardHandoffIsBounded);
+            Run("channel identity matches the cross-client fixture", ChannelIdentityMatchesCrossClientFixture);
+            Run("sync rule channel keys follow the normalized grammar", SyncRuleChannelKeyGrammar);
+            Run("sync rule routing honors first-match and AND semantics", SyncRuleRoutingFirstMatchAndAndSemantics);
+            Run("sync rule subscriptions resolve per device", SyncRuleSubscriptions);
+            Run("sync rules document round trips through JSON", SyncRulesDocumentJsonRoundTrip);
+            Run("sync rules documents merge with last-writer-wins", SyncRulesMergeDocumentsLastWriterWins);
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
@@ -478,6 +484,150 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void ChannelIdentityMatchesCrossClientFixture()
+        {
+            Assert(ServerDatabaseIdentity.FromTokenAndPassword("example-token", "example-password") == "l4GLcFU7RrlmkGXoRyQ7-zVG5D5S0VmfwO6-dGNmebU",
+                "The existing database identity derivation regressed.");
+            Assert(ServerDatabaseIdentity.SyncRulesFromTokenAndPassword("example-token", "example-password") == "j5Z6kOIWgsJMqS0IRzNJEq38aqJ-iA8e6yzyX0W71WQ",
+                "The sync rules identity derivation did not match the cross-client fixture.");
+            Assert(ServerDatabaseIdentity.ChannelFromTokenAndPassword("example-token", "example-password", "work") == "F0MZBlui50Vd37JVf-JcvOWvoHV71IDlQE5OnfVBKeA",
+                "The \"work\" channel identity derivation did not match the cross-client fixture.");
+            Assert(ServerDatabaseIdentity.ChannelFromTokenAndPassword("example-token", "example-password", "desktop only") == "02tgOt5QC_sWY2RmoI2pqII9MocLQ7-XIMHaSRVBE1o",
+                "The \"desktop only\" channel identity derivation did not match the cross-client fixture.");
+            Assert(ServerDatabaseIdentity.ChannelFromTokenAndPassword("", "example-password", "work") == string.Empty,
+                "A blank server token should yield an empty channel identity.");
+            Assert(ServerDatabaseIdentity.ChannelFromTokenAndPassword("example-token", "", "work") == string.Empty,
+                "A blank history password should yield an empty channel identity.");
+            Assert(ServerDatabaseIdentity.SyncRulesFromTokenAndPassword("", "example-password") == string.Empty,
+                "A blank server token should yield an empty sync rules identity.");
+            Assert(ServerDatabaseIdentity.SyncRulesFromTokenAndPassword("example-token", "") == string.Empty,
+                "A blank history password should yield an empty sync rules identity.");
+        }
+
+        private static void SyncRuleChannelKeyGrammar()
+        {
+            Assert(SyncRuleEngine.ChannelKey("Work ") == "work", "Trailing whitespace and casing should normalize to the channel key.");
+            Assert(SyncRuleEngine.ChannelKey("Desktop Only") == "desktop only", "Internal spaces should be preserved and lowercased.");
+            Assert(SyncRuleEngine.ChannelKey("-bad") == string.Empty, "A leading dash should not produce a valid channel key.");
+            Assert(SyncRuleEngine.ChannelKey("core") == "core", "A reserved name should still produce a syntactically valid key.");
+
+            var doc = new SyncRulesDocument();
+            doc.Channels.Add(new SyncChannel { Name = "core", Route = new SyncRoute { Groups = new List<string> { "Anything" } } });
+            var error = SyncRuleEngine.Validate(doc);
+            Assert(error != null, "A reserved channel name should be rejected by Validate.");
+
+            var longName = new string('a', 33);
+            Assert(SyncRuleEngine.ChannelKey(longName) == string.Empty, "A 33-character channel name should exceed the grammar's length limit.");
+            Assert(SyncRuleEngine.ChannelKey("café") == string.Empty, "A non-ASCII channel name should be rejected.");
+        }
+
+        private static void SyncRuleRoutingFirstMatchAndAndSemantics()
+        {
+            var doc = new SyncRulesDocument { Enabled = true };
+            doc.Channels.Add(new SyncChannel { Name = "Images", Route = new SyncRoute { Kind = "RichTextImages" } });
+            doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+            doc.Channels.Add(new SyncChannel { Name = "DesktopOnly", Route = new SyncRoute { SourceDevices = new List<string> { "Desktop" } } });
+
+            var imageAndWork = new ClipEntry
+            {
+                Group = "Work",
+                RichText = new RichTextPayload { HtmlFragment = "<img src=\"data:image/png;base64,x\">" }
+            };
+            Assert(SyncRuleEngine.RouteEntry(doc, imageAndWork) == "images", "The first matching channel in list order should win.");
+
+            var workOnly = new ClipEntry { Group = "work" };
+            Assert(SyncRuleEngine.RouteEntry(doc, workOnly) == "work", "Group matching should be case-insensitive.");
+
+            var noMatch = new ClipEntry { Group = "Other", SourceMachine = "Other" };
+            Assert(SyncRuleEngine.RouteEntry(doc, noMatch) == string.Empty, "An entry matching no route should route to core.");
+
+            var disabledDoc = new SyncRulesDocument { Enabled = false };
+            disabledDoc.Channels.Add(new SyncChannel { Name = "Images", Route = new SyncRoute { Kind = "RichTextImages" } });
+            Assert(SyncRuleEngine.RouteEntry(disabledDoc, imageAndWork) == string.Empty, "A disabled rules document should route everything to core.");
+
+            var andDoc = new SyncRulesDocument { Enabled = true };
+            andDoc.Channels.Add(new SyncChannel
+            {
+                Name = "WorkDesktop",
+                Route = new SyncRoute { Groups = new List<string> { "Work" }, SourceDevices = new List<string> { "Desktop" } }
+            });
+            var workFromPhone = new ClipEntry { Group = "Work", SourceMachine = "Phone" };
+            Assert(SyncRuleEngine.RouteEntry(andDoc, workFromPhone) == string.Empty,
+                "A route with multiple conditions should require every condition to match (AND semantics).");
+        }
+
+        private static void SyncRuleSubscriptions()
+        {
+            var doc = new SyncRulesDocument { Enabled = true };
+            doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+            doc.Channels.Add(new SyncChannel { Name = "Images", Route = new SyncRoute { Kind = "RichTextImages" } });
+            doc.Devices.Add(new SyncDevice { Name = "Desktop", Channels = new List<string> { "*" } });
+            doc.Devices.Add(new SyncDevice { Name = "Jeff-iPhone", Channels = new List<string> { "Work" } });
+
+            Assert(SyncRuleEngine.SubscribedChannels(doc, "Unknown-Device") == null,
+                "A device not listed in the rules document should subscribe to everything (null).");
+
+            var everything = SyncRuleEngine.SubscribedChannels(doc, "Desktop");
+            Assert(everything != null && everything.Count == 2 && everything.Contains("work") && everything.Contains("images"),
+                "A device with \"*\" should subscribe to every channel.");
+
+            var explicitChannels = SyncRuleEngine.SubscribedChannels(doc, " jeff-iphone ");
+            Assert(explicitChannels != null && explicitChannels.Count == 1 && explicitChannels.Contains("work"),
+                "Device matching should be trimmed and case-insensitive.");
+        }
+
+        private static void SyncRulesDocumentJsonRoundTrip()
+        {
+            var doc = new SyncRulesDocument
+            {
+                Enabled = true,
+                UpdatedUnixMs = 1757200000000,
+                UpdatedBy = "Desktop"
+            };
+            doc.Channels.Add(new SyncChannel { Name = "Images", Route = new SyncRoute { Kind = "RichTextImages" } });
+            doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work", "Standup" } } });
+            doc.Channels.Add(new SyncChannel { Name = "Desktop only", Route = new SyncRoute { SourceDevices = new List<string> { "Desktop", "Work-PC" } } });
+            doc.Devices.Add(new SyncDevice { Name = "Desktop", Channels = new List<string> { "*" } });
+            doc.Devices.Add(new SyncDevice { Name = "Jeff-iPhone", Channels = new List<string> { "work" } });
+            doc.Devices.Add(new SyncDevice { Name = "Work-PC", Channels = new List<string> { "work", "desktop only" } });
+
+            var json = JsonUtil.SerializePretty(doc);
+            var restored = JsonUtil.Deserialize<SyncRulesDocument>(json);
+
+            Assert(restored.Clipman == "sync-rules", "The Clipman marker did not survive a JSON round trip.");
+            Assert(restored.Version == 1, "The Version field did not survive a JSON round trip.");
+            Assert(restored.Enabled, "The Enabled field did not survive a JSON round trip.");
+            Assert(restored.UpdatedUnixMs == 1757200000000, "The UpdatedUnixMs field did not survive a JSON round trip.");
+            Assert(restored.UpdatedBy == "Desktop", "The UpdatedBy field did not survive a JSON round trip.");
+            Assert(restored.Channels.Count == 3, "Channels did not survive a JSON round trip.");
+            Assert(restored.Channels[1].Name == "Work" && restored.Channels[1].Route.Groups.Count == 2,
+                "A channel route's Groups did not survive a JSON round trip.");
+            Assert(restored.Channels[2].Route.SourceDevices.Count == 2, "A channel route's SourceDevices did not survive a JSON round trip.");
+            Assert(restored.Channels[0].Route.Kind == "RichTextImages", "A channel route's Kind did not survive a JSON round trip.");
+            Assert(restored.Devices.Count == 3, "Devices did not survive a JSON round trip.");
+            Assert(restored.Devices[2].Channels.Count == 2, "A device's Channels list did not survive a JSON round trip.");
+        }
+
+        private static void SyncRulesMergeDocumentsLastWriterWins()
+        {
+            var older = new SyncRulesDocument { UpdatedUnixMs = 1000, UpdatedBy = "Zeta" };
+            var newer = new SyncRulesDocument { UpdatedUnixMs = 2000, UpdatedBy = "Alpha" };
+            Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(older, newer), newer),
+                "The document with the greater UpdatedUnixMs should win.");
+            Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(newer, older), newer),
+                "MergeDocuments should be symmetric on UpdatedUnixMs.");
+
+            var tieLow = new SyncRulesDocument { UpdatedUnixMs = 1000, UpdatedBy = "Alpha" };
+            var tieHigh = new SyncRulesDocument { UpdatedUnixMs = 1000, UpdatedBy = "Beta" };
+            Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(tieLow, tieHigh), tieHigh),
+                "A tie on UpdatedUnixMs should be broken by the greater UpdatedBy (ordinal).");
+            Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(tieHigh, tieLow), tieHigh),
+                "MergeDocuments should be symmetric on the UpdatedBy tiebreak.");
+
+            Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(null, newer), newer), "A null local document should lose to a non-null remote document.");
+            Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(newer, null), newer), "A null remote document should lose to a non-null local document.");
         }
 
         private static void ServerPollSchedulingIsBounded()
