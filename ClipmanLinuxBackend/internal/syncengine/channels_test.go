@@ -466,8 +466,11 @@ func TestMutateViewFailedRelocationTargetKeepsSourceIntact(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failed relocation target was reported as success")
 	}
-	// Phase 1 may rewrite core, but only with the departing entry still in it
-	// and without the relocation marker, so nothing is lost.
+	// Core only loses here, and phase one carries the fetched copy of the
+	// departing entry, so core is not written at all and still holds x.
+	if got := fake.count("PUT", coreBucketID()); got != 0 {
+		t.Fatalf("core PUT count = %d, want 0: nothing about core changed", got)
+	}
 	core := fake.database(t, coreBucketID())
 	if !hasEntry(core, "x") {
 		t.Fatal("the entry was lost: it is neither in core nor in work")
@@ -556,14 +559,16 @@ func TestMutateViewRelocationChainLosesNothing(t *testing.T) {
 	if view.Residence["a"] != "work" || view.Residence["b"] != "archive" || view.Residence["c"] != "archive" {
 		t.Fatalf("residence = %#v", view.Residence)
 	}
-	// Every losing channel is uploaded once per phase: first still holding its
-	// departure, then without it. The archive channel only gains, so it is
-	// uploaded once.
+	// The work channel gains and loses, so it is uploaded once per phase: first
+	// still holding its departure, then without it. Core only loses, and phase
+	// one carries the copy it was fetched with, so its phase-one content is
+	// unchanged and only the phase-two removal is uploaded. The archive channel
+	// only gains, so it is uploaded once as well.
 	if got := fake.count("PUT", channelBucketID("work")); got != 2 {
 		t.Fatalf("work PUT count = %d, want 2 (one per phase)", got)
 	}
-	if got := fake.count("PUT", coreBucketID()); got != 2 {
-		t.Fatalf("core PUT count = %d, want 2 (one per phase)", got)
+	if got := fake.count("PUT", coreBucketID()); got != 1 {
+		t.Fatalf("core PUT count = %d, want 1 (phase one is clean for a channel that only loses)", got)
 	}
 	if got := fake.count("PUT", channelBucketID("archive")); got != 1 {
 		t.Fatalf("archive PUT count = %d, want 1", got)

@@ -116,6 +116,10 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 	for index := range view.Channels {
 		subscribed[view.Channels[index].Key] = index
 	}
+	// What each bucket held when it was downloaded, which is the copy phase one
+	// carries for entries that are leaving.
+	downloaded := fetchedEntries(view.Channels)
+
 	// Routing pass (spec section 5, upload steps 1-3): every entry is assigned
 	// to the channel its route names, and leaving a channel leaves a relocation
 	// marker behind in the channel the entry came from. departures records what
@@ -156,7 +160,7 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 	// derivation serves them all. A save that writes nothing anywhere still
 	// creates no bucket.
 	if !view.Channels[0].exists {
-		databases := buildChannelDatabases(view, withDepartures(routed, departures), assembleMarkers(view, previousMarkers, subscribed, nil), now)
+		databases := buildChannelDatabases(view, withDepartures(routed, departures, downloaded), assembleMarkers(view, previousMarkers, subscribed, nil), now)
 		writes := len(pendingKeys) > 0
 		for index := range databases {
 			if plainHash(&databases[index]) != view.Channels[index].PlainHash {
@@ -221,7 +225,7 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 
 	// Phase 1: every channel keeps the entries it is about to lose and withholds
 	// its new relocation markers, so this pass only ever adds.
-	phaseOne := buildChannelDatabases(view, withDepartures(routed, departures), assembleMarkers(view, previousMarkers, subscribed, nil), now)
+	phaseOne := buildChannelDatabases(view, withDepartures(routed, departures, downloaded), assembleMarkers(view, previousMarkers, subscribed, nil), now)
 	for index := range view.Channels {
 		channel := &view.Channels[index]
 		if plainHash(&phaseOne[index]) == channel.PlainHash {
@@ -314,7 +318,14 @@ func buildChannelDatabases(view *ViewState, routed map[string][]model.Entry, mar
 
 // withDepartures is the phase-1 entry assignment: what each channel keeps plus
 // what it is about to lose, so the first upload of a save only ever adds.
-func withDepartures(routed, departures map[string][]model.Entry) map[string][]model.Entry {
+//
+// A departing entry is carried in the copy the channel was fetched with, not
+// the locally modified one. The target receives the modified copy in the same
+// phase, and its higher ModifiedUnixMs wins view assembly for the transient
+// window in which both channels hold the id. Keeping the fetched copy is what
+// lets a channel whose only change is a departure hash clean and skip its
+// phase-1 upload entirely.
+func withDepartures(routed, departures map[string][]model.Entry, fetched map[string]map[string]model.Entry) map[string][]model.Entry {
 	if len(departures) == 0 {
 		return routed
 	}
@@ -326,9 +337,32 @@ func withDepartures(routed, departures map[string][]model.Entry) map[string][]mo
 		if len(leaving) == 0 {
 			continue
 		}
-		combined[key] = append(append([]model.Entry{}, combined[key]...), leaving...)
+		staying := append([]model.Entry{}, combined[key]...)
+		for _, entry := range leaving {
+			if before, ok := fetched[key][comparableID(entry.ID)]; ok {
+				entry = before
+			}
+			staying = append(staying, entry)
+		}
+		combined[key] = staying
 	}
 	return combined
+}
+
+// fetchedEntries indexes each channel's entries as they were downloaded, before
+// this save changed anything.
+func fetchedEntries(channels []ChannelState) map[string]map[string]model.Entry {
+	byChannel := make(map[string]map[string]model.Entry, len(channels))
+	for index := range channels {
+		entries := make(map[string]model.Entry)
+		if channels[index].Database != nil {
+			for _, entry := range channels[index].Database.Entries {
+				entries[comparableID(entry.ID)] = entry
+			}
+		}
+		byChannel[channels[index].Key] = entries
+	}
+	return byChannel
 }
 
 func removeEntry(entries []model.Entry, id string) []model.Entry {
