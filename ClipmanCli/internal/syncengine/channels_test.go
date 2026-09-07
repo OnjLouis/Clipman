@@ -596,6 +596,9 @@ func TestMutateViewWriteThroughFailureReportsPendingEntries(t *testing.T) {
 	if pendingErr.Unwrap() == nil {
 		t.Fatal("the write-through error does not wrap its cause")
 	}
+	if !pendingErr.Committed {
+		t.Fatal("Committed = false although every subscribed channel was uploaded")
+	}
 	if view == nil {
 		t.Fatal("no ViewState was returned alongside the write-through error")
 	}
@@ -632,6 +635,15 @@ func TestMutateViewPendingEntriesSurviveALaterUploadFailure(t *testing.T) {
 	}
 	if view == nil {
 		t.Fatal("no ViewState was returned alongside the write-through error")
+	}
+	// The work channel upload failed too, so this save is not committed and a
+	// caller that parked the pending entries and reported success would be
+	// dropping the user's change to that channel.
+	if pendingErr.Committed {
+		t.Fatal("Committed = true although a subscribed channel upload failed")
+	}
+	if hasEntry(*view.View, "w") {
+		t.Fatalf("returned view = %v, want only what committed", entryIDs(view.View))
 	}
 }
 

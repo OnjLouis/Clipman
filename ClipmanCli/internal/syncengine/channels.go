@@ -61,12 +61,25 @@ func (e *Engine) ReadView(ctx context.Context, deviceName string) (*ViewState, e
 // WriteThroughError reports that entries bound for channels this device does
 // not subscribe to could not be committed (spec section 6: the writer keeps
 // them in a small local pending store and retries after the next successful
-// poll). Pending holds them per channel key. The mutation itself is not rolled
-// back: MutateView still returns the committed ViewState alongside this error,
-// and channels the failed entries did not belong to were uploaded normally.
+// poll). Pending holds them per channel key.
+//
+// Committed says how much of the rest of the mutation survived, and callers
+// must branch on it:
+//
+//   - true: every subscribed channel was uploaded, and the entries in Pending
+//     are the only thing outstanding. Parking them and reporting success is
+//     correct.
+//   - false: a channel upload failed as well, and Err joins that failure. Part
+//     of the mutation is not on the server, so this must be reported to the
+//     user as a failed save; treating it as success loses their change.
+//
+// Err carries the underlying failures and is reachable with errors.Is and
+// errors.As through Unwrap. The ViewState returned alongside this error
+// reflects only what actually committed, never what was attempted.
 type WriteThroughError struct {
-	Pending map[string][]model.Entry
-	Err     error
+	Pending   map[string][]model.Entry
+	Committed bool
+	Err       error
 }
 
 func (w *WriteThroughError) Error() string {
@@ -95,9 +108,12 @@ func (w *WriteThroughError) Unwrap() error { return w.Err }
 // analysis: a failure in either phase can leave an entry in two channels, which
 // view assembly resolves, but never removes it from the only channel it was in.
 //
-// MutateView can return a non-nil ViewState together with a non-nil error: a
-// *WriteThroughError means the local channels were committed and only entries
-// bound for unsubscribed channels are outstanding.
+// MutateView can return a non-nil ViewState together with a non-nil error,
+// which is always a *WriteThroughError. The ViewState then describes only what
+// actually reached the server, so it stays usable as the local state. Callers
+// must check its Committed field before treating the save as successful: it is
+// false when a channel upload failed too, in which case Err (via Unwrap) joins
+// that failure and part of the mutation was not committed.
 func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(database *model.Database) error) (*ViewState, error) {
 	now := time.Now().UnixMilli()
 	view, err := e.readView(ctx, deviceName, now)
@@ -204,7 +220,9 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 
 	// The result an error is reported with. Entries that could not be written
 	// through must reach the caller even when a later upload fails, or the only
-	// record of them is gone.
+	// record of them is gone - but the caller is told, through Committed,
+	// whether the rest of the save survived. cause is nil only when every
+	// subscribed channel was uploaded.
 	finish := func(cause error) (*ViewState, error) {
 		committed, residence := buildView(view.Channels, now)
 		state := &ViewState{
@@ -215,7 +233,11 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 			Residence:     residence,
 		}
 		if len(failures) > 0 {
-			return state, &WriteThroughError{Pending: failures, Err: errors.Join(writeThroughErr, cause)}
+			return state, &WriteThroughError{
+				Pending:   failures,
+				Committed: cause == nil,
+				Err:       errors.Join(writeThroughErr, cause),
+			}
 		}
 		if cause != nil {
 			return nil, cause
