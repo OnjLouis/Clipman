@@ -135,6 +135,54 @@ func TestOlderModificationCannotOverwriteNewerEdit(t *testing.T) {
 	}
 }
 
+func TestEmptyTextHashTombstoneMatchesOnlyById(t *testing.T) {
+	now := int64(2_000_000_000_000)
+	database := model.NewDatabase(now)
+	database.Deleted = []model.DeletedEntry{{ID: "a", TextHash: "", DeletedUnixMs: now, SourceMachine: "desktop"}}
+	entryA := model.Entry{ID: "a", Text: "anything", CreatedUnixMs: now, LastUsedUnixMs: now}
+	entryB := model.Entry{ID: "b", Text: "anything", CreatedUnixMs: now, LastUsedUnixMs: now}
+	if !IsDeleted(database, entryA) {
+		t.Fatal("relocation tombstone did not delete the entry with its own id")
+	}
+	if IsDeleted(database, entryB) {
+		t.Fatal("relocation tombstone with empty TextHash must not match a different id by text")
+	}
+}
+
+func TestNormalizeKeepsEmptyTextHashTombstones(t *testing.T) {
+	now := int64(2_000_000_000_000)
+
+	t.Run("newer relocation marker after older hashed duplicate", func(t *testing.T) {
+		database := model.NewDatabase(now)
+		database.Deleted = []model.DeletedEntry{
+			{ID: "moved", TextHash: TextHash("old text"), DeletedUnixMs: now - 100, SourceMachine: "phone"},
+			{ID: "moved", TextHash: "", DeletedUnixMs: now, SourceMachine: "desktop"},
+		}
+		Normalize(&database, now)
+		if len(database.Deleted) != 1 {
+			t.Fatalf("expected single deduped tombstone, got %+v", database.Deleted)
+		}
+		if database.Deleted[0].TextHash != "" {
+			t.Fatalf("relocation tombstone lost its empty TextHash: %+v", database.Deleted[0])
+		}
+	})
+
+	t.Run("older relocation marker stays blank despite newer hashed duplicate", func(t *testing.T) {
+		database := model.NewDatabase(now)
+		database.Deleted = []model.DeletedEntry{
+			{ID: "moved", TextHash: "", DeletedUnixMs: now - 100, SourceMachine: "desktop"},
+			{ID: "moved", TextHash: TextHash("old text"), DeletedUnixMs: now, SourceMachine: "phone"},
+		}
+		Normalize(&database, now)
+		if len(database.Deleted) != 1 {
+			t.Fatalf("expected single deduped tombstone, got %+v", database.Deleted)
+		}
+		if database.Deleted[0].TextHash != TextHash("old text") {
+			t.Fatalf("expected the newer, hashed marker to win: %+v", database.Deleted[0])
+		}
+	})
+}
+
 func TestLegacySameIdentityRepairsTextFromSource(t *testing.T) {
 	now := int64(2_000_000_000_000)
 	target := model.NewDatabase(now)

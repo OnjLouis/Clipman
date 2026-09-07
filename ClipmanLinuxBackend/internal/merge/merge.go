@@ -264,13 +264,10 @@ func normalizeDeleted(database *model.Database, now int64) {
 		key := strings.ToLower(marker.ID)
 		existing, ok := byID[key]
 		if !ok || marker.DeletedUnixMs > existing.DeletedUnixMs {
-			if marker.TextHash == "" && ok {
-				marker.TextHash = existing.TextHash
-			}
+			// A relocation tombstone's empty TextHash is intentional (it matches
+			// by Id only) and must not be back-filled from another marker for
+			// the same Id.
 			byID[key] = marker
-		} else if existing.TextHash == "" && marker.TextHash != "" {
-			existing.TextHash = marker.TextHash
-			byID[key] = existing
 		}
 	}
 	database.Deleted = database.Deleted[:0]
