@@ -161,13 +161,20 @@ Download / poll (each poll tick):
    (Section 4 LWW) into the cached document, and recompute the subscription set.
 2. For each subscribed channel (core plus subscriptions), `HEAD`; `GET` only
    channels whose revision changed.
-3. Merge each changed channel database into the view using the existing
-   entry-level merge, recording residence. Tombstones apply only within their own
-   channel, with one exception: a tombstone with a non-empty `TextHash` also
-   suppresses matching-text entries in other channels.
-4. If the same `Id` appears in two channels (move race), the copy with the higher
-   `ModifiedUnixMs` wins; the loser is dropped from the view and repaired on the
-   next save.
+3. Assemble the view across channels by entry `Id` (core first, then channels in
+   rules-document order). Cross-channel assembly deliberately does NOT use the
+   entry-level field merge or text-fallback matching: within a channel the
+   existing merge applies as today; across channels an `Id` collision (move
+   race) is resolved by dropping the copy with the lower `ModifiedUnixMs`
+   wholesale, and on a tie the earlier channel in assembly order wins. The same
+   text under different ids in two channels stays duplicated (see Section 8).
+   Tombstones apply only within their own channel, with one exception: a
+   tombstone with a non-empty `TextHash` also suppresses matching-text entries
+   in other channels, subject to the same entry-changed-before-deletion rule the
+   entry-level merge uses. A relocation marker (empty `TextHash`) must never
+   suppress a live entry with the same id in another channel.
+4. The dropped loser of an `Id` collision is repaired (rewritten to its routed
+   channel) on the next save.
 
 Upload (each local mutation):
 
@@ -180,12 +187,19 @@ Upload (each local mutation):
    <this device>}`. The empty `TextHash` distinguishes "moved" from "deleted";
    merge implementations must only match `TextHash` when it is non-empty, and
    normalization must not back-fill an empty `TextHash` on such markers.
-4. Dirty detection: serialize each channel's plaintext JSON deterministically and
-   compare its SHA-256 to the hash recorded at the last transfer. Only dirty
-   channels are encrypted and `PUT` (with per-channel `If-Match`). The comparison
-   must happen on plaintext: ciphertext differs on every encode because the IV is
-   fresh.
-5. On a 409 for one channel: `GET` that channel, merge, rebuild, retry.
+4. Dirty detection: serialize each channel's plaintext JSON deterministically
+   with the database-level `UpdatedUnixMs` field zeroed, and compare its SHA-256
+   to the hash recorded at the last transfer. Zeroing `UpdatedUnixMs` makes the
+   hash durable across poll cycles (normalization restamps that field on every
+   pass). Only dirty channels are encrypted and `PUT` (with per-channel
+   `If-Match`). The comparison must happen on plaintext: ciphertext differs on
+   every encode because the IV is fresh.
+5. Upload ordering: every channel that GAINS an entry in this save (relocation
+   targets, newly created entries) is uploaded before any channel that LOSES
+   that entry (the relocation source with its marker). A partial failure must
+   never leave an entry deleted from its source without having been committed to
+   its target. On a 409 for one channel: `GET` that channel, merge, rebuild,
+   retry.
 
 Salt sharing: a channel blob created for the first time copies the core
 database's salt, so one PBKDF2 derivation serves every channel through the
