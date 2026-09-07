@@ -58,11 +58,38 @@ func (e *Engine) ReadView(ctx context.Context, deviceName string) (*ViewState, e
 	return e.readView(ctx, deviceName, time.Now().UnixMilli())
 }
 
+// WriteThroughError reports that entries bound for channels this device does
+// not subscribe to could not be committed (spec section 6: the writer keeps
+// them in a small local pending store and retries after the next successful
+// poll). Pending holds them per channel key. The mutation itself is not rolled
+// back: MutateView still returns the committed ViewState alongside this error,
+// and channels the failed entries did not belong to were uploaded normally.
+type WriteThroughError struct {
+	Pending map[string][]model.Entry
+	Err     error
+}
+
+func (w *WriteThroughError) Error() string {
+	keys := make([]string, 0, len(w.Pending))
+	for key := range w.Pending {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return fmt.Sprintf("entries for the %s channel could not be delivered: %v", strings.Join(keys, ", "), w.Err)
+}
+
+func (w *WriteThroughError) Unwrap() error { return w.Err }
+
 // MutateView applies mutate to the merged view and commits the result: it
 // re-routes every entry, rebuilds one database per channel, writes entries
 // bound for unsubscribed channels straight through, and uploads only the
 // channels whose plaintext actually changed. The returned ViewState is the
 // committed state, so callers need no second download.
+//
+// Uploads follow the gain-before-lose order of spec section 5, upload step 5:
+// the buckets that gain an entry in this save go first, so a failure part way
+// through can leave an entry duplicated but never deleted from the only place
+// it existed.
 func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(database *model.Database) error) (*ViewState, error) {
 	now := time.Now().UnixMilli()
 	view, err := e.readView(ctx, deviceName, now)
@@ -80,6 +107,12 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 	subscribed := make(map[string]int, len(view.Channels))
 	for index := range view.Channels {
 		subscribed[view.Channels[index].Key] = index
+	}
+	// The entry ids each bucket held when it was fetched decide, further down,
+	// which buckets gain something in this save.
+	fetched := make([]map[string]bool, len(view.Channels))
+	for index := range view.Channels {
+		fetched[index] = entryIDSet(view.Channels[index].Database)
 	}
 
 	// Routing pass (spec section 5, upload steps 1-3): every entry is assigned
@@ -112,50 +145,127 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 		pending[target] = append(pending[target], entry)
 	}
 
-	// Tombstones are channel-local: each channel keeps the markers it already
-	// carried, and only markers the mutation created or refreshed are filed
-	// against the channel the entry lived in.
-	channelMarkers := make(map[string][]model.DeletedEntry, len(view.Channels))
+	coreBlob := view.Channels[0].blob
+
+	// First sync: create the core bucket before anything else so every other
+	// bucket, channels and rules alike, copies its salt and one PBKDF2
+	// derivation serves them all. A save that writes nothing anywhere still
+	// creates no bucket.
+	if !view.Channels[0].exists {
+		databases := buildChannelDatabases(view, routed, assembleMarkers(view, previousMarkers, subscribed, relocations), now)
+		writes := len(pendingKeys) > 0
+		for index := range databases {
+			if plainHash(&databases[index]) != view.Channels[index].PlainHash {
+				writes = true
+			}
+		}
+		if writes {
+			if err := e.putChannel(ctx, &view.Channels[0], databases[0], coreBlob, now); err != nil {
+				return nil, err
+			}
+			coreBlob = view.Channels[0].blob
+		}
+	}
+
+	// Write-through (spec section 6) is the first thing committed after that:
+	// its targets gain entries that their source channels are about to lose.
+	// When one fails, the entry is not taken away from where it already lives -
+	// a resident entry stays in its source channel and its relocation marker is
+	// cancelled - and the caller is handed the entries that have nowhere to
+	// live yet so it can retry them.
+	sort.Strings(pendingKeys)
+	failures := make(map[string][]model.Entry)
+	var writeThroughErr error
+	for _, key := range pendingKeys {
+		if err := e.writeThrough(ctx, key, pending[key], coreBlob, now); err != nil {
+			if writeThroughErr == nil {
+				writeThroughErr = err
+			}
+			failures[key] = pending[key]
+			for _, entry := range pending[key] {
+				source, resident := view.Residence[entry.ID]
+				if !resident {
+					continue
+				}
+				routed[source] = append(routed[source], entry)
+				relocations[source] = removeMarkerFor(relocations[source], entry.ID)
+			}
+		}
+	}
+
+	databases := buildChannelDatabases(view, routed, assembleMarkers(view, previousMarkers, subscribed, relocations), now)
+	for pass := 0; pass < 2; pass++ {
+		for index := range view.Channels {
+			if gainsEntries(fetched[index], databases[index]) != (pass == 0) {
+				continue
+			}
+			channel := &view.Channels[index]
+			if plainHash(&databases[index]) == channel.PlainHash {
+				continue
+			}
+			if err := e.putChannel(ctx, channel, databases[index], coreBlob, now); err != nil {
+				return nil, err
+			}
+			if index == 0 {
+				coreBlob = channel.blob
+			}
+		}
+	}
+
+	committed, residence := buildView(view.Channels, now)
+	state := &ViewState{
+		Rules:         view.Rules,
+		RulesRevision: view.RulesRevision,
+		Channels:      view.Channels,
+		View:          committed,
+		Residence:     residence,
+	}
+	if len(failures) > 0 {
+		return state, &WriteThroughError{Pending: failures, Err: writeThroughErr}
+	}
+	return state, nil
+}
+
+// assembleMarkers files tombstones per channel. Tombstones are channel-local:
+// each channel keeps the markers it already carried, and only markers the
+// mutation created or refreshed are filed against the channel the entry lived
+// in. Relocation markers are added last, for the channels their entries left.
+func assembleMarkers(view *ViewState, previous map[string]model.DeletedEntry, subscribed map[string]int, relocations map[string][]model.DeletedEntry) map[string][]model.DeletedEntry {
+	markers := make(map[string][]model.DeletedEntry, len(view.Channels))
 	for index := range view.Channels {
 		channel := &view.Channels[index]
-		channelMarkers[channel.Key] = append([]model.DeletedEntry{}, channel.Database.Deleted...)
+		markers[channel.Key] = append([]model.DeletedEntry{}, channel.Database.Deleted...)
 	}
 	for _, marker := range view.View.Deleted {
-		if previous, ok := previousMarkers[comparableID(marker.ID)]; ok &&
-			previous.DeletedUnixMs == marker.DeletedUnixMs && previous.TextHash == marker.TextHash {
+		if before, ok := previous[comparableID(marker.ID)]; ok &&
+			before.DeletedUnixMs == marker.DeletedUnixMs && before.TextHash == marker.TextHash {
 			continue
 		}
 		home := view.Residence[marker.ID]
 		if _, ok := subscribed[home]; !ok {
 			home = ""
 		}
-		channelMarkers[home] = append(channelMarkers[home], marker)
+		markers[home] = append(markers[home], marker)
 	}
-	for key, markers := range relocations {
+	for key, relocated := range relocations {
 		if _, ok := subscribed[key]; ok {
-			channelMarkers[key] = append(channelMarkers[key], markers...)
+			markers[key] = append(markers[key], relocated...)
 		}
 	}
+	return markers
+}
 
-	coreBlob := view.Channels[0].blob
-
-	// Write-through first (spec section 6): if it fails the entry stays where
-	// it is and is retried on the next mutation, rather than being dropped from
-	// its source channel with nowhere to land.
-	sort.Strings(pendingKeys)
-	for _, key := range pendingKeys {
-		if err := e.writeThrough(ctx, key, pending[key], coreBlob, now); err != nil {
-			return nil, err
-		}
-	}
-
+// buildChannelDatabases rebuilds one database per subscribed channel from the
+// routed entries and the markers filed against it, in view.Channels order.
+func buildChannelDatabases(view *ViewState, routed map[string][]model.Entry, markers map[string][]model.DeletedEntry, now int64) []model.Database {
+	databases := make([]model.Database, len(view.Channels))
 	for index := range view.Channels {
 		channel := &view.Channels[index]
 		database := model.Database{
 			Version:       channel.Database.Version,
 			UpdatedUnixMs: now,
 			Entries:       routed[channel.Key],
-			Deleted:       dropMarkersForEntries(channelMarkers[channel.Key], routed[channel.Key]),
+			Deleted:       dropMarkersForEntries(markers[channel.Key], routed[channel.Key]),
 			Extra:         cloneExtra(channel.Database.Extra),
 		}
 		if channel.Key == "" {
@@ -165,22 +275,42 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 			database.Version = 1
 		}
 		merge.Normalize(&database, now)
-		if plainHash(&database) == channel.PlainHash {
-			continue
-		}
-		if err := e.putChannel(ctx, channel, database, coreBlob, now); err != nil {
-			return nil, err
+		databases[index] = database
+	}
+	return databases
+}
+
+// gainsEntries reports whether database holds an entry the bucket did not have
+// when it was fetched, which is what puts a channel in the first upload pass.
+func gainsEntries(fetched map[string]bool, database model.Database) bool {
+	for _, entry := range database.Entries {
+		if !fetched[comparableID(entry.ID)] {
+			return true
 		}
 	}
+	return false
+}
 
-	committed, residence := buildView(view.Channels, now)
-	return &ViewState{
-		Rules:         view.Rules,
-		RulesRevision: view.RulesRevision,
-		Channels:      view.Channels,
-		View:          committed,
-		Residence:     residence,
-	}, nil
+func entryIDSet(database *model.Database) map[string]bool {
+	ids := make(map[string]bool)
+	if database == nil {
+		return ids
+	}
+	for _, entry := range database.Entries {
+		ids[comparableID(entry.ID)] = true
+	}
+	return ids
+}
+
+func removeMarkerFor(markers []model.DeletedEntry, id string) []model.DeletedEntry {
+	kept := markers[:0]
+	for _, marker := range markers {
+		if comparableID(marker.ID) == comparableID(id) {
+			continue
+		}
+		kept = append(kept, marker)
+	}
+	return kept
 }
 
 // readView is ReadView with the timestamp supplied by the caller, so that a
@@ -251,7 +381,14 @@ func (e *Engine) readRules(ctx context.Context, coreBlob []byte) (*rules.Documen
 	if err != nil {
 		return nil, "", nil
 	}
-	return rules.MergeDocuments(e.CachedRules, document), download.Revision, nil
+	// When the cache wins the last-writer-wins merge, the effective document is
+	// not the one the server holds, so no revision is reported: an If-Match
+	// against it would claim an edit was based on a document it never saw.
+	merged := rules.MergeDocuments(e.CachedRules, document)
+	if merged != document {
+		return merged, "", nil
+	}
+	return merged, download.Revision, nil
 }
 
 // uploadCachedRules restores a rules bucket that disappeared from the server
@@ -555,8 +692,15 @@ func markersByID(markers []model.DeletedEntry) map[string]model.DeletedEntry {
 	return byID
 }
 
+// plainHash is the dirty-detection hash of spec section 5, upload step 4: the
+// SHA-256 of the deterministic plaintext JSON with the database-level
+// UpdatedUnixMs zeroed. Zeroing it is what makes the hash durable, because
+// normalization restamps that field on every pass, so two reads of an
+// unchanged bucket at different times still hash alike.
 func plainHash(database *model.Database) [32]byte {
-	encoded, err := json.Marshal(database)
+	durable := *database
+	durable.UpdatedUnixMs = 0
+	encoded, err := json.Marshal(durable)
 	if err != nil {
 		return [32]byte{}
 	}

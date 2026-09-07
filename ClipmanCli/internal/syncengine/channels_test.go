@@ -1,8 +1,10 @@
 package syncengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,6 +55,7 @@ type channelServer struct {
 	created      map[string]bool
 	conflicts    map[string]int
 	replacements map[string][]byte
+	broken       map[string]bool
 	sequence     int
 }
 
@@ -62,7 +65,34 @@ func newChannelServer() *channelServer {
 		created:      map[string]bool{},
 		conflicts:    map[string]int{},
 		replacements: map[string][]byte{},
+		broken:       map[string]bool{},
 	}
+}
+
+// breakBucket makes every PUT to one bucket fail with a server error, which is
+// how the tests model a bucket that cannot be written right now.
+func (s *channelServer) breakBucket(identifier string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.broken[identifier] = true
+}
+
+// salt returns the container salt of a stored blob, which is what proves that
+// channel buckets share the core database's PBKDF2 derivation.
+func (s *channelServer) salt(t *testing.T, identifier string) []byte {
+	t.Helper()
+	blob := s.blob(identifier)
+	if blob == nil {
+		t.Fatalf("bucket %q does not exist", identifier)
+	}
+	_, salt, err := clipdb.DecodeRaw(blob, channelTestPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(salt) != 16 {
+		t.Fatalf("bucket %q has no container salt", identifier)
+	}
+	return salt
 }
 
 func (s *channelServer) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -87,6 +117,10 @@ func (s *channelServer) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		data, readErr := io.ReadAll(request.Body)
 		if readErr != nil {
 			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if s.broken[identifier] {
+			writer.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		if s.conflicts[identifier] > 0 {
@@ -332,12 +366,23 @@ func TestReadViewMergesSubscribedChannelsOnly(t *testing.T) {
 
 func TestMutateViewUploadsOnlyDirtyChannels(t *testing.T) {
 	fake, engine := newChannelEngine(t)
-	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("a", "alpha", "", 1000)))
-	fake.storeDatabase(t, channelBucketID("work"), databaseWith(testEntry("b", "beta", "Work", 1000)))
+	// Interleaved creation times across the two channels: the merged view
+	// renumbers ManualOrder globally, so the work channel only stays clean if
+	// rebuilding it reproduces its own 1..n numbering exactly.
+	fake.storeDatabase(t, coreBucketID(), databaseWith(
+		testEntry("a1", "alpha one", "", 1000),
+		testEntry("a2", "alpha two", "", 3000),
+		testEntry("a3", "alpha three", "", 5000),
+	))
+	fake.storeDatabase(t, channelBucketID("work"), databaseWith(
+		testEntry("b1", "beta one", "Work", 2000),
+		testEntry("b2", "beta two", "Work", 4000),
+		testEntry("b3", "beta three", "Work", 6000),
+	))
 	fake.storeRules(t, enabledRules())
 
 	view, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
-		database.Entries = append(database.Entries, testEntry("c", "gamma", "", 4000))
+		database.Entries = append(database.Entries, testEntry("c", "gamma", "", 7000))
 		return nil
 	})
 	if err != nil {
@@ -352,8 +397,176 @@ func TestMutateViewUploadsOnlyDirtyChannels(t *testing.T) {
 	if !hasEntry(fake.database(t, coreBucketID()), "c") {
 		t.Fatal("the new entry was not committed to core")
 	}
-	if !hasEntry(*view.View, "b") || view.Residence["b"] != "work" {
-		t.Fatalf("returned view lost the work channel: %v", entryIDs(view.View))
+	for _, id := range []string{"b1", "b2", "b3"} {
+		if !hasEntry(*view.View, id) || view.Residence[id] != "work" {
+			t.Fatalf("returned view lost the work channel: %v", entryIDs(view.View))
+		}
+	}
+	// A second mutation that changes nothing must upload nothing at all.
+	before := len(fake.requests)
+	if _, err := engine.MutateView(context.Background(), "Laptop", func(*model.Database) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range fake.requests[before:] {
+		if strings.HasPrefix(request, "PUT ") {
+			t.Fatalf("an unchanged mutation uploaded %q", request)
+		}
+	}
+}
+
+func TestReadViewPlainHashIsStableAcrossReads(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("a", "alpha", "", 1000)))
+	fake.storeDatabase(t, channelBucketID("work"), databaseWith(testEntry("b", "beta", "Work", 1000)))
+	fake.storeRules(t, enabledRules())
+
+	first, err := engine.ReadView(context.Background(), "Laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := engine.ReadView(context.Background(), "Laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.View.UpdatedUnixMs == second.View.UpdatedUnixMs {
+		t.Fatal("both reads used the same clock reading; the test proves nothing")
+	}
+	if len(first.Channels) != len(second.Channels) {
+		t.Fatalf("channel counts differ: %d and %d", len(first.Channels), len(second.Channels))
+	}
+	for index := range first.Channels {
+		if first.Channels[index].PlainHash != second.Channels[index].PlainHash {
+			t.Fatalf("channel %q hashed differently on two reads of unchanged data", first.Channels[index].Key)
+		}
+	}
+}
+
+func TestMutateViewFailedRelocationTargetKeepsSourceIntact(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("x", "hello", "", 1000)))
+	fake.storeRules(t, enabledRules())
+	fake.breakBucket(channelBucketID("work"))
+
+	_, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
+		for index := range database.Entries {
+			if database.Entries[index].ID == "x" {
+				database.Entries[index].Group = "Work"
+				database.Entries[index].ModifiedUnixMs = 5000
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a failed relocation target was reported as success")
+	}
+	if fake.count("PUT", coreBucketID()) != 0 {
+		t.Fatal("core was rewritten although the entry never reached the work channel")
+	}
+	if !hasEntry(fake.database(t, coreBucketID()), "x") {
+		t.Fatal("the entry was lost: it is neither in core nor in work")
+	}
+}
+
+func TestMutateViewWriteThroughFailureReportsPendingEntries(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("a", "alpha", "", 1000)))
+	fake.storeRules(t, enabledRules(rules.Device{Name: "Phone", Channels: []string{}}))
+	fake.breakBucket(channelBucketID("work"))
+
+	view, err := engine.MutateView(context.Background(), "Phone", func(database *model.Database) error {
+		database.Entries = append(database.Entries, testEntry("x", "hello", "Work", 4000))
+		database.Entries = append(database.Entries, testEntry("c", "gamma", "", 4000))
+		return nil
+	})
+	var pendingErr *WriteThroughError
+	if !errors.As(err, &pendingErr) {
+		t.Fatalf("error = %v, want a *WriteThroughError", err)
+	}
+	if len(pendingErr.Pending["work"]) != 1 || pendingErr.Pending["work"][0].ID != "x" {
+		t.Fatalf("pending entries = %#v, want the undelivered x", pendingErr.Pending)
+	}
+	if pendingErr.Unwrap() == nil {
+		t.Fatal("the write-through error does not wrap its cause")
+	}
+	if view == nil {
+		t.Fatal("no ViewState was returned alongside the write-through error")
+	}
+	core := fake.database(t, coreBucketID())
+	if !hasEntry(core, "c") || !hasEntry(core, "a") {
+		t.Fatalf("core entries = %v, want the unrelated change committed", entryIDs(&core))
+	}
+	if hasEntry(core, "x") {
+		t.Fatal("an entry routed to another channel was parked in core")
+	}
+	if !hasEntry(*view.View, "c") || hasEntry(*view.View, "x") {
+		t.Fatalf("returned view = %v, want the committed core state", entryIDs(view.View))
+	}
+}
+
+func TestMutateViewFreshInstallSharesCoreSalt(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	// A new device joining a fleet that already uses rules: the rules bucket
+	// exists, no history bucket does.
+	fake.storeRules(t, enabledRules())
+
+	if _, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
+		database.Entries = append(database.Entries, testEntry("a", "alpha", "", 4000))
+		database.Entries = append(database.Entries, testEntry("b", "beta", "Work", 4000))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	core := fake.salt(t, coreBucketID())
+	work := fake.salt(t, channelBucketID("work"))
+	if !bytes.Equal(core, work) {
+		t.Fatalf("work channel salt = %x, core salt = %x; a fresh channel must copy core's salt", work, core)
+	}
+	if fake.count("PUT", coreBucketID()) != 1 {
+		t.Fatalf("core PUT count = %d, want a single create", fake.count("PUT", coreBucketID()))
+	}
+	if !hasEntry(fake.database(t, coreBucketID()), "a") || !hasEntry(fake.database(t, channelBucketID("work")), "b") {
+		t.Fatal("the fresh install did not commit both entries to their channels")
+	}
+}
+
+func TestMutateViewRelocationRoundTripKeepsEntry(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("x", "hello", "", 1000)))
+	fake.storeRules(t, enabledRules())
+
+	if _, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
+		for index := range database.Entries {
+			if database.Entries[index].ID == "x" {
+				database.Entries[index].Group = "Work"
+				database.Entries[index].ModifiedUnixMs = 5000
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
+		for index := range database.Entries {
+			if database.Entries[index].ID == "x" {
+				database.Entries[index].Group = ""
+				database.Entries[index].ModifiedUnixMs = 6000
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := fake.database(t, coreBucketID())
+	if !hasEntry(core, "x") {
+		t.Fatal("the entry did not survive the round trip back to core: a stale relocation marker deleted it")
+	}
+	work := fake.database(t, channelBucketID("work"))
+	if hasEntry(work, "x") {
+		t.Fatal("the work channel kept the entry after it moved back")
+	}
+	if !hasEntry(*view.View, "x") || view.Residence["x"] != "" {
+		t.Fatalf("residence = %#v, want x back in core", view.Residence)
 	}
 }
 
@@ -422,8 +635,16 @@ func TestMutateViewWriteThroughUnsubscribedChannel(t *testing.T) {
 	if _, ok := view.Residence["x"]; ok {
 		t.Fatal("an unsubscribed channel appeared in residence")
 	}
-	if fake.count("PUT", coreBucketID()) != 0 {
-		t.Fatal("core was uploaded although nothing landed there")
+	// On this first sync core is created once as the salt anchor every other
+	// bucket copies, and stays empty because nothing routed to it.
+	if fake.count("PUT", coreBucketID()) != 1 {
+		t.Fatalf("core PUT count = %d, want the single salt-anchor create", fake.count("PUT", coreBucketID()))
+	}
+	if len(fake.database(t, coreBucketID()).Entries) != 0 {
+		t.Fatal("an entry routed to another channel was parked in core")
+	}
+	if !bytes.Equal(fake.salt(t, channelBucketID("work")), fake.salt(t, coreBucketID())) {
+		t.Fatal("the write-through bucket does not share the core database's salt")
 	}
 }
 
@@ -506,6 +727,9 @@ func TestMissingRulesBucketFallsBackToCache(t *testing.T) {
 	}
 	if !reflect.DeepEqual(restored, engine.CachedRules) {
 		t.Fatalf("re-uploaded rules = %#v", restored)
+	}
+	if !bytes.Equal(fake.salt(t, rulesBucketID()), fake.salt(t, coreBucketID())) {
+		t.Fatal("the restored rules blob does not share the core database's salt")
 	}
 }
 
