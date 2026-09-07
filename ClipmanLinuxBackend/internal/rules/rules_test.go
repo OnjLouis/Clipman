@@ -26,15 +26,17 @@ func TestChannelKeyGrammar(t *testing.T) {
 		t.Fatalf("ChannelKey(non-ASCII name) = %q, want empty", got)
 	}
 
-	doc := &Document{
-		Clipman: "sync-rules",
-		Enabled: true,
-		Channels: []Channel{
-			{Name: "core", Route: Route{Groups: []string{"Work"}}},
-		},
-	}
-	if err := Validate(doc); err == nil {
-		t.Fatal("Validate must reject a channel named \"core\" as reserved")
+	for _, reserved := range []string{"core", "all", "pinned", "sync-rules"} {
+		doc := &Document{
+			Clipman: "sync-rules",
+			Enabled: true,
+			Channels: []Channel{
+				{Name: reserved, Route: Route{Groups: []string{"Work"}}},
+			},
+		}
+		if err := Validate(doc); err == nil {
+			t.Errorf("Validate must reject a channel named %q as reserved", reserved)
+		}
 	}
 }
 
@@ -87,6 +89,36 @@ func TestValidateRejectsInvalidDocuments(t *testing.T) {
 	unknownDeviceChannel.Devices = []Device{{Name: "Desktop", Channels: []string{"nonexistent"}}}
 	if err := Validate(unknownDeviceChannel); err == nil {
 		t.Error("device referencing an unknown channel: Validate must return an error")
+	}
+
+	mixedWildcard := base()
+	mixedWildcard.Devices = []Device{{Name: "Desktop", Channels: []string{"*", "work"}}}
+	if err := Validate(mixedWildcard); err == nil {
+		t.Error("device Channels mixing \"*\" with named keys: Validate must return an error")
+	}
+}
+
+func TestValidateRejectsMixedWildcardDeviceChannels(t *testing.T) {
+	doc := &Document{
+		Clipman: "sync-rules",
+		Enabled: true,
+		Channels: []Channel{
+			{Name: "Work", Route: Route{Groups: []string{"Work"}}},
+		},
+		Devices: []Device{
+			{Name: "Desktop", Channels: []string{"*", "work"}},
+		},
+	}
+	if err := Validate(doc); err == nil {
+		t.Fatal("Validate must reject a device Channels list that mixes \"*\" with named keys")
+	}
+
+	data, err := Serialize(doc)
+	if err != nil {
+		t.Fatalf("Serialize error: %v", err)
+	}
+	if _, err := Parse(data); err == nil {
+		t.Fatal("Parse must reject a device Channels list that mixes \"*\" with named keys")
 	}
 }
 
@@ -192,6 +224,10 @@ func TestRouteKindRichTextImages(t *testing.T) {
 	}
 	if got := RouteEntry(doc, richTextEntry("<b>plain</b>")); got != "" {
 		t.Fatalf("RouteEntry(rich text without image) = %q, want empty", got)
+	}
+	malformed := &model.Entry{Extra: map[string]json.RawMessage{"RichText": json.RawMessage("{not json")}}
+	if got := RouteEntry(doc, malformed); got != "" {
+		t.Fatalf("RouteEntry(malformed RichText payload) = %q, want empty", got)
 	}
 	if got := RouteEntry(doc, &model.Entry{}); got != "" {
 		t.Fatalf("RouteEntry(no rich text at all) = %q, want empty", got)

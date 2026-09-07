@@ -125,6 +125,16 @@ func Validate(doc *Document) error {
 	}
 
 	for _, device := range doc.Devices {
+		hasWildcard := false
+		for _, channelRef := range device.Channels {
+			if channelRef == "*" {
+				hasWildcard = true
+				break
+			}
+		}
+		if hasWildcard && len(device.Channels) != 1 {
+			return fmt.Errorf("rules: device %q mixes \"*\" with named channels in Channels", device.Name)
+		}
 		for _, channelRef := range device.Channels {
 			if channelRef == "*" {
 				continue
