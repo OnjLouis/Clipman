@@ -58,6 +58,27 @@ final class ShareSyncServiceTests: XCTestCase {
         XCTAssertEqual(result.database.Entries[0].RichText, richText)
     }
 
+    func testStartupCaptureDoesNotRetouchExistingEntry() {
+        let original = ClipEntry(
+            Text: "Shared text",
+            Name: "Original name",
+            Group: "Original group",
+            SourceMachine: "Windows",
+            CreatedUnixMs: 100,
+            LastUsedUnixMs: 200,
+            ModifiedUnixMs: 150
+        )
+
+        let result = SyncConflictResolver.addText(
+            database: ClipDatabase(Entries: [original]),
+            text: original.Text,
+            machineName: "iPhone",
+            preserveExistingMetadata: true
+        )
+
+        XCTAssertEqual(result.Entries, [original])
+    }
+
     private func settings(richTextEnabled: Bool = false) -> ShareSyncSettings {
         ShareSyncSettings(
             serverURL: "clipman://example.test:12345/",
@@ -75,12 +96,11 @@ final class ShareSyncServiceTests: XCTestCase {
 final class QuickActionTests: XCTestCase {
     @MainActor
     func testQuickClipActionWaitsUntilTheAppConsumesIt() {
-        _ = ClipmanQuickActionCenter.shared.consume()
-        defer { _ = ClipmanQuickActionCenter.shared.consume() }
-        ClipmanQuickActionCenter.shared.request(.quickClip)
+        let center = ClipmanQuickActionCenter()
+        center.request(.quickClip)
 
-        XCTAssertEqual(ClipmanQuickActionCenter.shared.pendingAction, .quickClip)
-        XCTAssertEqual(ClipmanQuickActionCenter.shared.consume(), .quickClip)
-        XCTAssertNil(ClipmanQuickActionCenter.shared.pendingAction)
+        XCTAssertEqual(center.pendingAction, .quickClip)
+        XCTAssertEqual(center.consume(), .quickClip)
+        XCTAssertNil(center.pendingAction)
     }
 }

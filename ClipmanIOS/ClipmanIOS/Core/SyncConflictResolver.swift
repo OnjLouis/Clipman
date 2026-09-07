@@ -92,13 +92,20 @@ enum SyncConflictResolver {
         return merged
     }
 
-    static func addText(database: ClipDatabase, text: String, machineName: String, richText: RichTextPayload? = nil) -> ClipDatabase {
+    static func addText(
+        database: ClipDatabase,
+        text: String,
+        machineName: String,
+        richText: RichTextPayload? = nil,
+        preserveExistingMetadata: Bool = false
+    ) -> ClipDatabase {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return database }
         var result = database
         let now = TimeUtil.nowUnixMs()
         let normalizedRichText = MobileRichTextClipboard.normalize(richText)
         if let index = result.Entries.firstIndex(where: { $0.Text == trimmed }) {
+            if preserveExistingMetadata { return result }
             result.Entries[index].LastUsedUnixMs = now
             result.Entries[index].SourceMachine = machineName
             if let normalizedRichText {

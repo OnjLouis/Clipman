@@ -85,6 +85,8 @@ The history window includes an accessible toolbar after the history type control
 
 Preferences can assign an optional global Quick Clip hotkey. It is unset by default and opens the same editor from another application without reading or replacing the current clipboard.
 
+Add current clipboard item on start adds genuinely new content but leaves an existing entry or file event unchanged, including its original device, group, and timestamp.
+
 For VoiceOver users, `Option+M` opens the history window's Clipman command menu directly. If macOS reports a new Clipman window but focus lands badly, press the Show History global hotkey once to dismiss the window and again to reopen it with a fresh focus attempt.
 
 ## Development App Build

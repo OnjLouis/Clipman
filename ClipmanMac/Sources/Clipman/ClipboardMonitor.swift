@@ -33,9 +33,9 @@ private struct PasteboardSnapshot {
 
 @MainActor
 protocol ClipboardMonitorDelegate: AnyObject {
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool)
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool)
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool, startupCapture: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool, startupCapture: Bool)
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String, startupCapture: Bool)
     func clipboardMonitor(_ monitor: ClipboardMonitor, didRejectImage reason: String, deliberate: Bool)
     func clipboardMonitorDidSkipIgnoredApplication(_ monitor: ClipboardMonitor)
     func clipboardMonitorDidWriteInternalClipboard(_ monitor: ClipboardMonitor)
@@ -86,14 +86,14 @@ final class ClipboardMonitor: @unchecked Sendable {
         let pasteboard = NSPasteboard.general
         lastChangeCount = pasteboard.changeCount
         ignoredChangeCount = nil
-        capture(from: pasteboard, playSkipSound: false, deliberate: false)
+        capture(from: pasteboard, playSkipSound: false, deliberate: false, startupCapture: true)
     }
 
     func saveCurrentContents() {
         let pasteboard = NSPasteboard.general
         lastChangeCount = pasteboard.changeCount
         ignoredChangeCount = nil
-        capture(from: pasteboard, playSkipSound: true, deliberate: true)
+        capture(from: pasteboard, playSkipSound: true, deliberate: true, startupCapture: false)
     }
 
     func stop() {
@@ -197,10 +197,10 @@ final class ClipboardMonitor: @unchecked Sendable {
             return
         }
         embeddedImagePasteboardFile = nil
-        capture(from: pasteboard, playSkipSound: true, deliberate: false)
+        capture(from: pasteboard, playSkipSound: true, deliberate: false, startupCapture: false)
     }
 
-    private func capture(from pasteboard: NSPasteboard, playSkipSound: Bool, deliberate: Bool) {
+    private func capture(from pasteboard: NSPasteboard, playSkipSound: Bool, deliberate: Bool, startupCapture: Bool) {
         guard isEnabled || deliberate else { return }
         let observedAtMilliseconds = Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
         let appDiagnostic = foregroundApplicationDiagnostic()
@@ -244,8 +244,8 @@ final class ClipboardMonitor: @unchecked Sendable {
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic
             )
-            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, sourceApplication: sourceApplicationName(), operation: "Copy", observedAtMilliseconds: observedAtMilliseconds, changeIdentifier: pasteboard.changeCount, deliberate: deliberate)
-            captureAdditionalRichTextImageIfEnabled(from: fileCapture.files)
+            delegate?.clipboardMonitor(self, didCaptureFiles: fileCapture.files, formats: fileCapture.formats, containsText: pasteboard.string(forType: .string) != nil, sourceApplication: sourceApplicationName(), operation: "Copy", observedAtMilliseconds: observedAtMilliseconds, changeIdentifier: pasteboard.changeCount, deliberate: deliberate, startupCapture: startupCapture)
+            captureAdditionalRichTextImageIfEnabled(from: fileCapture.files, startupCapture: startupCapture)
             return
         }
         let text = pasteboard.string(forType: .string)
@@ -264,6 +264,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                 deliberate: deliberate,
                 appDiagnostic: appDiagnostic,
                 pasteboardDiagnostic: pasteboardDiagnostic,
+                startupCapture: startupCapture,
                 processingDescription: "Processing a copied Finder image for Rich Text history."
             )
             return
@@ -278,6 +279,7 @@ final class ClipboardMonitor: @unchecked Sendable {
                     deliberate: deliberate,
                     appDiagnostic: appDiagnostic,
                     pasteboardDiagnostic: pasteboardDiagnostic,
+                    startupCapture: startupCapture,
                     processingDescription: "Processing a standalone image for Rich Text history."
                 )
                 return
@@ -305,7 +307,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             appDiagnostic: appDiagnostic,
             pasteboardDiagnostic: pasteboardDiagnostic
         )
-        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), observedAtMilliseconds: observedAtMilliseconds, changeIdentifier: pasteboard.changeCount, deliberate: deliberate)
+        delegate?.clipboardMonitor(self, didCapture: text, richText: RichTextData.capture(from: pasteboard), sourceApplication: sourceApplicationName(), observedAtMilliseconds: observedAtMilliseconds, changeIdentifier: pasteboard.changeCount, deliberate: deliberate, startupCapture: startupCapture)
     }
 
     private func captureStandaloneImage(
@@ -315,6 +317,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         deliberate: Bool,
         appDiagnostic: String,
         pasteboardDiagnostic: String,
+        startupCapture: Bool,
         processingDescription: String
     ) {
         switch imageInput {
@@ -351,7 +354,8 @@ final class ClipboardMonitor: @unchecked Sendable {
                         sourceApplication: sourceApplication,
                         observedAtMilliseconds: observedAtMilliseconds,
                         changeIdentifier: changeIdentifier,
-                        deliberate: deliberate
+                        deliberate: deliberate,
+                        startupCapture: startupCapture
                     )
                 } catch {
                     guard let self else { return }
@@ -367,7 +371,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         }
     }
 
-    private func captureAdditionalRichTextImageIfEnabled(from paths: [String]) {
+    private func captureAdditionalRichTextImageIfEnabled(from paths: [String], startupCapture: Bool) {
         guard alsoAddCopiedImageFilesToRichTextHistory,
               paths.count == 1,
               ["png", "jpg", "jpeg"].contains(URL(fileURLWithPath: paths[0]).pathExtension.lowercased())
@@ -386,7 +390,8 @@ final class ClipboardMonitor: @unchecked Sendable {
                     self,
                     didCaptureAdditionalImage: prepared.text,
                     richText: prepared.payload,
-                    sourceApplication: sourceApplication
+                    sourceApplication: sourceApplication,
+                    startupCapture: startupCapture
                 )
             } catch {
                 guard let self else { return }

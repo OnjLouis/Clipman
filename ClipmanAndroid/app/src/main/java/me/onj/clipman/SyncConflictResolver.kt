@@ -43,11 +43,18 @@ object SyncConflictResolver {
     fun hasSameContent(left: ClipDatabase, right: ClipDatabase): Boolean =
         left.Entries == right.Entries && left.DeletedEntries == right.DeletedEntries
 
-    fun addText(database: ClipDatabase, text: String, machineName: String, richText: RichTextPayload? = null): ClipDatabase {
+    fun addText(
+        database: ClipDatabase,
+        text: String,
+        machineName: String,
+        richText: RichTextPayload? = null,
+        preserveExistingMetadata: Boolean = false
+    ): ClipDatabase {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return database
         val now = TimeUtil.nowUnixMs()
         val existing = database.Entries.firstOrNull { it.Text == trimmed }
+        if (preserveExistingMetadata && existing != null) return database
         val normalizedRichText = RichTextClipboard.normalize(richText)
         val storedRichText = normalizedRichText ?: existing?.RichText
         val richTextUpdated = if (normalizedRichText == null) existing?.RichTextUpdatedUnixMs ?: 0 else now

@@ -25,6 +25,7 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - Use VoiceOver-friendly rows and actions so one swipe moves between entries.
 - When authentication is enabled, lock whenever Clipman leaves the foreground and authenticate again when returning.
 - Check the server revision every five seconds while active, download history only when it changed, pause behind Settings or in the background, and back off connection failures.
+- Preserve supported iOS clipboard content across the initial server refresh and add it only when it is not already in history, so launch capture cannot take ownership of an existing entry.
 - When startup clipboard import and automatic remote copying are both enabled, preserve and save supported clipboard content already on the device before allowing the initial server refresh to copy anything back.
 - Make an optional one-time tip through Apple's in-app purchase system. Tips do not unlock features or content.
 

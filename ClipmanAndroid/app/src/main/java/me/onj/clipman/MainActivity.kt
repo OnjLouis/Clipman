@@ -1104,7 +1104,7 @@ private fun ClipmanApp(
         }
     }
 
-    fun addCurrentClipboardText() {
+    fun addCurrentClipboardText(preserveExistingMetadata: Boolean = false) {
         val entrySnapshot = database.Entries
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -1124,6 +1124,9 @@ private fun ClipmanApp(
                     setTransientStatus("The Android clipboard does not contain text or an image to add.")
                     return@onSuccess
                 }
+                if (preserveExistingMetadata && database.Entries.any { it.Text == clipboardText }) {
+                    return@onSuccess
+                }
                 val image = EmbeddedImageRichText.parse(clipboardContent.richText)
                 if (image != null && EmbeddedImageRichText.exceedsTotalBudget(database.Entries, clipboardText, image.bytes.size)) {
                     setTransientStatus("Clipman's 8 MiB embedded-image history limit has been reached. Delete an image entry before adding another.")
@@ -1135,7 +1138,8 @@ private fun ClipmanApp(
                         current,
                         clipboardText,
                         deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
-                        clipboardContent.richText
+                        clipboardContent.richText,
+                        preserveExistingMetadata
                     )
                 }
             }.onFailure { error ->
@@ -1342,7 +1346,7 @@ private fun ClipmanApp(
     LaunchedEffect(addClipboardAfterLoad) {
         if (addClipboardAfterLoad) {
             addClipboardAfterLoad = false
-            addCurrentClipboardText()
+            addCurrentClipboardText(preserveExistingMetadata = true)
         }
     }
 

@@ -738,10 +738,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.saveCurrentContents()
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool, startupCapture: Bool) {
         guard storageUnavailableReason.isEmpty else {
             clipMergeDetector.reset()
             sounds.play(.skip)
+            return
+        }
+        if startupCapture && !store.entryID(forText: text).isEmpty {
+            clipMergeDetector.reset()
             return
         }
         if !deliberate && store.hasRecentlyTouchedRemoteText(text, excluding: settings.deviceName) {
@@ -828,10 +832,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         )
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool, startupCapture: Bool) {
         guard storageUnavailableReason.isEmpty else {
             clipMergeDetector.reset()
             sounds.play(.skip)
+            return
+        }
+        if startupCapture && !fileStore.eventID(files: files).isEmpty {
+            clipMergeDetector.reset()
             return
         }
         let normalizedOperation = operation.isEmpty ? "Copy" : operation
@@ -883,8 +891,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String, startupCapture: Bool) {
         guard storageUnavailableReason.isEmpty else { return }
+        if startupCapture && !store.entryID(forText: text).isEmpty { return }
         store.addTextWithResult(
             text,
             group: sourceApplication,

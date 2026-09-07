@@ -756,6 +756,20 @@ def file_event_summary(event):
     return "; ".join(parts)
 
 
+def file_history_contains_paths(events, paths):
+    expected = sorted(
+        (str(path).strip().casefold() for path in paths if str(path).strip())
+    )
+    if not expected:
+        return False
+    return any(
+        sorted(
+            (str(path).strip().casefold() for path in event.get("files", []) if str(path).strip())
+        ) == expected
+        for event in events
+    )
+
+
 def is_file_manager_clipboard_payload(text):
     lines = [line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n") if line.strip()]
     if not lines:
@@ -2188,6 +2202,7 @@ class ClipmanApplication(Gtk.Application):
 
     def _image_hash_ready(self, data, state, digest):
         first = not self.clipboard_baseline_ready
+        startup_capture = False
         self.clipboard_baseline_ready = True
         signature = ("image", state["mime"], digest)
         if signature == self.last_clipboard_signature:
@@ -2200,6 +2215,8 @@ class ClipmanApplication(Gtk.Application):
             if not capture and not state["force"]:
                 self.clipboard_read_busy = False
                 return GLib.SOURCE_REMOVE
+            startup_capture = capture and not state["force"]
+        state["preserve_existing"] = startup_capture
         if digest == self.own_clipboard_image_signature:
             self.own_clipboard_image_signature = None
             self.clipboard_read_busy = False
@@ -2232,6 +2249,7 @@ class ClipmanApplication(Gtk.Application):
             result.get("text", ""), quiet=not state["force"], automatic=not state["force"], source=state.get("source", ""),
             rich_text=result.get("rich_text"), failure=self._image_capture_failed,
             success=lambda: setattr(self, "clipboard_read_busy", False),
+            preserve_existing=state.get("preserve_existing", False),
         )
 
     def _image_capture_failed(self, message):
@@ -2298,6 +2316,7 @@ class ClipmanApplication(Gtk.Application):
     def _process_clipboard_text(self, clipboard, text, rich_text):
         self.clipboard_read_busy = False
         first = not self.clipboard_baseline_ready
+        startup_capture = False
         self.clipboard_baseline_ready = True
         if text is None:
             self._clear_clipboard_image_file()
@@ -2324,6 +2343,7 @@ class ClipmanApplication(Gtk.Application):
             self.capture_current_clipboard = False
             if not capture:
                 return
+            startup_capture = True
         if text == self.own_clipboard_text:
             self.own_clipboard_text = None
             self.clipmerge.reset()
@@ -2366,7 +2386,10 @@ class ClipmanApplication(Gtk.Application):
                     lambda message: self._clipmerge_text_response(message, observation, merged_text, source),
                 )
                 return
-            self._put_text(text, quiet=True, automatic=True, source=source, rich_text=normalized_rich, capture_observation=observation)
+            self._put_text(
+                text, quiet=True, automatic=True, source=source, rich_text=normalized_rich,
+                capture_observation=observation, preserve_existing=startup_capture,
+            )
 
     def _clipmerge_text_response(self, message, observation, merged_text, source):
         if not message.get("ok"):
@@ -2424,6 +2447,7 @@ class ClipmanApplication(Gtk.Application):
         if not force and signature == self.last_clipboard_signature and not (repeated_change and self.preferences.values["clipmerge_enabled"]):
             return
         first = not self.clipboard_baseline_ready
+        startup_capture = False
         self.clipboard_baseline_ready = True
         self.last_clipboard_signature = signature
         if first and not force:
@@ -2431,6 +2455,9 @@ class ClipmanApplication(Gtk.Application):
             self.capture_current_clipboard = False
             if not capture:
                 return
+            startup_capture = True
+        if startup_capture and file_history_contains_paths(self.file_events, paths):
+            return
         if not force and signature == self.own_clipboard_files:
             self.own_clipboard_files = None
             self.clipmerge.reset()
@@ -2444,6 +2471,7 @@ class ClipmanApplication(Gtk.Application):
         params = {
             "files": paths, "formats": [mime_type], "operation": operation,
             "source": source, "contains_text": clipboard.get_formats().contain_mime_type("text/plain"),
+            "preserve_existing": startup_capture,
         }
         rich_image = None
         if not force and should_import_file_as_rich_image(self.preferences.values, self.section, False):
@@ -3582,21 +3610,25 @@ class ClipmanApplication(Gtk.Application):
             dialog.destroy()
         dialog.connect("response", response); dialog.present(); password.grab_focus()
 
-    def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None, failure=None, success=None, capture_observation=None):
+    def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None, failure=None, success=None, capture_observation=None, preserve_existing=False):
         original_text = text
         if self.preferences.values["auto_remove_url_tracking"]:
             text = clean_tracking_text(text, False)
         if text != original_text:
             rich_text = None
-        duplicate = "keep" if self.preferences.values["keep_duplicate_entries"] else "move"
+        duplicate = "ignore" if preserve_existing else "keep" if self.preferences.values["keep_duplicate_entries"] else "move"
         group = source if automatic and source and self.preferences.values["auto_group_by_app"] else ""
         normalized_rich = normalize_rich_text(rich_text) if self.preferences.values["rich_text_history_enabled"] else None
-        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate, "rich_text": normalized_rich}, lambda m: self._put_response(m, quiet, text, normalized_rich, failure, success, capture_observation))
+        self.backend.call("put", {"text": text, "group": group, "duplicate": duplicate, "rich_text": normalized_rich}, lambda m: self._put_response(m, quiet, text, normalized_rich, failure, success, capture_observation, preserve_existing))
 
-    def _put_response(self, message, quiet, text, rich_text=None, failure=None, success=None, capture_observation=None):
+    def _put_response(self, message, quiet, text, rich_text=None, failure=None, success=None, capture_observation=None, preserve_existing=False):
         if not message.get("ok"):
             if failure: failure(message.get("error"))
             elif not quiet: self.show_error(message.get("error"))
+            return
+        outcome = message.get("result", {}).get("operation", {}).get("outcome", "")
+        if preserve_existing and outcome == "ignored":
+            if success: success()
             return
         if capture_observation is not None:
             entry_id = message.get("result", {}).get("operation", {}).get("entry", {}).get("id", "")

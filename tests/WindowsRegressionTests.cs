@@ -38,6 +38,7 @@ namespace Clipman.Tests
             Run("Quick Paste snapshots avoid opaque OLE clipboard formats", QuickPasteSnapshotAvoidsOpaqueOleFormats);
             Run("single-modifier hotkey warning preference defaults and round trips", SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips);
             Run("Quick Clip settings and manual entries round trip", QuickClipSettingsAndManualEntriesRoundTrip);
+            Run("startup capture preserves existing clip ownership", StartupCapturePreservesExistingClipOwnership);
             Run("entry editors reserve Enter for multiline text", EntryEditorsReserveEnterForMultilineText);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
@@ -601,6 +602,14 @@ namespace Clipman.Tests
                 AssertEntryEditorUsesExplicitSave(properties, "Entry Properties");
                 AssertEntryEditorUsesExplicitSave(quickClip, "Quick Clip");
             }
+        }
+
+        private static void StartupCapturePreservesExistingClipOwnership()
+        {
+            Assert(ClipmanApplicationContext.DuplicateModeForCapture(true, "MoveToTop") == "Ignore",
+                "Startup capture must not retouch an existing clip.");
+            Assert(ClipmanApplicationContext.DuplicateModeForCapture(false, "MoveToTop") == "MoveToTop",
+                "Ordinary clipboard capture must retain the configured duplicate behavior.");
         }
 
         private static void AssertEntryEditorUsesExplicitSave(EntryPropertiesForm form, string description)

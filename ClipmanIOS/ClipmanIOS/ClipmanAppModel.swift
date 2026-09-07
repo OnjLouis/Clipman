@@ -315,6 +315,7 @@ final class ClipmanAppModel: ObservableObject {
                 let hasQuickAction = ClipmanQuickActionCenter.shared.pendingAction != nil
                 var shouldRefreshServer = settings.storageMode == .server && !hasQuickAction
                 var preserveClipboardDuringInitialRefresh = false
+                var launchClipboardPayload: MobileClipboardPayload?
                 if hasQuickAction {
                     processPendingQuickAction()
                 } else if isImportingServerConnection {
@@ -327,7 +328,11 @@ final class ClipmanAppModel: ObservableObject {
                     preserveClipboardDuringInitialRefresh = MobileRichTextClipboard.containsSupportedContent(
                         includeImages: settings.richTextEnabled && settings.includeImagesInRichText
                     )
-                    requestClipboardImport(announceUnavailable: false)
+                    if preserveClipboardDuringInitialRefresh {
+                        launchClipboardPayload = MobileRichTextClipboard.readCurrent(
+                            includeImages: settings.richTextEnabled && settings.includeImagesInRichText
+                        )
+                    }
                 }
                 startPolling()
                 if shouldRefreshServer {
@@ -335,6 +340,13 @@ final class ClipmanAppModel: ObservableObject {
                         showStatus: false,
                         localCacheIsCurrent: true,
                         allowRemoteClipboardWrite: !preserveClipboardDuringInitialRefresh
+                    )
+                }
+                if let launchClipboardPayload {
+                    _ = addPastedClipboardPayload(
+                        launchClipboardPayload,
+                        preserveExistingMetadata: true,
+                        announceResult: false
                     )
                 }
             } else {
@@ -707,7 +719,11 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     @discardableResult
-    func addPastedClipboardPayload(_ payload: MobileClipboardPayload?) -> Bool {
+    func addPastedClipboardPayload(
+        _ payload: MobileClipboardPayload?,
+        preserveExistingMetadata: Bool = false,
+        announceResult: Bool = true
+    ) -> Bool {
         if let importError = payload?.importError, !importError.isEmpty {
             setTransientStatus(importError)
             soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
@@ -720,6 +736,10 @@ final class ClipmanAppModel: ObservableObject {
             return false
         }
         let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alreadyExists = database.Entries.contains { $0.Text == text }
+        if preserveExistingMetadata && alreadyExists {
+            return true
+        }
         if let image = payload.embeddedImage {
             guard settings.richTextEnabled && settings.includeImagesInRichText else {
                 setTransientStatus("Image history is off. Enable Rich Text history and Include images in Settings.")
@@ -735,12 +755,12 @@ final class ClipmanAppModel: ObservableObject {
                 return false
             }
         }
-        let alreadyExists = database.Entries.contains { $0.Text == text }
         database = SyncConflictResolver.addText(
             database: database,
             text: text,
             machineName: machineName,
-            richText: settings.richTextEnabled ? payload.richText : nil
+            richText: settings.richTextEnabled ? payload.richText : nil,
+            preserveExistingMetadata: preserveExistingMetadata
         )
         let successMessage = payload.embeddedImage != nil
             ? "Image added to Rich Text history."
@@ -748,13 +768,15 @@ final class ClipmanAppModel: ObservableObject {
         let existingMessage = payload.embeddedImage != nil
             ? "Image already exists in history."
             : "Clipboard text already exists in history."
-        soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+        if announceResult {
+            soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+        }
         if alreadyExists {
-            setTransientStatus(existingMessage)
+            if announceResult { setTransientStatus(existingMessage) }
             queueUpload(successMessage: nil)
         } else {
             queueUpload(
-                successMessage: successMessage,
+                successMessage: announceResult ? successMessage : nil,
                 progressMessage: payload.embeddedImage != nil
                     ? "Adding image; server sync in progress."
                     : "Adding clipboard text; server sync in progress."

@@ -2,7 +2,7 @@
 
 Clipman Android is a foreground-only clipboard-history client. It can keep history privately on the Android device or use the same Clipman Server history as the desktop and iOS clients. While the app is open, users can browse, search, copy, add, edit, pin, delete, and open links.
 
-Quick Clip lets users type a new entry directly, including an optional Name and Group, without first replacing the Android clipboard. It is available beside Paste and from the launcher icon's long-press menu. If startup clipboard import and automatic remote copying are both enabled, Clipman preserves and saves supported content already on the device before the initial server refresh can copy anything back.
+Quick Clip lets users type a new entry directly, including an optional Name and Group, without first replacing the Android clipboard. It is available beside Paste and from the launcher icon's long-press menu. If startup clipboard import and automatic remote copying are both enabled, Clipman preserves supported device clipboard content across the initial server refresh and adds it only when it is not already in history, without reassigning an existing entry's metadata to Android.
 
 For user setup and testing instructions, read `Manual.html`.
 

@@ -68,6 +68,15 @@ namespace Clipman
             }
         }
 
+        public bool Contains(ClipboardEventSummary summary)
+        {
+            if (summary == null || summary.Files == null || summary.Files.Count == 0) return false;
+            lock (sync)
+            {
+                return database.Events.Any(item => SameFileClipboardEvent(item, summary));
+            }
+        }
+
         private static IEnumerable<ClipboardEventSummary> SortNormalEvents(IEnumerable<ClipboardEventSummary> events, string sortMode, bool descending)
         {
             switch ((sortMode ?? string.Empty).Trim().ToUpperInvariant())

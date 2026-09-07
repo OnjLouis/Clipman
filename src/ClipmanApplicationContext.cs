@@ -785,7 +785,7 @@ namespace Clipman
         {
             try
             {
-                HandleClipboardUpdate();
+                HandleClipboardUpdate(startupCapture: true);
             }
             catch (ExternalException ex)
             {
@@ -796,7 +796,7 @@ namespace Clipman
             }
         }
 
-        internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0, bool recovery = false)
+        internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0, bool recovery = false, bool startupCapture = false)
         {
             if (!deliberate && clipboardSequence == 0)
             {
@@ -879,7 +879,7 @@ namespace Clipman
                     return;
                 }
                 var imageGroup = settings.AutoGroupByApp ? FriendlyProcessName(sourceProcessName) : string.Empty;
-                store.AddText(imageCapture.Text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, imageGroup, imageCapture.RichText);
+                store.AddText(imageCapture.Text, DuplicateModeForCapture(startupCapture, settings.DuplicateMode), settings.MaxHistoryEntries, settings.MaxHistoryDays, imageGroup, imageCapture.RichText);
                 if (IsStorageUnavailable())
                 {
                     sounds.Skip(settings.SoundsEnabled);
@@ -901,6 +901,10 @@ namespace Clipman
             }
             if (fileSummary != null)
             {
+                if (startupCapture && fileEventStore.Contains(fileSummary))
+                {
+                    return;
+                }
                 HandleCapturedFileEvent(fileSummary, sourceProcessName, deliberate, clipboardSequence);
                 if (settings.RichTextHistoryEnabled && settings.IncludeImagesInRichText && settings.AutoAddImageFilesToRichText)
                 {
@@ -1027,7 +1031,7 @@ namespace Clipman
                 }
             }
 
-            storedEntry = store.AddText(text, settings.DuplicateMode, settings.MaxHistoryEntries, settings.MaxHistoryDays, group, richText);
+            storedEntry = store.AddText(text, DuplicateModeForCapture(startupCapture, settings.DuplicateMode), settings.MaxHistoryEntries, settings.MaxHistoryDays, group, richText);
             clipMergeDetector.SetCurrentHistoryId(storedEntry == null ? string.Empty : storedEntry.Id);
             if (IsStorageUnavailable())
             {
@@ -1040,6 +1044,11 @@ namespace Clipman
 
             sounds.Copy(settings.SoundsEnabled);
             QueueAutomaticWebsiteTitle(storedEntry, deliberate);
+        }
+
+        internal static string DuplicateModeForCapture(bool startupCapture, string configuredMode)
+        {
+            return startupCapture ? "Ignore" : configuredMode;
         }
 
         private void AddCopiedImageFileToRichTextAsync(string path, string sourceProcessName)

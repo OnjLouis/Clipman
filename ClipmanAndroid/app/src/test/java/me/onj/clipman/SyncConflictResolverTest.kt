@@ -206,6 +206,26 @@ class SyncConflictResolverTest {
     }
 
     @Test
+    fun startupCaptureDoesNotRetouchExistingEntry() {
+        val original = entry("existing", "Shared text", 100).copy(
+            Name = "Original name",
+            Group = "Original group",
+            SourceMachine = "Windows",
+            LastUsedUnixMs = 200,
+            ModifiedUnixMs = 150
+        )
+
+        val updated = SyncConflictResolver.addText(
+            database(original),
+            original.Text,
+            "Android",
+            preserveExistingMetadata = true
+        )
+
+        assertEquals(original, updated.Entries.single())
+    }
+
+    @Test
     fun oversizedAndroidHtmlIsRejected() {
         val oversized = RichTextPayload(HtmlFragment = "x".repeat(768 * 1024 + 1), PreferredFormat = "Html")
 
