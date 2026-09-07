@@ -86,10 +86,18 @@ func (w *WriteThroughError) Unwrap() error { return w.Err }
 // channels whose plaintext actually changed. The returned ViewState is the
 // committed state, so callers need no second download.
 //
-// Uploads follow the gain-before-lose order of spec section 5, upload step 5:
-// the buckets that gain an entry in this save go first, so a failure part way
-// through can leave an entry duplicated but never deleted from the only place
-// it existed.
+// Uploads follow the add-then-remove two-phase order of spec section 5, upload
+// step 5. Phase 1 uploads every channel while still including the entries that
+// are leaving it and withholding its new relocation markers, so targets gain
+// before sources lose. Phase 2 then rewrites only the losing channels without
+// their departures. That ordering is safe for channels that gain and lose in
+// the same save, and for relocation chains and cycles, without any dependency
+// analysis: a failure in either phase can leave an entry in two channels, which
+// view assembly resolves, but never removes it from the only channel it was in.
+//
+// MutateView can return a non-nil ViewState together with a non-nil error: a
+// *WriteThroughError means the local channels were committed and only entries
+// bound for unsubscribed channels are outstanding.
 func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(database *model.Database) error) (*ViewState, error) {
 	now := time.Now().UnixMilli()
 	view, err := e.readView(ctx, deviceName, now)
@@ -108,17 +116,12 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 	for index := range view.Channels {
 		subscribed[view.Channels[index].Key] = index
 	}
-	// The entry ids each bucket held when it was fetched decide, further down,
-	// which buckets gain something in this save.
-	fetched := make([]map[string]bool, len(view.Channels))
-	for index := range view.Channels {
-		fetched[index] = entryIDSet(view.Channels[index].Database)
-	}
-
 	// Routing pass (spec section 5, upload steps 1-3): every entry is assigned
 	// to the channel its route names, and leaving a channel leaves a relocation
-	// marker behind in the channel the entry came from.
+	// marker behind in the channel the entry came from. departures records what
+	// each channel loses, which is what the two upload phases differ over.
 	routed := make(map[string][]model.Entry, len(view.Channels))
+	departures := make(map[string][]model.Entry)
 	pending := make(map[string][]model.Entry)
 	pendingKeys := make([]string, 0)
 	relocations := make(map[string][]model.DeletedEntry)
@@ -127,6 +130,7 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 		target := rules.RouteEntry(view.Rules, &entry)
 		source, resident := view.Residence[entry.ID]
 		if resident && source != target {
+			departures[source] = append(departures[source], entry)
 			relocations[source] = append(relocations[source], model.DeletedEntry{
 				ID:            entry.ID,
 				TextHash:      "",
@@ -152,7 +156,7 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 	// derivation serves them all. A save that writes nothing anywhere still
 	// creates no bucket.
 	if !view.Channels[0].exists {
-		databases := buildChannelDatabases(view, routed, assembleMarkers(view, previousMarkers, subscribed, relocations), now)
+		databases := buildChannelDatabases(view, withDepartures(routed, departures), assembleMarkers(view, previousMarkers, subscribed, nil), now)
 		writes := len(pendingKeys) > 0
 		for index := range databases {
 			if plainHash(&databases[index]) != view.Channels[index].PlainHash {
@@ -188,42 +192,70 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 					continue
 				}
 				routed[source] = append(routed[source], entry)
+				departures[source] = removeEntry(departures[source], entry.ID)
 				relocations[source] = removeMarkerFor(relocations[source], entry.ID)
 			}
 		}
 	}
 
-	databases := buildChannelDatabases(view, routed, assembleMarkers(view, previousMarkers, subscribed, relocations), now)
-	for pass := 0; pass < 2; pass++ {
-		for index := range view.Channels {
-			if gainsEntries(fetched[index], databases[index]) != (pass == 0) {
-				continue
-			}
-			channel := &view.Channels[index]
-			if plainHash(&databases[index]) == channel.PlainHash {
-				continue
-			}
-			if err := e.putChannel(ctx, channel, databases[index], coreBlob, now); err != nil {
-				return nil, err
-			}
-			if index == 0 {
-				coreBlob = channel.blob
-			}
+	// The result an error is reported with. Entries that could not be written
+	// through must reach the caller even when a later upload fails, or the only
+	// record of them is gone.
+	finish := func(cause error) (*ViewState, error) {
+		committed, residence := buildView(view.Channels, now)
+		state := &ViewState{
+			Rules:         view.Rules,
+			RulesRevision: view.RulesRevision,
+			Channels:      view.Channels,
+			View:          committed,
+			Residence:     residence,
+		}
+		if len(failures) > 0 {
+			return state, &WriteThroughError{Pending: failures, Err: errors.Join(writeThroughErr, cause)}
+		}
+		if cause != nil {
+			return nil, cause
+		}
+		return state, nil
+	}
+
+	// Phase 1: every channel keeps the entries it is about to lose and withholds
+	// its new relocation markers, so this pass only ever adds.
+	phaseOne := buildChannelDatabases(view, withDepartures(routed, departures), assembleMarkers(view, previousMarkers, subscribed, nil), now)
+	for index := range view.Channels {
+		channel := &view.Channels[index]
+		if plainHash(&phaseOne[index]) == channel.PlainHash {
+			continue
+		}
+		if err := e.putChannel(ctx, channel, phaseOne[index], coreBlob, now); err != nil {
+			return finish(err)
+		}
+		if index == 0 {
+			coreBlob = channel.blob
 		}
 	}
 
-	committed, residence := buildView(view.Channels, now)
-	state := &ViewState{
-		Rules:         view.Rules,
-		RulesRevision: view.RulesRevision,
-		Channels:      view.Channels,
-		View:          committed,
-		Residence:     residence,
+	// Phase 2: with every addition committed, the losing channels drop their
+	// departures and gain their relocation markers. Their PlainHash ends up on
+	// this final content.
+	phaseTwo := buildChannelDatabases(view, routed, assembleMarkers(view, previousMarkers, subscribed, relocations), now)
+	for index := range view.Channels {
+		channel := &view.Channels[index]
+		if len(departures[channel.Key]) == 0 {
+			continue
+		}
+		if plainHash(&phaseTwo[index]) == channel.PlainHash {
+			continue
+		}
+		if err := e.putChannel(ctx, channel, phaseTwo[index], coreBlob, now); err != nil {
+			return finish(err)
+		}
+		if index == 0 {
+			coreBlob = channel.blob
+		}
 	}
-	if len(failures) > 0 {
-		return state, &WriteThroughError{Pending: failures, Err: writeThroughErr}
-	}
-	return state, nil
+
+	return finish(nil)
 }
 
 // assembleMarkers files tombstones per channel. Tombstones are channel-local:
@@ -280,26 +312,34 @@ func buildChannelDatabases(view *ViewState, routed map[string][]model.Entry, mar
 	return databases
 }
 
-// gainsEntries reports whether database holds an entry the bucket did not have
-// when it was fetched, which is what puts a channel in the first upload pass.
-func gainsEntries(fetched map[string]bool, database model.Database) bool {
-	for _, entry := range database.Entries {
-		if !fetched[comparableID(entry.ID)] {
-			return true
-		}
+// withDepartures is the phase-1 entry assignment: what each channel keeps plus
+// what it is about to lose, so the first upload of a save only ever adds.
+func withDepartures(routed, departures map[string][]model.Entry) map[string][]model.Entry {
+	if len(departures) == 0 {
+		return routed
 	}
-	return false
+	combined := make(map[string][]model.Entry, len(routed)+len(departures))
+	for key, entries := range routed {
+		combined[key] = entries
+	}
+	for key, leaving := range departures {
+		if len(leaving) == 0 {
+			continue
+		}
+		combined[key] = append(append([]model.Entry{}, combined[key]...), leaving...)
+	}
+	return combined
 }
 
-func entryIDSet(database *model.Database) map[string]bool {
-	ids := make(map[string]bool)
-	if database == nil {
-		return ids
+func removeEntry(entries []model.Entry, id string) []model.Entry {
+	kept := entries[:0]
+	for _, entry := range entries {
+		if comparableID(entry.ID) == comparableID(id) {
+			continue
+		}
+		kept = append(kept, entry)
 	}
-	for _, entry := range database.Entries {
-		ids[comparableID(entry.ID)] = true
-	}
-	return ids
+	return kept
 }
 
 func removeMarkerFor(markers []model.DeletedEntry, id string) []model.DeletedEntry {
@@ -697,6 +737,12 @@ func markersByID(markers []model.DeletedEntry) map[string]model.DeletedEntry {
 // UpdatedUnixMs zeroed. Zeroing it is what makes the hash durable, because
 // normalization restamps that field on every pass, so two reads of an
 // unchanged bucket at different times still hash alike.
+//
+// One case stays clock-dependent by design: merge.Normalize back-fills a zero
+// CreatedUnixMs or LastUsedUnixMs from the current time, so a channel holding
+// legacy entries written without timestamps hashes differently on every read
+// and is treated as dirty until the first save rewrites it with real ones.
+// That is self-healing and costs one extra upload.
 func plainHash(database *model.Database) [32]byte {
 	durable := *database
 	durable.UpdatedUnixMs = 0

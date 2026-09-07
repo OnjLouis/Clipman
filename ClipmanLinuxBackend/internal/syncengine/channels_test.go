@@ -262,6 +262,13 @@ func testEntry(id, text, group string, stamp int64) model.Entry {
 	}
 }
 
+// imageEntry carries the rich text that the RichTextImages route matches on.
+func imageEntry(id, text string, stamp int64) model.Entry {
+	entry := testEntry(id, text, "", stamp)
+	entry.Extra["RichText"] = json.RawMessage(`{"HtmlFragment":"<img src=\"data:image/png;base64,AAAA\">"}`)
+	return entry
+}
+
 func databaseWith(entries ...model.Entry) model.Database {
 	database := model.NewDatabase(1000)
 	database.Entries = append(database.Entries, entries...)
@@ -459,11 +466,107 @@ func TestMutateViewFailedRelocationTargetKeepsSourceIntact(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failed relocation target was reported as success")
 	}
-	if fake.count("PUT", coreBucketID()) != 0 {
-		t.Fatal("core was rewritten although the entry never reached the work channel")
-	}
-	if !hasEntry(fake.database(t, coreBucketID()), "x") {
+	// Phase 1 may rewrite core, but only with the departing entry still in it
+	// and without the relocation marker, so nothing is lost.
+	core := fake.database(t, coreBucketID())
+	if !hasEntry(core, "x") {
 		t.Fatal("the entry was lost: it is neither in core nor in work")
+	}
+	for _, marker := range core.Deleted {
+		if marker.ID == "x" {
+			t.Fatal("core gained a relocation marker for an entry that never reached the work channel")
+		}
+	}
+}
+
+func TestMutateViewGainAndLoseChannelKeepsDepartingEntry(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("x", "hello", "", 1000)))
+	fake.storeRules(t, enabledRules())
+	fake.breakBucket(channelBucketID("work"))
+
+	// One save in which core both gains an entry and loses one: the entry that
+	// leaves must not be dropped from core before the work channel has it.
+	_, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
+		database.Entries = append(database.Entries, testEntry("n", "new entry", "", 4000))
+		for index := range database.Entries {
+			if database.Entries[index].ID == "x" {
+				database.Entries[index].Group = "Work"
+				database.Entries[index].ModifiedUnixMs = 5000
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a failed relocation target was reported as success")
+	}
+	core := fake.database(t, coreBucketID())
+	if !hasEntry(core, "x") {
+		t.Fatalf("core entries = %v; the departing entry was dropped before the work channel had it", entryIDs(&core))
+	}
+	for _, marker := range core.Deleted {
+		if marker.ID == "x" {
+			t.Fatal("core gained a relocation marker for an entry that never reached the work channel")
+		}
+	}
+}
+
+func TestMutateViewRelocationChainLosesNothing(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	document := enabledRules()
+	document.Channels = []rules.Channel{
+		{Name: "Work", Route: rules.Route{Groups: []string{"Work"}}},
+		{Name: "Archive", Route: rules.Route{Groups: []string{"Archive"}}},
+	}
+	fake.storeRules(t, document)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("a", "alpha", "", 1000)))
+	fake.storeDatabase(t, channelBucketID("work"), databaseWith(testEntry("b", "beta", "Work", 1000)))
+	fake.storeDatabase(t, channelBucketID("archive"), databaseWith(testEntry("c", "gamma", "Archive", 1000)))
+
+	// a: core -> work while b: work -> archive, so the work channel gains and
+	// loses in the same save.
+	view, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
+		for index := range database.Entries {
+			switch database.Entries[index].ID {
+			case "a":
+				database.Entries[index].Group = "Work"
+				database.Entries[index].ModifiedUnixMs = 5000
+			case "b":
+				database.Entries[index].Group = "Archive"
+				database.Entries[index].ModifiedUnixMs = 5000
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := fake.database(t, coreBucketID())
+	work := fake.database(t, channelBucketID("work"))
+	archive := fake.database(t, channelBucketID("archive"))
+	if hasEntry(core, "a") || !hasEntry(work, "a") {
+		t.Fatalf("a did not move core -> work: core %v, work %v", entryIDs(&core), entryIDs(&work))
+	}
+	if hasEntry(work, "b") || !hasEntry(archive, "b") {
+		t.Fatalf("b did not move work -> archive: work %v, archive %v", entryIDs(&work), entryIDs(&archive))
+	}
+	if !hasEntry(archive, "c") {
+		t.Fatal("the archive channel lost an entry it was not asked to move")
+	}
+	if view.Residence["a"] != "work" || view.Residence["b"] != "archive" || view.Residence["c"] != "archive" {
+		t.Fatalf("residence = %#v", view.Residence)
+	}
+	// Every losing channel is uploaded once per phase: first still holding its
+	// departure, then without it. The archive channel only gains, so it is
+	// uploaded once.
+	if got := fake.count("PUT", channelBucketID("work")); got != 2 {
+		t.Fatalf("work PUT count = %d, want 2 (one per phase)", got)
+	}
+	if got := fake.count("PUT", coreBucketID()); got != 2 {
+		t.Fatalf("core PUT count = %d, want 2 (one per phase)", got)
+	}
+	if got := fake.count("PUT", channelBucketID("archive")); got != 1 {
+		t.Fatalf("archive PUT count = %d, want 1", got)
 	}
 }
 
@@ -500,6 +603,30 @@ func TestMutateViewWriteThroughFailureReportsPendingEntries(t *testing.T) {
 	}
 	if !hasEntry(*view.View, "c") || hasEntry(*view.View, "x") {
 		t.Fatalf("returned view = %v, want the committed core state", entryIDs(view.View))
+	}
+}
+
+func TestMutateViewPendingEntriesSurviveALaterUploadFailure(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("a", "alpha", "", 1000)))
+	fake.storeRules(t, enabledRules(rules.Device{Name: "Phone", Channels: []string{"work"}}))
+	fake.breakBucket(channelBucketID("images"))
+	fake.breakBucket(channelBucketID("work"))
+
+	view, err := engine.MutateView(context.Background(), "Phone", func(database *model.Database) error {
+		database.Entries = append(database.Entries, imageEntry("i", "a picture", 4000))
+		database.Entries = append(database.Entries, testEntry("w", "work text", "Work", 4000))
+		return nil
+	})
+	var pendingErr *WriteThroughError
+	if !errors.As(err, &pendingErr) {
+		t.Fatalf("error = %v, want the write-through failure to survive the later upload failure", err)
+	}
+	if len(pendingErr.Pending["images"]) != 1 || pendingErr.Pending["images"][0].ID != "i" {
+		t.Fatalf("pending entries = %#v, want the undelivered image entry", pendingErr.Pending)
+	}
+	if view == nil {
+		t.Fatal("no ViewState was returned alongside the write-through error")
 	}
 }
 
