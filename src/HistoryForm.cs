@@ -528,6 +528,8 @@ namespace Clipman
             menu.MenuDeactivate += (s, e) => BeginDelayedFocus(80);
 
             var file = new ToolStripMenuItem("&File");
+            file.DropDownItems.Add("&New Quick Clip...\tCtrl+N", null, (s, e) => ShowQuickClip());
+            file.DropDownItems.Add("-");
             file.DropDownItems.Add("&Import...\tCtrl+I", null, (s, e) => Import(false));
             file.DropDownItems.Add("Import and &replace...\tCtrl+Shift+I", null, (s, e) => Import(true));
             file.DropDownItems.Add("&Export...\tCtrl+E", null, (s, e) => Export());
@@ -861,6 +863,8 @@ namespace Clipman
             edit.DropDownItems.Add("Set as &quick-paste target...", null, (s, e) => ShowEntryProperties(true));
             var websiteTitle = edit.DropDownItems.Add("Use &website title as name...", null, (s, e) => UseWebsiteTitleAsName());
             websiteTitle.Enabled = CanUseWebsiteTitleForSelection();
+            var openLink = edit.DropDownItems.Add("Open lin&k\tAlt+Enter", null, (s, e) => OpenSelectedLink());
+            openLink.Enabled = CanOpenSelectedLink();
             edit.DropDownItems.Add("P&ush to other devices\tCtrl+P", null, (s, e) => PushSelectedToOtherMachines());
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
             edit.DropDownItems.Add("Pin or unp&in\tShift+Enter", null, (s, e) => TogglePinned());
@@ -900,6 +904,8 @@ namespace Clipman
             menu.Items.Add("Set as &quick-paste target...", null, (sender, args) => ShowEntryProperties(true));
             var websiteTitle = menu.Items.Add("Use &website title as name...", null, (sender, args) => UseWebsiteTitleAsName());
             websiteTitle.Enabled = CanUseWebsiteTitleForSelection();
+            var openLink = menu.Items.Add("Open lin&k\tAlt+Enter", null, (sender, args) => OpenSelectedLink());
+            openLink.Enabled = CanOpenSelectedLink();
             menu.Items.Add("P&ush to other devices\tCtrl+P", null, (sender, args) => PushSelectedToOtherMachines());
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
             menu.Items.Add(PinMenuText(), null, (sender, args) => TogglePinned());
@@ -1330,6 +1336,11 @@ namespace Clipman
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (keyData == (Keys.Control | Keys.N))
+            {
+                ShowQuickClip();
+                return true;
+            }
             if (keyData == (Keys.Control | Keys.Shift | Keys.I))
             {
                 Import(true);
@@ -1338,6 +1349,11 @@ namespace Clipman
             if (keyData == (Keys.Control | Keys.Shift | Keys.O))
             {
                 OpenSettingsFolder();
+                return true;
+            }
+            if (keyData == (Keys.Alt | Keys.Enter))
+            {
+                OpenSelectedLink();
                 return true;
             }
             if ((keyData & Keys.Modifiers) == Keys.Alt && (keyData & Keys.KeyCode) == Keys.F4)
@@ -2943,9 +2959,10 @@ namespace Clipman
 
             if (string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ShowHistoryHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
                 string.Equals((quickCopyHotkey ?? string.Empty).Trim(), (settings.ToggleActiveHotkey ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase) ||
-                (!string.IsNullOrWhiteSpace(settings.SaveCurrentClipboardHotkey) && string.Equals((quickCopyHotkey ?? string.Empty).Trim(), settings.SaveCurrentClipboardHotkey.Trim(), StringComparison.OrdinalIgnoreCase)))
+                (!string.IsNullOrWhiteSpace(settings.SaveCurrentClipboardHotkey) && string.Equals((quickCopyHotkey ?? string.Empty).Trim(), settings.SaveCurrentClipboardHotkey.Trim(), StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(settings.QuickClipHotkey) && string.Equals((quickCopyHotkey ?? string.Empty).Trim(), settings.QuickClipHotkey.Trim(), StringComparison.OrdinalIgnoreCase)))
             {
-                MessageBox.Show(this, "The Quick Paste hotkey must be different from the Show History, Toggle Monitoring, and Save Current Clipboard hotkeys.", "Clipman Quick Paste", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "The Quick Paste hotkey must be different from the Show History, Toggle Monitoring, Save Current Clipboard, and Quick Clip hotkeys.", "Clipman Quick Paste", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
@@ -3131,6 +3148,40 @@ namespace Clipman
             if (!LinkPresentation.TryGetUri(selected[0], out uri)) return false;
             return uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
                    uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool CanOpenSelectedLink()
+        {
+            var selected = SelectedEntries();
+            Uri ignored;
+            return selected.Count == 1 && LinkPresentation.TryGetWebUri(selected[0], out ignored);
+        }
+
+        private void OpenSelectedLink()
+        {
+            var selected = SelectedEntries();
+            Uri uri;
+            if (selected.Count != 1 || !LinkPresentation.TryGetWebUri(selected[0], out uri))
+            {
+                playSkipSound();
+                statusText.Text = "Select one HTTP or HTTPS link first.";
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = uri.AbsoluteUri,
+                    UseShellExecute = true
+                });
+                statusText.Text = "Opened link in the default browser.";
+            }
+            catch (Exception ex)
+            {
+                playSkipSound();
+                statusText.Text = "Could not open the selected link: " + ex.Message;
+            }
         }
 
         private void UseWebsiteTitleAsName()
@@ -3776,6 +3827,32 @@ namespace Clipman
                 list.AccessibleName = "Text history";
             }
             list.AccessibleDescription = string.Empty;
+        }
+
+        public void ShowQuickClip()
+        {
+            using (var dialog = new EntryPropertiesForm(null, false, string.Empty, QuickPasteModes.PasteRestore, false, true))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                var entry = store.AddManualEntry(
+                    dialog.EntryText,
+                    dialog.EntryName,
+                    dialog.EntryGroup,
+                    dialog.EntryPinned,
+                    dialog.EntryIsTemplate,
+                    settings.DuplicateMode,
+                    settings.MaxHistoryEntries,
+                    settings.MaxHistoryDays);
+                if (entry == null)
+                {
+                    statusText.Text = "Quick Clip was not saved because it contains no text.";
+                    playSkipSound();
+                    return;
+                }
+                RefreshGroupFilterItems();
+                Reload(entry.Id, -1);
+                statusText.Text = "Quick Clip saved.";
+            }
         }
 
         private void SelectHistoryTab(string tabId, bool focus)

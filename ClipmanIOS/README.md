@@ -15,15 +15,17 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - Show the private local cache immediately in Server mode, then refresh and merge with the server in the background.
 - Browse Text, Links, and optional Rich Text history.
 - Add the current iOS clipboard text into Clipman while the app is open.
+- Use Quick Clip to type a new entry directly, including its optional Name, Group, pinned state, and template setting.
 - Optionally offer to add the current iOS clipboard text after each successful unlock and initial history refresh. Clipman only presents the choice when the pasteboard advertises text. The full-screen choice uses Apple's paste control, so Paste is explicit and Cancel or a VoiceOver scrub leaves history unchanged.
 - Copy an entry back to the iOS clipboard.
 - Optionally back up encrypted history to a folder selected through Files, including iCloud Drive and supported third-party providers. Restore merges entries and deletion records with current history; the backup never includes server tokens, settings, or passwords.
-- Use the built-in **Add Clipboard to Clipman** and **Copy Latest Clip** actions from Shortcuts, Siri, or the iPhone Action Button. Both actions honour Clipman's authentication setting and continue safely from the encrypted local cache if the server is unavailable.
-- Long-press the Clipman Home Screen icon for the same Add Clipboard and Copy Latest Clip commands.
+- Use the built-in **Quick Clip**, **Add Clipboard to Clipman**, and **Copy Latest Clip** actions from Shortcuts, Siri, or the iPhone Action Button. The actions honour Clipman's authentication setting and continue safely from the encrypted local cache if the server is unavailable.
+- Long-press the Clipman Home Screen icon for the same Quick Clip, Add Clipboard, and Copy Latest Clip commands.
 - View, edit, pin, unpin, delete, search, and filter entries.
 - Use VoiceOver-friendly rows and actions so one swipe moves between entries.
 - When authentication is enabled, lock whenever Clipman leaves the foreground and authenticate again when returning.
 - Check the server revision every five seconds while active, download history only when it changed, pause behind Settings or in the background, and back off connection failures.
+- When startup clipboard import and automatic remote copying are both enabled, preserve and save supported clipboard content already on the device before allowing the initial server refresh to copy anything back.
 - Make an optional one-time tip through Apple's in-app purchase system. Tips do not unlock features or content.
 
 ## Build Notes
@@ -58,4 +60,4 @@ The server address, server token, and history password fields have explicit Voic
 
 Activate Clipman's status line to move to the bottom of the current history list. The standard iOS status-bar gesture remains available for returning to the top.
 
-Clipman's App Shortcuts appear automatically in Apple's Shortcuts app. To use one with the Action Button, choose **Shortcut** in the Action Button settings and select either Clipman action. Siri phrases include "Add clipboard to Clipman" and "Copy latest from Clipman".
+Clipman's App Shortcuts appear automatically in Apple's Shortcuts app. To use one with the Action Button, choose **Shortcut** in the Action Button settings and select a Clipman action. Siri phrases include "Create a Quick Clip in Clipman", "Add clipboard to Clipman", and "Copy latest from Clipman".

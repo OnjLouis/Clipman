@@ -18,6 +18,9 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 </ul></nav>
 
 <h2 id="changelog">Changelog</h2>
+<h3>2.9.0</h3>
+<ul><li>Added <strong>Quick Clip</strong>. Press <kbd>Ctrl+N</kbd>, use the File menu or assign an optional global hotkey to type a new entry directly without changing the system clipboard.</li><li>Added <kbd>Alt+Enter</kbd> to open one selected standalone HTTP or HTTPS link in the default browser. Links remain available when Links history is disabled, while ordinary prose and private <code>clipman://</code> configuration links are not launched.</li></ul>
+
 <h3>2.8.5</h3>
 <ul><li>Multiple selected Text, Links or Rich Text entries can now be joined with no separator, one new line, one blank line, a space, comma and space, or a custom separator. The choice also applies to transformed text, pushes and <strong>Copy Name and Content</strong>.</li><li>The history status bar now puts the active section's entry count before its connected or offline server state.</li></ul>
 
@@ -108,13 +111,14 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <table><thead><tr><th>Tab</th><th>Contents</th></tr></thead><tbody>
 <tr><td>General</td><td>Clipboard monitoring, sounds, opt-in ClipMerge timing and separators, multiple-entry copy separator, source-application grouping, remote clipboard receipt, optional paste after Enter, dynamic history section, automatic URL cleanup, optional Links and Rich Text history, bounded PNG/JPEG capture within Rich Text, optional automatic image-file addition, saved list position and duplicate handling.</td></tr>
 <tr><td>File History</td><td>Automatic removal of unavailable unpinned file events.</td></tr>
-<tr><td>Hotkeys</td><td>Global Show History and Toggle Monitoring shortcuts, plus an optional Save Current Clipboard shortcut that is unset by default.</td></tr>
+<tr><td>Hotkeys</td><td>Global Show History and Toggle Monitoring shortcuts, plus optional Save Current Clipboard and Quick Clip shortcuts that are unset by default.</td></tr>
 <tr><td>Storage and Password</td><td>Server connection changes, ignored applications and the Linux display-server compatibility note.</td></tr>
 <tr><td>Startup and Updates</td><td>Desktop-session startup, optional capture of the existing clipboard at startup, update frequency and silent automatic installation.</td></tr>
 <tr><td>Sensitive Data</td><td>Opt-in automatic-capture exclusions and their individual presets.</td></tr>
 </tbody></table>
 <p>Automatic remote clipboard receipt, dynamic history and automatic tracking removal are opt-in. Dynamic history makes a newly accepted item select its matching section the next time history opens. That automatic selection is used once, so a section you choose manually remains selected until another new item arrives. Missing custom sounds fall back to factory sounds.</p>
 <p>Entry deletion asks for confirmation by default. The confirmation can remember <strong>Do not ask again</strong>; re-enable it from General preferences. Clearing an entire history area keeps its separate confirmation.</p>
+<p><strong>Quick Clip</strong> creates a new saved entry without reading or changing the system clipboard. Use <kbd>Ctrl+N</kbd>, the File menu, or assign its optional global hotkey. <strong>Open Link</strong> uses <kbd>Alt+Enter</kbd> to open exactly one selected standalone HTTP or HTTPS entry; ordinary prose and private <code>clipman://</code> configuration links are not launched.</p>
 
 <h2 id="shortcuts">Keyboard shortcuts</h2>
 <table><thead><tr><th>Action</th><th>Shortcut</th></tr></thead><tbody>
@@ -123,7 +127,8 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <tr><td>Copy selected Names and resolved content, then hide Clipman; Go to file in File History</td><td><kbd>Ctrl+Enter</kbd></td></tr>
 <tr><td>Cut selected unpinned text entry</td><td><kbd>Ctrl+X</kbd></td></tr>
 <tr><td>Paste clipboard text after selected entry</td><td><kbd>Ctrl+V</kbd></td></tr>
-<tr><td>New entry</td><td><kbd>Ctrl+N</kbd></td></tr>
+<tr><td>Open Quick Clip</td><td><kbd>Ctrl+N</kbd></td></tr>
+<tr><td>Open selected standalone website link</td><td><kbd>Alt+Enter</kbd></td></tr>
 <tr><td>Select all visible entries</td><td><kbd>Ctrl+A</kbd></td></tr>
 <tr><td>Import or export</td><td><kbd>Ctrl+I</kbd> or <kbd>Ctrl+E</kbd></td></tr>
 <tr><td>Group selected entry</td><td><kbd>Ctrl+G</kbd></td></tr>
@@ -148,6 +153,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <tr><td>Show or hide globally</td><td><kbd>Ctrl+Alt+Backslash</kbd> by default</td></tr>
 <tr><td>Turn monitoring on/off globally</td><td><kbd>Ctrl+Alt+Grave</kbd> by default</td></tr>
 <tr><td>Save current clipboard to history globally</td><td>User-assigned in Preferences; unset by default</td></tr>
+<tr><td>Open Quick Clip globally</td><td>User-assigned in Preferences; unset by default</td></tr>
 <tr><td>Preferences</td><td><kbd>Ctrl+,</kbd></td></tr>
 <tr><td>Secrets</td><td><kbd>Ctrl+Shift+E</kbd></td></tr>
 <tr><td>Assigned Quick Paste or secret</td><td>User-assigned global hotkey</td></tr>

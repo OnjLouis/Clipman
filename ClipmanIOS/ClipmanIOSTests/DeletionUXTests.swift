@@ -2,6 +2,22 @@ import XCTest
 @testable import Clipman
 
 final class DeletionUXTests: XCTestCase {
+    func testAddManualEntryStoresMetadataAndCanonicalizesGroup() {
+        let original = ClipDatabase(Entries: [ClipEntry(Text: "Existing", Group: "GitHub")])
+
+        let updated = SyncConflictResolver.addManualEntry(
+            database: original,
+            entry: ClipEntry(Text: "  New note  ", Name: " Note ", Group: "github", Pinned: true, IsTemplate: true),
+            machineName: "iPhone"
+        )
+
+        let entry = try! XCTUnwrap(updated.Entries.first { $0.Text == "New note" })
+        XCTAssertEqual(entry.Name, "Note")
+        XCTAssertEqual(entry.Group, "GitHub")
+        XCTAssertEqual(entry.SourceMachine, "iPhone")
+        XCTAssertTrue(entry.Pinned)
+        XCTAssertTrue(entry.IsTemplate)
+    }
     @MainActor
     func testDeleteRemovesOnlyTheTargetBeforePersistenceCompletes() async throws {
         let repository = DeletionTestRepository(saveBehavior: .waitForRelease)

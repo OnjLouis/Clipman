@@ -38,6 +38,7 @@ final class ClipmanAppModel: ObservableObject {
     @Published var historyFilter = HistoryFilter.all
     @Published var status = "Ready."
     @Published var showingSettings = false
+    @Published var showingQuickClip = false
     @Published var isRefreshing = false
     @Published private(set) var pendingServerConnection: ServerConnectionDetails?
     @Published private(set) var serverConnectionImportError = ""
@@ -278,12 +279,6 @@ final class ClipmanAppModel: ObservableObject {
         setHistorySortMode(settings.historySortMode.next)
     }
 
-    var nextSection: Section {
-        let sections = visibleSections
-        guard let current = sections.firstIndex(of: selectedSection) else { return .text }
-        return sections[(current + 1) % sections.count]
-    }
-
     func unlock() {
         guard !isUnlocked, !isUnlocking else { return }
         isUnlocking = true
@@ -319,6 +314,7 @@ final class ClipmanAppModel: ObservableObject {
                 }
                 let hasQuickAction = ClipmanQuickActionCenter.shared.pendingAction != nil
                 var shouldRefreshServer = settings.storageMode == .server && !hasQuickAction
+                var preserveClipboardDuringInitialRefresh = false
                 if hasQuickAction {
                     processPendingQuickAction()
                 } else if isImportingServerConnection {
@@ -328,11 +324,18 @@ final class ClipmanAppModel: ObservableObject {
                     showingSettings = true
                     shouldRefreshServer = false
                 } else if settings.addClipboardOnLaunch {
+                    preserveClipboardDuringInitialRefresh = MobileRichTextClipboard.containsSupportedContent(
+                        includeImages: settings.richTextEnabled && settings.includeImagesInRichText
+                    )
                     requestClipboardImport(announceUnavailable: false)
                 }
                 startPolling()
                 if shouldRefreshServer {
-                    _ = await refresh(showStatus: false, localCacheIsCurrent: true)
+                    _ = await refresh(
+                        showStatus: false,
+                        localCacheIsCurrent: true,
+                        allowRemoteClipboardWrite: !preserveClipboardDuringInitialRefresh
+                    )
                 }
             } else {
                 isUnlocking = false
@@ -437,6 +440,8 @@ final class ClipmanAppModel: ObservableObject {
         guard isUnlocked, let action = ClipmanQuickActionCenter.shared.consume() else { return }
         showingSettings = false
         switch action {
+        case .quickClip:
+            showingQuickClip = true
         case .addClipboard:
             requestClipboardImport()
         case .copyLatest:
@@ -543,7 +548,11 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     @discardableResult
-    func refresh(showStatus: Bool, localCacheIsCurrent: Bool = false) async -> Bool {
+    func refresh(
+        showStatus: Bool,
+        localCacheIsCurrent: Bool = false,
+        allowRemoteClipboardWrite: Bool = true
+    ) async -> Bool {
         guard !refreshInProgress, !mutationSyncInProgress else { return false }
         let generation = storageGeneration
         let mutationGeneration = databaseMutationGeneration
@@ -641,7 +650,7 @@ final class ClipmanAppModel: ObservableObject {
             pollingFailureCount = 0
             setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
             if !showStatus, previousNewest != nil, let newest = newestRemoteEntry(in: merged), newest.Id != previousNewest?.Id, newest.Id != lastRemoteEntryID {
-                if settings.autoCopyRemote {
+                if settings.autoCopyRemote && allowRemoteClipboardWrite {
                     MobileRichTextClipboard.write(newest, includeRichText: settings.richTextEnabled)
                 }
                 lastRemoteEntryID = newest.Id
@@ -928,6 +937,26 @@ final class ClipmanAppModel: ObservableObject {
         queueUpload(successMessage: "Entry updated.")
     }
 
+    func addQuickClip(_ entry: ClipEntry) {
+        let text = entry.Text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            setTransientStatus("Quick Clip was not saved because it contains no text.")
+            return
+        }
+        var normalized = entry
+        normalized.Group = canonicalGroup(entry.Group)
+        database = SyncConflictResolver.addManualEntry(
+            database: database,
+            entry: normalized,
+            machineName: machineName
+        )
+        soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+        queueUpload(
+            successMessage: "Quick Clip saved.",
+            progressMessage: "Quick Clip saved; server sync in progress."
+        )
+    }
+
     private func canonicalGroup(_ requestedValue: String) -> String {
         let requested = requestedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !requested.isEmpty else { return "" }
@@ -1174,19 +1203,9 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     private func rebuildLinkCache() {
-        var items: [LinkExtractor.LinkItem] = []
-        var pureIDs = Set<String>()
-        for entry in database.Entries {
-            let links = LinkExtractor.links(in: entry.Text)
-            for (index, url) in links.enumerated() {
-                items.append(LinkExtractor.LinkItem(id: "\(entry.Id)-link-\(index)", url: url, entry: entry))
-            }
-            if LinkExtractor.isPureLinkEntry(entry) {
-                pureIDs.insert(entry.Id)
-            }
-        }
+        let items = LinkExtractor.historyLinkItems(in: database.Entries)
         linkItems = items
-        pureLinkEntryIDs = pureIDs
+        pureLinkEntryIDs = Set(items.map(\.entry.Id))
     }
 
     private func loadedStatusText() -> String {

@@ -408,12 +408,14 @@ hotkey_application = types.SimpleNamespace(
 )
 hotkey_manager = types.SimpleNamespace(
     generation=7, show_registered=False, toggle_registered=False,
-    save_configured=True, save_registered=False, quick_registered={},
+    save_configured=True, save_registered=False,
+    quick_clip_configured=True, quick_clip_registered=False, quick_registered={},
     application=hotkey_application,
 )
-assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "ready", "registered": {"show": True, "toggle": True, "save": True, "quick:entry": True}}, 7) is False
+assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "ready", "registered": {"show": True, "toggle": True, "save": True, "quick-clip": True, "quick:entry": True}}, 7) is False
 assert hotkey_manager.show_registered and hotkey_manager.toggle_registered
 assert hotkey_manager.save_registered
+assert hotkey_manager.quick_clip_registered
 assert hotkey_manager.quick_registered == {"entry": True}
 assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "activated", "action": "show"}, 7) is False
 assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "activated", "action": "toggle"}, 7) is False

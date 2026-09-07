@@ -7,6 +7,23 @@ import org.junit.Test
 
 class SyncConflictResolverTest {
     @Test
+    fun addManualEntryStoresMetadataAndCanonicalizesGroup() {
+        val original = database(ClipEntry(Text = "Existing", Group = "GitHub"))
+
+        val updated = SyncConflictResolver.addManualEntry(
+            original,
+            ClipEntry(Text = "  New note  ", Name = " Note ", Group = "github", Pinned = true, IsTemplate = true),
+            "Android phone"
+        )
+
+        val entry = updated.Entries.single { it.Text == "New note" }
+        assertEquals("Note", entry.Name)
+        assertEquals("GitHub", entry.Group)
+        assertEquals("Android phone", entry.SourceMachine)
+        assertTrue(entry.Pinned)
+        assertTrue(entry.IsTemplate)
+    }
+    @Test
     fun updateNormalizesGroupCaseToEstablishedSpelling() {
         val target = entry("target", "Target", 1).copy(Group = "")
         val history = database(

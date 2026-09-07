@@ -285,6 +285,58 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
+    func addManualEntry(
+        text: String,
+        name: String,
+        group: String,
+        isPinned: Bool,
+        isTemplate: Bool,
+        maxEntries: Int = 1000,
+        completion: (@MainActor @Sendable (ClipStoreAddResult) -> Void)? = nil
+    ) {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else {
+            Task { @MainActor in completion?(.failed) }
+            return
+        }
+        queue.async {
+            guard self.mergeLatestBeforeWriteLocked() else {
+                Task { @MainActor in completion?(.failed) }
+                return
+            }
+            let now = TimeUtil.nowUnixMs()
+            let normalizedGroup = self.canonicalGroupLocked(group.trimmingCharacters(in: .whitespacesAndNewlines))
+            if let index = self.database.Entries.firstIndex(where: { $0.Text == trimmedText }) {
+                self.database.Entries[index].Name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.database.Entries[index].Group = normalizedGroup
+                self.database.Entries[index].SourceMachine = self.machineName
+                self.database.Entries[index].LastUsedUnixMs = now
+                self.database.Entries[index].ModifiedUnixMs = now
+                self.database.Entries[index].Pinned = isPinned
+                self.database.Entries[index].IsTemplate = isTemplate
+            } else {
+                self.database.Entries.append(ClipEntry(
+                    Text: trimmedText,
+                    Name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    Group: normalizedGroup,
+                    SourceMachine: self.machineName,
+                    CreatedUnixMs: now,
+                    LastUsedUnixMs: now,
+                    ModifiedUnixMs: now,
+                    Pinned: isPinned,
+                    IsTemplate: isTemplate,
+                    ManualOrder: self.nextManualOrderLocked()
+                ))
+            }
+            self.pruneLocked(maxEntries: maxEntries)
+            let saved = self.saveLocked()
+            Task { @MainActor in
+                if saved { self.delegate?.clipStoreDidChange() }
+                completion?(saved ? .saved : .failed)
+            }
+        }
+    }
+
     func entryID(forText text: String) -> String {
         queue.sync { database.Entries.first(where: { $0.Text == text })?.Id ?? "" }
     }

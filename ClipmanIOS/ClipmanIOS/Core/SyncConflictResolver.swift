@@ -122,6 +122,47 @@ enum SyncConflictResolver {
         return result
     }
 
+    static func addManualEntry(database: ClipDatabase, entry: ClipEntry, machineName: String) -> ClipDatabase {
+        let text = entry.Text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return database }
+        var result = database
+        let now = TimeUtil.nowUnixMs()
+        let group = canonicalGroup(in: result.Entries, requested: entry.Group)
+        if let index = result.Entries.firstIndex(where: { $0.Text == text }) {
+            result.Entries[index].Name = entry.Name.trimmingCharacters(in: .whitespacesAndNewlines)
+            result.Entries[index].Group = group
+            result.Entries[index].SourceMachine = machineName
+            result.Entries[index].LastUsedUnixMs = now
+            result.Entries[index].ModifiedUnixMs = now
+            result.Entries[index].Pinned = entry.Pinned
+            result.Entries[index].IsTemplate = entry.IsTemplate
+        } else {
+            let nextOrder = (result.Entries.map(\.ManualOrder).max() ?? 0) + 1
+            result.Entries.append(ClipEntry(
+                Text: text,
+                Name: entry.Name.trimmingCharacters(in: .whitespacesAndNewlines),
+                Group: group,
+                SourceMachine: machineName,
+                CreatedUnixMs: now,
+                LastUsedUnixMs: now,
+                ModifiedUnixMs: now,
+                Pinned: entry.Pinned,
+                IsTemplate: entry.IsTemplate,
+                ManualOrder: nextOrder
+            ))
+        }
+        normalize(&result)
+        return result
+    }
+
+    private static func canonicalGroup(in entries: [ClipEntry], requested: String) -> String {
+        let value = requested.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return "" }
+        return entries
+            .map { $0.Group.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty && $0.caseInsensitiveCompare(value) == .orderedSame } ?? value
+    }
+
     static func updateEntry(database: ClipDatabase, entry: ClipEntry, machineName: String) -> ClipDatabase {
         var result = database
         guard let index = result.Entries.firstIndex(where: { $0.Id == entry.Id }) else { return result }

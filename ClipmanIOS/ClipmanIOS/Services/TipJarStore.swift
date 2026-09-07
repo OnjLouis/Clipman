@@ -12,6 +12,7 @@ final class TipJarStore: ObservableObject {
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var hasLoaded = false
     @Published private(set) var isPurchasing = false
     @Published private(set) var message = "" {
         didSet {
@@ -27,7 +28,10 @@ final class TipJarStore: ObservableObject {
     func loadProducts() async {
         guard products.isEmpty, !isLoading else { return }
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            hasLoaded = true
+        }
         do {
             let loaded = try await Product.products(for: Self.productIDs)
             products = loaded.sorted {

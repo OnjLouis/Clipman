@@ -1,5 +1,5 @@
 import XCTest
-@testable import ClipmanIOS
+@testable import Clipman
 
 final class ShareSyncServiceTests: XCTestCase {
     func testSharedConfigurationContainsNoSecrets() throws {
@@ -69,5 +69,18 @@ final class ShareSyncServiceTests: XCTestCase {
             richTextEnabled: richTextEnabled,
             includeImagesInRichText: false
         )
+    }
+}
+
+final class QuickActionTests: XCTestCase {
+    @MainActor
+    func testQuickClipActionWaitsUntilTheAppConsumesIt() {
+        _ = ClipmanQuickActionCenter.shared.consume()
+        defer { _ = ClipmanQuickActionCenter.shared.consume() }
+        ClipmanQuickActionCenter.shared.request(.quickClip)
+
+        XCTAssertEqual(ClipmanQuickActionCenter.shared.pendingAction, .quickClip)
+        XCTAssertEqual(ClipmanQuickActionCenter.shared.consume(), .quickClip)
+        XCTAssertNil(ClipmanQuickActionCenter.shared.pendingAction)
     }
 }

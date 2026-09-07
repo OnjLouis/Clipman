@@ -53,6 +53,18 @@ def image_rich_text_with_filename(filename, data=None, mime_type="image/png"):
 
 
 class LinkLabelTests(unittest.TestCase):
+    def test_open_link_accepts_only_standalone_web_links(self):
+        self.assertEqual(
+            clipman.openable_web_link(" https://example.com/path "),
+            "https://example.com/path",
+        )
+        self.assertEqual(
+            clipman.openable_web_link("https://example.com/path  link"),
+            "https://example.com/path",
+        )
+        self.assertIsNone(clipman.openable_web_link("Read https://example.com/path"))
+        self.assertIsNone(clipman.openable_web_link("clipman://example.com/path"))
+
     def test_name_and_content_copy_formatting(self):
         entries = [
             {"name": " Release notes ", "text": "https://example.com/release"},
@@ -471,6 +483,11 @@ class ClipMergeTests(unittest.TestCase):
 
 
 class PreferenceTests(unittest.TestCase):
+    def test_quick_clip_global_hotkey_defaults_to_unassigned(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": folder}):
+            preferences = clipman.Preferences()
+            self.assertEqual(preferences.values["quick_clip_hotkey"], "")
+
     def test_website_title_contact_defaults_are_conservative(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": folder}):
             preferences = clipman.Preferences()

@@ -34,6 +34,10 @@ enum LinkExtractor {
         }
     }
 
+    static func historyLinkItems(in entries: [ClipEntry]) -> [LinkItem] {
+        linkItems(in: entries.filter(isPureLinkEntry))
+    }
+
     static func isPureLinkEntry(_ entry: ClipEntry) -> Bool {
         pureHTTPURL(in: entry.Text) != nil
     }

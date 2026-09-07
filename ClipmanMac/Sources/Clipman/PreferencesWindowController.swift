@@ -104,6 +104,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let showHotkeyField = HotkeyCaptureField()
     private let toggleHotkeyField = HotkeyCaptureField()
     private let saveCurrentClipboardHotkeyField = HotkeyCaptureField()
+    private let quickClipHotkeyField = HotkeyCaptureField()
     private let passwordField = NSSecureTextField()
     private let ignoredApplicationsView = PreferencesTabTextView()
     private let statusLabel = NSTextField(labelWithString: "")
@@ -185,6 +186,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("Save current clipboard hotkey, optional", saveCurrentClipboardHotkeyField)
+        addRow("Open Quick Clip hotkey, optional", quickClipHotkeyField)
         confirmSingleModifierHotkeysCheckbox.setAccessibilityLabel("Warn before saving single-modifier global hotkeys")
         confirmSingleModifierHotkeysCheckbox.setAccessibilityHelp("When checked, Clipman warns before saving an allowed global hotkey that uses only one modifier. You can also turn this warning off from its confirmation dialog.")
         grid.addRow(with: [NSGridCell.emptyContentView, confirmSingleModifierHotkeysCheckbox])
@@ -196,6 +198,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         showHotkeyField.hotkeyDelegate = self
         toggleHotkeyField.hotkeyDelegate = self
         saveCurrentClipboardHotkeyField.hotkeyDelegate = self
+        quickClipHotkeyField.hotkeyDelegate = self
 
         monitoringCheckbox.target = nil
         monitoringCheckbox.action = nil
@@ -397,6 +400,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         showHotkeyField.descriptor = settings.showHistoryHotkey
         toggleHotkeyField.descriptor = settings.toggleMonitoringHotkey
         saveCurrentClipboardHotkeyField.descriptor = settings.saveCurrentClipboardHotkey
+        quickClipHotkeyField.descriptor = settings.quickClipHotkey
         passwordField.stringValue = ""
         ignoredApplicationsView.string = settings.ignoredApplications.joined(separator: "\n")
         statusLabel.stringValue = passwordStatusText()
@@ -633,7 +637,26 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             statusLabel.stringValue = "Save current clipboard cannot use a hotkey already assigned to Quick Paste."
             return
         }
-        guard confirmSingleModifierHotkeys(show: show, toggle: toggle, saveCurrentClipboard: saveCurrentClipboardHotkey) else {
+        let quickClipHotkeyText = quickClipHotkeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let quickClipHotkey: HotkeyDescriptor?
+        if quickClipHotkeyText.isEmpty {
+            quickClipHotkey = nil
+        } else if let captured = quickClipHotkeyField.descriptor ?? HotkeyDescriptor.parse(quickClipHotkeyText), captured.isValid {
+            quickClipHotkey = captured
+        } else {
+            statusLabel.stringValue = "Quick Clip hotkey must be blank or use a valid global hotkey."
+            return
+        }
+        let reservedHotkeys = [show, toggle, saveCurrentClipboardHotkey].compactMap { $0 }
+        guard quickClipHotkey == nil || !reservedHotkeys.contains(quickClipHotkey!) else {
+            statusLabel.stringValue = "Quick Clip must use a different hotkey from Show History, Toggle Monitoring, and Save Current Clipboard."
+            return
+        }
+        guard quickClipHotkey == nil || !settings.quickCopyHotkeys.values.contains(quickClipHotkey!) else {
+            statusLabel.stringValue = "Quick Clip cannot use a hotkey already assigned to Quick Paste."
+            return
+        }
+        guard confirmSingleModifierHotkeys(show: show, toggle: toggle, saveCurrentClipboard: saveCurrentClipboardHotkey, quickClip: quickClipHotkey) else {
             return
         }
         let selectedStorageMode = storedStorageMode(storageModePopup.titleOfSelectedItem ?? "")
@@ -713,6 +736,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         settings.showHistoryHotkey = show
         settings.toggleMonitoringHotkey = toggle
         settings.saveCurrentClipboardHotkey = saveCurrentClipboardHotkey
+        settings.quickClipHotkey = quickClipHotkey
         settings.ignoredApplications = normalizedIgnoredApplications(ignoredApplicationsView.string)
         let password = enteredPassword.isEmpty ? nil : enteredPassword
         guard preferencesDelegate?.preferencesWindow(self, didUpdate: settings, passwordToSave: password) != false else {
@@ -722,11 +746,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         window?.close()
     }
 
-    private func confirmSingleModifierHotkeys(show: HotkeyDescriptor, toggle: HotkeyDescriptor, saveCurrentClipboard: HotkeyDescriptor?) -> Bool {
+    private func confirmSingleModifierHotkeys(show: HotkeyDescriptor, toggle: HotkeyDescriptor, saveCurrentClipboard: HotkeyDescriptor?, quickClip: HotkeyDescriptor?) -> Bool {
         guard confirmSingleModifierHotkeysCheckbox.state == .on else {
             return true
         }
-        guard show.usesSingleModifier || toggle.usesSingleModifier || saveCurrentClipboard?.usesSingleModifier == true else {
+        guard show.usesSingleModifier || toggle.usesSingleModifier || saveCurrentClipboard?.usesSingleModifier == true || quickClip?.usesSingleModifier == true else {
             return true
         }
 

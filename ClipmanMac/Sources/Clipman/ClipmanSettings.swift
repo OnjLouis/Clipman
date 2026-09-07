@@ -22,6 +22,7 @@ struct ClipmanSettings: Codable, Equatable {
     var showHistoryHotkey: HotkeyDescriptor
     var toggleMonitoringHotkey: HotkeyDescriptor
     var saveCurrentClipboardHotkey: HotkeyDescriptor?
+    var quickClipHotkey: HotkeyDescriptor?
     var windowFrame: String
     var sortMode: String
     var sortDescending: Bool
@@ -57,7 +58,7 @@ struct ClipmanSettings: Codable, Equatable {
     var sensitiveDataPresetIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, clipMergeEnabled, clipMergeWindowMilliseconds, clipMergeSeparatorMode, clipMergeCustomSeparator, multipleEntrySeparatorMode, multipleEntryCustomSeparator, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, windowFrame
+        case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, clipMergeEnabled, clipMergeWindowMilliseconds, clipMergeSeparatorMode, clipMergeCustomSeparator, multipleEntrySeparatorMode, multipleEntryCustomSeparator, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, quickClipHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, includeImagesInRichTextHistory, alsoAddCopiedImageFilesToRichTextHistory, groupFilter, historyFilterType, deviceFilter, confirmDeletions, confirmSingleModifierHotkeys, confirmWebsiteTitleRequests, autoNameCopiedWebsiteLinks, runAtStartup
         case captureClipboardOnStartup
         case rememberDatabasePassword
@@ -90,6 +91,7 @@ struct ClipmanSettings: Codable, Equatable {
         showHistoryHotkey: HotkeyDescriptor,
         toggleMonitoringHotkey: HotkeyDescriptor,
         saveCurrentClipboardHotkey: HotkeyDescriptor?,
+        quickClipHotkey: HotkeyDescriptor?,
         windowFrame: String,
         sortMode: String,
         sortDescending: Bool,
@@ -143,6 +145,7 @@ struct ClipmanSettings: Codable, Equatable {
         self.showHistoryHotkey = showHistoryHotkey
         self.toggleMonitoringHotkey = toggleMonitoringHotkey
         self.saveCurrentClipboardHotkey = saveCurrentClipboardHotkey
+        self.quickClipHotkey = quickClipHotkey
         self.windowFrame = windowFrame
         self.sortMode = sortMode
         self.sortDescending = sortDescending
@@ -204,6 +207,7 @@ struct ClipmanSettings: Codable, Equatable {
         showHistoryHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .showHistoryHotkey) ?? fallback.showHistoryHotkey
         toggleMonitoringHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .toggleMonitoringHotkey) ?? fallback.toggleMonitoringHotkey
         saveCurrentClipboardHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .saveCurrentClipboardHotkey)
+        quickClipHotkey = try container.decodeIfPresent(HotkeyDescriptor.self, forKey: .quickClipHotkey)
         windowFrame = try container.decodeIfPresent(String.self, forKey: .windowFrame) ?? ""
         sortMode = try container.decodeIfPresent(String.self, forKey: .sortMode) ?? "LastUsed"
         sortDescending = try container.decodeIfPresent(Bool.self, forKey: .sortDescending) ?? true
@@ -280,6 +284,7 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(showHistoryHotkey, forKey: .showHistoryHotkey)
         try container.encode(toggleMonitoringHotkey, forKey: .toggleMonitoringHotkey)
         try container.encodeIfPresent(saveCurrentClipboardHotkey, forKey: .saveCurrentClipboardHotkey)
+        try container.encodeIfPresent(quickClipHotkey, forKey: .quickClipHotkey)
         try container.encode(windowFrame, forKey: .windowFrame)
         try container.encode(sortMode, forKey: .sortMode)
         try container.encode(sortDescending, forKey: .sortDescending)
@@ -344,6 +349,7 @@ struct ClipmanSettings: Codable, Equatable {
             showHistoryHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ANSI_Grave), modifiers: [.option, .shift]),
             toggleMonitoringHotkey: HotkeyDescriptor(keyCode: UInt32(kVK_ISO_Section), modifiers: [.option, .shift]),
             saveCurrentClipboardHotkey: nil,
+            quickClipHotkey: nil,
             windowFrame: "",
             sortMode: "LastUsed",
             sortDescending: true,

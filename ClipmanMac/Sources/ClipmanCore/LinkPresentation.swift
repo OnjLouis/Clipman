@@ -171,6 +171,17 @@ public struct LinkPresentation: Equatable, Sendable {
         return candidate
     }
 
+    public static func webURL(_ value: String) -> URL? {
+        guard let candidate = linkOnlyURLText(value),
+              let url = URL(string: candidate),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else {
+            return nil
+        }
+        return url
+    }
+
     private static func isUUID(_ value: String) -> Bool {
         value.range(
             of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"#,

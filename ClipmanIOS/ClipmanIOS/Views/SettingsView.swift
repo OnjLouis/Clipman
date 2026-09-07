@@ -80,9 +80,7 @@ struct SettingsView: View {
 
                 serverConnectionSection
 
-                if tipJar.isLoading || !tipJar.products.isEmpty {
-                    TipJarSettingsSection(tipJar: tipJar)
-                }
+                TipJarSettingsSection(tipJar: tipJar)
 
                 Section("Help") {
                     Link("Open Manual", destination: URL(string: "https://onjlouis.github.io/Clipman/manual.html")!)
@@ -519,8 +517,14 @@ private struct TipJarSettingsSection: View {
         Section("Support Clipman") {
             Text("Tips are optional in-app purchases and do not unlock features or content.")
                 .font(.footnote)
-            if tipJar.products.isEmpty {
+            if tipJar.isLoading || !tipJar.hasLoaded {
                 ProgressView("Loading Tip Options")
+            } else if tipJar.products.isEmpty {
+                Text("Tip options are currently unavailable. No features are affected.")
+                    .font(.footnote)
+                Button("Retry Loading Tip Options") {
+                    Task { await tipJar.loadProducts() }
+                }
             } else {
                 ForEach(tipJar.products, id: \.id) { product in
                     Button(tipJar.buttonTitle(for: product)) {
