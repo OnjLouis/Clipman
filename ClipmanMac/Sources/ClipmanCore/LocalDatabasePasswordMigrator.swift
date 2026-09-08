@@ -35,12 +35,49 @@ public enum LocalDatabasePasswordMigrator {
             if let secretsDatabase {
                 try ClipDatabaseFile.saveAtomicCodable(secretsURL, value: secretsDatabase, password: newPassword)
             }
+            try migrateSyncSiblings(beside: textHistoryURL, from: oldPassword, to: newPassword)
         } catch {
             if textChanged, let textDatabase {
                 try? ClipDatabaseFile.saveAtomic(textHistoryURL, database: textDatabase, password: oldPassword)
             }
             if filesChanged, let fileDatabase {
                 try? ClipDatabaseFile.saveAtomicCodable(fileHistoryURL, value: fileDatabase, password: oldPassword)
+            }
+            throw error
+        }
+    }
+
+    /// Sync channel files, the sync-rules document and the pending
+    /// write-through store live beside the history database and use the same
+    /// container and password (`sync-rules-spec.md` section 2), so a password
+    /// change has to carry them across as well. They are re-encrypted as raw
+    /// payloads, which works uniformly for the channel databases and for the
+    /// rules document, whose payload is not a `ClipDatabase`.
+    private static func migrateSyncSiblings(beside textHistoryURL: URL, from oldPassword: String, to newPassword: String) throws {
+        let folder = textHistoryURL.deletingLastPathComponent()
+        guard let children = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
+            return
+        }
+        let candidates = children
+            .filter { url in
+                guard url.pathExtension.lowercased() == "clipdb" else { return false }
+                let name = url.lastPathComponent.lowercased()
+                return name.hasPrefix("clipman-channel-")
+                    || name == SyncRuleEngine.syncRulesFileName
+                    || name == SyncRuleEngine.pendingChannelWritesFileName
+            }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        var migrated: [(url: URL, payload: Data)] = []
+        do {
+            for url in candidates {
+                guard let payload = try ClipDatabaseFile.loadRawPayload(url, password: oldPassword) else { continue }
+                try ClipDatabaseFile.saveRawPayloadAtomic(url, payload: payload, password: newPassword)
+                migrated.append((url, payload))
+            }
+        } catch {
+            for entry in migrated {
+                try? ClipDatabaseFile.saveRawPayloadAtomic(entry.url, payload: entry.payload, password: oldPassword)
             }
             throw error
         }

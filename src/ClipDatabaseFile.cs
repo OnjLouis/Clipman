@@ -63,9 +63,20 @@ namespace Clipman
 
         public static void SaveAtomic<T>(string path, T database, string password) where T : new()
         {
+            SaveAtomic(path, database, password, null);
+        }
+
+        /// <summary>
+        /// Saves a container that shares its PBKDF2 salt with <paramref name="saltSourcePath"/> when it
+        /// is created for the first time, so one key derivation serves the history database and every
+        /// sync channel beside it (sync-rules-spec.md section 5, "Salt sharing"). An existing file
+        /// always keeps its own salt.
+        /// </summary>
+        public static void SaveAtomic<T>(string path, T database, string password, string saltSourcePath) where T : new()
+        {
             if (!string.IsNullOrEmpty(password) && IsCompressedPath(path))
             {
-                SaveEncryptedAtomic(path, database, password);
+                SaveEncryptedAtomic(path, database, password, saltSourcePath);
                 return;
             }
 
@@ -245,7 +256,7 @@ namespace Clipman
             }
         }
 
-        private static void SaveEncryptedAtomic<T>(string path, T database, string password) where T : new()
+        private static void SaveEncryptedAtomic<T>(string path, T database, string password, string saltSourcePath) where T : new()
         {
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir))
@@ -254,7 +265,9 @@ namespace Clipman
             }
 
             var temp = path + ".tmp";
-            var salt = ExistingEncryptedSalt(path) ?? RandomBytes(16);
+            var salt = ExistingEncryptedSalt(path) ??
+                (string.IsNullOrEmpty(saltSourcePath) ? null : ExistingEncryptedSalt(saltSourcePath)) ??
+                RandomBytes(16);
             var iv = RandomBytes(16);
             var keys = DeriveKeys(password, salt);
             var plain = SerializeBounded(database);

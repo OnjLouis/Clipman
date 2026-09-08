@@ -80,6 +80,8 @@ struct SettingsView: View {
 
                 serverConnectionSection
 
+                SyncRulesSettingsSection(app: app)
+
                 TipJarSettingsSection(tipJar: tipJar)
 
                 Section("Help") {
@@ -507,6 +509,165 @@ struct SettingsView: View {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss 'UTC'"
         return formatter.string(from: Date(timeIntervalSince1970: milliseconds / 1000))
+    }
+}
+
+/// The read-mostly sync-rules screen of `sync-rules-spec.md` section 5: it shows
+/// the channels and the devices the rules document defines, and lets the user
+/// change only this device's subscription. Creating, editing and deleting
+/// channels stays on desktop and the command line, where the editing client can
+/// re-route the affected entries immediately.
+private struct SyncRulesSettingsSection: View {
+    @ObservedObject var app: ClipmanAppModel
+    @State private var subscribeToAll = true
+    @State private var selectedKeys: Set<String> = []
+    @State private var loadedStamp: Int64 = .min
+    @State private var isSaving = false
+    @State private var errorMessage = ""
+
+    var body: some View {
+        Section("Sync channels") {
+            Text("Enable sync rules only after every device runs a Clipman version that supports them. Older devices will continue to sync the main history only.")
+                .font(.footnote)
+            if !app.syncRules.available {
+                Text("Sync channels become available when this device stores history on Clipman Server.")
+                    .font(.footnote)
+            } else if !app.syncRules.isEnabled {
+                Text("Sync rules are off for this history. Use Clipman on a desktop computer or the command line to create channels and turn them on.")
+                    .font(.footnote)
+            } else {
+                subscriptionControls
+                deviceDirectory
+            }
+        }
+        .task {
+            await app.refreshSyncRules()
+            reloadIfNeeded()
+        }
+        .onChange(of: app.syncRules) { _ in
+            reloadIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private var subscriptionControls: some View {
+        Text("Channels are created on desktop. This screen changes only what this device downloads. The main history is always downloaded.")
+            .font(.footnote)
+        if app.syncRules.isReadOnly {
+            Text("These sync rules were written by a newer version of Clipman, so this device can read them but not change them. Update Clipman here to edit them.")
+                .font(.footnote)
+        }
+        Toggle("Download every channel", isOn: $subscribeToAll)
+            .disabled(app.syncRules.isReadOnly || isSaving)
+            .accessibilityHint("When on, this device downloads the main history and every sync channel.")
+        ForEach(app.syncRules.channelKeys, id: \.self) { key in
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Download \(app.syncRules.channelName(key))", isOn: binding(for: key))
+                    .disabled(subscribeToAll || app.syncRules.isReadOnly || isSaving)
+                    .accessibilityHint(routeDescription(for: key))
+                Text(routeDescription(for: key))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
+        Button("Save sync channels") { save() }
+            .disabled(app.syncRules.isReadOnly || isSaving || !hasChanges)
+            .accessibilityHint("Saves which channels this device downloads. Other devices are not changed.")
+        if !errorMessage.isEmpty {
+            Text(errorMessage)
+                .font(.footnote)
+                .accessibilityLabel("Sync channels error. \(errorMessage)")
+        }
+    }
+
+    @ViewBuilder
+    private var deviceDirectory: some View {
+        ForEach(app.syncRules.document?.Devices ?? [], id: \.Name) { device in
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.Name)
+                Text(subscriptionSummary(device))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Device \(device.Name) downloads \(subscriptionSummary(device))")
+        }
+        if !app.syncRules.deviceIsListed {
+            Text("This device is not listed in the sync rules yet, so it downloads every channel. Clipman adds it on the next successful sync.")
+                .font(.footnote)
+        }
+    }
+
+    private func binding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { subscribeToAll || selectedKeys.contains(key) },
+            set: { isOn in
+                if isOn {
+                    selectedKeys.insert(key)
+                } else {
+                    selectedKeys.remove(key)
+                }
+            }
+        )
+    }
+
+    private var hasChanges: Bool {
+        let subscribesToEverything = app.syncRules.subscribesToEverything
+        if subscribeToAll { return !subscribesToEverything }
+        if subscribesToEverything { return true }
+        return selectedKeys != Set(app.syncRules.subscribedKeys)
+    }
+
+    private func reloadIfNeeded() {
+        let stamp = app.syncRules.document?.UpdatedUnixMs ?? .min
+        guard !isSaving, stamp != loadedStamp else { return }
+        loadedStamp = stamp
+        subscribeToAll = app.syncRules.subscribesToEverything
+        selectedKeys = Set(app.syncRules.subscribedKeys)
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = ""
+        let channels: [String]? = subscribeToAll
+            ? nil
+            : app.syncRules.channelKeys.filter { selectedKeys.contains($0) }
+        Task {
+            let failure = await app.saveSyncSubscription(channels)
+            isSaving = false
+            errorMessage = failure ?? ""
+            reloadIfNeeded()
+        }
+    }
+
+    private func routeDescription(for key: String) -> String {
+        guard let channel = app.syncRules.document?.Channels.first(where: {
+            SyncRuleEngine.channelKey($0.Name) == key
+        }) else {
+            return "No routing conditions."
+        }
+        var parts: [String] = []
+        if let groups = channel.Route.Groups, !groups.isEmpty {
+            parts.append("Groups: \(groups.joined(separator: ", "))")
+        }
+        if let devices = channel.Route.SourceDevices, !devices.isEmpty {
+            parts.append("Devices: \(devices.joined(separator: ", "))")
+        }
+        if let kind = channel.Route.Kind, kind == SyncRuleEngine.richTextImagesKind {
+            parts.append("Entries that contain an embedded image")
+        }
+        return parts.isEmpty ? "No routing conditions." : parts.joined(separator: ". ")
+    }
+
+    private func subscriptionSummary(_ device: SyncDevice) -> String {
+        if device.Channels.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "*" }) {
+            return "Every channel"
+        }
+        let names = device.Channels
+            .map { app.syncRules.channelName(SyncRuleEngine.normalized($0)) }
+            .filter { !$0.isEmpty }
+        return names.isEmpty ? "Main history only" : names.joined(separator: ", ")
     }
 }
 

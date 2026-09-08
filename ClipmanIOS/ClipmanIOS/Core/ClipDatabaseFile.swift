@@ -133,16 +133,22 @@ enum ClipDatabaseFile {
 
     static func load(_ data: Data, password: String) throws -> ClipDatabase {
         if data.isEmpty { return ClipDatabase() }
+        return try JSONDecoder().decode(ClipDatabase.self, from: loadRawPayload(data, password: password))
+    }
+
+    /// The decoded plaintext payload of a container. The sync-rules document is
+    /// stored in the same container the history database uses, but its payload is
+    /// not a `ClipDatabase` (`sync-rules-spec.md` section 4), so it is read and
+    /// written as raw bytes.
+    static func loadRawPayload(_ data: Data, password: String) throws -> Data {
+        if data.isEmpty { return Data() }
         try validateFileSize(data.count)
 
-        let jsonData: Data
         if data.starts(with: encryptedMagic) {
-            jsonData = try readEncrypted(data, password: password)
-        } else {
-            let payload = data.starts(with: compressedMagic) ? data.dropFirst(compressedMagic.count) : data[...]
-            jsonData = try Gzip.decompress(Data(payload))
+            return try readEncrypted(data, password: password)
         }
-        return try JSONDecoder().decode(ClipDatabase.self, from: jsonData)
+        let payload = data.starts(with: compressedMagic) ? data.dropFirst(compressedMagic.count) : data[...]
+        return try Gzip.decompress(Data(payload))
     }
 
     static func save(
@@ -152,20 +158,36 @@ enum ClipDatabaseFile {
     ) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-        let json = try encoder.encode(database)
-        try validateEncodedJSONSize(json.count)
+        return try saveRawPayload(
+            try encoder.encode(database),
+            password: password,
+            preferredSalt: preferredSalt
+        )
+    }
+
+    /// Writes an arbitrary plaintext payload into the same container the history
+    /// database uses: `CLIPDB2` encrypted when a history password exists,
+    /// `CLIPDB1` compressed otherwise. `preferredSalt` lets a container created
+    /// for the first time copy the core database's PBKDF2 salt, so one key
+    /// derivation serves every channel (`sync-rules-spec.md` section 5).
+    static func saveRawPayload(
+        _ payload: Data,
+        password: String,
+        preferredSalt: [UInt8]? = nil
+    ) throws -> Data {
+        try validateEncodedJSONSize(payload.count)
         let result: Data
         if password.isEmpty {
             do {
                 result = compressedMagic + (try Gzip.compress(
-                    json,
+                    payload,
                     maximumOutputBytes: maximumFileBytes - compressedMagic.count
                 ))
             } catch GzipError.compressedOutputTooLarge {
                 throw ClipDatabaseError.databaseFileTooLarge
             }
         } else {
-            result = try writeEncrypted(json: json, password: password, preferredSalt: preferredSalt)
+            result = try writeEncrypted(json: payload, password: password, preferredSalt: preferredSalt)
         }
         try validateFileSize(result.count)
         return result

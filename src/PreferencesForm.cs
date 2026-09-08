@@ -11,6 +11,7 @@ namespace Clipman
     {
         private readonly AppSettings settings;
         private readonly Action<AppSettings> applySettings;
+        private readonly Func<bool> openSyncRules;
         private readonly TextBox showHotkey;
         private readonly TextBox toggleHotkey;
         private readonly TextBox saveCurrentClipboardHotkey;
@@ -69,10 +70,11 @@ namespace Clipman
         private readonly CheckedListBox sensitiveDataPresets;
         private bool loading;
 
-        public PreferencesForm(AppSettings current, Action<AppSettings> applySettings, Action<string> copySensitiveText)
+        public PreferencesForm(AppSettings current, Action<AppSettings> applySettings, Action<string> copySensitiveText, Func<bool> openSyncRules)
         {
             this.applySettings = applySettings;
             this.copySensitiveText = copySensitiveText;
+            this.openSyncRules = openSyncRules;
             settings = CloneSettings(current);
 
             Text = "Clipman Preferences";
@@ -308,6 +310,10 @@ namespace Clipman
             importServerAuthority.Click += (s, e) => ImportServerAuthority();
             var removeServerAuthority = new Button { Text = "Remo&ve authority", AutoSize = true };
             removeServerAuthority.AccessibleDescription = "Remove the app-specific private certificate authority without changing the server address or token.";
+            var syncRulesButton = new Button { Text = "S&ync rules...", AutoSize = true };
+            syncRulesButton.AccessibleName = "Sync rules";
+            syncRulesButton.AccessibleDescription = "Opens the sync rules editor, which partitions clipboard history into named channels and controls which devices receive each channel.";
+            syncRulesButton.Click += (s, e) => OpenSyncRulesEditor();
             removeServerAuthority.Click += (s, e) => RemoveServerAuthority();
 
             var dbPanel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
@@ -340,6 +346,8 @@ namespace Clipman
             AddFullRow(storageLayout, serverCaStatus);
             AddRow(storageLayout, "Authority fingerprint chec&ksum:", serverCaFingerprint);
             AddFullRow(storageLayout, NewNote("Enter a host and port such as home-server:49152. Clipman will infer the local server protocol. Server mode stores the raw clipman-history.clipdb on a Clipman Server. The server never knows the history password; encryption still happens on this computer."));
+            AddFullRow(storageLayout, syncRulesButton);
+            AddFullRow(storageLayout, NewNote("Sync rules split clipboard history into named channels so only chosen devices receive each channel. This is off by default and independent of the storage type above."));
             AddRow(storageLayout, "History &password:", passwordPanel);
             AddRow(storageLayout, "&Confirm password:", passwordConfirmPanel);
             AddFullRow(storageLayout, rememberDatabasePassword);
@@ -702,6 +710,16 @@ namespace Clipman
 
             ApplyNow();
             base.OnFormClosing(e);
+        }
+
+        private void OpenSyncRulesEditor()
+        {
+            if (openSyncRules == null) return;
+            var applied = openSyncRules();
+            if (applied)
+            {
+                MessageBox.Show(this, "Sync rules were updated.", "Clipman Sync Rules", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
         }
 
         private void ImportServerConnection()

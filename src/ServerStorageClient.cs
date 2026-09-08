@@ -23,11 +23,29 @@ namespace Clipman
             string databasePassword,
             string caCertPem,
             string caHost)
+            : this(serverUrl, token, databasePassword, caCertPem, caHost, null)
+        {
+        }
+
+        /// <summary>
+        /// Addresses one bucket on the configured server. <paramref name="explicitDatabaseId"/> is
+        /// blank for the history database and carries a derived sync-channel or sync-rules id
+        /// otherwise (sync-rules-spec.md section 2).
+        /// </summary>
+        public ServerStorageClient(
+            string serverUrl,
+            string token,
+            string databasePassword,
+            string caCertPem,
+            string caHost,
+            string explicitDatabaseId)
         {
             baseUrl = NormalizeBaseUrl(serverUrl);
             this.token = ServerSettingsSanitizer.CleanToken(token);
             hasDatabasePassword = !string.IsNullOrEmpty(databasePassword);
-            databaseId = ServerDatabaseIdentity.FromTokenAndPassword(this.token, databasePassword);
+            databaseId = string.IsNullOrEmpty(explicitDatabaseId)
+                ? ServerDatabaseIdentity.FromTokenAndPassword(this.token, databasePassword)
+                : explicitDatabaseId;
             privateAuthority = ParsePrivateAuthority(caCertPem, caHost, serverUrl);
         }
 
@@ -71,9 +89,22 @@ namespace Clipman
 
         public ServerDatabaseMetadata Upload(byte[] data, string expectedRevision)
         {
+            return Upload(data, expectedRevision, false);
+        }
+
+        /// <summary>
+        /// Uploads a bucket. <paramref name="createOnly"/> sends <c>If-None-Match: *</c> so a bucket
+        /// another device wrote in the meantime always wins (sync-rules-spec.md section 4, Caching).
+        /// </summary>
+        public ServerDatabaseMetadata Upload(byte[] data, string expectedRevision, bool createOnly)
+        {
             ValidateServerTransferLength(data == null ? 0 : data.LongLength);
             var request = CreateRequest(DatabasePath(), "PUT");
-            if (!string.IsNullOrWhiteSpace(expectedRevision))
+            if (createOnly)
+            {
+                request.Headers["If-None-Match"] = "*";
+            }
+            else if (!string.IsNullOrWhiteSpace(expectedRevision))
             {
                 request.Headers["If-Match"] = "\"" + expectedRevision.Trim('"') + "\"";
             }

@@ -45,6 +45,9 @@ final class ClipmanAppModel: ObservableObject {
     @Published private(set) var serverConnectionImportSequence = 0
     @Published private(set) var isImportingServerConnection = false
     @Published private(set) var linkItems: [LinkExtractor.LinkItem] = []
+    /// The sync rules in effect (`sync-rules-spec.md` section 4). Empty until the
+    /// first successful server transfer, and empty for local storage.
+    @Published private(set) var syncRules = MobileSyncRulesSnapshot()
 
     private let soundService = SoundService()
     private let historyRepository: any MobileHistoryRepositoryProtocol
@@ -637,7 +640,10 @@ final class ClipmanAppModel: ObservableObject {
                 }
                 status = "Cached history loaded; refreshing Clipman Server."
             }
-            if !showStatus && !revision.isEmpty && !hasPendingLocalChanges {
+            // With sync rules in effect the core bucket's revision is only part of
+            // the picture: a channel can change while core stands still, so the
+            // poll always goes through the channel-aware read.
+            if !showStatus && !revision.isEmpty && !hasPendingLocalChanges && !syncRules.isEnabled {
                 let metadata = try await client.metadata()
                 if metadata.revision == revision {
                     pollingFailureCount = 0
@@ -680,6 +686,7 @@ final class ClipmanAppModel: ObservableObject {
             } else if let backupError = sync.backupError {
                 setSteadyStatus("History saved, but the history backup could not be updated: \(backupError)")
             }
+            applySyncOutcome(sync)
             return true
         } catch {
             guard generation == storageGeneration,
@@ -703,6 +710,58 @@ final class ClipmanAppModel: ObservableObject {
             }
             setSteadyStatus(error.localizedDescription)
             return false
+        }
+    }
+
+    /// Applies the sync-rules state a transfer reported and announces the
+    /// write-through outcome of `sync-rules-spec.md` section 6. Entries written
+    /// straight through never appear in the local view, so this announcement is
+    /// the only feedback the user gets.
+    private func applySyncOutcome(_ sync: MobileSyncResult) {
+        if let rules = sync.rules, rules != syncRules {
+            syncRules = rules
+        }
+        if !sync.writeThroughChannelNames.isEmpty {
+            let message = "Added to \(sync.writeThroughChannelNames.joined(separator: ", ")) for your other devices."
+            setTransientStatus(message)
+            announceStatus(message)
+        } else if !sync.pendingChannelNames.isEmpty {
+            let message = "\(sync.pendingChannelNames.joined(separator: ", ")) could not be reached. Clipman will retry after the next sync."
+            setTransientStatus(message)
+            announceStatus(message)
+        }
+    }
+
+    /// Re-reads the sync-rules document for the settings screen, without
+    /// disturbing history sync.
+    func refreshSyncRules() async {
+        guard settings.storageMode == .server else {
+            syncRules = MobileSyncRulesSnapshot()
+            return
+        }
+        let snapshot = await historyRepository.syncRulesSnapshot(settings: settings)
+        guard snapshot != syncRules else { return }
+        syncRules = snapshot
+    }
+
+    /// Rewrites only this device's subscription in the rules document. `channels`
+    /// is nil for "every channel". Returns a message when the change could not be
+    /// saved, and nil on success.
+    func saveSyncSubscription(_ channels: [String]?) async -> String? {
+        let settingsSnapshot = settings
+        do {
+            let snapshot = try await historyRepository.updateDeviceSubscription(
+                settings: settingsSnapshot,
+                channels: channels
+            )
+            syncRules = snapshot
+            setTransientStatus("Sync channels updated for this device.")
+            announceStatus("Sync channels updated for this device.")
+            await refresh(showStatus: false)
+            return nil
+        } catch {
+            soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+            return error.localizedDescription
         }
     }
 
@@ -1082,6 +1141,7 @@ final class ClipmanAppModel: ObservableObject {
             if let backupError = sync.backupError {
                 setSteadyStatus("History backup could not be updated: \(backupError)")
             }
+            applySyncOutcome(sync)
         } catch is CancellationError {
             return
         } catch {
@@ -1144,6 +1204,7 @@ final class ClipmanAppModel: ObservableObject {
             if let backupError = sync.backupError {
                 setSteadyStatus("Entry deleted, but the history backup could not be updated: \(backupError)")
             }
+            applySyncOutcome(sync)
         } catch is CancellationError {
             return
         } catch {

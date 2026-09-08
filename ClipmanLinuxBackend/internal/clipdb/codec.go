@@ -104,28 +104,9 @@ func DecodeFileHistory(blob []byte, password string, limits Limits) (model.FileD
 
 func decodeJSON(blob []byte, password string, limits Limits) ([]byte, Limits, error) {
 	limits = normalizedLimits(limits)
-	if int64(len(blob)) > limits.MaxBlobBytes {
-		return nil, limits, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
-	}
-	var compressed []byte
-	switch {
-	case bytes.HasPrefix(blob, encryptedMagic):
-		if password == "" {
-			return nil, limits, ErrPasswordRequired
-		}
-		plain, err := decrypt(blob, password)
-		if err != nil {
-			return nil, limits, err
-		}
-		compressed = plain
-	case bytes.HasPrefix(blob, compressedMagic):
-		compressed = blob[len(compressedMagic):]
-	default:
-		compressed = blob
-	}
-	jsonBytes, err := gunzipLimited(compressed, limits.MaxJSONBytes)
+	jsonBytes, _, err := decodeContainer(blob, password, limits)
 	if err != nil {
-		return nil, limits, fmt.Errorf("invalid Clipman database: %w", err)
+		return nil, limits, err
 	}
 	jsonBytes = bytes.TrimPrefix(jsonBytes, []byte{0xEF, 0xBB, 0xBF})
 	if !utf8.Valid(jsonBytes) {
@@ -135,6 +116,48 @@ func decodeJSON(blob []byte, password string, limits Limits) ([]byte, Limits, er
 		return nil, limits, err
 	}
 	return jsonBytes, limits, nil
+}
+
+// decodeContainer implements the CLIPDB1/CLIPDB2 magic dispatch shared by
+// decodeJSON (which additionally validates the payload as Clipman JSON) and
+// DecodeRaw (which hands back the decompressed payload as-is). salt is nil
+// unless blob is an encrypted CLIPDB2 container. limits is assumed already
+// normalized.
+func decodeContainer(blob []byte, password string, limits Limits) (payload []byte, salt []byte, err error) {
+	if int64(len(blob)) > limits.MaxBlobBytes {
+		return nil, nil, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
+	}
+	var compressed []byte
+	switch {
+	case bytes.HasPrefix(blob, encryptedMagic):
+		if password == "" {
+			return nil, nil, ErrPasswordRequired
+		}
+		plain, decryptErr := decrypt(blob, password)
+		if decryptErr != nil {
+			return nil, nil, decryptErr
+		}
+		compressed = plain
+		salt = extractSalt(blob)
+	case bytes.HasPrefix(blob, compressedMagic):
+		compressed = blob[len(compressedMagic):]
+	default:
+		compressed = blob
+	}
+	payload, err = gunzipLimited(compressed, limits.MaxJSONBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid Clipman database: %w", err)
+	}
+	return payload, salt, nil
+}
+
+// DecodeRaw decodes the same CLIPDB1/CLIPDB2 container as Decode, but returns
+// the decompressed payload verbatim instead of unmarshaling it as a
+// model.Database. This lets the container carry an arbitrary JSON document
+// (for example the sync-rules document). salt is nil for unencrypted
+// containers; a wrong password fails exactly like Decode.
+func DecodeRaw(blob []byte, password string) (payload []byte, salt []byte, err error) {
+	return decodeContainer(blob, password, normalizedLimits(Limits{}))
 }
 
 func Encode(database model.Database, password string, existing []byte) ([]byte, error) {
@@ -170,6 +193,28 @@ func encodeJSONWithLimits(value any, password string, existing []byte, limits Li
 	if err != nil {
 		return nil, err
 	}
+	return encodeContainer(compressed, password, extractSalt(existing), limits)
+}
+
+// extractSalt returns the 16-byte salt embedded in an existing CLIPDB2
+// container, or nil if existing is not a valid encrypted container. It is
+// used to reuse a database's salt when re-encoding it, so PBKDF2 derivation
+// (and the derived-key caches built on it) stay stable across saves.
+func extractSalt(existing []byte) []byte {
+	if len(existing) >= len(encryptedMagic)+1+16 && bytes.HasPrefix(existing, encryptedMagic) && existing[len(encryptedMagic)] == 1 {
+		return append([]byte(nil), existing[len(encryptedMagic)+1:len(encryptedMagic)+1+16]...)
+	}
+	return nil
+}
+
+// encodeContainer implements the CLIPDB1/CLIPDB2 container assembly (gzip
+// output already applied by the caller, then PBKDF2/AES/HMAC) shared by
+// encodeJSONWithLimits and EncodeRaw. Container selection matches Encode: a
+// nonblank password produces an encrypted CLIPDB2 blob (reusing
+// preferredSalt when it is a valid 16-byte salt, else a fresh one); a blank
+// password produces a compressed CLIPDB1 blob. limits is assumed already
+// normalized.
+func encodeContainer(compressed []byte, password string, preferredSalt []byte, limits Limits) ([]byte, error) {
 	if password == "" {
 		out := append(append([]byte(nil), compressedMagic...), compressed...)
 		if int64(len(out)) > limits.MaxBlobBytes {
@@ -177,18 +222,15 @@ func encodeJSONWithLimits(value any, password string, existing []byte, limits Li
 		}
 		return out, nil
 	}
-	var salt []byte
-	if len(existing) >= len(encryptedMagic)+1+16 && bytes.HasPrefix(existing, encryptedMagic) && existing[len(encryptedMagic)] == 1 {
-		salt = append([]byte(nil), existing[len(encryptedMagic)+1:len(encryptedMagic)+1+16]...)
-	}
-	if len(salt) == 0 {
+	salt := preferredSalt
+	if len(salt) != 16 {
 		salt = make([]byte, 16)
-		if _, err = io.ReadFull(rand.Reader, salt); err != nil {
+		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 			return nil, err
 		}
 	}
 	iv := make([]byte, 16)
-	if _, err = io.ReadFull(rand.Reader, iv); err != nil {
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
 		return nil, err
 	}
 	encKey, macKey := derive([]byte(password), salt)
@@ -212,6 +254,20 @@ func encodeJSONWithLimits(value any, password string, existing []byte, limits Li
 		return nil, fmt.Errorf("database exceeds %d-byte limit", limits.MaxBlobBytes)
 	}
 	return out, nil
+}
+
+// EncodeRaw encodes an arbitrary JSON payload (for example the sync-rules
+// document) using the same CLIPDB1/CLIPDB2 container as Encode, without
+// requiring it to be a model.Database. Container selection matches Encode: a
+// nonblank password produces an encrypted CLIPDB2 blob (reusing
+// preferredSalt when valid, else a fresh salt); a blank password produces a
+// compressed CLIPDB1 blob.
+func EncodeRaw(payload []byte, password string, preferredSalt []byte) ([]byte, error) {
+	compressed, err := gzipBytes(payload)
+	if err != nil {
+		return nil, err
+	}
+	return encodeContainer(compressed, password, preferredSalt, DefaultLimits())
 }
 
 func normalizedLimits(limits Limits) Limits {

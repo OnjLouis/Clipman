@@ -12,17 +12,50 @@ class ServerStorageClient(
     token: String,
     databasePassword: String,
     caCertPem: String = "",
-    caHost: String = ""
+    caHost: String = "",
+    databaseIdOverride: String = ""
 ) {
+    private val configuredServerUrl = serverUrl
+    private val configuredToken = token
+    private val configuredPassword = databasePassword
+    private val configuredCaCertPem = caCertPem
+    private val configuredCaHost = caHost
     private val baseUrl = normalizeBaseUrl(serverUrl)
     private val token = cleanToken(token)
-    private val databaseId = ServerDatabaseIdentity.fromTokenAndPassword(token, databasePassword)
+    private val databaseId = databaseIdOverride.trim().ifBlank {
+        ServerDatabaseIdentity.fromTokenAndPassword(configuredToken, databasePassword)
+    }
     private val hasDatabasePassword = databasePassword.isNotEmpty()
     private val privateAuthority = runCatching { ServerConnectionConfig.parseAuthority(caCertPem, serverUrl) }.getOrNull()
     private val authorityValid = caCertPem.isBlank() || (privateAuthority != null && (caHost.isBlank() || privateAuthority.host.equals(caHost.trim(), ignoreCase = true)))
 
     val isConfigured: Boolean
         get() = baseUrl.isNotBlank() && token.trim().isNotBlank() && hasDatabasePassword && databaseId.isNotBlank() && authorityValid
+
+    /**
+     * The same server, credentials and transport addressing one sync channel's
+     * bucket (sync-rules-spec.md section 2). Returns null when the channel key
+     * addresses no bucket, which is the case without a server token or history
+     * password.
+     */
+    fun forChannel(channelKey: String): ServerStorageClient? =
+        forDatabase(ServerDatabaseIdentity.channelId(configuredToken, configuredPassword, channelKey))
+
+    /** The same server addressing the sync rules bucket. */
+    fun forSyncRules(): ServerStorageClient? =
+        forDatabase(ServerDatabaseIdentity.syncRulesId(configuredToken, configuredPassword))
+
+    private fun forDatabase(id: String): ServerStorageClient? {
+        if (id.isBlank()) return null
+        return ServerStorageClient(
+            configuredServerUrl,
+            configuredToken,
+            configuredPassword,
+            configuredCaCertPem,
+            configuredCaHost,
+            id
+        )
+    }
 
     fun download(): ServerDatabaseDownload {
         val connection = openConnection("GET")

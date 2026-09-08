@@ -6,6 +6,9 @@ import ClipmanCore
 @MainActor
 protocol PreferencesWindowControllerDelegate: AnyObject {
     func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) -> Bool
+    /// Opens the sync rules editor (sync-rules-spec.md sections 3 and 4). The
+    /// app controller owns the clip store the editor reads and writes.
+    func preferencesWindowShowSyncRules(_ controller: PreferencesWindowController)
 }
 
 final class PreferencesWindow: NSWindow {
@@ -57,6 +60,10 @@ private final class PreferencesTabTextView: NSTextView {
         window?.selectPreviousKeyView(sender)
     }
 }
+
+/// The standing guidance of sync-rules-spec.md section 7, shown wherever sync
+/// rules can be turned on.
+let syncRulesGuidanceText = "Enable sync rules only after every device runs a Clipman version that supports them. Older devices will continue to sync the main history only."
 
 private let imageMetadataPrivacyText = "Retained image metadata may contain camera or location information and follows your history encryption and sync choices."
 private let includeImagesEnabledAccessibilityHelp = "When checked, standalone PNG and JPEG clipboard images can be optimized and stored in Rich Text history. \(imageMetadataPrivacyText) Each image is limited to 512 KiB and all embedded images together are limited to 8 MiB. This is off by default."
@@ -183,6 +190,19 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         serverAuthorityFingerprint.drawsBackground = true
         serverAuthorityFingerprint.setAccessibilityLabel("Private certificate authority SHA-256 fingerprint")
         addRow("Authority fingerprint", serverAuthorityFingerprint)
+
+        let syncRulesLabel = NSTextField(labelWithString: "Sync rules")
+        syncRulesLabel.alignment = .right
+        let syncRulesButton = button(title: "Sync Rules...", action: #selector(showSyncRules))
+        syncRulesButton.setAccessibilityLabel("Sync rules")
+        syncRulesButton.setAccessibilityHelp("Open the sync rules editor, where clipboard entries are routed into named sync channels and each device chooses which channels it downloads.")
+        grid.addRow(with: [syncRulesLabel, syncRulesButton])
+        let syncRulesNote = NSTextField(wrappingLabelWithString: syncRulesGuidanceText)
+        syncRulesNote.textColor = .secondaryLabelColor
+        syncRulesNote.maximumNumberOfLines = 3
+        syncRulesNote.setAccessibilityLabel("Sync rules guidance")
+        grid.addRow(with: [NSGridCell.emptyContentView, syncRulesNote])
+
         addRow("Show history hotkey", showHotkeyField)
         addRow("Toggle monitoring hotkey", toggleHotkeyField)
         addRow("Save current clipboard hotkey, optional", saveCurrentClipboardHotkeyField)
@@ -404,6 +424,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         passwordField.stringValue = ""
         ignoredApplicationsView.string = settings.ignoredApplications.joined(separator: "\n")
         statusLabel.stringValue = passwordStatusText()
+    }
+
+    @objc private func showSyncRules() {
+        preferencesDelegate?.preferencesWindowShowSyncRules(self)
     }
 
     @objc private func chooseSettingsFolder() {

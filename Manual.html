@@ -75,6 +75,7 @@
     <li><a href="#clipboard-privacy-signals">Clipboard Privacy Signals</a></li>
     <li><a href="#ignored-applications">Ignored Applications</a></li>
     <li><a href="#database-and-sync">Database and Sync</a></li>
+    <li><a href="#sync-rules-and-channels">Sync Rules and Channels</a></li>
     <li><a href="#secrets">Secrets</a></li>
     <li><a href="#clipman-server">Clipman Server</a></li>
     <li><a href="#send-to">Send To</a></li>
@@ -90,6 +91,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>Unreleased</h3>
+  <ul>
+    <li>Added optional <strong>Sync rules</strong> so a shared history can be split into named channels routed by group, source device, or embedded images, with each device subscribing only to the channels it wants. Sync rules are off by default; with them off, or for any entry no channel claims, history behaves exactly as before. Windows exposes a Sync rules dialog from Preferences, Mac and Linux expose the same editing from their Preferences and settings dialogs, the Clipman CLI adds <code>rules show</code>, <code>rules enable</code>, <code>rules disable</code>, <code>rules channel add</code>, <code>rules channel remove</code>, and <code>rules device set</code>, and Android and iOS Settings can view the current channels and change this device's own subscription. See <a href="#sync-rules-and-channels">Sync Rules and Channels</a>.</li>
+    <li>Added write-through delivery for sync rules: capturing an entry that routes to a channel this device does not subscribe to still delivers it to that channel for other devices, announced once as <code>Added to &lt;channel name&gt; for your other devices.</code>, and retried automatically if the device is offline at the time.</li>
+  </ul>
+
   <h3>2.9.1 Windows and macOS</h3>
   <ul>
     <li>Fixed <code>Alt+Up</code>/<code>Alt+Down</code> on Windows and <code>Option+Up</code>/<code>Option+Down</code> on macOS sometimes moving an entry against a hidden Text, Links or Rich Text item. Manual movement now consistently reorders against the adjacent visible item, including pinned links and filtered history views.</li>
@@ -1026,6 +1033,33 @@
   <p>When Windows uses the install-local <code>Settings</code> folder beside <code>clipman.exe</code>, Clipman writes a small shared update-state file there. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance from that same shared installation sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy. A custom data folder elsewhere may still share history and settings, but it does not coordinate executable replacement; each separately installed Clipman updates normally without being stopped by another machine's build marker.</p>
 
   <p>During an online or automatic update, Clipman downloads the release ZIP to a temporary folder, asks other instances running from the same install-local shared folder to close briefly, replaces the app files while preserving <code>Settings</code>, then starts the updated copy. When the new copy starts it publishes the new shared update state, so other computers using that same shared installation can restart after their cloud service or network share exposes the updated executable. Separately installed clients that share only a custom data folder remain running and use their own updater.</p>
+
+  <h2 id="sync-rules-and-channels">Sync Rules and Channels</h2>
+  <p>Sync rules are an optional way to split shared history into named <strong>sync channels</strong> so a device downloads and uploads only the channels it wants instead of the entire database. Sync rules are off by default. While they are off, and for any entry no channel claims, history works exactly as described in <a href="#database-and-sync">Database and Sync</a>: everything lives together in the <strong>core</strong> channel, which is the existing shared history database. Turning sync rules on does not move anything by itself; an entry only moves once a routing rule is set up to claim it.</p>
+
+  <p>Each channel has a routing rule made of one or more conditions: a group, one or more source devices, or rich-text entries that contain an embedded image. When a rule combines more than one kind of condition, an entry must match all of them to route to that channel. Channels are checked in the order they are listed, and an entry goes into the first channel whose rule matches it. An entry that matches no channel's rule stays in core.</p>
+
+  <p>Every named device also has its own list of subscribed channels; core is always included and cannot be removed from a device's subscription. A device that sync rules do not mention subscribes to everything, so an unconfigured or older device behaves the same as it would with sync rules off entirely. Subscriptions only control what that one device downloads and displays; they do not affect what other devices see.</p>
+
+  <p>Edit sync rules from the Sync rules dialog in Windows Preferences, from the Preferences window on Mac, or from the settings dialog on Linux. The Clipman CLI offers the same editing through <code>clipman-cli rules show</code>, <code>rules enable</code>, <code>rules disable</code>, <code>rules channel add</code>, <code>rules channel remove</code>, and <code>rules device set</code>. Android and iOS Settings can view the current channels and rules and change which channels this device subscribes to; adding, removing, or changing a channel's rule remains a desktop or CLI task.</p>
+
+  <p>If a device captures an entry that routes to a channel it does not itself subscribe to, Clipman still delivers that entry to the channel so your other devices receive it. The entry does not appear in this device's own history, and Clipman announces the delivery once, in the wording <code>Added to &lt;channel name&gt; for your other devices.</code> If the device is offline at that moment, the delivery is held locally and retried automatically after the next successful sync.</p>
+
+  <p>Enable sync rules only after every device runs a version that supports them; older devices keep syncing the main history only, lose nothing, and their new entries are sorted into channels by updated devices later.</p>
+
+  <p>Deleting a channel does not delete any entries. Its entries fall through to the next channel whose rule matches them, or to core if none does. The emptied server-side database bucket left behind for that channel is not deleted automatically; a server administrator can prune it with the server's existing database maintenance tools.</p>
+
+  <p>With sync rules enabled, manual order is kept separately within each channel. The combined history list orders entries by their position within their own channel, then by creation time, so reordering entries in one channel does not reorder entries that live in a different channel.</p>
+
+  <p><strong>Known limitations:</strong></p>
+  <ul>
+    <li>A Quick Paste hotkey that targets an entry in a channel this device no longer subscribes to behaves the same as a hotkey that targets a deleted entry.</li>
+    <li>Duplicate detection at capture time only consults the channels a device subscribes to, so identical text captured on two devices with disjoint subscriptions can exist once in each of their channels.</li>
+    <li>History Limits are evaluated against the entries a device is subscribed to, not the complete shared history. Pinned entries and named entries remain exempt from history limits as they are today.</li>
+    <li>Deleting an entry on one device while another device concurrently moves it to a different channel can bring the entry back instead of deleting it. This is rare and resolves the next time that entry is edited or deleted again.</li>
+  </ul>
+
+  <p>Sync rules exist mainly to reduce transfer size and processing cost. Each poll and each save touch only the channels a device subscribes to, plus core, instead of the whole database. A device that excludes an images channel or a large group's channel transfers noticeably less data on every sync than a device subscribed to everything.</p>
 
   <h2 id="secrets">Secrets</h2>
   <p>Clipman 2.0 includes a small optional Secrets area for short private snippets that you type deliberately, such as a system password or code that you sometimes need to paste quickly outside a web browser. Secrets are not captured automatically from the clipboard, are not shown in normal Text history, and are not included in ordinary history import or export. Open <strong>Options, Secrets</strong> on Windows, <strong>Secrets</strong> from the Mac status menu, or <strong>Secrets</strong> from the Mac in-window Clipman menu with <code>Option+M</code>. You can also open Secrets directly with <code>Ctrl+Shift+E</code> on Windows or <code>Command+Shift+E</code> on Mac.</p>

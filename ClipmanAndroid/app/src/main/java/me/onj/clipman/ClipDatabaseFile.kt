@@ -28,13 +28,22 @@ object ClipDatabaseFile {
 
     fun load(bytes: ByteArray, password: String): ClipDatabase {
         if (bytes.isEmpty()) return ClipDatabase()
+        return json.decodeFromString(ClipDatabase.serializer(), loadRawText(bytes, password))
+    }
+
+    /**
+     * Reads the plaintext payload of a Clipman container without assuming it
+     * is a history database. The sync rules document of sync-rules-spec.md
+     * section 4 uses the identical container with a different payload.
+     */
+    fun loadRawText(bytes: ByteArray, password: String): String {
+        if (bytes.isEmpty()) return ""
         requireDatabaseBlobSize(bytes.size.toLong())
-        val text = when {
+        return when {
             bytes.startsWith(encryptedMagic) -> readEncryptedText(bytes, password)
             bytes.startsWith(compressedMagic) -> readCompressedText(bytes.copyOfRange(compressedMagic.size, bytes.size))
             else -> readCompressedText(bytes)
         }
-        return json.decodeFromString(ClipDatabase.serializer(), text)
     }
 
     fun isEncrypted(bytes: ByteArray): Boolean = bytes.startsWith(encryptedMagic)
@@ -54,8 +63,18 @@ object ClipDatabaseFile {
         database: ClipDatabase,
         password: String,
         preferredSalt: ByteArray? = null
+    ): ByteArray = saveRawText(json.encodeToString(ClipDatabase.serializer(), database), password, preferredSalt)
+
+    /**
+     * Writes an arbitrary plaintext payload into the standard container:
+     * CLIPDB2 encrypted when a history password exists, CLIPDB1 compressed
+     * otherwise. Container selection is identical to the history database.
+     */
+    fun saveRawText(
+        text: String,
+        password: String,
+        preferredSalt: ByteArray? = null
     ): ByteArray {
-        val text = json.encodeToString(ClipDatabase.serializer(), database)
         val serialized = text.toByteArray(Charsets.UTF_8)
         requireSerializedJsonSize(serialized.size.toLong())
         val encoded = if (password.isNotEmpty()) {

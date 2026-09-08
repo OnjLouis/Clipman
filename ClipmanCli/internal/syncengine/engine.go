@@ -9,6 +9,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/clipdb"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/merge"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/model"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/rules"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/server"
 )
 
@@ -17,6 +18,15 @@ type Engine struct {
 	Password string
 	Limits   clipdb.Limits
 	Retries  int
+	// Token is the server token channel and sync-rules bucket ids are derived
+	// from. It is only needed by the channel-aware ReadView/MutateView; the
+	// single-bucket Read/Mutate path ignores it.
+	Token string
+	// CachedRules is the last sync-rules document the caller saw. The engine
+	// does not persist anything itself: platform callers own the cache and set
+	// this so a rules bucket that disappeared from the server can keep working
+	// and be restored (spec section 4, Caching).
+	CachedRules *rules.Document
 }
 type State struct {
 	Database model.Database

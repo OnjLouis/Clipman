@@ -29,6 +29,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var historyWindow: HistoryWindowController!
     private var preferencesWindow: PreferencesWindowController?
     private var secretsWindow: SecretsWindowController?
+    private var syncRulesWindow: SyncRulesWindowController?
     private var previousFrontmostProcessIdentifier: pid_t?
     private var pasteAfterHistoryHide = false
     private var lastPasteTargetInspection = "Not checked"
@@ -930,6 +931,22 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func clipStoreServerSyncDidRecover() {
         clearServerSyncWarningIfNeeded()
+    }
+
+    func clipStoreDidWriteThrough(channelNames: [String]) {
+        guard !channelNames.isEmpty else { return }
+        for name in channelNames {
+            let message = "Added to \(name) for your other devices."
+            RuntimeLogger.write("Clipman wrote an entry through to an unsubscribed sync channel.", details: message)
+            NSAccessibility.post(
+                element: NSApplication.shared,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: message,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue
+                ]
+            )
+        }
     }
 
     func fileHistoryStoreDidChange() {
@@ -1889,6 +1906,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func secretsWindowDidChangeSecrets(_ controller: SecretsWindowController) {
         registerHotkeys()
+    }
+
+    func preferencesWindowShowSyncRules(_ controller: PreferencesWindowController) {
+        if syncRulesWindow == nil {
+            syncRulesWindow = SyncRulesWindowController(store: store)
+        }
+        syncRulesWindow?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) -> Bool {

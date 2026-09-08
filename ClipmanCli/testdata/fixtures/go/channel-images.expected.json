@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "updatedUnixMs": 1757200000000,
+  "entries": [
+    {
+      "id": "images-screenshot",
+      "text": "Screenshot",
+      "name": "",
+      "group": "",
+      "sourceMachine": "Desktop",
+      "createdUnixMs": 1757200000500,
+      "lastUsedUnixMs": 1757200000500,
+      "pinned": false,
+      "isTemplate": false,
+      "manualOrder": 1,
+      "hasRichText": true
+    }
+  ],
+  "deleted": []
+}

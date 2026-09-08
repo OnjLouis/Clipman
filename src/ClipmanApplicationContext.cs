@@ -297,7 +297,7 @@ namespace Clipman
                 }
             }
 
-            preferencesForm = new PreferencesForm(settings, ApplyPreferences, CopySensitiveTextToClipboard);
+            preferencesForm = new PreferencesForm(settings, ApplyPreferences, CopySensitiveTextToClipboard, OpenSyncRulesEditor);
             preferencesForm.FormClosed += (s, e) => preferencesForm = null;
             if (historyForm != null && !historyForm.IsDisposed && historyForm.Visible)
             {
@@ -308,6 +308,28 @@ namespace Clipman
                 preferencesForm.ShowDialog();
             }
             preferencesForm = null;
+        }
+
+        /// <summary>
+        /// Opens the modal sync rules editor from Preferences. Returns whether it applied a change,
+        /// so Preferences can announce success the same way other preference changes do.
+        /// </summary>
+        private bool OpenSyncRulesEditor()
+        {
+            using (var form = new SyncRulesForm(store, CurrentDeviceName()))
+            {
+                if (preferencesForm != null && !preferencesForm.IsDisposed)
+                {
+                    form.ShowDialog(preferencesForm);
+                }
+                else
+                {
+                    form.ShowDialog();
+                }
+
+                if (form.Applied) UpdateTray();
+                return form.Applied;
+            }
         }
 
         private void FocusPreferencesForm()
@@ -2464,6 +2486,9 @@ namespace Clipman
         {
             var monitoring = settings.Active ? string.Empty : "Monitoring off. ";
             var fileStorageError = fileEventStore == null ? string.Empty : fileEventStore.LastStorageError;
+            // The channel notice is good news about one entry; it must never stand in for a storage
+            // or connectivity problem, so it is only offered where the status would say "Ready".
+            var channelNotice = store == null ? string.Empty : store.ChannelAnnouncement();
             var sync = store == null ? null : store.GetServerSyncStatus();
             if (IsServerStorageEnabled())
             {
@@ -2483,11 +2508,19 @@ namespace Clipman
                 {
                     return monitoring + "File history storage unavailable.";
                 }
+                if (!string.IsNullOrEmpty(channelNotice))
+                {
+                    return monitoring + channelNotice;
+                }
                 return settings.Active ? "Ready. Server sync connected." : "Monitoring off. Server sync connected.";
             }
             if ((store != null && !string.IsNullOrWhiteSpace(store.LastStorageError)) || !string.IsNullOrWhiteSpace(fileStorageError))
             {
                 return monitoring + "Storage unavailable.";
+            }
+            if (!string.IsNullOrEmpty(channelNotice))
+            {
+                return monitoring + channelNotice;
             }
             return settings.Active ? "Ready. Using local or shared-folder history." : "Monitoring off. Using local or shared-folder history.";
         }

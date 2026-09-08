@@ -166,6 +166,71 @@ func TestCodecHardLimitsCannotBeRaised(t *testing.T) {
 	}
 }
 
+func TestRawDocumentRoundTripEncrypted(t *testing.T) {
+	payload := []byte(`{"Clipman":"sync-rules","Version":1,"Enabled":true}`)
+	blob, err := EncodeRaw(payload, "pw", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, salt, err := DecodeRaw(blob, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("round trip mismatch")
+	}
+	if len(salt) == 0 {
+		t.Fatal("expected salt from encrypted container")
+	}
+	if _, _, err := DecodeRaw(blob, "wrong"); err == nil {
+		t.Fatal("wrong password must fail")
+	}
+}
+
+func TestRawDocumentRoundTripUnencrypted(t *testing.T) {
+	payload := []byte(`{"Clipman":"sync-rules","Version":1,"Enabled":false}`)
+	blob, err := EncodeRaw(payload, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, salt, err := DecodeRaw(blob, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("round trip mismatch")
+	}
+	if salt != nil {
+		t.Fatalf("expected nil salt from unencrypted container, got %v", salt)
+	}
+}
+
+func TestRawDocumentReusesPreferredSalt(t *testing.T) {
+	payload := []byte(`{"Clipman":"sync-rules","Version":1,"Enabled":true}`)
+	blob, err := EncodeRaw(payload, "pw", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, salt, err := DecodeRaw(blob, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(salt) == 0 {
+		t.Fatal("expected salt from first encode")
+	}
+	blob2, err := EncodeRaw(payload, "pw", salt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, salt2, err := DecodeRaw(blob2, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(salt, salt2) {
+		t.Fatalf("preferred salt was not reused: got %x want %x", salt2, salt)
+	}
+}
+
 func TestDecodeRejectsTooManyEntries(t *testing.T) {
 	database := model.NewDatabase(1)
 	database.Entries = []model.Entry{{ID: "1", Text: "one"}, {ID: "2", Text: "two"}}

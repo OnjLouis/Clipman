@@ -28,6 +28,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/model"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/operation"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/platform"
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/rules"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/server"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/syncengine"
 	tmpl "github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/template"
@@ -71,6 +72,13 @@ type session struct {
 	revision   string
 	loaded     bool
 	offline    bool
+	// view is the last successful channel-aware read or mutation. It is nil
+	// only before the first successful ReadView/MutateView call (e.g. right
+	// after an offline bootstrap from the local disk cache). With sync rules
+	// absent or disabled it still holds a single-channel (core-only) view, so
+	// refresh's HEAD short-circuit and the "channels" response field work
+	// uniformly whether or not rules are in use.
+	view *syncengine.ViewState
 }
 
 var version = "0.1.0-preview"
@@ -361,6 +369,10 @@ func (s *session) handle(action string, raw json.RawMessage) (any, error) {
 		return s.getSecret(raw)
 	case "secret_delete":
 		return s.deleteSecret(raw)
+	case "rules_get":
+		return s.rulesGet()
+	case "rules_set":
+		return s.rulesSet(raw)
 	case "shutdown":
 		return map[string]bool{"stopped": true}, nil
 	default:
@@ -490,13 +502,14 @@ func (s *session) activate(cfg config.Config, password string) error {
 	}
 	limits := clipdb.Limits{MaxBlobBytes: cfg.Limits.MaxBlobBytes, MaxJSONBytes: cfg.Limits.MaxJSONBytes, MaxEntries: cfg.Limits.MaxEntries, MaxTextBytes: cfg.Limits.MaxTextBytes}
 	client.MaxBlobBytes = limits.MaxBlobBytes
-	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3}
+	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3, Token: token}
+	engine.CachedRules = s.initialCachedRules(password)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if _, err = client.Health(ctx); err != nil {
 		return fmt.Errorf("server connection failed: %w", err)
 	}
-	state, err := engine.Read(ctx)
+	view, err := engine.ReadView(ctx, cfg.Machine)
 	if err != nil {
 		return fmt.Errorf("history could not be opened; check the history password: %w", err)
 	}
@@ -512,7 +525,9 @@ func (s *session) activate(cfg config.Config, password string) error {
 	s.cfg, s.password, s.client, s.engine = cfg, password, client, engine
 	s.filePath, s.fileDB, s.fileLoaded = candidate.filePath, candidate.fileDB, candidate.fileLoaded
 	s.normalizeFileHistory()
-	s.setState(state, false)
+	s.setViewState(view)
+	s.cacheRulesDocument(view.Rules)
+	s.selfRegisterDevice(ctx, view)
 	return nil
 }
 
@@ -522,14 +537,12 @@ func (s *session) refresh(force bool) (any, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if !force && s.loaded && s.revision != "" {
-		metadata, err := s.client.Head(ctx)
-		if err == nil && metadata.Revision == s.revision {
-			s.offline = false
-			return s.historyResult(false), nil
-		}
+	if !force && s.loaded && s.view != nil && s.viewUnchanged(ctx) {
+		s.offline = false
+		changed := s.retryPendingWrites(ctx)
+		return s.historyResult(changed), nil
 	}
-	state, err := s.engine.Read(ctx)
+	view, err := s.engine.ReadView(ctx, s.cfg.Machine)
 	if err != nil {
 		if s.loaded {
 			s.offline = true
@@ -544,15 +557,90 @@ func (s *session) refresh(force bool) (any, error) {
 		}
 		return nil, fmt.Errorf("server history is unavailable: %w", err)
 	}
-	s.setState(state, false)
+	s.setViewState(view)
+	s.cacheRulesDocument(view.Rules)
+	s.retryPendingWrites(ctx)
 	return s.historyResult(true), nil
 }
 
-func (s *session) setState(state syncengine.State, offline bool) {
-	s.database, s.revision, s.loaded, s.offline = state.Database, state.Revision, true, offline
-	if len(state.Blob) > 0 {
-		_ = platform.SavePrivate(s.cachePath, state.Blob)
+// viewUnchanged implements the session-layer half of the spec section 5
+// download short-circuit: HEAD the rules bucket (if addressable) and every
+// channel in the last-known view, and report true only when every revision
+// still matches. A rules HEAD that 404s is "unchanged" exactly when the last
+// view also saw no rules revision (rules absent, or a local cache in effect);
+// any ambiguity or transport error is treated as "changed" so the caller
+// always falls back to a full, correct ReadView.
+func (s *session) viewUnchanged(ctx context.Context) bool {
+	if s.view == nil {
+		return false
 	}
+	token := s.engine.Token
+	if rulesID := identity.SyncRulesDatabaseID(token, s.password); rulesID != "" {
+		metadata, err := s.bucketClient(rulesID).Head(ctx)
+		switch {
+		case errors.Is(err, server.ErrNotFound):
+			if s.view.RulesRevision != "" {
+				return false
+			}
+		case err != nil:
+			return false
+		default:
+			if s.view.RulesRevision == "" || metadata.Revision != s.view.RulesRevision {
+				return false
+			}
+		}
+	}
+	for _, channel := range s.view.Channels {
+		databaseID := s.client.DatabaseID
+		if channel.Key != "" {
+			databaseID = identity.ChannelDatabaseID(token, s.password, channel.Key)
+			if databaseID == "" {
+				return false
+			}
+		}
+		metadata, err := s.bucketClient(databaseID).Head(ctx)
+		switch {
+		case errors.Is(err, server.ErrNotFound):
+			// A channel bucket is not created until its first mutation
+			// (readChannel leaves Revision blank for one that does not exist
+			// yet), so a 404 here matches the last view exactly when it also
+			// saw no revision.
+			if channel.Revision != "" {
+				return false
+			}
+		case err != nil:
+			return false
+		default:
+			if channel.Revision == "" || metadata.Revision != channel.Revision {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// setViewState records a channel-aware read or mutation as the session's
+// current state. The local offline-fallback cache is re-encoded from the
+// merged view rather than reusing a channel's raw blob (ChannelState keeps
+// that unexported), reusing the previous cache file's container so this does
+// not force a fresh PBKDF2 derivation on every call.
+func (s *session) setViewState(view *syncengine.ViewState) {
+	s.view = view
+	s.database = *view.View
+	s.revision = view.Channels[0].Revision
+	s.loaded, s.offline = true, false
+	existing, _ := platform.ReadPrivate(s.cachePath)
+	if blob, err := clipdb.Encode(s.database, s.password, existing); err == nil {
+		_ = platform.SavePrivate(s.cachePath, blob)
+	}
+}
+
+// bucketClient addresses another bucket on the same server with the same
+// credentials and transport as the session's configured client.
+func (s *session) bucketClient(databaseID string) *server.Client {
+	clone := *s.client
+	clone.DatabaseID = databaseID
+	return &clone
 }
 
 func (s *session) historyResult(changed bool) map[string]any {
@@ -570,7 +658,19 @@ func (s *session) historyResult(changed bool) map[string]any {
 		return entries[i].CreatedUnixMs < entries[j].CreatedUnixMs
 	})
 	groupNames := canonicalLabels(s.database.Entries, func(entry model.Entry) string { return entry.Group })
-	return map[string]any{"entries": entries, "file_events": s.exportFileEvents(), "groups": groupNames, "revision": s.revision, "changed": changed, "offline": s.offline, "server": s.client.BaseURL, "machine": s.cfg.Machine}
+	result := map[string]any{"entries": entries, "file_events": s.exportFileEvents(), "groups": groupNames, "revision": s.revision, "changed": changed, "offline": s.offline, "server": s.client.BaseURL, "machine": s.cfg.Machine}
+	if s.view != nil {
+		channels := make([]map[string]string, 0, len(s.view.Channels))
+		for _, channel := range s.view.Channels {
+			key := channel.Key
+			if key == "" {
+				key = "core"
+			}
+			channels = append(channels, map[string]string{"key": key, "revision": channel.Revision})
+		}
+		result["channels"] = channels
+	}
+	return result
 }
 
 type labelStats struct {
@@ -642,6 +742,16 @@ func canonicalLabelFor(entries []model.Entry, selector func(model.Entry) string,
 	return requested
 }
 
+// mutate adapts the existing per-operation Mutation closures (which report a
+// changed flag, an operation-specific result, and an error) onto
+// Engine.MutateView. WriteThroughError needs particular care here (see its
+// doc comment in internal/syncengine/channels.go): the undelivered entries
+// are always parked to pending-writes.json regardless of outcome, but the
+// save is reported as successful, with the added "pendingChannels" field,
+// only when Committed is true. When Committed is false a subscribed-channel
+// upload also failed, so this must surface as a failed save even though some
+// entries were parked - reporting success here would silently drop the rest
+// of the user's change.
 func (s *session) mutate(fn syncengine.Mutation) (any, error) {
 	if s.engine == nil {
 		return nil, errors.New("history is locked")
@@ -651,12 +761,38 @@ func (s *session) mutate(fn syncengine.Mutation) (any, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	result, state, err := s.engine.MutateState(ctx, fn)
+	var result any
+	view, err := s.engine.MutateView(ctx, s.cfg.Machine, func(db *model.Database) error {
+		_, r, mutErr := fn(db, time.Now().UnixMilli())
+		result = r
+		return mutErr
+	})
 	if err != nil {
+		var pending *syncengine.WriteThroughError
+		if errors.As(err, &pending) {
+			s.recordPendingWrites(pending.Pending)
+			if pending.Committed && view != nil {
+				s.setViewState(view)
+				return map[string]any{
+					"operation":       result,
+					"history":         s.historyResult(true),
+					"pendingChannels": pendingChannelKeys(pending.Pending),
+				}, nil
+			}
+		}
 		return nil, err
 	}
-	s.setState(state, false)
+	s.setViewState(view)
 	return map[string]any{"operation": result, "history": s.historyResult(true)}, nil
+}
+
+func pendingChannelKeys(pending map[string][]model.Entry) []string {
+	keys := make([]string, 0, len(pending))
+	for key := range pending {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (s *session) put(raw json.RawMessage) (any, error) {
@@ -1216,6 +1352,519 @@ func section(text string) string {
 		return "text"
 	}
 	return "links"
+}
+
+// --- sync rules: cache, pending write-through store, session handlers ------
+
+// pendingWritesFile and rulesCacheFile live beside the offline history cache
+// (gui-cache.clipdb), in the same private per-user data directory.
+func (s *session) pendingWritesFile() string {
+	return filepath.Join(filepath.Dir(s.cachePath), "pending-writes.json")
+}
+func (s *session) rulesCacheFile() string {
+	return filepath.Join(filepath.Dir(s.cachePath), "rules-cache.json")
+}
+
+// initialCachedRules loads the on-disk rules cache for seeding a fresh
+// Engine.CachedRules at activation. The gui-cache.clipdb beside it holds an
+// encrypted container, so the rules cache is stored the same way (via
+// clipdb.EncodeRaw/DecodeRaw with the session password) rather than as
+// plaintext JSON. A read-only (future-version) document is withheld, per
+// rules.ReadOnly's contract: it must never arm the engine's 404 re-upload
+// fallback, which would rewrite a document this client only partly
+// understands.
+func (s *session) initialCachedRules(password string) *rules.Document {
+	blob, err := platform.ReadPrivate(s.rulesCacheFile())
+	if err != nil {
+		return nil
+	}
+	payload, _, err := clipdb.DecodeRaw(blob, password)
+	if err != nil {
+		return nil
+	}
+	doc, err := rules.Parse(payload)
+	if err != nil || rules.ReadOnly(doc) {
+		return nil
+	}
+	return doc
+}
+
+// cacheRulesDocument persists the last-seen rules document to disk and arms
+// Engine.CachedRules with it, withholding a read-only document from the
+// cache guard for the same reason initialCachedRules does.
+func (s *session) cacheRulesDocument(doc *rules.Document) {
+	if doc == nil {
+		return
+	}
+	if rules.ReadOnly(doc) {
+		s.engine.CachedRules = nil
+	} else {
+		s.engine.CachedRules = doc
+	}
+	payload, err := rules.Serialize(doc)
+	if err != nil {
+		return
+	}
+	existing, _ := platform.ReadPrivate(s.rulesCacheFile())
+	var salt []byte
+	if len(existing) > 0 {
+		if _, existingSalt, decodeErr := clipdb.DecodeRaw(existing, s.password); decodeErr == nil {
+			salt = existingSalt
+		}
+	}
+	blob, err := clipdb.EncodeRaw(payload, s.password, salt)
+	if err != nil {
+		return
+	}
+	_ = platform.SavePrivate(s.rulesCacheFile(), blob)
+}
+
+// rulesSalt returns the PBKDF2 salt a rules-bucket write should reuse: from
+// existingBlob when supplied, otherwise from the core database, so channel
+// and rules blobs share one derivation (spec section 5, "Salt sharing").
+func (s *session) rulesSalt(ctx context.Context, existingBlob []byte) []byte {
+	if len(existingBlob) > 0 {
+		if _, salt, err := clipdb.DecodeRaw(existingBlob, s.password); err == nil {
+			return salt
+		}
+	}
+	if download, err := s.client.Get(ctx); err == nil {
+		if _, salt, err := clipdb.DecodeRaw(download.Data, s.password); err == nil {
+			return salt
+		}
+	}
+	return nil
+}
+
+// fetchRulesDocument downloads and decodes the rules document directly,
+// without touching history, for rules-get/rules-set and self-registration.
+// It intentionally returns the server's document as-is, not run through
+// Engine.CachedRules/MergeDocuments (readRules's edit-vs-display split, also
+// used by the CLI): rules-set's own conflict handling merges against exactly
+// what the server holds, and self-registration's CAS must be based on the
+// same. Do not "fix" this to fold in the local cache.
+func (s *session) fetchRulesDocument(ctx context.Context) (doc *rules.Document, revision string, blob []byte, exists bool, err error) {
+	rulesID := identity.SyncRulesDatabaseID(s.engine.Token, s.password)
+	if rulesID == "" {
+		return nil, "", nil, false, errors.New("cannot address the sync rules bucket without a server token and history password")
+	}
+	download, err := s.bucketClient(rulesID).Get(ctx)
+	if errors.Is(err, server.ErrNotFound) {
+		return nil, "", nil, false, nil
+	}
+	if err != nil {
+		return nil, "", nil, false, err
+	}
+	payload, _, err := clipdb.DecodeRaw(download.Data, s.password)
+	if err != nil {
+		return nil, "", nil, false, err
+	}
+	parsed, err := rules.Parse(payload)
+	if err != nil {
+		return nil, "", nil, false, err
+	}
+	return parsed, download.Revision, download.Data, true, nil
+}
+
+func cloneRulesDocument(doc *rules.Document) *rules.Document {
+	clone := *doc
+	clone.Channels = append([]rules.Channel{}, doc.Channels...)
+	for i := range clone.Channels {
+		clone.Channels[i].Route.Groups = append([]string{}, doc.Channels[i].Route.Groups...)
+		clone.Channels[i].Route.SourceDevices = append([]string{}, doc.Channels[i].Route.SourceDevices...)
+	}
+	clone.Devices = append([]rules.Device{}, doc.Devices...)
+	for i := range clone.Devices {
+		clone.Devices[i].Channels = append([]string{}, doc.Devices[i].Channels...)
+	}
+	return &clone
+}
+
+// nextRulesTimestamp returns a millisecond timestamp guaranteed to be greater
+// than prev, so an edit's UpdatedUnixMs strictly advances even when the wall
+// clock has not visibly moved since the document was last written.
+func nextRulesTimestamp(prev int64) int64 {
+	now := time.Now().UnixMilli()
+	if now <= prev {
+		return prev + 1
+	}
+	return now
+}
+
+// selfRegisterDevice implements spec section 4's registry behavior: after a
+// successful activation with rules enabled, a device missing from Devices
+// adds itself with Channels ["*"] via one best-effort compare-and-swap.
+// Failure here must never fail activation. It re-fetches the rules document
+// directly rather than reusing view.Rules, because view.RulesRevision can be
+// blank (the local cache won the last-writer-wins merge, so it is not what
+// the server holds and an If-Match against it would be meaningless).
+func (s *session) selfRegisterDevice(ctx context.Context, view *syncengine.ViewState) {
+	if view == nil || view.Rules == nil || !view.Rules.Enabled || rules.ReadOnly(view.Rules) {
+		return
+	}
+	machine := strings.TrimSpace(s.cfg.Machine)
+	for _, device := range view.Rules.Devices {
+		if strings.EqualFold(strings.TrimSpace(device.Name), machine) {
+			return
+		}
+	}
+	doc, revision, blob, exists, err := s.fetchRulesDocument(ctx)
+	if err != nil || !exists || doc == nil || !doc.Enabled || rules.ReadOnly(doc) {
+		return
+	}
+	for _, device := range doc.Devices {
+		if strings.EqualFold(strings.TrimSpace(device.Name), machine) {
+			return // already registered by a racing writer
+		}
+	}
+	candidate := cloneRulesDocument(doc)
+	candidate.Devices = append(candidate.Devices, rules.Device{Name: s.cfg.Machine, Channels: []string{"*"}})
+	candidate.UpdatedUnixMs = nextRulesTimestamp(doc.UpdatedUnixMs)
+	candidate.UpdatedBy = s.cfg.Machine
+	payload, err := rules.Serialize(candidate)
+	if err != nil {
+		return
+	}
+	encoded, err := clipdb.EncodeRaw(payload, s.password, s.rulesSalt(ctx, blob))
+	if err != nil {
+		return
+	}
+	rulesID := identity.SyncRulesDatabaseID(s.engine.Token, s.password)
+	if _, err := s.bucketClient(rulesID).Put(ctx, encoded, revision, false); err != nil {
+		return
+	}
+	s.cacheRulesDocument(candidate)
+}
+
+// rulesGet implements the "rules_get" backend request:
+// {"rules": <document or null>, "readOnly": bool, "revision": "..."}.
+func (s *session) rulesGet() (any, error) {
+	if s.engine == nil {
+		return nil, errors.New("history is locked")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	doc, revision, _, exists, err := s.fetchRulesDocument(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		doc, revision = s.engine.CachedRules, ""
+	} else {
+		s.cacheRulesDocument(doc)
+	}
+	return map[string]any{"rules": doc, "readOnly": rules.ReadOnly(doc), "revision": revision}, nil
+}
+
+// rulesSet implements the "rules_set" backend request: validate, refuse a
+// read-only document, upload with If-Match against the caller-supplied
+// revision (from the last rules-get), and LWW-merge and retry on a 409 (spec
+// section 4, Concurrency). It responds with the document actually stored.
+func (s *session) rulesSet(raw json.RawMessage) (any, error) {
+	if s.engine == nil {
+		return nil, errors.New("history is locked")
+	}
+	var p struct {
+		Rules    rules.Document `json:"rules"`
+		Revision string         `json:"revision"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, err
+	}
+	doc := p.Rules
+	if err := rules.ValidateForEdit(&doc); err != nil {
+		return nil, err
+	}
+	if rules.ReadOnly(&doc) {
+		return nil, errors.New("this sync rules document uses a newer format and cannot be edited here")
+	}
+	rulesID := identity.SyncRulesDatabaseID(s.engine.Token, s.password)
+	if rulesID == "" {
+		return nil, errors.New("cannot address the sync rules bucket without a server token and history password")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client := s.bucketClient(rulesID)
+	// Always advance past the caller-supplied timestamp (the revision this
+	// edit was based on), never merely fill a blank one: doc.UpdatedUnixMs
+	// otherwise stays pinned to the stale value the client fetched, so a 409
+	// below would compare that stale stamp against whatever the server
+	// already holds (which is, by definition, newer than what this client
+	// last saw) and MergeDocuments would silently prefer the remote copy,
+	// discarding this edit while still reporting success.
+	doc.UpdatedUnixMs = nextRulesTimestamp(doc.UpdatedUnixMs)
+	doc.UpdatedBy = s.cfg.Machine
+	revision := p.Revision
+	createOnly := revision == ""
+	var existingBlob []byte
+	for attempt := 0; attempt < 3; attempt++ {
+		payload, err := rules.Serialize(&doc)
+		if err != nil {
+			return nil, err
+		}
+		blob, err := clipdb.EncodeRaw(payload, s.password, s.rulesSalt(ctx, existingBlob))
+		if err != nil {
+			return nil, err
+		}
+		metadata, putErr := client.Put(ctx, blob, revision, createOnly)
+		if putErr == nil {
+			s.cacheRulesDocument(&doc)
+			return map[string]any{"rules": doc, "readOnly": false, "revision": metadata.Revision}, nil
+		}
+		if !errors.Is(putErr, server.ErrConflict) {
+			return nil, putErr
+		}
+		remote, remoteRevision, remoteBlob, exists, fetchErr := s.fetchRulesDocument(ctx)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		if !exists {
+			revision, createOnly, existingBlob = "", true, nil
+			continue
+		}
+		merged := rules.MergeDocuments(&doc, remote)
+		doc = *merged
+		revision, createOnly, existingBlob = remoteRevision, false, remoteBlob
+	}
+	return nil, errors.New("sync rules changed on the server repeatedly; try again")
+}
+
+// --- write-through pending store (spec section 6) ---------------------------
+
+func (s *session) loadPendingWrites() map[string][]model.Entry {
+	data, err := platform.ReadPrivate(s.pendingWritesFile())
+	if err != nil {
+		return nil
+	}
+	var pending map[string][]model.Entry
+	if json.Unmarshal(data, &pending) != nil {
+		return nil
+	}
+	return pending
+}
+
+func (s *session) savePendingWrites(pending map[string][]model.Entry) {
+	nonEmpty := false
+	for _, entries := range pending {
+		if len(entries) > 0 {
+			nonEmpty = true
+			break
+		}
+	}
+	if !nonEmpty {
+		_ = os.Remove(s.pendingWritesFile())
+		return
+	}
+	data, err := json.Marshal(pending)
+	if err != nil {
+		return
+	}
+	_ = platform.SavePrivate(s.pendingWritesFile(), data)
+}
+
+// recordPendingWrites merges newly failed write-through entries into whatever
+// is already parked on disk, keyed by entry id so a repeated failure does not
+// duplicate an entry already waiting for the same channel.
+func (s *session) recordPendingWrites(newPending map[string][]model.Entry) {
+	if len(newPending) == 0 {
+		return
+	}
+	existing := s.loadPendingWrites()
+	if existing == nil {
+		existing = map[string][]model.Entry{}
+	}
+	for key, entries := range newPending {
+		existing[key] = mergeEntriesByID(existing[key], entries)
+	}
+	s.savePendingWrites(existing)
+}
+
+func mergeEntriesByID(existing, incoming []model.Entry) []model.Entry {
+	byID := make(map[string]model.Entry, len(existing)+len(incoming))
+	order := make([]string, 0, len(existing)+len(incoming))
+	add := func(e model.Entry) {
+		if _, ok := byID[e.ID]; !ok {
+			order = append(order, e.ID)
+		}
+		byID[e.ID] = e
+	}
+	for _, e := range existing {
+		add(e)
+	}
+	for _, e := range incoming {
+		add(e)
+	}
+	result := make([]model.Entry, 0, len(order))
+	for _, id := range order {
+		result = append(result, byID[id])
+	}
+	return result
+}
+
+// retryPendingWrites is called at the start of every successful refresh: any
+// entry left over from a failed write-through is retried, and cleared from
+// the pending store on success. It is entirely best effort; a channel that
+// still cannot be reached simply stays pending for the next attempt.
+//
+// Every parked entry is re-routed against the CURRENT rules document before
+// retrying, rather than resent to the channel key it was originally parked
+// under: that channel may since have been removed, and delivering it there
+// regardless would resurrect a bucket that no longer belongs in the document.
+// An entry that no longer routes anywhere (core) is delivered through a
+// normal mutation instead of a channel write-through, so it lands in the
+// local view like any other capture. It returns whether anything was
+// delivered, so callers can report the refresh as having changed state.
+func (s *session) retryPendingWrites(ctx context.Context) bool {
+	pending := s.loadPendingWrites()
+	if len(pending) == 0 {
+		return false
+	}
+	var currentDoc *rules.Document
+	if s.view != nil {
+		currentDoc = s.view.Rules
+	}
+	regrouped := map[string][]model.Entry{}
+	for _, entries := range pending {
+		for _, entry := range entries {
+			target := rules.RouteEntry(currentDoc, &entry)
+			regrouped[target] = append(regrouped[target], entry)
+		}
+	}
+	remaining := map[string][]model.Entry{}
+	changed := false
+	for target, entries := range regrouped {
+		if len(entries) == 0 {
+			continue
+		}
+		if target == "" {
+			if failed := s.retryToCore(ctx, entries); len(failed) > 0 {
+				remaining[""] = append(remaining[""], failed...)
+			} else {
+				changed = true
+			}
+			continue
+		}
+		if err := s.writeThroughToChannel(ctx, target, entries); err != nil {
+			remaining[target] = append(remaining[target], entries...)
+			continue
+		}
+		changed = true
+	}
+	s.savePendingWrites(remaining)
+	return changed
+}
+
+// retryToCore delivers pending entries that now route to core (their channel
+// was removed, or never routed anywhere in the first place) through a normal
+// mutation, so they land in the local view instead of a channel bucket. It
+// returns the entries that still could not be delivered.
+func (s *session) retryToCore(ctx context.Context, entries []model.Entry) []model.Entry {
+	view, err := s.engine.MutateView(ctx, s.cfg.Machine, func(database *model.Database) error {
+		existing := make(map[string]bool, len(database.Entries))
+		for _, e := range database.Entries {
+			existing[strings.ToLower(strings.TrimSpace(e.ID))] = true
+		}
+		for _, entry := range entries {
+			if existing[strings.ToLower(strings.TrimSpace(entry.ID))] {
+				continue
+			}
+			database.Entries = append(database.Entries, entry)
+		}
+		return nil
+	})
+	if err != nil {
+		var pending *syncengine.WriteThroughError
+		if errors.As(err, &pending) {
+			s.recordPendingWrites(pending.Pending)
+			if pending.Committed && view != nil {
+				s.setViewState(view)
+				return nil
+			}
+		}
+		return entries
+	}
+	s.setViewState(view)
+	return nil
+}
+
+// writeThroughToChannel performs the one-shot fetch-merge-put of spec section
+// 6 against a channel bucket directly, mirroring the engine's unexported
+// writeThrough using only the session's public surface (Client, Password,
+// Limits) since that method is not exported for reuse here.
+func (s *session) writeThroughToChannel(ctx context.Context, key string, entries []model.Entry) error {
+	databaseID := identity.ChannelDatabaseID(s.engine.Token, s.password, key)
+	if databaseID == "" {
+		return fmt.Errorf("cannot address the %q channel without a server token and history password", key)
+	}
+	client := s.bucketClient(databaseID)
+	download, err := client.Get(ctx)
+	now := time.Now().UnixMilli()
+	var database model.Database
+	var revision string
+	var existingBlob []byte
+	createOnly := false
+	switch {
+	case errors.Is(err, server.ErrNotFound):
+		database = model.NewDatabase(now)
+		createOnly = true
+	case err != nil:
+		return err
+	default:
+		decoded, decodeErr := clipdb.Decode(download.Data, s.password, s.engine.Limits)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		database = decoded
+		revision = download.Revision
+		existingBlob = download.Data
+	}
+	merge.Normalize(&database, now)
+	database.Deleted = dropMarkersForResident(database.Deleted, entries)
+	source := model.NewDatabase(now)
+	source.Entries = append(source.Entries, entries...)
+	merge.Merge(&database, source, now)
+	if len(existingBlob) == 0 {
+		existingBlob = s.fetchCoreBlobBestEffort(ctx)
+	}
+	encoded, err := clipdb.Encode(database, s.password, existingBlob)
+	if err != nil {
+		return err
+	}
+	_, err = client.Put(ctx, encoded, revision, createOnly)
+	return err
+}
+
+// fetchCoreBlobBestEffort best-effort downloads the raw core blob, purely
+// so a newly-created channel bucket can share its PBKDF2 salt. A failure here
+// is not fatal: the caller falls back to a fresh salt.
+func (s *session) fetchCoreBlobBestEffort(ctx context.Context) []byte {
+	download, err := s.client.Get(ctx)
+	if err != nil {
+		return nil
+	}
+	return download.Data
+}
+
+// dropMarkersForResident removes a tombstone naming an entry that is about to
+// be written back into the same channel, mirroring the engine's own
+// dropMarkersForEntries so a stale relocation marker cannot immediately
+// delete the entry it names again.
+func dropMarkersForResident(markers []model.DeletedEntry, entries []model.Entry) []model.DeletedEntry {
+	if len(markers) == 0 || len(entries) == 0 {
+		return markers
+	}
+	resident := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		resident[strings.ToLower(strings.TrimSpace(e.ID))] = true
+	}
+	kept := make([]model.DeletedEntry, 0, len(markers))
+	for _, m := range markers {
+		if resident[strings.ToLower(strings.TrimSpace(m.ID))] {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	return kept
 }
 
 func decode(raw json.RawMessage, target any) error {

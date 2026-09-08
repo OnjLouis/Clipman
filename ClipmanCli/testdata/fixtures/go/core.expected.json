@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "updatedUnixMs": 1757200000000,
+  "entries": [
+    {
+      "id": "core-plain",
+      "text": "Core grocery list",
+      "name": "",
+      "group": "Personal",
+      "sourceMachine": "Jeff-iPhone",
+      "createdUnixMs": 1757200000100,
+      "lastUsedUnixMs": 1757200000100,
+      "pinned": false,
+      "isTemplate": false,
+      "manualOrder": 1,
+      "hasRichText": false
+    },
+    {
+      "id": "core-unmatched",
+      "text": "Loose note",
+      "name": "",
+      "group": "",
+      "sourceMachine": "Jeff-iPhone",
+      "createdUnixMs": 1757200000200,
+      "lastUsedUnixMs": 1757200000200,
+      "pinned": false,
+      "isTemplate": false,
+      "manualOrder": 2,
+      "hasRichText": false
+    }
+  ],
+  "deleted": []
+}

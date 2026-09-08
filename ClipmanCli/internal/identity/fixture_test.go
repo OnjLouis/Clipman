@@ -23,10 +23,20 @@ func TestIdentityMatchesEveryClient(t *testing.T) {
 		for _, vector := range manifest.Identity {
 			name := manifest.Generator + "/" + vector.Name
 			t.Run(name, func(t *testing.T) {
-				got := identity.DatabaseID(vector.Token, vector.Password)
+				var got string
+				switch vector.Kind {
+				case "", "database":
+					got = identity.DatabaseID(vector.Token, vector.Password)
+				case "channel":
+					got = identity.ChannelDatabaseID(vector.Token, vector.Password, vector.ChannelKey)
+				case "sync-rules":
+					got = identity.SyncRulesDatabaseID(vector.Token, vector.Password)
+				default:
+					t.Fatalf("the corpus carries an identity kind %q this client does not know", vector.Kind)
+				}
 				if got != vector.DatabaseID {
-					t.Fatalf("bucket mismatch\n token    %q\n password %q\n want     %q\n got      %q",
-						vector.Token, vector.Password, vector.DatabaseID, got)
+					t.Fatalf("bucket mismatch\n kind     %q\n token    %q\n password %q\n want     %q\n got      %q",
+						vector.Kind, vector.Token, vector.Password, vector.DatabaseID, got)
 				}
 			})
 		}

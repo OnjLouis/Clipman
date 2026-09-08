@@ -118,7 +118,7 @@ func run(args []string) int {
 		}
 		return printError(fail(2, "usage: clipman-cli help [COMMAND]"))
 	}
-	known := map[string]bool{"init": true, "status": true, "list": true, "get": true, "put": true, "rm": true, "sync": true, "pick": true, "menu": true}
+	known := map[string]bool{"init": true, "status": true, "list": true, "get": true, "put": true, "rm": true, "sync": true, "pick": true, "menu": true, "rules": true}
 	if !known[command] {
 		return printError(fail(2, "unknown command %q", command))
 	}
@@ -147,6 +147,8 @@ func run(args []string) int {
 			commandErr = runPick(ctx, commandArgs)
 		case "menu":
 			commandErr = runMenu(ctx, commandArgs)
+		case "rules":
+			commandErr = runRules(ctx, commandArgs)
 		}
 	}
 	return printError(commandErr)
@@ -490,7 +492,7 @@ func loadContext(g globals) (*appContext, error) {
 	verbosef(g, "server %s", serverURL)
 	verbosef(g, "history bucket %s", fingerprint(databaseID))
 	limits := clipdb.Limits{MaxBlobBytes: cfg.Limits.MaxBlobBytes, MaxJSONBytes: cfg.Limits.MaxJSONBytes, MaxEntries: cfg.Limits.MaxEntries, MaxTextBytes: cfg.Limits.MaxTextBytes}
-	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3}
+	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3, Token: token, CachedRules: initialCachedRules(path)}
 	return &appContext{globals: g, configPath: path, config: cfg, token: token, password: password, databaseID: databaseID, client: client, engine: engine}, nil
 }
 
@@ -888,23 +890,27 @@ func runSync(ctx *appContext, args []string) error {
 	if len(fs.Args()) > 0 {
 		return fail(2, "sync takes no positional arguments")
 	}
+	retryPendingWrites(ctx)
 	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	state, err := ctx.engine.Read(callCtx)
+	view, err := ctx.engine.ReadView(callCtx, ctx.config.Machine)
 	if err != nil {
 		return mapRuntimeError("sync failed", err)
 	}
+	cacheRulesFromView(ctx, view)
+	selfRegisterDevice(ctx, view)
+	exists := len(view.Channels) > 0 && view.Channels[0].Revision != ""
 	if ctx.globals.json {
-		return writeJSON(map[string]any{"revision": state.Revision, "database_exists": state.Exists, "entries": len(state.Database.Entries), "uploaded": false})
+		return writeJSON(map[string]any{"revision": view.Channels[0].Revision, "database_exists": exists, "entries": len(view.View.Entries), "uploaded": false})
 	}
 	if !ctx.globals.quiet {
 		// An absent database is not an empty history: it usually means the
 		// history password or token differs from the one that holds the data,
 		// so saying "history is current" here would hide a typed password.
-		if !state.Exists {
+		if !exists {
 			fmt.Fprintln(os.Stderr, "No history exists on the server for this token and history password yet.")
 		} else {
-			fmt.Fprintf(os.Stderr, "History is current: %d entries.\n", len(state.Database.Entries))
+			fmt.Fprintf(os.Stderr, "History is current: %d entries.\n", len(view.View.Entries))
 		}
 	}
 	return nil
@@ -923,7 +929,8 @@ func runList(ctx *appContext, args []string) error {
 	if err := parseCommandFlags(fs, "list", args); err != nil {
 		return err
 	}
-	state, err := readState(ctx)
+	retryPendingWrites(ctx)
+	view, err := readState(ctx)
 	if err != nil {
 		return err
 	}
@@ -931,7 +938,7 @@ func runList(ctx *appContext, args []string) error {
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	entries := operation.View(state.Database, parsedKind, *pinned)
+	entries := operation.View(*view.View, parsedKind, *pinned)
 	filtered := entries[:0]
 	for _, entry := range entries {
 		if *group != "" && !strings.EqualFold(entry.Group, *group) {
@@ -971,24 +978,30 @@ func runGet(ctx *appContext, args []string) error {
 	if err != nil {
 		return err
 	}
-	state, err := readState(ctx)
+	view, err := readState(ctx)
 	if err != nil {
 		return err
 	}
-	entries := operation.View(state.Database, kind, pinned)
+	entries := operation.View(*view.View, kind, pinned)
 	entry, index, err := operation.Select(entries, selector)
 	if err != nil {
 		return selectionError(err)
 	}
 	if touch {
-		result, mutErr := ctx.engine.Mutate(context.Background(), func(database *model.Database, now int64) (bool, any, error) {
-			updated, e := operation.Touch(database, entry.ID, now)
-			return e == nil, updated, e
+		var touched model.Entry
+		result, mutErr := ctx.engine.MutateView(context.Background(), ctx.config.Machine, func(database *model.Database) error {
+			updated, e := operation.Touch(database, entry.ID, time.Now().UnixMilli())
+			if e != nil {
+				return e
+			}
+			touched = updated
+			return nil
 		})
-		if mutErr != nil {
+		if absorbed := absorbWriteThrough(ctx, mutErr); absorbed != nil {
 			return mapRuntimeError("touch failed", mutErr)
 		}
-		entry = result.(model.Entry)
+		cacheRulesFromView(ctx, result)
+		entry = touched
 	}
 	if ctx.globals.json {
 		value := output.EntryJSON(index, entry)
@@ -1055,20 +1068,22 @@ func runPut(ctx *appContext, args []string) error {
 	}
 	text := string(data)
 	newID := merge.NewID()
-	result, err := ctx.engine.Mutate(context.Background(), func(database *model.Database, now int64) (bool, any, error) {
-		entry, outcome := operation.Put(database, text, *name, *group, ctx.config.Machine, *duplicate, newID, *pin, *template, now)
-		return outcome != "ignored", map[string]any{"entry": entry, "outcome": outcome}, nil
+	var result map[string]any
+	view, err := ctx.engine.MutateView(context.Background(), ctx.config.Machine, func(database *model.Database) error {
+		entry, outcome := operation.Put(database, text, *name, *group, ctx.config.Machine, *duplicate, newID, *pin, *template, time.Now().UnixMilli())
+		result = map[string]any{"entry": entry, "outcome": outcome}
+		return nil
 	})
-	if err != nil {
+	if absorbed := absorbWriteThrough(ctx, err); absorbed != nil {
 		return mapRuntimeError("put failed", err)
 	}
+	cacheRulesFromView(ctx, view)
 	if ctx.globals.json {
 		return writeJSON(result)
 	}
 	if !ctx.globals.quiet {
-		value := result.(map[string]any)
-		entry := value["entry"].(model.Entry)
-		fmt.Fprintf(os.Stderr, "%s %s\n", value["outcome"], entry.ID)
+		entry := result["entry"].(model.Entry)
+		fmt.Fprintf(os.Stderr, "%s %s\n", result["outcome"], entry.ID)
 	}
 	return nil
 }
@@ -1089,7 +1104,7 @@ func runRemove(ctx *appContext, args []string) error {
 	if err != nil {
 		return err
 	}
-	state, err := readState(ctx)
+	view, err := readState(ctx)
 	if err != nil {
 		return err
 	}
@@ -1097,7 +1112,7 @@ func runRemove(ctx *appContext, args []string) error {
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	entries := operation.View(state.Database, parsedKind, ctx.config.PinnedFirst)
+	entries := operation.View(*view.View, parsedKind, ctx.config.PinnedFirst)
 	entry, index, err := operation.Select(entries, selector)
 	if err != nil {
 		return selectionError(err)
@@ -1111,14 +1126,19 @@ func runRemove(ctx *appContext, args []string) error {
 			return fail(2, "deletion cancelled")
 		}
 	}
-	result, err := ctx.engine.Mutate(context.Background(), func(database *model.Database, now int64) (bool, any, error) {
-		removed, e := operation.Delete(database, entry.ID, ctx.config.Machine, now)
-		return e == nil, removed, e
+	var removed model.Entry
+	updated, err := ctx.engine.MutateView(context.Background(), ctx.config.Machine, func(database *model.Database) error {
+		result, e := operation.Delete(database, entry.ID, ctx.config.Machine, time.Now().UnixMilli())
+		if e != nil {
+			return e
+		}
+		removed = result
+		return nil
 	})
-	if err != nil {
+	if absorbed := absorbWriteThrough(ctx, err); absorbed != nil {
 		return mapRuntimeError("delete failed", err)
 	}
-	removed := result.(model.Entry)
+	cacheRulesFromView(ctx, updated)
 	if ctx.globals.json {
 		return writeJSON(map[string]any{"id": removed.ID, "index": index, "kind": *kindValue})
 	}
@@ -1158,11 +1178,11 @@ func (s *cliStore) Load(context.Context) ([]model.Entry, error) {
 		// kind now in force, which Tab may have changed on the way out.
 		return operation.View(database, s.kind, s.pinnedFirst), nil
 	}
-	state, err := readState(s.ctx)
+	view, err := readState(s.ctx)
 	if err != nil {
 		return nil, err
 	}
-	database := state.Database
+	database := *view.View
 	s.last = &database
 	return operation.View(database, s.kind, s.pinnedFirst), nil
 }
@@ -1171,13 +1191,14 @@ func (s *cliStore) Load(context.Context) ([]model.Entry, error) {
 func (s *cliStore) handOver() { s.reuse = s.last }
 
 func (s *cliStore) Delete(callCtx context.Context, id string) error {
-	_, err := s.ctx.engine.Mutate(callCtx, func(database *model.Database, now int64) (bool, any, error) {
-		removed, deleteErr := operation.Delete(database, id, s.ctx.config.Machine, now)
-		return deleteErr == nil, removed, deleteErr
+	view, err := s.ctx.engine.MutateView(callCtx, s.ctx.config.Machine, func(database *model.Database) error {
+		_, deleteErr := operation.Delete(database, id, s.ctx.config.Machine, time.Now().UnixMilli())
+		return deleteErr
 	})
-	if err != nil {
+	if absorbed := absorbWriteThrough(s.ctx, err); absorbed != nil {
 		return mapRuntimeError("delete failed", err)
 	}
+	cacheRulesFromView(s.ctx, view)
 	return nil
 }
 
@@ -1186,14 +1207,17 @@ func (s *cliStore) Create(callCtx context.Context, text, name string) (model.Ent
 	// adding one while viewing templates creates a template.
 	isTemplate := s.kind == operation.Templates
 	newID := merge.NewID()
-	result, err := s.ctx.engine.Mutate(callCtx, func(database *model.Database, now int64) (bool, any, error) {
-		entry, outcome := operation.Put(database, text, name, "", s.ctx.config.Machine, "movetotop", newID, false, isTemplate, now)
-		return outcome != "ignored", entry, nil
+	var created model.Entry
+	view, err := s.ctx.engine.MutateView(callCtx, s.ctx.config.Machine, func(database *model.Database) error {
+		entry, _ := operation.Put(database, text, name, "", s.ctx.config.Machine, "movetotop", newID, false, isTemplate, time.Now().UnixMilli())
+		created = entry
+		return nil
 	})
-	if err != nil {
+	if absorbed := absorbWriteThrough(s.ctx, err); absorbed != nil {
 		return model.Entry{}, mapRuntimeError("add failed", err)
 	}
-	return result.(model.Entry), nil
+	cacheRulesFromView(s.ctx, view)
+	return created, nil
 }
 
 // terminalConsole routes the browser's prompts and announcements to the
@@ -1530,20 +1554,20 @@ func buildSelector(args []string, id, name, search string, first, caseSensitive 
 	}
 	return operation.Selector{Index: index, ID: id, Name: name, Search: search, First: first, CaseSensitive: caseSensitive}, nil
 }
-func readState(ctx *appContext) (syncengine.State, error) {
+func readState(ctx *appContext) (*syncengine.ViewState, error) {
 	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	state, err := ctx.engine.Read(callCtx)
+	view, err := ctx.engine.ReadView(callCtx, ctx.config.Machine)
 	if err != nil {
-		return state, mapRuntimeError("history could not be loaded", err)
+		return nil, mapRuntimeError("history could not be loaded", err)
 	}
-	merge.Normalize(&state.Database, time.Now().UnixMilli())
-	if state.Exists {
-		verbosef(ctx.globals, "downloaded revision %s, %d entries", state.Revision, len(state.Database.Entries))
+	cacheRulesFromView(ctx, view)
+	if len(view.Channels) > 0 && view.Channels[0].Revision != "" {
+		verbosef(ctx.globals, "downloaded revision %s, %d entries", view.Channels[0].Revision, len(view.View.Entries))
 	} else {
 		verbosef(ctx.globals, "no database exists for this token and history password")
 	}
-	return state, nil
+	return view, nil
 }
 func selectionError(err error) error {
 	if strings.Contains(err.Error(), "ambiguous") {
@@ -1671,21 +1695,28 @@ func writeJSON(value any) error {
 	return encoder.Encode(value)
 }
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Browse history interactively; the default when no command is given\n  sync     Download and validate current history\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --verbose         Write diagnostic messages to standard error\n  --version         Show version information")
+	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Browse history interactively; the default when no command is given\n  sync     Download and validate current history\n  rules    Manage sync channels and device subscriptions\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --verbose         Write diagnostic messages to standard error\n  --version         Show version information")
 }
 
 func printCommandUsage(out io.Writer, command string) bool {
 	usage := map[string]string{
-		"init":   "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force] [--portable]\n  (use the global --ca-cert FILE or --insecure option before init to trust a self-signed server certificate)\n  (without --save-password, an interactive run asks whether to save the history password)\n  (--portable writes config.toml beside this executable; it is then used automatically by that copy)",
-		"status": "Usage: clipman-cli [global options] status [--refresh] [--json]",
-		"list":   "Usage: clipman-cli [global options] list [-n COUNT | --all] [--group NAME] [--search TEXT] [--kind history|templates|all] [--pinned-first] [--porcelain] [--json]",
-		"get":    "Usage: clipman-cli [global options] get [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--first] [--touch] [--newline] [--raw] [--json]",
-		"put":    "Usage: clipman-cli [global options] put [--file FILE | --text TEXT] [--name NAME] [--group NAME] [--pin] [--template] [--duplicate ignore|movetotop|keep] [--json]",
-		"rm":     "Usage: clipman-cli [global options] rm [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--case-sensitive] [--yes] [--json]",
-		"sync":   "Usage: clipman-cli [global options] sync [--json] [--quiet]",
-		"pick":   "Usage: clipman-cli [global options] pick [-n COUNT | --all] [--kind history|templates|all] [--pinned-first] [--renderer line|tui | --tui | --line]\n  (-n sets how many entries are announced at once; n and p move between pages)",
-		"menu":   "Usage: clipman-cli [global options] menu [-n COUNT | --all] [--kind history|templates|all] [--pinned-first] [--renderer line|tui | --tui | --line]\n  (-n sets the page size; every entry stays reachable by paging, and --all announces them at once)\n  (line renderer: NUMBER reads an entry a page at a time, o NUMBER outputs, w NUMBER saves to a file, x NUMBER runs a program, d NUMBER deletes, /TEXT searches, n and p page, a adds, r reloads, u switches interface, ? helps, q quits)\n  (full-screen renderer: arrows move, g goes to a number, Enter outputs, v reads the whole clip, w saves to a file, x runs a program, / filters, Tab switches kind, d deletes, r reloads, u switches interface, ? shows keys, q quits)\n  (--debug writes a caret trace beside this program; --debug-log FILE chooses where)",
-		"help":   "Usage: clipman-cli help",
+		"init":                 "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force] [--portable]\n  (use the global --ca-cert FILE or --insecure option before init to trust a self-signed server certificate)\n  (without --save-password, an interactive run asks whether to save the history password)\n  (--portable writes config.toml beside this executable; it is then used automatically by that copy)",
+		"status":               "Usage: clipman-cli [global options] status [--refresh] [--json]",
+		"list":                 "Usage: clipman-cli [global options] list [-n COUNT | --all] [--group NAME] [--search TEXT] [--kind history|templates|all] [--pinned-first] [--porcelain] [--json]",
+		"get":                  "Usage: clipman-cli [global options] get [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--first] [--touch] [--newline] [--raw] [--json]",
+		"put":                  "Usage: clipman-cli [global options] put [--file FILE | --text TEXT] [--name NAME] [--group NAME] [--pin] [--template] [--duplicate ignore|movetotop|keep] [--json]",
+		"rm":                   "Usage: clipman-cli [global options] rm [INDEX | --id ID | --name NAME | --search TEXT] [--kind history|templates|all] [--case-sensitive] [--yes] [--json]",
+		"sync":                 "Usage: clipman-cli [global options] sync [--json] [--quiet]",
+		"pick":                 "Usage: clipman-cli [global options] pick [-n COUNT | --all] [--kind history|templates|all] [--pinned-first] [--renderer line|tui | --tui | --line]\n  (-n sets how many entries are announced at once; n and p move between pages)",
+		"menu":                 "Usage: clipman-cli [global options] menu [-n COUNT | --all] [--kind history|templates|all] [--pinned-first] [--renderer line|tui | --tui | --line]\n  (-n sets the page size; every entry stays reachable by paging, and --all announces them at once)\n  (line renderer: NUMBER reads an entry a page at a time, o NUMBER outputs, w NUMBER saves to a file, x NUMBER runs a program, d NUMBER deletes, /TEXT searches, n and p page, a adds, r reloads, u switches interface, ? helps, q quits)\n  (full-screen renderer: arrows move, g goes to a number, Enter outputs, v reads the whole clip, w saves to a file, x runs a program, / filters, Tab switches kind, d deletes, r reloads, u switches interface, ? shows keys, q quits)\n  (--debug writes a caret trace beside this program; --debug-log FILE chooses where)",
+		"help":                 "Usage: clipman-cli help",
+		"rules":                "Usage: clipman-cli [global options] rules <show|enable|disable|channel|device> ...\n  rules show                                        Print the sync rules document\n  rules enable                                       Turn sync channels on\n  rules disable                                      Turn sync channels off\n  rules channel add <name> [--group G]... [--source-device D]... [--kind richtextimages]\n  rules channel remove <name>\n  rules device set <device> --channels <k1,k2|*>",
+		"rules show":           "Usage: clipman-cli [global options] rules show [--json]",
+		"rules enable":         "Usage: clipman-cli [global options] rules enable [--json]",
+		"rules disable":        "Usage: clipman-cli [global options] rules disable [--json]",
+		"rules channel add":    "Usage: clipman-cli [global options] rules channel add <name> [--group GROUP]... [--source-device DEVICE]... [--kind richtextimages] [--json]",
+		"rules channel remove": "Usage: clipman-cli [global options] rules channel remove <name> [--json]",
+		"rules device set":     "Usage: clipman-cli [global options] rules device set <device> --channels <k1,k2|*> [--json]",
 	}
 	text, ok := usage[command]
 	if !ok {

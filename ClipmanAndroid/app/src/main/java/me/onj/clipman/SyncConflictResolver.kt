@@ -40,6 +40,14 @@ object SyncConflictResolver {
         return normalize(target.copy(Entries = merged, DeletedEntries = deletedById))
     }
 
+    /**
+     * The normalization every merge applies, without merging anything in.
+     * Channel-aware sync rebuilds one database per channel and needs each of
+     * them normalized the same way a merged database is.
+     */
+    fun normalized(database: ClipDatabase): ClipDatabase =
+        merge(target = database, source = ClipDatabase())
+
     fun hasSameContent(left: ClipDatabase, right: ClipDatabase): Boolean =
         left.Entries == right.Entries && left.DeletedEntries == right.DeletedEntries
 

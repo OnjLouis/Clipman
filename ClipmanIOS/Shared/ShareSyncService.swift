@@ -25,8 +25,23 @@ enum ShareSyncError: Error, LocalizedError {
     }
 }
 
+/// One Clipman Server bucket the Share extension writes to. The core history and
+/// every sync channel are ordinary buckets (`sync-rules-spec.md` section 2), so
+/// the extension needs nothing but this to route a shared item into a channel.
+protocol ShareSyncBucket {
+    var databaseID: String { get }
+    func download() async throws -> ServerDatabaseDownload
+    func upload(data: Data, expectedRevision: String, createOnly: Bool) async throws -> String
+}
+
+extension ServerStorageClient: ShareSyncBucket {}
+
 struct ShareSyncService {
-    private static let maximumExtensionDatabaseBytes = 32 * 1024 * 1024
+    /// The Share extension has a much smaller memory budget than the app, so it
+    /// refuses to merge a blob larger than this. With sync rules in effect the
+    /// limit applies to the single channel blob the shared item routes to, not to
+    /// the whole history.
+    static let maximumExtensionDatabaseBytes = 32 * 1024 * 1024
     private static let maximumConflictAttempts = 3
 
     func synchronize(text: String, html: String) async throws -> ShareSyncResult {
@@ -61,20 +76,37 @@ struct ShareSyncService {
         payload: MobileClipboardPayload,
         settings: ShareSyncSettings
     ) async throws -> ShareSyncResult {
+        try await synchronize(
+            payload: payload,
+            settings: settings,
+            rules: ShareSyncConfigurationStore.loadRules()
+        ) { channelKey in
+            try Self.serverBucket(channelKey: channelKey, settings: settings)
+        }
+    }
+
+    /// Routes the shared item with the cached rules document and writes it to the
+    /// bucket of the channel it belongs in, with the same conflict retry loop the
+    /// extension has always used. `resolveBucket` receives the normalized channel
+    /// key, `""` meaning the core history.
+    func synchronize(
+        payload: MobileClipboardPayload,
+        settings: ShareSyncSettings,
+        rules: SyncRulesDocument?,
+        resolveBucket: (String) throws -> any ShareSyncBucket
+    ) async throws -> ShareSyncResult {
         let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw PendingSharedTextError.emptyText }
 
-        let client = ServerStorageClient(
-            settings: settings,
-            maximumResponseBytes: Self.maximumExtensionDatabaseBytes
-        )
-        guard client.isConfigured else { throw ShareSyncConfigurationError.invalidConfiguration }
+        let channelKey = Self.targetChannelKey(payload: payload, settings: settings, rules: rules)
+        let bucket = try resolveBucket(channelKey)
+        let createsChannel = !channelKey.isEmpty
 
         for _ in 0..<Self.maximumConflictAttempts {
             let remoteData: Data?
             let revision: String
             do {
-                let download = try await client.download()
+                let download = try await bucket.download()
                 remoteData = download.data
                 revision = download.revision
             } catch ServerStorageError.notFound {
@@ -99,13 +131,20 @@ struct ShareSyncService {
                 to: remote,
                 settings: settings
             )
+            // A channel blob created for the first time copies the core
+            // database's salt, so one PBKDF2 derivation serves every bucket.
             let encoded = try await DatabaseWorker.save(
                 mutation.database,
                 password: settings.historyPassword,
                 preferredSalt: remoteData.flatMap(ClipDatabaseFile.encryptedSalt)
+                    ?? ShareSyncConfigurationStore.loadHistorySalt()
             )
             do {
-                _ = try await client.upload(data: encoded, expectedRevision: revision)
+                _ = try await bucket.upload(
+                    data: encoded,
+                    expectedRevision: revision,
+                    createOnly: createsChannel && revision.isEmpty
+                )
                 return mutation.alreadyExists ? .alreadyExists : .added
             } catch ServerStorageError.conflict {
                 continue
@@ -114,6 +153,37 @@ struct ShareSyncService {
             }
         }
         throw ShareSyncError.repeatedConflict
+    }
+
+    /// The channel a shared item routes to, computed from the same fields every
+    /// other client routes on (spec section 4). Shared items carry no group, so
+    /// only `SourceDevices` and `RichTextImages` routes can match them.
+    static func targetChannelKey(
+        payload: MobileClipboardPayload,
+        settings: ShareSyncSettings,
+        rules: SyncRulesDocument?
+    ) -> String {
+        SyncRuleEngine.route(
+            document: rules,
+            entry: ClipEntry(
+                Text: payload.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                SourceMachine: settings.deviceName,
+                RichText: settings.richTextEnabled ? payload.richText : nil
+            )
+        )
+    }
+
+    static func serverBucket(channelKey: String, settings: ShareSyncSettings) throws -> any ShareSyncBucket {
+        let client = ServerStorageClient(
+            settings: settings,
+            maximumResponseBytes: maximumExtensionDatabaseBytes
+        )
+        guard client.isConfigured else { throw ShareSyncConfigurationError.invalidConfiguration }
+        guard !channelKey.isEmpty else { return client }
+        guard let channel = client.addressingChannel(channelKey, password: settings.historyPassword) else {
+            throw ShareSyncConfigurationError.invalidConfiguration
+        }
+        return channel
     }
 }
 

@@ -38,6 +38,8 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Windows regression test compilation failed with exit code $LASTEXITCODE"
     }
+    # The cross-client fixture tests locate the corpus through this variable.
+    $env:CLIPMAN_REPO_ROOT = $repositoryRoot
     & $testExecutable
     if ($LASTEXITCODE -ne 0) {
         throw "Windows regression tests failed with exit code $LASTEXITCODE"
