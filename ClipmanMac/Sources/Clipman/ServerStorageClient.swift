@@ -81,6 +81,36 @@ final class ServerStorageClient: @unchecked Sendable {
         self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty && !databasePassword.isEmpty && authorityMatches && (caCertPEM.isEmpty || normalizedAuthority != nil)
     }
 
+    private init(
+        baseURL: URL?,
+        token: String,
+        databaseID: String,
+        certificateAuthority: ServerCertificateAuthority?,
+        isConfigured: Bool
+    ) {
+        self.baseURL = baseURL
+        self.token = token
+        self.databaseID = databaseID
+        self.certificateAuthority = certificateAuthority
+        self.isConfigured = isConfigured
+    }
+
+    /// A client for another bucket on the same server, using the same
+    /// credentials and transport. Sync channels and the sync-rules document are
+    /// ordinary buckets addressed by their derived ids (sync-rules-spec.md
+    /// section 2), so they need no server change at all.
+    func addressing(databaseID: String) -> ServerStorageClient? {
+        let cleanedID = databaseID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isConfigured, !cleanedID.isEmpty else { return nil }
+        return ServerStorageClient(
+            baseURL: baseURL,
+            token: token,
+            databaseID: cleanedID,
+            certificateAuthority: certificateAuthority,
+            isConfigured: true
+        )
+    }
+
     func metadata() throws -> ServerDatabaseMetadata {
         let (_, response) = try request(method: "HEAD", body: nil, expectedRevision: nil)
         return metadata(from: response)
@@ -91,16 +121,19 @@ final class ServerStorageClient: @unchecked Sendable {
         return ServerDatabaseDownload(metadata: metadata(from: response), data: data)
     }
 
-    func upload(data: Data, expectedRevision: String) throws -> ServerDatabaseMetadata {
-        let (_, response) = try request(method: "PUT", body: data, expectedRevision: expectedRevision)
+    /// `createOnly` sends `If-None-Match: *`, so a bucket another device created
+    /// in the meantime wins instead of being overwritten. Channel and rules
+    /// buckets are created that way (sync-rules-spec.md sections 4 and 6).
+    func upload(data: Data, expectedRevision: String, createOnly: Bool = false) throws -> ServerDatabaseMetadata {
+        let (_, response) = try request(method: "PUT", body: data, expectedRevision: expectedRevision, createOnly: createOnly)
         return metadata(from: response)
     }
 
-    private func request(method: String, body: Data?, expectedRevision: String?) throws -> (Data, HTTPURLResponse) {
+    private func request(method: String, body: Data?, expectedRevision: String?, createOnly: Bool = false) throws -> (Data, HTTPURLResponse) {
         guard let baseURL, isConfigured else { throw ServerStorageError.notConfigured }
         let url = baseURL.appendingPathComponent("api/v1/database/\(databaseID)")
         if url.scheme?.caseInsensitiveCompare("http") == .orderedSame {
-            return try privateNetworkRequest(url: url, method: method, body: body, expectedRevision: expectedRevision)
+            return try privateNetworkRequest(url: url, method: method, body: body, expectedRevision: expectedRevision, createOnly: createOnly)
         }
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -111,6 +144,8 @@ final class ServerStorageClient: @unchecked Sendable {
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let expectedRevision, !expectedRevision.isEmpty {
             request.setValue(expectedRevision, forHTTPHeaderField: "If-Match")
+        } else if createOnly {
+            request.setValue("*", forHTTPHeaderField: "If-None-Match")
         }
         if let body {
             request.httpBody = body
@@ -158,7 +193,8 @@ final class ServerStorageClient: @unchecked Sendable {
         url: URL,
         method: String,
         body: Data?,
-        expectedRevision: String?
+        expectedRevision: String?,
+        createOnly: Bool
     ) throws -> (Data, HTTPURLResponse) {
         let portValue = url.port ?? 80
         guard let host = url.host,
@@ -182,6 +218,8 @@ final class ServerStorageClient: @unchecked Sendable {
         ]
         if let expectedRevision, !expectedRevision.isEmpty {
             headers.append("If-Match: \(expectedRevision)")
+        } else if createOnly {
+            headers.append("If-None-Match: *")
         }
         if body != nil {
             headers.append("Content-Type: application/octet-stream")

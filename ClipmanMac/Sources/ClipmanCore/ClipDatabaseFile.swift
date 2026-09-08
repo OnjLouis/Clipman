@@ -58,30 +58,65 @@ public enum ClipDatabaseFile {
         if data.isEmpty {
             return defaultValue
         }
+        return try decode(plainPayload(data, url: url, password: password), as: T.self)
+    }
 
-        let jsonData: Data
+    /// The decoded plaintext payload of a container, or nil when the file is
+    /// missing or empty. The sync-rules document is stored in a standard
+    /// container whose payload is not a `ClipDatabase`
+    /// (`sync-rules-spec.md` section 4), so it is read and written as raw bytes.
+    public static func loadRawPayload(_ url: URL, password: String = "") throws -> Data? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let data = try readDatabaseData(url)
+        if data.isEmpty { return nil }
+        return try plainPayload(data, url: url, password: password)
+    }
+
+    /// Writes an arbitrary plaintext payload into the same container the
+    /// history database uses: `CLIPDB2` encrypted when a password exists,
+    /// `CLIPDB1` compressed otherwise. `salt` is used only when the container is
+    /// created for the first time.
+    public static func saveRawPayloadAtomic(_ url: URL, payload: Data, password: String = "", salt: [UInt8]? = nil) throws {
+        try validateEncodedJSONByteCount(payload.count)
+        try writeContainer(url, json: payload, password: password, salt: salt)
+    }
+
+    private static func plainPayload(_ data: Data, url: URL, password: String) throws -> Data {
         if data.starts(with: encryptedMagic) {
-            jsonData = try readEncrypted(data, password: password)
-        } else if url.pathExtension.lowercased() == "clipdb" {
-            let payload = data.starts(with: compressedMagic) ? data.dropFirst(compressedMagic.count) : data[...]
-            jsonData = try Gzip.decompress(Data(payload))
-        } else {
-            jsonData = data
+            return try readEncrypted(data, password: password)
         }
-        return try decode(jsonData, as: T.self)
+        if url.pathExtension.lowercased() == "clipdb" {
+            let payload = data.starts(with: compressedMagic) ? data.dropFirst(compressedMagic.count) : data[...]
+            return try Gzip.decompress(Data(payload))
+        }
+        return data
     }
 
-    public static func saveAtomic(_ url: URL, database: ClipDatabase, password: String = "") throws {
-        try saveAtomicCodable(url, value: database, password: password)
+    /// The PBKDF2 salt of an existing encrypted container, or nil when the file
+    /// is missing or not encrypted. Sync channels reuse the core database's
+    /// salt so one key derivation serves every channel blob
+    /// (`sync-rules-spec.md` section 5, Salt sharing).
+    public static func containerSalt(_ url: URL) -> [UInt8]? {
+        existingEncryptedSalt(url)
     }
 
-    public static func saveAtomicCodable<T: Encodable>(_ url: URL, value: T, password: String = "") throws {
+    public static func saveAtomic(_ url: URL, database: ClipDatabase, password: String = "", salt: [UInt8]? = nil) throws {
+        try saveAtomicCodable(url, value: database, password: password, salt: salt)
+    }
+
+    /// `salt` is used only when the container is created for the first time; an
+    /// existing container always keeps the salt it already has.
+    public static func saveAtomicCodable<T: Encodable>(_ url: URL, value: T, password: String = "", salt: [UInt8]? = nil) throws {
         let json = try encode(value)
         try validateEncodedJSONByteCount(json.count)
+        try writeContainer(url, json: json, password: password, salt: salt)
+    }
+
+    private static func writeContainer(_ url: URL, json: Data, password: String, salt: [UInt8]?) throws {
         let isDatabaseContainer = url.pathExtension.lowercased() == "clipdb"
         let data: Data
         if !password.isEmpty && isDatabaseContainer {
-            data = try writeEncrypted(url, json: json, password: password)
+            data = try writeEncrypted(url, json: json, password: password, salt: salt)
         } else if isDatabaseContainer {
             data = compressedMagic + (try Gzip.compress(json))
         } else {
@@ -138,8 +173,9 @@ public enum ClipDatabaseFile {
         return try Gzip.decompress(Data(decrypted))
     }
 
-    private static func writeEncrypted(_ url: URL, json: Data, password: String) throws -> Data {
-        let salt = existingEncryptedSalt(url) ?? randomBytes(count: 16)
+    private static func writeEncrypted(_ url: URL, json: Data, password: String, salt requestedSalt: [UInt8]?) throws -> Data {
+        let requested = (requestedSalt?.count == 16) ? requestedSalt : nil
+        let salt = existingEncryptedSalt(url) ?? requested ?? randomBytes(count: 16)
         let iv = randomBytes(count: 16)
         let keys = try deriveKeys(password: password, salt: salt)
         let compressed = Array(try Gzip.compress(json))

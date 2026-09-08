@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ClipmanCore
 
 @MainActor
@@ -7,6 +8,28 @@ protocol ClipStoreDelegate: AnyObject {
     func clipStoreNeedsPassword(for path: String) -> String?
     func clipStoreDidFail(error: Error)
     func clipStoreServerSyncDidRecover()
+    /// Announces that entries were written straight through to a channel this
+    /// device does not subscribe to (sync-rules-spec.md section 6). They never
+    /// appear in the local view, so this is the only feedback the user gets.
+    func clipStoreDidWriteThrough(channelNames: [String])
+}
+
+/// One sync channel as it stood at the last transfer. `key` is `""` for the
+/// core channel, which keeps using the existing history file and, in server
+/// mode, the configured database id. `plainHash` is the durable dirty-detection
+/// hash of spec section 5, upload step 4.
+private struct ChannelSlot {
+    var key: String
+    var url: URL
+    var databaseID: String
+    var database = ClipDatabase()
+    var revision = ""
+    var existsOnServer = false
+    var plainHash = Data()
+    /// The entries this channel was fetched with, before the current save
+    /// changed anything. Phase one of an upload carries these copies for
+    /// departing entries (spec section 5, upload step 5).
+    var fetched: [String: ClipEntry] = [:]
 }
 
 struct ServerSyncStatus {
@@ -59,6 +82,25 @@ final class ClipStore: @unchecked Sendable {
     private var serverLastUploadUnixMs: Int64 = 0
     private var serverNextPollUnixMs: Int64 = 0
     private var serverConsecutiveFailures = 0
+    private var serverToken = ""
+
+    // Sync channels (sync-rules-spec.md sections 4 to 6). With no rules document,
+    // or a disabled one, every one of these stays empty and each code path below
+    // takes its legacy branch, so behavior is identical to a client without the
+    // feature.
+    private var rulesDocument: SyncRulesDocument?
+    /// The revision an edit may claim to be based on. It is deliberately blank
+    /// whenever the cached document, not the server's, is the one in effect.
+    private var rulesRevision = ""
+    /// The revision the rules bucket was last downloaded at, which is what the
+    /// poll compares against so an unchanged bucket is never fetched twice.
+    private var rulesServerRevision = ""
+    private var rulesExistsOnServer = false
+    private var rulesCacheHash = Data()
+    private var channelSlots: [ChannelSlot] = []
+    private var residence: [String: String] = [:]
+    private var viewMarkers: [String: DeletedClipEntry] = [:]
+    private var pendingChannelWrites: [String: [ClipEntry]] = [:]
 
     init(databaseURL: URL, machineName: String) {
         self.databaseURL = databaseURL
@@ -68,8 +110,11 @@ final class ClipStore: @unchecked Sendable {
     func setMachineName(_ value: String) {
         queue.sync {
             let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty {
+            if !name.isEmpty && name != self.machineName {
                 self.machineName = name
+                // Subscriptions are keyed on the device name, so renaming this
+                // Mac can change which channels it downloads.
+                self.rebuildChannelSlotsLocked()
             }
         }
     }
@@ -103,7 +148,11 @@ final class ClipStore: @unchecked Sendable {
             self.serverConfigurationGeneration &+= 1
             self.serverPollInProgress = false
             self.serverRevision = ""
+            self.serverToken = serverToken
             self.resetServerStatusLocked()
+            self.rulesRevision = ""
+            self.rulesServerRevision = ""
+            self.rulesExistsOnServer = false
             self.serverClient = enabled ? ServerStorageClient(
                 serverURL: serverURL,
                 token: serverToken,
@@ -113,12 +162,14 @@ final class ClipStore: @unchecked Sendable {
             ) : nil
             guard let client = self.serverClient, client.isConfigured else {
                 self.serverClient = nil
+                self.rebuildChannelSlotsLocked()
                 if self.serverFailureReported {
                     self.serverFailureReported = false
                     DispatchQueue.main.async { self.delegate?.clipStoreServerSyncDidRecover() }
                 }
                 return
             }
+            self.rebuildChannelSlotsLocked()
 
             self.startServerPollTimerLocked()
             self.pollServerLocked()
@@ -775,6 +826,14 @@ final class ClipStore: @unchecked Sendable {
             _ = try SyncConflictResolver.resolveDatabaseConflicts(databaseURL: databaseURL, password: password)
             database = try loadDatabaseWithPasswordLocked()
             normalizeManualOrderLocked()
+            loadPendingChannelWritesLocked()
+            refreshRulesFromDiskLocked()
+            if rulesActiveLocked() {
+                try loadChannelsFromDiskLocked()
+                assembleViewLocked()
+            } else {
+                clearChannelStateLocked()
+            }
             return true
         } catch {
             DispatchQueue.main.async { self.delegate?.clipStoreDidFail(error: error) }
@@ -807,6 +866,16 @@ final class ClipStore: @unchecked Sendable {
                     }
                 }
             }
+            refreshRulesFromDiskLocked()
+            if rulesActiveLocked() {
+                // The channel-aware equivalent of the merge below: the view is
+                // rebuilt from the channels as they now stand, which is what
+                // the reference engine reads at the top of every mutation.
+                try loadChannelsFromDiskLocked()
+                assembleViewLocked()
+                return true
+            }
+            clearChannelStateLocked()
             _ = try SyncConflictResolver.resolveDatabaseConflicts(databaseURL: databaseURL, password: password)
             let latest = try loadDatabaseWithPasswordLocked()
             SyncConflictResolver.merge(into: &database, source: latest)
@@ -820,6 +889,14 @@ final class ClipStore: @unchecked Sendable {
 
     @discardableResult
     private func saveLocked() -> Bool {
+        guard rulesActiveLocked(), !channelSlots.isEmpty else {
+            return legacySaveLocked()
+        }
+        return saveWithChannelsLocked()
+    }
+
+    @discardableResult
+    private func legacySaveLocked() -> Bool {
         do {
             SyncConflictResolver.normalize(&database)
             database.UpdatedUnixMs = TimeUtil.nowUnixMs()
@@ -844,6 +921,1067 @@ final class ClipStore: @unchecked Sendable {
             DispatchQueue.main.async { self.delegate?.clipStoreDidFail(error: error) }
             return false
         }
+    }
+
+    // MARK: - Sync channels
+
+    /// The public surface the sync-rules editor uses.
+    func getSyncRules() -> SyncRulesDocument? {
+        queue.sync { rulesDocument }
+    }
+
+    func syncRulesReadOnly() -> Bool {
+        queue.sync { SyncRuleEngine.isReadOnly(rulesDocument) }
+    }
+
+    func syncChannelKeys() -> [String] {
+        queue.sync { SyncRuleEngine.allChannelKeys(rulesDocument) }
+    }
+
+    func syncRulesDeviceName() -> String {
+        queue.sync { machineName }
+    }
+
+    /// Validates and applies an edited rules document. A validation problem is
+    /// returned immediately; the re-route and upload it triggers run on the
+    /// store queue and report failures through `clipStoreDidFail`. Returning
+    /// synchronously here would deadlock, because applying rules can ask the
+    /// main thread for the history password.
+    func setSyncRules(_ document: SyncRulesDocument) -> String? {
+        if let reason = SyncRuleEngine.validate(document) { return reason }
+        if syncRulesReadOnly() {
+            return "These sync rules were written by a newer version of Clipman, so this version can only display them."
+        }
+        queue.async { self.applySyncRulesLocked(document) }
+        return nil
+    }
+
+    private func applySyncRulesLocked(_ document: SyncRulesDocument) {
+        guard !SyncRuleEngine.isReadOnly(rulesDocument) else { return }
+        var updated = document
+        updated.Clipman = SyncRuleEngine.documentKind
+        updated.Version = SyncRuleEngine.currentVersion
+        updated.UpdatedUnixMs = TimeUtil.nowUnixMs()
+        updated.UpdatedBy = machineName
+        rulesDocument = updated
+        rebuildChannelSlotsLocked()
+        writeRulesCacheLocked()
+        if serverClient != nil {
+            rulesRevision = uploadRulesLocked(updated, createOnly: !rulesExistsOnServer)
+            rulesServerRevision = rulesRevision
+        }
+        // The editing device performs the re-route immediately (spec section 5,
+        // Rules edits).
+        guard mergeLatestBeforeWriteLocked() else { return }
+        let saved = saveLocked()
+        DispatchQueue.main.async {
+            if saved { self.delegate?.clipStoreDidChange() }
+        }
+    }
+
+    /// True when a rules document is in effect and defines at least one usable
+    /// channel. Everything channel-aware in this file is guarded on this, so a
+    /// client with no rules, or with rules disabled, behaves exactly as it did
+    /// before the feature existed (spec section 7).
+    private func rulesActiveLocked() -> Bool {
+        guard let document = rulesDocument, document.Enabled else { return false }
+        return !SyncRuleEngine.allChannelKeys(document).isEmpty
+    }
+
+    private func clearChannelStateLocked() {
+        channelSlots = []
+        residence = [:]
+        viewMarkers = [:]
+    }
+
+    private var dataFolderURL: URL {
+        databaseURL.deletingLastPathComponent()
+    }
+
+    private func channelFileURL(_ key: String) -> URL {
+        dataFolderURL.appendingPathComponent(SyncRuleEngine.channelFileName(key))
+    }
+
+    private var rulesFileURL: URL {
+        dataFolderURL.appendingPathComponent(SyncRuleEngine.syncRulesFileName)
+    }
+
+    private var pendingChannelWritesURL: URL {
+        dataFolderURL.appendingPathComponent(SyncRuleEngine.pendingChannelWritesFileName)
+    }
+
+    /// A channel blob created for the first time copies the core database's
+    /// salt, so one PBKDF2 derivation serves every channel (spec section 5).
+    private func coreSaltLocked() -> [UInt8]? {
+        ClipDatabaseFile.containerSalt(databaseURL)
+    }
+
+    private func channelClientLocked(_ slot: ChannelSlot) -> ServerStorageClient? {
+        guard let client = serverClient, client.isConfigured else { return nil }
+        if slot.key.isEmpty { return client }
+        return client.addressing(databaseID: slot.databaseID)
+    }
+
+    /// Rebuilds the core-first slot list from the current subscriptions,
+    /// carrying forward what each surviving channel already knows.
+    private func rebuildChannelSlotsLocked() {
+        let existing = channelSlots
+        var slots: [ChannelSlot] = []
+
+        var core = existing.first { $0.key.isEmpty }
+            ?? ChannelSlot(key: "", url: databaseURL, databaseID: "")
+        core.url = databaseURL
+        slots.append(core)
+
+        for key in SyncRuleEngine.subscribedKeys(document: rulesDocument, deviceName: machineName) {
+            let databaseID = serverClient == nil
+                ? ""
+                : ServerDatabaseIdentity.channelDatabaseId(token: serverToken, password: password, channelKey: key)
+            // In server mode a channel that cannot be addressed is left out of
+            // the view; entries bound for it are written through instead.
+            if serverClient != nil && databaseID.isEmpty { continue }
+            if var slot = existing.first(where: { $0.key == key }) {
+                slot.url = channelFileURL(key)
+                slot.databaseID = databaseID
+                slots.append(slot)
+            } else {
+                slots.append(ChannelSlot(key: key, url: channelFileURL(key), databaseID: databaseID))
+            }
+        }
+        channelSlots = slots
+    }
+
+    private func loadSlotDatabaseLocked(_ slot: ChannelSlot) throws -> ClipDatabase {
+        if slot.key.isEmpty {
+            _ = try SyncConflictResolver.resolveDatabaseConflicts(databaseURL: slot.url, password: password)
+            return try loadDatabaseWithPasswordLocked()
+        }
+        try resolveChannelFileConflictsLocked(slot.url)
+        return try ClipDatabaseFile.load(slot.url, password: password)
+    }
+
+    /// Conflict-copy resolution for a channel file. The generic resolver cannot
+    /// be used unfiltered here: spec section 2 turns spaces into dashes, so the
+    /// file of a channel named "work laptop" looks like a sync service's
+    /// conflict copy of the channel named "work", and merging and deleting it
+    /// would lose a whole channel. Any sibling that is the file of a channel the
+    /// rules document defines is therefore never treated as a conflict copy.
+    private func resolveChannelFileConflictsLocked(_ url: URL) throws {
+        let known = Set(SyncRuleEngine.allChannelKeys(rulesDocument).map {
+            SyncRuleEngine.channelFileName($0).lowercased()
+        })
+        let conflicts = SyncConflictResolver.conflictSiblings(for: url)
+            .filter { !known.contains($0.lastPathComponent.lowercased()) }
+        guard !conflicts.isEmpty else { return }
+
+        var merged = ClipDatabase()
+        if FileManager.default.fileExists(atPath: url.path) {
+            SyncConflictResolver.merge(into: &merged, source: try ClipDatabaseFile.load(url, password: password))
+        }
+        for conflict in conflicts {
+            SyncConflictResolver.merge(into: &merged, source: try ClipDatabaseFile.load(conflict, password: password))
+        }
+        SyncConflictResolver.normalize(&merged)
+        try ClipDatabaseFile.saveAtomic(url, database: merged, password: password, salt: coreSaltLocked())
+        for conflict in conflicts {
+            try? FileManager.default.removeItem(at: conflict)
+        }
+    }
+
+    private func loadChannelsFromDiskLocked() throws {
+        rebuildChannelSlotsLocked()
+        for index in channelSlots.indices {
+            var loaded = try loadSlotDatabaseLocked(channelSlots[index])
+            SyncConflictResolver.normalize(&loaded)
+            channelSlots[index].database = loaded
+            channelSlots[index].fetched = Self.entriesByComparableID(loaded.Entries)
+            // In shared-folder mode the file is the transport, so its content is
+            // the hash recorded at the last transfer. In server mode only a
+            // transfer may replace that hash; an empty hash means "dirty", which
+            // is the safe answer when this device has not talked to the server
+            // about this channel yet.
+            if serverClient == nil {
+                channelSlots[index].plainHash = Self.durableHash(loaded)
+            }
+        }
+    }
+
+    /// Spec section 5, download steps 3 and 4: merges the channels into the one
+    /// view the user sees and records which channel each entry came from.
+    private func assembleViewLocked() {
+        var view = ClipDatabase(Version: 1, UpdatedUnixMs: TimeUtil.nowUnixMs(), Entries: [], DeletedEntries: [])
+        var owners: [String] = []
+        var indexByID: [String: Int] = [:]
+
+        for slot in channelSlots {
+            if slot.database.Version > view.Version {
+                view.Version = slot.database.Version
+            }
+            if slot.key.isEmpty {
+                view.unknownFields = slot.database.unknownFields
+            }
+            for entry in slot.database.Entries {
+                let identifier = Self.comparableID(entry.Id)
+                if !identifier.isEmpty, let index = indexByID[identifier] {
+                    // The same id in two channels is a move race: the copy with
+                    // the higher ModifiedUnixMs wins and the loser is dropped,
+                    // to be repaired by the next save.
+                    if entry.ModifiedUnixMs > view.Entries[index].ModifiedUnixMs {
+                        view.Entries[index] = entry
+                        owners[index] = slot.key
+                    }
+                    continue
+                }
+                view.Entries.append(entry)
+                owners.append(slot.key)
+                if !identifier.isEmpty {
+                    indexByID[identifier] = view.Entries.count - 1
+                }
+            }
+        }
+
+        // Tombstones apply within their own channel only, with one exception: a
+        // marker with a non-empty TextHash also suppresses matching text in
+        // other channels. A relocation marker has an empty TextHash and so can
+        // never suppress a live entry elsewhere.
+        var suppressed = [Bool](repeating: false, count: view.Entries.count)
+        for slot in channelSlots {
+            for marker in slot.database.DeletedEntries where !marker.TextHash.isEmpty {
+                for index in view.Entries.indices where !suppressed[index] && owners[index] != slot.key {
+                    if Self.textMarkerSuppresses(marker, view.Entries[index]) {
+                        suppressed[index] = true
+                    }
+                }
+            }
+        }
+
+        var survivors: [ClipEntry] = []
+        var owner: [String: String] = [:]
+        var live = Set<String>()
+        for (index, entry) in view.Entries.enumerated() where !suppressed[index] {
+            survivors.append(entry)
+            owner[entry.Id] = owners[index]
+            live.insert(Self.comparableID(entry.Id))
+        }
+        view.Entries = survivors
+
+        // The view carries every channel's markers, except those contradicted by
+        // a live entry elsewhere: applying a relocation marker to the view would
+        // delete the entry it only meant to move.
+        for slot in channelSlots {
+            for marker in slot.database.DeletedEntries where !live.contains(Self.comparableID(marker.Id)) {
+                view.DeletedEntries.append(marker)
+            }
+        }
+        SyncConflictResolver.normalize(&view)
+
+        var finalResidence: [String: String] = [:]
+        for entry in view.Entries {
+            if let key = owner[entry.Id] {
+                finalResidence[entry.Id] = key
+            }
+        }
+        database = view
+        residence = finalResidence
+        viewMarkers = Self.markersByComparableID(view.DeletedEntries)
+    }
+
+    /// The HEAD sweep of spec section 5, download step 2, used on its own to
+    /// decide whether a poll has any work to do. Without it a client with rules
+    /// enabled would rebuild its whole view every two seconds.
+    private func channelRevisionsChangedLocked() -> Bool {
+        guard rulesActiveLocked() else { return false }
+        guard !channelSlots.isEmpty else { return true }
+        for slot in channelSlots where !slot.key.isEmpty {
+            guard let client = channelClientLocked(slot) else { continue }
+            if slot.plainHash.isEmpty { return true }
+            do {
+                let head = try client.metadata()
+                if head.revision != slot.revision || !slot.existsOnServer { return true }
+            } catch ServerStorageError.notFound {
+                if slot.existsOnServer { return true }
+            } catch {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Spec section 5, download steps 1 and 2 for server mode: the rules bucket
+    /// has already been checked by the caller; each subscribed channel is HEADed
+    /// and only downloaded when its revision moved.
+    private func syncChannelsFromServerLocked() throws {
+        rebuildChannelSlotsLocked()
+        for index in channelSlots.indices {
+            var slot = channelSlots[index]
+            var merged = try loadSlotDatabaseLocked(slot)
+            SyncConflictResolver.normalize(&merged)
+            let fileHash = Self.durableHash(merged)
+            // The baseline is what the transport holds, never what the local
+            // file holds: an empty baseline means "dirty", which is the safe
+            // answer whenever this device has not transferred this channel yet.
+            var baselineHash = slot.plainHash
+
+            if let channelClient = channelClientLocked(slot) {
+                do {
+                    let head = try channelClient.metadata()
+                    if head.revision != slot.revision || !slot.existsOnServer {
+                        let download = try channelClient.download()
+                        var remote = try loadDownloadedDatabaseLocked(download.data)
+                        SyncConflictResolver.normalize(&remote)
+                        baselineHash = Self.durableHash(remote)
+                        SyncConflictResolver.merge(into: &merged, source: remote)
+                        SyncConflictResolver.normalize(&merged)
+                        slot.revision = download.metadata.revision
+                    }
+                    slot.existsOnServer = true
+                } catch ServerStorageError.notFound {
+                    // A missing bucket is an empty channel, not an error, and it
+                    // hashes like one: a channel nobody has written to yet must
+                    // not be created just because this device subscribes to it.
+                    slot.existsOnServer = false
+                    slot.revision = ""
+                    baselineHash = Self.emptyDatabaseHash()
+                }
+            } else {
+                baselineHash = fileHash
+            }
+
+            slot.database = merged
+            slot.plainHash = baselineHash
+            slot.fetched = Self.entriesByComparableID(merged.Entries)
+            channelSlots[index] = slot
+            if slot.key.isEmpty {
+                serverRevision = slot.revision
+            }
+            if Self.durableHash(merged) != fileHash {
+                try ClipDatabaseFile.saveAtomic(
+                    slot.url,
+                    database: merged,
+                    password: password,
+                    salt: slot.key.isEmpty ? nil : coreSaltLocked()
+                )
+            }
+        }
+
+        assembleViewLocked()
+        resetWatcherLocked()
+        let dirty = channelSlots.contains { Self.isDirty($0, Self.durableHash($0.database)) }
+        if dirty {
+            _ = saveWithChannelsLocked()
+            return
+        }
+        serverUploadPending = false
+        markServerSuccessLocked(upload: false)
+    }
+
+    /// Spec section 5, upload steps 1 to 5. Routes every entry, rebuilds one
+    /// database per channel, writes entries bound for unsubscribed channels
+    /// straight through, and commits the channels whose plaintext changed - in
+    /// two phases, so a partial failure can leave an entry in two channels but
+    /// never in none.
+    @discardableResult
+    private func saveWithChannelsLocked() -> Bool {
+        let now = TimeUtil.nowUnixMs()
+        SyncConflictResolver.normalize(&database)
+        database.UpdatedUnixMs = now
+
+        var slotIndexByKey: [String: Int] = [:]
+        for (index, slot) in channelSlots.enumerated() {
+            slotIndexByKey[slot.key] = index
+        }
+
+        var routed: [String: [ClipEntry]] = [:]
+        var departures: [String: [ClipEntry]] = [:]
+        var relocations: [String: [DeletedClipEntry]] = [:]
+        var pending: [String: [ClipEntry]] = [:]
+        var pendingKeys: [String] = []
+
+        for entry in database.Entries {
+            let target = SyncRuleEngine.route(document: rulesDocument, entry: entry)
+            if let source = residence[entry.Id], source != target {
+                departures[source, default: []].append(entry)
+                relocations[source, default: []].append(DeletedClipEntry(
+                    Id: entry.Id,
+                    TextHash: "",
+                    DeletedUnixMs: now,
+                    SourceMachine: machineName
+                ))
+            }
+            if slotIndexByKey[target] != nil {
+                routed[target, default: []].append(entry)
+                continue
+            }
+            if pending[target] == nil {
+                pendingKeys.append(target)
+            }
+            pending[target, default: []].append(entry)
+        }
+
+        // Tombstones are channel-local: each channel keeps the markers it
+        // already carried, and only markers this mutation created or refreshed
+        // are filed against the channel the entry lived in.
+        func assembleMarkers(includingRelocations: Bool) -> [String: [DeletedClipEntry]] {
+            var markers: [String: [DeletedClipEntry]] = [:]
+            for slot in self.channelSlots {
+                markers[slot.key] = slot.database.DeletedEntries
+            }
+            for marker in self.database.DeletedEntries {
+                let identifier = Self.comparableID(marker.Id)
+                if let before = self.viewMarkers[identifier],
+                   before.DeletedUnixMs == marker.DeletedUnixMs,
+                   before.TextHash == marker.TextHash {
+                    continue
+                }
+                var home = self.residence[marker.Id] ?? ""
+                if slotIndexByKey[home] == nil { home = "" }
+                markers[home, default: []].append(marker)
+            }
+            if includingRelocations {
+                for (key, relocated) in relocations where slotIndexByKey[key] != nil {
+                    markers[key, default: []].append(contentsOf: relocated)
+                }
+            }
+            return markers
+        }
+
+        func buildDatabases(_ assignment: [String: [ClipEntry]], _ markers: [String: [DeletedClipEntry]]) -> [ClipDatabase] {
+            self.channelSlots.map { slot in
+                let entries = assignment[slot.key] ?? []
+                var built = ClipDatabase(
+                    Version: max(1, slot.database.Version),
+                    UpdatedUnixMs: now,
+                    Entries: entries,
+                    DeletedEntries: Self.dropMarkersForEntries(markers[slot.key] ?? [], entries),
+                    unknownFields: slot.key.isEmpty ? self.database.unknownFields : slot.database.unknownFields
+                )
+                SyncConflictResolver.normalize(&built)
+                built.UpdatedUnixMs = now
+                return built
+            }
+        }
+
+        // Phase one keeps the entries a channel is about to lose, in the copy
+        // the channel was fetched with, and withholds its new relocation
+        // markers, so the first pass only ever adds.
+        func withDepartures(_ assignment: [String: [ClipEntry]]) -> [String: [ClipEntry]] {
+            guard !departures.isEmpty else { return assignment }
+            var combined = assignment
+            for (key, leaving) in departures where !leaving.isEmpty {
+                guard let index = slotIndexByKey[key] else { continue }
+                var staying = combined[key] ?? []
+                for entry in leaving {
+                    staying.append(self.channelSlots[index].fetched[Self.comparableID(entry.Id)] ?? entry)
+                }
+                combined[key] = staying
+            }
+            return combined
+        }
+
+        var writeThroughFailed = false
+        var delivered: [String] = []
+
+        // Write-through comes first: its targets gain entries that their source
+        // channels are about to lose. When one fails the entry is not taken
+        // away from where it already lives - its relocation is cancelled - and
+        // it is parked for the next successful poll (spec section 6).
+        for key in pendingKeys.sorted() {
+            let entries = pending[key] ?? []
+            do {
+                try writeThroughLocked(key: key, entries: entries)
+                delivered.append(SyncRuleEngine.channelName(rulesDocument, key: key))
+                dropPendingChannelWritesLocked(key: key, entries: entries)
+            } catch {
+                writeThroughFailed = true
+                RuntimeLogger.write(
+                    "Clipman could not deliver entries to an unsubscribed sync channel.",
+                    error: error,
+                    details: "Channel: \(key)"
+                )
+                parkPendingChannelWritesLocked(key: key, entries: entries)
+                for entry in entries {
+                    guard let source = residence[entry.Id] else { continue }
+                    routed[source, default: []].append(entry)
+                    departures[source] = Self.removingEntry(departures[source] ?? [], id: entry.Id)
+                    relocations[source] = Self.removingMarker(relocations[source] ?? [], id: entry.Id)
+                }
+            }
+        }
+
+        var uploadError: Error?
+        var committedAny = false
+
+        let phaseOne = buildDatabases(withDepartures(routed), assembleMarkers(includingRelocations: false))
+        for index in channelSlots.indices {
+            let candidate = Self.durableHash(phaseOne[index])
+            guard Self.isDirty(channelSlots[index], candidate) else { continue }
+            do {
+                try commitChannelLocked(index: index, database: phaseOne[index], hash: candidate)
+                committedAny = true
+            } catch {
+                uploadError = error
+                break
+            }
+        }
+
+        // Phase two runs only after every addition committed: the losing
+        // channels drop their departures and gain their relocation markers.
+        if uploadError == nil {
+            let phaseTwo = buildDatabases(routed, assembleMarkers(includingRelocations: true))
+            for index in channelSlots.indices {
+                guard !(departures[channelSlots[index].key] ?? []).isEmpty else { continue }
+                let candidate = Self.durableHash(phaseTwo[index])
+                guard Self.isDirty(channelSlots[index], candidate) else { continue }
+                do {
+                    try commitChannelLocked(index: index, database: phaseTwo[index], hash: candidate)
+                    committedAny = true
+                } catch {
+                    uploadError = error
+                    break
+                }
+            }
+        }
+
+        assembleViewLocked()
+        resetWatcherLocked()
+        announceWriteThroughLocked(delivered)
+
+        if let uploadError {
+            // A channel upload failed, so part of this mutation is not stored.
+            // Reporting it as saved would lose the user's change.
+            serverUploadPending = serverClient != nil
+            markServerFailureLocked()
+            reportServerFailureLocked(uploadError)
+            return false
+        }
+        if writeThroughFailed {
+            // Every subscribed channel committed; only the parked entries are
+            // outstanding, so the mutation itself succeeded.
+            serverUploadPending = serverClient != nil
+            return true
+        }
+        serverUploadPending = false
+        markServerSuccessLocked(upload: committedAny && serverClient != nil)
+        return true
+    }
+
+    /// Writes one channel: the local file first, which is the shared-folder
+    /// transport and the server-mode cache, then the identical bytes to its
+    /// bucket. A conflict re-reads that bucket, merges and retries.
+    private func commitChannelLocked(index: Int, database candidate: ClipDatabase, hash: Data) throws {
+        let key = channelSlots[index].key
+        let url = channelSlots[index].url
+        try ClipDatabaseFile.saveAtomic(
+            url,
+            database: candidate,
+            password: password,
+            salt: key.isEmpty ? nil : coreSaltLocked()
+        )
+        channelSlots[index].database = candidate
+        channelSlots[index].plainHash = hash
+        channelSlots[index].fetched = Self.entriesByComparableID(candidate.Entries)
+
+        guard let client = channelClientLocked(channelSlots[index]) else { return }
+        let data = try Data(contentsOf: url)
+        do {
+            let metadata = try client.upload(
+                data: data,
+                expectedRevision: channelSlots[index].revision,
+                createOnly: !channelSlots[index].existsOnServer
+            )
+            channelSlots[index].revision = metadata.revision
+            channelSlots[index].existsOnServer = true
+            if key.isEmpty { serverRevision = metadata.revision }
+        } catch ServerStorageError.conflict {
+            try resolveChannelConflictLocked(index: index, database: candidate)
+        } catch ServerStorageError.notFound {
+            let metadata = try client.upload(data: data, expectedRevision: "")
+            channelSlots[index].revision = metadata.revision
+            channelSlots[index].existsOnServer = true
+            if key.isEmpty { serverRevision = metadata.revision }
+        }
+    }
+
+    private func resolveChannelConflictLocked(index: Int, database candidate: ClipDatabase) throws {
+        guard let client = channelClientLocked(channelSlots[index]) else { return }
+        let key = channelSlots[index].key
+        let url = channelSlots[index].url
+        var local = candidate
+
+        for _ in 0..<3 {
+            var fresh = ClipDatabase()
+            var revision = ""
+            do {
+                let download = try client.download()
+                fresh = try loadDownloadedDatabaseLocked(download.data)
+                revision = download.metadata.revision
+            } catch ServerStorageError.notFound {
+                fresh = ClipDatabase()
+                revision = ""
+            }
+            var combined = fresh
+            SyncConflictResolver.merge(into: &combined, source: local)
+            SyncConflictResolver.normalize(&combined)
+            combined.UpdatedUnixMs = TimeUtil.nowUnixMs()
+            try ClipDatabaseFile.saveAtomic(
+                url,
+                database: combined,
+                password: password,
+                salt: key.isEmpty ? nil : coreSaltLocked()
+            )
+            let data = try Data(contentsOf: url)
+            do {
+                let metadata = try client.upload(
+                    data: data,
+                    expectedRevision: revision,
+                    createOnly: revision.isEmpty
+                )
+                channelSlots[index].database = combined
+                channelSlots[index].plainHash = Self.durableHash(combined)
+                channelSlots[index].fetched = Self.entriesByComparableID(combined.Entries)
+                channelSlots[index].revision = metadata.revision
+                channelSlots[index].existsOnServer = true
+                if key.isEmpty { serverRevision = metadata.revision }
+                return
+            } catch ServerStorageError.conflict {
+                local = combined
+            }
+        }
+        throw ServerStorageError.conflict
+    }
+
+    /// The one-shot fetch-merge-put of spec section 6 for a channel this device
+    /// does not subscribe to. The channel is discarded again afterwards, so its
+    /// contents never reach the local view.
+    private func writeThroughLocked(key: String, entries: [ClipEntry]) throws {
+        guard !key.isEmpty, !entries.isEmpty else { return }
+
+        guard let client = serverClient, client.isConfigured else {
+            // Shared-folder mode: the channel is an ordinary sibling file and
+            // writing it is the delivery.
+            let url = channelFileURL(key)
+            try resolveChannelFileConflictsLocked(url)
+            var existing = try ClipDatabaseFile.load(url, password: password)
+            existing.DeletedEntries = Self.dropMarkersForEntries(existing.DeletedEntries, entries)
+            SyncConflictResolver.merge(into: &existing, source: ClipDatabase(Entries: entries))
+            SyncConflictResolver.normalize(&existing)
+            try ClipDatabaseFile.saveAtomic(url, database: existing, password: password, salt: coreSaltLocked())
+            return
+        }
+
+        let databaseID = ServerDatabaseIdentity.channelDatabaseId(token: serverToken, password: password, channelKey: key)
+        guard let channelClient = client.addressing(databaseID: databaseID) else {
+            throw ServerStorageError.notConfigured
+        }
+        let temporary = dataFolderURL.appendingPathComponent(".clipman-write-through-\(UUID().uuidString).clipdb")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        for _ in 0..<3 {
+            var existing = ClipDatabase()
+            var revision = ""
+            var exists = false
+            do {
+                let download = try channelClient.download()
+                existing = try loadDownloadedDatabaseLocked(download.data)
+                revision = download.metadata.revision
+                exists = true
+            } catch ServerStorageError.notFound {
+                existing = ClipDatabase()
+            }
+            existing.DeletedEntries = Self.dropMarkersForEntries(existing.DeletedEntries, entries)
+            SyncConflictResolver.merge(into: &existing, source: ClipDatabase(Entries: entries))
+            SyncConflictResolver.normalize(&existing)
+            try ClipDatabaseFile.saveAtomic(temporary, database: existing, password: password, salt: coreSaltLocked())
+            let data = try Data(contentsOf: temporary)
+            do {
+                _ = try channelClient.upload(data: data, expectedRevision: revision, createOnly: !exists)
+                return
+            } catch ServerStorageError.conflict {
+                continue
+            }
+        }
+        throw ServerStorageError.conflict
+    }
+
+    private func parkPendingChannelWritesLocked(key: String, entries: [ClipEntry]) {
+        var stored = pendingChannelWrites[key] ?? []
+        for entry in entries where !stored.contains(where: { Self.comparableID($0.Id) == Self.comparableID(entry.Id) }) {
+            stored.append(entry)
+        }
+        pendingChannelWrites[key] = stored
+        persistPendingChannelWritesLocked()
+    }
+
+    private func dropPendingChannelWritesLocked(key: String, entries: [ClipEntry]) {
+        guard var stored = pendingChannelWrites[key] else { return }
+        let delivered = Set(entries.map { Self.comparableID($0.Id) })
+        stored.removeAll { delivered.contains(Self.comparableID($0.Id)) }
+        if stored.isEmpty {
+            pendingChannelWrites.removeValue(forKey: key)
+        } else {
+            pendingChannelWrites[key] = stored
+        }
+        persistPendingChannelWritesLocked()
+    }
+
+    private func persistPendingChannelWritesLocked() {
+        let url = pendingChannelWritesURL
+        guard !pendingChannelWrites.isEmpty else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        let value = PendingChannelWrites(Channels: pendingChannelWrites.keys.sorted().map {
+            PendingChannelWrite(ChannelKey: $0, Entries: pendingChannelWrites[$0] ?? [])
+        })
+        do {
+            try ClipDatabaseFile.saveAtomicCodable(url, value: value, password: password, salt: coreSaltLocked())
+        } catch {
+            RuntimeLogger.write("Clipman could not store pending sync channel writes.", error: error)
+        }
+    }
+
+    private func loadPendingChannelWritesLocked() {
+        var loaded: [String: [ClipEntry]] = [:]
+        if let stored = try? ClipDatabaseFile.loadCodable(
+            pendingChannelWritesURL,
+            password: password,
+            defaultValue: PendingChannelWrites()
+        ) {
+            for channel in stored.Channels where !channel.ChannelKey.isEmpty && !channel.Entries.isEmpty {
+                loaded[channel.ChannelKey] = channel.Entries
+            }
+        }
+        pendingChannelWrites = loaded
+    }
+
+    /// Retries parked write-throughs after a successful poll. Each entry is
+    /// re-routed against the rules document in effect now, never against the
+    /// channel key it was parked under, and an entry that now belongs to a
+    /// subscribed channel simply rejoins the view.
+    private func retryPendingChannelWritesLocked() {
+        guard !pendingChannelWrites.isEmpty else { return }
+        let parked = pendingChannelWrites.keys.sorted().flatMap { pendingChannelWrites[$0] ?? [] }
+        guard !parked.isEmpty else {
+            pendingChannelWrites = [:]
+            persistPendingChannelWritesLocked()
+            return
+        }
+
+        let subscribed = Set(channelSlots.map(\.key))
+        var regrouped: [String: [ClipEntry]] = [:]
+        var reclaimed: [ClipEntry] = []
+        for entry in parked {
+            let target = SyncRuleEngine.route(document: rulesDocument, entry: entry)
+            if subscribed.contains(target) {
+                reclaimed.append(entry)
+                continue
+            }
+            regrouped[target, default: []].append(entry)
+        }
+
+        var remaining: [String: [ClipEntry]] = [:]
+        var delivered: [String] = []
+        for key in regrouped.keys.sorted() {
+            let entries = regrouped[key] ?? []
+            do {
+                try writeThroughLocked(key: key, entries: entries)
+                delivered.append(SyncRuleEngine.channelName(rulesDocument, key: key))
+            } catch {
+                remaining[key] = entries
+            }
+        }
+        pendingChannelWrites = remaining
+        persistPendingChannelWritesLocked()
+        announceWriteThroughLocked(delivered)
+
+        guard !reclaimed.isEmpty else { return }
+        for entry in reclaimed where !database.Entries.contains(where: { Self.comparableID($0.Id) == Self.comparableID(entry.Id) }) {
+            database.Entries.append(entry)
+        }
+        if saveLocked() {
+            DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+        }
+    }
+
+    private func announceWriteThroughLocked(_ names: [String]) {
+        guard !names.isEmpty else { return }
+        var seen = Set<String>()
+        let ordered = names.filter { seen.insert($0).inserted }
+        DispatchQueue.main.async { self.delegate?.clipStoreDidWriteThrough(channelNames: ordered) }
+    }
+
+    private func afterSuccessfulPollLocked() {
+        selfRegisterDeviceLocked()
+        retryPendingChannelWritesLocked()
+    }
+
+    /// Spec section 4, Registry behavior: once rules are enabled, a client whose
+    /// device name is missing from Devices adds itself, subscribed to
+    /// everything, on its next successful sync.
+    private func selfRegisterDeviceLocked() {
+        guard let document = rulesDocument, document.Enabled, !SyncRuleEngine.isReadOnly(document) else { return }
+        let name = machineName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let target = SyncRuleEngine.normalized(name)
+        guard !document.Devices.contains(where: { SyncRuleEngine.normalized($0.Name) == target }) else { return }
+
+        var updated = document
+        updated.Devices.append(SyncDevice(Name: name, Channels: ["*"]))
+        updated.UpdatedUnixMs = TimeUtil.nowUnixMs()
+        updated.UpdatedBy = name
+        guard SyncRuleEngine.validate(updated) == nil else { return }
+        rulesDocument = updated
+        rebuildChannelSlotsLocked()
+        writeRulesCacheLocked()
+        if serverClient != nil {
+            rulesRevision = uploadRulesLocked(updated, createOnly: !rulesExistsOnServer)
+            rulesServerRevision = rulesRevision
+        }
+    }
+
+    /// Reads the rules document from its sibling file. That file is the
+    /// shared-folder transport and, in server mode, the local cache the spec's
+    /// 404 fallback restores from.
+    @discardableResult
+    private func refreshRulesFromDiskLocked() -> Bool {
+        resolveRulesConflictsLocked()
+        guard let payload = try? ClipDatabaseFile.loadRawPayload(rulesFileURL, password: password),
+              let stored = SyncRuleEngine.parse(payload) else {
+            // Nothing readable on disk: the cache must be written again from
+            // whatever is in effect rather than assumed to be already there.
+            rulesCacheHash = Data()
+            return false
+        }
+        rulesCacheHash = Self.payloadHash(SyncRuleEngine.serialize(stored))
+        let merged = SyncRuleEngine.merge(local: rulesDocument, remote: stored)
+        guard merged != rulesDocument else { return false }
+        rulesDocument = merged
+        rebuildChannelSlotsLocked()
+        return true
+    }
+
+    /// Spec section 5, download step 1: HEAD the rules bucket, download only on
+    /// a revision change, merge into the cache, and recompute subscriptions. A
+    /// damaged or unreadable rules document degrades to no rules rather than
+    /// stopping history from syncing.
+    @discardableResult
+    private func refreshRulesFromServerLocked() -> Bool {
+        guard let client = serverClient, client.isConfigured else { return false }
+        let rulesID = ServerDatabaseIdentity.syncRulesDatabaseId(token: serverToken, password: password)
+        guard let rulesClient = client.addressing(databaseID: rulesID) else { return false }
+
+        do {
+            let head = try rulesClient.metadata()
+            rulesExistsOnServer = true
+            if head.revision == rulesServerRevision, rulesDocument != nil {
+                return false
+            }
+            let download = try rulesClient.download()
+            rulesServerRevision = download.metadata.revision
+            guard let payload = try? decodeRulesPayloadLocked(download.data),
+                  let remote = SyncRuleEngine.parse(payload) else {
+                return false
+            }
+            let merged = SyncRuleEngine.merge(local: rulesDocument, remote: remote)
+            let changed = merged != rulesDocument
+            // When the cache wins the merge, the effective document is not the
+            // one the server holds, so no revision is reported: an If-Match
+            // against it would claim an edit was based on a document the server
+            // never saw.
+            rulesRevision = (merged == remote) ? download.metadata.revision : ""
+            rulesDocument = merged
+            if changed {
+                writeRulesCacheLocked()
+                rebuildChannelSlotsLocked()
+            }
+            return changed
+        } catch ServerStorageError.notFound {
+            rulesExistsOnServer = false
+            rulesRevision = ""
+            rulesServerRevision = ""
+            // A cached future-version document is kept for display only and must
+            // never be re-uploaded, so it does not arm this fallback.
+            guard let cached = rulesDocument, !SyncRuleEngine.isReadOnly(cached) else { return false }
+            rulesRevision = uploadRulesLocked(cached, createOnly: true)
+            rulesServerRevision = rulesRevision
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    private func decodeRulesPayloadLocked(_ data: Data) throws -> Data {
+        let temporary = dataFolderURL.appendingPathComponent(".clipman-sync-rules-download-\(UUID().uuidString).clipdb")
+        try FileManager.default.createDirectory(at: dataFolderURL, withIntermediateDirectories: true)
+        try data.write(to: temporary, options: [.atomic])
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        guard let payload = try ClipDatabaseFile.loadRawPayload(temporary, password: password) else {
+            throw ClipDatabaseError.unsupportedFormat("The sync rules document was empty.")
+        }
+        return payload
+    }
+
+    private func writeRulesCacheLocked() {
+        guard let document = rulesDocument, let payload = SyncRuleEngine.serialize(document) else { return }
+        let hash = Self.payloadHash(payload)
+        guard hash != rulesCacheHash else { return }
+        do {
+            try ClipDatabaseFile.saveRawPayloadAtomic(
+                rulesFileURL,
+                payload: payload,
+                password: password,
+                salt: coreSaltLocked()
+            )
+            rulesCacheHash = hash
+        } catch {
+            RuntimeLogger.write("Clipman could not store the sync rules document.", error: error)
+        }
+    }
+
+    private func uploadRulesLocked(_ document: SyncRulesDocument, createOnly: Bool) -> String {
+        guard let client = serverClient, client.isConfigured else { return rulesRevision }
+        let rulesID = ServerDatabaseIdentity.syncRulesDatabaseId(token: serverToken, password: password)
+        guard let rulesClient = client.addressing(databaseID: rulesID),
+              let payload = SyncRuleEngine.serialize(document) else {
+            return rulesRevision
+        }
+        let temporary = dataFolderURL.appendingPathComponent(".clipman-sync-rules-upload-\(UUID().uuidString).clipdb")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        do {
+            try ClipDatabaseFile.saveRawPayloadAtomic(
+                temporary,
+                payload: payload,
+                password: password,
+                salt: coreSaltLocked()
+            )
+            let data = try Data(contentsOf: temporary)
+            let metadata = try rulesClient.upload(
+                data: data,
+                expectedRevision: createOnly ? "" : rulesRevision,
+                createOnly: createOnly
+            )
+            rulesExistsOnServer = true
+            return metadata.revision
+        } catch {
+            RuntimeLogger.write("Clipman could not upload the sync rules document.", error: error)
+            return createOnly ? "" : rulesRevision
+        }
+    }
+
+    /// The rules file is not a `ClipDatabase`, so its conflict copies are merged
+    /// by the document's own last-writer-wins rule rather than by the entry
+    /// merge the history files use.
+    private func resolveRulesConflictsLocked() {
+        let conflicts = SyncConflictResolver.conflictSiblings(for: rulesFileURL)
+        guard !conflicts.isEmpty else { return }
+
+        var winner: SyncRulesDocument?
+        if let payload = try? ClipDatabaseFile.loadRawPayload(rulesFileURL, password: password),
+           let current = SyncRuleEngine.parse(payload) {
+            winner = current
+        }
+        for conflict in conflicts {
+            if let payload = try? ClipDatabaseFile.loadRawPayload(conflict, password: password),
+               let candidate = SyncRuleEngine.parse(payload) {
+                winner = SyncRuleEngine.merge(local: winner, remote: candidate)
+            }
+            try? FileManager.default.removeItem(at: conflict)
+        }
+        guard let winner, !SyncRuleEngine.isReadOnly(winner), let payload = SyncRuleEngine.serialize(winner) else {
+            return
+        }
+        try? ClipDatabaseFile.saveRawPayloadAtomic(
+            rulesFileURL,
+            payload: payload,
+            password: password,
+            salt: coreSaltLocked()
+        )
+        rulesCacheHash = Self.payloadHash(payload)
+    }
+
+    // MARK: - Sync channel helpers
+
+    /// The dirty-detection hash of spec section 5, upload step 4: SHA-256 of the
+    /// deterministic plaintext JSON with the database-level `UpdatedUnixMs`
+    /// zeroed. Zeroing it is what makes the hash durable across poll cycles,
+    /// because normalization restamps that field on every pass. Sorted keys make
+    /// the encoding deterministic; this hash is only ever compared with itself
+    /// on the same device, so it needs no cross-client agreement.
+    private static func durableHash(_ database: ClipDatabase) -> Data {
+        var durable = database
+        durable.UpdatedUnixMs = 0
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let encoded = try? encoder.encode(durable) else { return Data() }
+        return Data(SHA256.hash(data: encoded))
+    }
+
+    /// The durable hash of an empty, normalized channel database.
+    private static func emptyDatabaseHash() -> Data {
+        var empty = ClipDatabase()
+        SyncConflictResolver.normalize(&empty)
+        return durableHash(empty)
+    }
+
+    private static func payloadHash(_ payload: Data?) -> Data {
+        guard let payload else { return Data() }
+        return Data(SHA256.hash(data: payload))
+    }
+
+    /// An empty hash on either side means "not known to match", which must be
+    /// treated as dirty so nothing is silently left unsent.
+    private static func isDirty(_ slot: ChannelSlot, _ candidate: Data) -> Bool {
+        slot.plainHash.isEmpty || candidate.isEmpty || candidate != slot.plainHash
+    }
+
+    private static func comparableID(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func entriesByComparableID(_ entries: [ClipEntry]) -> [String: ClipEntry] {
+        var byID: [String: ClipEntry] = [:]
+        for entry in entries {
+            byID[comparableID(entry.Id)] = entry
+        }
+        return byID
+    }
+
+    private static func markersByComparableID(_ markers: [DeletedClipEntry]) -> [String: DeletedClipEntry] {
+        var byID: [String: DeletedClipEntry] = [:]
+        for marker in markers {
+            byID[comparableID(marker.Id)] = marker
+        }
+        return byID
+    }
+
+    /// The text-hash half of the entry merge's deletion rule, which is the only
+    /// tombstone rule that reaches across channel boundaries.
+    private static func textMarkerSuppresses(_ marker: DeletedClipEntry, _ entry: ClipEntry) -> Bool {
+        guard !marker.TextHash.isEmpty, !entry.Text.isEmpty else { return false }
+        guard marker.TextHash.caseInsensitiveCompare(SyncConflictResolver.textHash(entry.Text)) == .orderedSame else {
+            return false
+        }
+        let changed = max(entry.CreatedUnixMs, entry.LastUsedUnixMs)
+        return marker.DeletedUnixMs <= 0 || changed <= marker.DeletedUnixMs
+    }
+
+    /// Removes markers naming an entry being written into the same channel.
+    /// Without this a relocation marker left by an earlier move would delete the
+    /// entry again when a rule change moves it back.
+    private static func dropMarkersForEntries(_ markers: [DeletedClipEntry], _ entries: [ClipEntry]) -> [DeletedClipEntry] {
+        guard !markers.isEmpty, !entries.isEmpty else { return markers }
+        let resident = Set(entries.map { comparableID($0.Id) })
+        return markers.filter { !resident.contains(comparableID($0.Id)) }
+    }
+
+    private static func removingEntry(_ entries: [ClipEntry], id: String) -> [ClipEntry] {
+        let target = comparableID(id)
+        return entries.filter { comparableID($0.Id) != target }
+    }
+
+    private static func removingMarker(_ markers: [DeletedClipEntry], id: String) -> [DeletedClipEntry] {
+        let target = comparableID(id)
+        return markers.filter { comparableID($0.Id) != target }
     }
 
     private func resetServerStatusLocked() {
@@ -919,16 +2057,21 @@ final class ClipStore: @unchecked Sendable {
     private func handleServerMetadataResultLocked(_ result: Result<ServerDatabaseMetadata, Error>) {
         switch result {
         case .success(let metadata):
+            // Spec section 5, download step 1: the rules bucket is checked
+            // first, because its content decides which channels are read next.
+            let rulesChanged = refreshRulesFromServerLocked()
             let revisionChanged = metadata.revision != serverRevision
-            guard revisionChanged || serverUploadPending else {
+            guard revisionChanged || serverUploadPending || rulesChanged || channelRevisionsChangedLocked() else {
                 markServerSuccessLocked(upload: false)
+                afterSuccessfulPollLocked()
                 return
             }
             do {
-                try syncFromServerLocked(uploadLocalWhenMissing: false)
-                if revisionChanged {
+                try syncFromServerLocked(uploadLocalWhenMissing: false, refreshRules: false)
+                if revisionChanged || rulesChanged {
                     DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
                 }
+                afterSuccessfulPollLocked()
             } catch {
                 markServerFailureLocked()
                 reportServerFailureLocked(error)
@@ -942,6 +2085,7 @@ final class ClipStore: @unchecked Sendable {
             do {
                 try syncFromServerLocked(uploadLocalWhenMissing: true)
                 DispatchQueue.main.async { self.delegate?.clipStoreDidChange() }
+                afterSuccessfulPollLocked()
             } catch {
                 markServerFailureLocked()
                 reportServerFailureLocked(error)
@@ -962,11 +2106,20 @@ final class ClipStore: @unchecked Sendable {
         }
     }
 
-    private func syncFromServerLocked(uploadLocalWhenMissing: Bool) throws {
+    private func syncFromServerLocked(uploadLocalWhenMissing: Bool, refreshRules: Bool = true) throws {
         guard let client = serverClient, client.isConfigured else { return }
         if serverSyncInProgress { return }
         serverSyncInProgress = true
         defer { serverSyncInProgress = false }
+
+        if refreshRules {
+            refreshRulesFromServerLocked()
+        }
+        if rulesActiveLocked() {
+            try syncChannelsFromServerLocked()
+            return
+        }
+        clearChannelStateLocked()
 
         do {
             let download = try client.download()
