@@ -56,6 +56,7 @@ namespace Clipman.Tests
             Run("command-line entries retain the configured device identity", CommandLineEntriesRetainConfiguredDeviceIdentity);
             Run("command-line clipboard handoff is exact, consumable, and bounded", CommandLineClipboardHandoffIsBounded);
             Run("channel identity matches the cross-client fixture", ChannelIdentityMatchesCrossClientFixture);
+            Run("the go sync rules fixture corpus decodes into the expected view", GoSyncRulesFixtureCorpusDecodesIntoExpectedView);
             Run("sync rule channel keys follow the normalized grammar", SyncRuleChannelKeyGrammar);
             Run("sync rule routing honors first-match and AND semantics", SyncRuleRoutingFirstMatchAndAndSemantics);
             Run("sync rule subscriptions resolve per device", SyncRuleSubscriptions);
@@ -521,6 +522,131 @@ namespace Clipman.Tests
                 "A blank server token should yield an empty sync rules identity.");
             Assert(ServerDatabaseIdentity.SyncRulesFromTokenAndPassword("example-token", "") == string.Empty,
                 "A blank history password should yield an empty sync rules identity.");
+        }
+
+        // The reduced expectation shape recorded in the fixture corpus
+        // (ClipmanCli/testdata/fixtures/README.md). Property names match the
+        // JSON keys exactly because JavaScriptSerializer maps them literally.
+        private sealed class FixtureViewEntry
+        {
+            public string id { get; set; }
+            public string text { get; set; }
+            public string name { get; set; }
+            public string group { get; set; }
+            public string sourceMachine { get; set; }
+            public long createdUnixMs { get; set; }
+            public long lastUsedUnixMs { get; set; }
+            public bool pinned { get; set; }
+            public bool isTemplate { get; set; }
+            public long manualOrder { get; set; }
+            public bool hasRichText { get; set; }
+        }
+
+        private sealed class FixtureExpectedView
+        {
+            public int version { get; set; }
+            public long updatedUnixMs { get; set; }
+            public List<FixtureViewEntry> entries { get; set; }
+            public List<object> deleted { get; set; }
+        }
+
+        private static string FindGoSyncRulesFixtureDirectory()
+        {
+            var root = Environment.GetEnvironmentVariable("CLIPMAN_REPO_ROOT");
+            if (!string.IsNullOrEmpty(root))
+            {
+                var fromRoot = Path.Combine(Path.Combine(Path.Combine(root, "ClipmanCli"), "testdata"), Path.Combine("fixtures", "go"));
+                if (Directory.Exists(fromRoot)) return fromRoot;
+            }
+            var probe = Environment.CurrentDirectory;
+            while (!string.IsNullOrEmpty(probe))
+            {
+                var candidate = Path.Combine(Path.Combine(Path.Combine(probe, "ClipmanCli"), "testdata"), Path.Combine("fixtures", "go"));
+                if (Directory.Exists(candidate)) return candidate;
+                probe = Path.GetDirectoryName(probe);
+            }
+            return null;
+        }
+
+        // Task 6.1 of the sync rules plan: decode the blobs the Go reference
+        // implementation generated, apply this client's own subscription and
+        // merge logic for device Jeff-iPhone (subscribed to the work channel
+        // only), and compare the assembled view against expected-view.json.
+        // A failure here is a real cross-device sync break, not a style
+        // disagreement.
+        private static void GoSyncRulesFixtureCorpusDecodesIntoExpectedView()
+        {
+            var directory = FindGoSyncRulesFixtureDirectory();
+            Assert(directory != null,
+                "The go-reference sync rules fixture corpus was not found; set CLIPMAN_REPO_ROOT or run from the repository.");
+
+            var password = "example-password";
+            var rules = ClipDatabaseFile.Load<SyncRulesDocument>(Path.Combine(directory, "sync-rules.clipdb"), password);
+            Assert(rules != null && rules.Clipman == "sync-rules" && rules.Enabled,
+                "The rules blob did not decode into an enabled sync-rules document.");
+            Assert(SyncRuleEngine.Validate(rules) == null, "The fixture rules document failed validation.");
+
+            var subscribed = SyncRuleEngine.SubscribedChannels(rules, "Jeff-iPhone");
+            Assert(subscribed != null && subscribed.Count == 1 && subscribed.Contains("work"),
+                "Jeff-iPhone must subscribe to the work channel and nothing else.");
+
+            var core = ClipDatabaseFile.Load(Path.Combine(directory, "core.clipdb"), password);
+            var work = ClipDatabaseFile.Load(Path.Combine(directory, "channel-work.clipdb"), password);
+            var images = ClipDatabaseFile.Load(Path.Combine(directory, "channel-images.clipdb"), password);
+            Assert(core.Entries.Count > 0 && work.Entries.Count > 0 && images.Entries.Count > 0,
+                "Every fixture channel blob must decode to at least one entry.");
+
+            // Assemble the subscribed view exactly as the client does: core
+            // first, then the subscribed channels in document order, then the
+            // dense manual-order renumbering of the merged database.
+            var view = new ClipDatabase();
+            SyncConflictResolver.MergeInto(view, core);
+            SyncConflictResolver.MergeInto(view, work);
+            var renumbered = view.Entries
+                .OrderBy(e => e.ManualOrder <= 0 ? long.MaxValue : e.ManualOrder)
+                .ThenBy(e => e.CreatedUnixMs)
+                .ToList();
+            for (var index = 0; index < renumbered.Count; index++)
+            {
+                renumbered[index].ManualOrder = index + 1;
+            }
+
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var expected = serializer.Deserialize<FixtureExpectedView>(
+                File.ReadAllText(Path.Combine(directory, "expected-view.json")));
+            Assert(expected != null && expected.entries != null, "expected-view.json did not parse.");
+
+            var actual = view.Entries.OrderBy(e => e.Id, StringComparer.Ordinal).ToList();
+            Assert(actual.Count == expected.entries.Count,
+                "The assembled view holds " + actual.Count.ToString(CultureInfo.InvariantCulture) +
+                " entries, but the fixture expects " + expected.entries.Count.ToString(CultureInfo.InvariantCulture) + ".");
+            for (var index = 0; index < actual.Count; index++)
+            {
+                var got = actual[index];
+                var want = expected.entries[index];
+                Assert(got.Id == want.id, "View entry " + want.id + " is missing or out of order.");
+                Assert(got.Text == want.text, "View entry " + want.id + " text mismatch.");
+                Assert((got.Name ?? string.Empty) == want.name, "View entry " + want.id + " name mismatch.");
+                Assert((got.Group ?? string.Empty) == want.group, "View entry " + want.id + " group mismatch.");
+                Assert((got.SourceMachine ?? string.Empty) == want.sourceMachine, "View entry " + want.id + " source device mismatch.");
+                Assert(got.CreatedUnixMs == want.createdUnixMs, "View entry " + want.id + " created timestamp mismatch.");
+                Assert(got.LastUsedUnixMs == want.lastUsedUnixMs, "View entry " + want.id + " last-used timestamp mismatch.");
+                Assert(got.Pinned == want.pinned, "View entry " + want.id + " pinned mismatch.");
+                Assert(got.IsTemplate == want.isTemplate, "View entry " + want.id + " template mismatch.");
+                Assert(got.ManualOrder == want.manualOrder, "View entry " + want.id + " manual order mismatch.");
+                Assert((got.RichText != null) == want.hasRichText, "View entry " + want.id + " rich text presence mismatch.");
+            }
+            Assert((view.DeletedEntries == null ? 0 : view.DeletedEntries.Count) == (expected.deleted == null ? 0 : expected.deleted.Count),
+                "The assembled view's tombstone count does not match the fixture.");
+
+            // The images channel is unsubscribed: none of its entries may
+            // appear in the view.
+            foreach (var entry in images.Entries)
+            {
+                var identifier = entry.Id;
+                Assert(!view.Entries.Any(e => string.Equals(e.Id, identifier, StringComparison.OrdinalIgnoreCase)),
+                    "An unsubscribed channel's entry leaked into the view.");
+            }
         }
 
         private static void SyncRuleChannelKeyGrammar()

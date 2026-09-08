@@ -21,9 +21,15 @@ import (
 
 // Identity is one token/password to bucket-ID vector.
 type Identity struct {
-	Name       string `json:"name"`
-	Token      string `json:"token"`
-	Password   string `json:"password"`
+	Name     string `json:"name"`
+	Token    string `json:"token"`
+	Password string `json:"password"`
+	// Kind selects the derivation under test: "" or "database" for the
+	// history bucket, "channel" for a sync channel bucket (ChannelKey names
+	// the channel), and "sync-rules" for the rules bucket. See
+	// sync-rules-spec.md section 2.
+	Kind       string `json:"kind,omitempty"`
+	ChannelKey string `json:"channelKey,omitempty"`
 	DatabaseID string `json:"databaseId"`
 }
 
@@ -37,6 +43,28 @@ type Database struct {
 	Container string `json:"container"`
 }
 
+// SyncRulesChannel names one channel blob of a sync-rules fixture set. An
+// empty Key is the core channel.
+type SyncRulesChannel struct {
+	Key        string `json:"key"`
+	File       string `json:"file"`
+	DatabaseID string `json:"databaseId"`
+}
+
+// SyncRules is a sync-rules interoperability fixture set per
+// sync-rules-spec.md: an encrypted rules-document blob, one encrypted blob
+// per channel, and the merged view the named device must assemble from the
+// channels it subscribes to.
+type SyncRules struct {
+	Token           string             `json:"token"`
+	Password        string             `json:"password"`
+	Device          string             `json:"device"`
+	RulesFile       string             `json:"rulesFile"`
+	RulesDatabaseID string             `json:"rulesDatabaseId"`
+	Channels        []SyncRulesChannel `json:"channels"`
+	ExpectedView    string             `json:"expectedView"`
+}
+
 // Manifest is one generator's corpus.
 type Manifest struct {
 	Version   int        `json:"version"`
@@ -44,6 +72,7 @@ type Manifest struct {
 	Note      string     `json:"note"`
 	Identity  []Identity `json:"identity"`
 	Databases []Database `json:"databases"`
+	SyncRules *SyncRules `json:"syncRules,omitempty"`
 
 	// Dir is the directory the manifest was read from.
 	Dir string `json:"-"`
@@ -165,6 +194,30 @@ func Load(generator string) (Manifest, error) {
 // Blob reads the stored bytes for one database.
 func (m Manifest) Blob(database Database) ([]byte, error) {
 	return os.ReadFile(filepath.Join(m.Dir, database.File))
+}
+
+// ReadFile reads a named file from the manifest's directory, for the
+// sync-rules blobs and expectation files the manifest's SyncRules section
+// points at.
+func (m Manifest) ReadFile(name string) ([]byte, error) {
+	return os.ReadFile(filepath.Join(m.Dir, name))
+}
+
+// SyncRulesExpectedView reads the merged-view expectation of the manifest's
+// sync-rules set.
+func (m Manifest) SyncRulesExpectedView() (Expected, error) {
+	if m.SyncRules == nil {
+		return Expected{}, errors.New("manifest has no sync-rules set")
+	}
+	data, err := m.ReadFile(m.SyncRules.ExpectedView)
+	if err != nil {
+		return Expected{}, err
+	}
+	var expected Expected
+	if err := json.Unmarshal(data, &expected); err != nil {
+		return Expected{}, fmt.Errorf("%s: %w", m.SyncRules.ExpectedView, err)
+	}
+	return expected, nil
 }
 
 // Expected reads the recorded reading for one database.

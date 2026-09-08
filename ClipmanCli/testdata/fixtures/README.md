@@ -42,6 +42,7 @@ encoding.
 | Generator | State | How it is produced |
 |---|---|---|
 | `windows/` | **present** | `tools\ClipmanFixtures\Build-Fixtures.ps1`, compiled against `src\` |
+| `go/` | **present** | `go test ./internal/syncengine -run TestRegenerateSyncRulesFixtures -regenerate-sync-rules-fixtures` |
 | `macos/` | missing | needs a Mac; see below |
 | `android/` | missing | needs a JDK 17+ and the Android SDK |
 | `ios/` | missing | needs Xcode |
@@ -51,6 +52,33 @@ The Go tests discover generators rather than listing them, so dropping a
 `macos/` directory in place brings it into every test with no code change. Tests
 skip cleanly when the corpus is absent, so a checkout without fixtures still
 builds and passes.
+
+## The sync-rules set (`go/`)
+
+`go/` is the sync-rules interoperability set of `sync-rules-spec.md`, generated
+by the Go reference implementation's own codec and identity code. Its manifest
+extends the schema with:
+
+- `identity` vectors carrying a `kind` (`database`, `channel` with a
+  `channelKey`, or `sync-rules`) selecting which bucket-ID derivation the
+  vector pins. Vectors without a `kind` are ordinary database vectors, so old
+  manifests are unaffected.
+- a `syncRules` section naming the encrypted rules-document blob, one blob per
+  channel (`key` of `""` is core), the bucket id each blob would live in, a
+  device name, and `expected-view.json` — the merged view that device must
+  assemble from the channels it subscribes to. In the shipped set,
+  `Jeff-iPhone` subscribes to `work` only, so the view is core plus the work
+  channel and nothing from the images channel.
+
+Consumers: `TestSyncRulesFixtureViewMatchesTheContract` (Go, runs the real
+multi-channel engine against a fake server holding the blobs), the Windows
+regression test `GoSyncRulesFixtureCorpusDecodesIntoExpectedView`, the Mac
+`SyncRulesFixtureCorpusTests`, and the Android `SyncRulesFixtureCorpusTest`.
+Each decodes the blobs with its own port and asserts the identical view. The
+channel blobs are also listed under `databases`, so the ordinary decode sweep
+covers them too. The set carries no tombstones on purpose: the 90-day
+tombstone retention window would age a fixed-timestamp tombstone out of the
+view and make the expectation time-dependent.
 
 ## Regenerating the Windows fixtures
 

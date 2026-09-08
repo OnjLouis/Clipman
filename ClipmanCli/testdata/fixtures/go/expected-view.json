@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "updatedUnixMs": 1757200000000,
+  "entries": [
+    {
+      "id": "core-plain",
+      "text": "Core grocery list",
+      "name": "",
+      "group": "Personal",
+      "sourceMachine": "Jeff-iPhone",
+      "createdUnixMs": 1757200000100,
+      "lastUsedUnixMs": 1757200000100,
+      "pinned": false,
+      "isTemplate": false,
+      "manualOrder": 1,
+      "hasRichText": false
+    },
+    {
+      "id": "core-unmatched",
+      "text": "Loose note",
+      "name": "",
+      "group": "",
+      "sourceMachine": "Jeff-iPhone",
+      "createdUnixMs": 1757200000200,
+      "lastUsedUnixMs": 1757200000200,
+      "pinned": false,
+      "isTemplate": false,
+      "manualOrder": 3,
+      "hasRichText": false
+    },
+    {
+      "id": "work-plan",
+      "text": "Quarterly plan",
+      "name": "",
+      "group": "Work",
+      "sourceMachine": "Desktop",
+      "createdUnixMs": 1757200000400,
+      "lastUsedUnixMs": 1757200000400,
+      "pinned": false,
+      "isTemplate": false,
+      "manualOrder": 4,
+      "hasRichText": false
+    },
+    {
+      "id": "work-standup",
+      "text": "Standup notes",
+      "name": "",
+      "group": "Standup",
+      "sourceMachine": "Jeff-iPhone",
+      "createdUnixMs": 1757200000300,
+      "lastUsedUnixMs": 1757200000300,
+      "pinned": false,
+      "isTemplate": false,
+      "manualOrder": 2,
+      "hasRichText": false
+    }
+  ],
+  "deleted": []
+}
