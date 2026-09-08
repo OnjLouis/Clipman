@@ -145,10 +145,18 @@ func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(
 	pending := make(map[string][]model.Entry)
 	pendingKeys := make([]string, 0)
 	relocations := make(map[string][]model.DeletedEntry)
+	// A future-version document is read-only: this client cannot fully evaluate
+	// its rules, so it must not fight better-informed clients over placement.
+	// Every entry that already lives somewhere stays there, and only new
+	// captures are routed (spec section 4).
+	readOnly := rules.ReadOnly(view.Rules)
 	for index := range view.View.Entries {
 		entry := view.View.Entries[index]
 		target := rules.RouteEntry(view.Rules, &entry)
 		source, resident := view.Residence[entry.ID]
+		if readOnly && resident {
+			target = source
+		}
 		if resident && source != target {
 			departures[source] = append(departures[source], entry)
 			relocations[source] = append(relocations[source], model.DeletedEntry{
@@ -461,7 +469,11 @@ func (e *Engine) readRules(ctx context.Context, coreBlob []byte) (*rules.Documen
 	client := e.bucketClient(rulesID)
 	download, err := client.Get(ctx)
 	if errors.Is(err, server.ErrNotFound) {
-		if e.CachedRules == nil {
+		// A cached future-version document is kept for display only and must
+		// never be written back, so it does not arm this fallback: on a genuine
+		// loss of the rules bucket such a client falls back to disabled rules
+		// until an up-to-date client restores the document (spec section 4).
+		if e.CachedRules == nil || rules.ReadOnly(e.CachedRules) {
 			return nil, "", nil
 		}
 		return e.CachedRules, e.uploadCachedRules(ctx, client, coreBlob), nil

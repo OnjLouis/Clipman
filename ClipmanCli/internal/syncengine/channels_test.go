@@ -877,6 +877,76 @@ func TestMissingRulesBucketFallsBackToCache(t *testing.T) {
 	}
 }
 
+func TestMutateViewReadOnlyDocumentNeverRelocates(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	document := enabledRules(rules.Device{Name: "Phone", Channels: []string{}})
+	document.Version = 2
+	fake.storeRules(t, document)
+	// x lives in core but its group matches the work channel: under a
+	// read-only document its current residence is authoritative.
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("x", "hello", "Work", 1000)))
+	fake.storeDatabase(t, channelBucketID("work"), databaseWith(testEntry("w", "work text", "Work", 1000)))
+
+	view, err := engine.MutateView(context.Background(), "Laptop", func(database *model.Database) error {
+		database.Entries = append(database.Entries, testEntry("n", "new core entry", "", 4000))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := fake.database(t, coreBucketID())
+	if !hasEntry(core, "x") {
+		t.Fatalf("core entries = %v; a read-only document relocated a resident entry", entryIDs(&core))
+	}
+	if len(core.Deleted) != 0 {
+		t.Fatalf("core tombstones = %#v, want none: no relocation happened", core.Deleted)
+	}
+	if got := fake.count("PUT", channelBucketID("work")); got != 0 {
+		t.Fatalf("work PUT count = %d, want 0: the would-be target must not be written", got)
+	}
+	if view.Residence["x"] != "" {
+		t.Fatalf("residence = %#v, want x still in core", view.Residence)
+	}
+
+	// New captures are still routed, and still reach a channel this device does
+	// not subscribe to by write-through.
+	if _, err := engine.MutateView(context.Background(), "Phone", func(database *model.Database) error {
+		database.Entries = append(database.Entries, testEntry("p", "phone capture", "Work", 5000))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	work := fake.database(t, channelBucketID("work"))
+	if !hasEntry(work, "p") || !hasEntry(work, "w") {
+		t.Fatalf("work entries = %v, want w and the written-through p", entryIDs(&work))
+	}
+	if hasEntry(fake.database(t, coreBucketID()), "p") {
+		t.Fatal("a newly routed entry was parked in core instead of written through")
+	}
+}
+
+func TestMissingRulesBucketIgnoresCachedFutureDocument(t *testing.T) {
+	fake, engine := newChannelEngine(t)
+	fake.storeDatabase(t, coreBucketID(), databaseWith(testEntry("a", "alpha", "", 1000)))
+	fake.storeDatabase(t, channelBucketID("work"), databaseWith(testEntry("b", "beta", "Work", 1000)))
+	engine.CachedRules = enabledRules()
+	engine.CachedRules.Version = 2
+
+	view, err := engine.ReadView(context.Background(), "Laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Rules != nil {
+		t.Fatalf("rules = %#v; a cached future-version document must not arm the 404 fallback", view.Rules)
+	}
+	if fake.count("PUT", rulesBucketID()) != 0 {
+		t.Fatal("a cached future-version document was written back to the server")
+	}
+	if hasEntry(*view.View, "b") || len(view.Channels) != 1 {
+		t.Fatalf("view entries = %v, want core only with rules disabled", entryIDs(view.View))
+	}
+}
+
 func TestUndecodableRulesBlobDegradesToDisabled(t *testing.T) {
 	corrupt, err := clipdb.EncodeRaw([]byte(`{"Clipman":"not-sync-rules"}`), channelTestPassword, nil)
 	if err != nil {

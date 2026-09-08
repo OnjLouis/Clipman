@@ -393,3 +393,29 @@ func TestRouteUnknownKindNeverMatches(t *testing.T) {
 		t.Fatalf("RouteEntry with unknown Kind = %q, want empty (never matches)", got)
 	}
 }
+
+func TestRouteStopsAtUnresolvableFirstMatch(t *testing.T) {
+	// Only a future-version document can carry a channel name this client
+	// cannot turn into a key; Validate rejects one at version 1. Routing must
+	// stop at that first matching route and place the entry in core, rather
+	// than falling through to a later route this client only partly
+	// understands (spec section 4).
+	future := &Document{
+		Clipman:       "sync-rules",
+		Version:       2,
+		Enabled:       true,
+		UpdatedUnixMs: 1757200000000,
+		UpdatedBy:     "Desktop",
+		Channels: []Channel{
+			{Name: "Ünicode", Route: Route{Groups: []string{"Work"}}},
+			{Name: "Work", Route: Route{Groups: []string{"Work"}}},
+		},
+	}
+	if ChannelKey("Ünicode") != "" {
+		t.Fatal("the first channel name must be unresolvable for this test to mean anything")
+	}
+	entry := &model.Entry{Group: "Work"}
+	if got := RouteEntry(future, entry); got != "" {
+		t.Fatalf("RouteEntry = %q, want core: evaluation must stop at the first matching route", got)
+	}
+}
