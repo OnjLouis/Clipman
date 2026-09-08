@@ -164,6 +164,48 @@ final class DeletionUXTests: XCTestCase {
         XCTAssertTrue(merged.Entries.isEmpty)
     }
 
+    func testNewerEntrySurvivesStaleRelocationMarkerWithSameIdentity() {
+        let movedAt = TimeUtil.nowUnixMs() - 1_000
+        let entry = ClipEntry(
+            Id: "moved-id",
+            Text: "Restored",
+            CreatedUnixMs: movedAt + 1,
+            LastUsedUnixMs: movedAt + 1,
+            ModifiedUnixMs: movedAt + 1
+        )
+        let marker = DeletedClipEntry(
+            Id: entry.Id,
+            TextHash: "",
+            DeletedUnixMs: movedAt,
+            SourceMachine: "Desktop"
+        )
+
+        let merged = SyncConflictResolver.merge(
+            target: ClipDatabase(DeletedEntries: [marker]),
+            source: ClipDatabase(Entries: [entry])
+        )
+
+        XCTAssertEqual(merged.Entries.map(\.Id), [entry.Id])
+        XCTAssertFalse(merged.DeletedEntries.contains { $0.Id == entry.Id })
+    }
+
+    func testDuplicateTextConvergesOnStableIdentity() {
+        let first = ClipEntry(Id: "b-id", Text: "Same text", CreatedUnixMs: 100, LastUsedUnixMs: 200, ModifiedUnixMs: 300)
+        let second = ClipEntry(Id: "a-id", Text: "Same text", CreatedUnixMs: 100, LastUsedUnixMs: 200, ModifiedUnixMs: 300)
+
+        let leftFirst = SyncConflictResolver.merge(
+            target: ClipDatabase(Entries: [first]),
+            source: ClipDatabase(Entries: [second])
+        )
+        let rightFirst = SyncConflictResolver.merge(
+            target: ClipDatabase(Entries: [second]),
+            source: ClipDatabase(Entries: [first])
+        )
+
+        XCTAssertEqual(leftFirst.Entries.map(\.Id), ["a-id"])
+        XCTAssertEqual(rightFirst.Entries.map(\.Id), ["a-id"])
+    }
+
     func testMergeAppliesRecentDeletionByTextHash() {
         let now = TimeUtil.nowUnixMs()
         let entry = ClipEntry(

@@ -98,6 +98,7 @@
     <li>Added direct editor save shortcuts. In F2 Entry Properties and Quick Clip, press <code>Ctrl+Enter</code> on Windows or Linux, or <code>Command+Enter</code> on Mac, to save while ordinary Enter continues to insert a new line. Mac also accepts <code>Command+S</code> in those editors and in other editable windows with a Save action, including Preferences and Sync Rules.</li>
     <li>Stopped unchanged Windows server polls from rebuilding the history lists, preserving NVDA focus instead of repeatedly announcing the selected entry.</li>
     <li>Made the iOS More screen stable during background synchronization. Its available actions remain in place until it closes, and unchanged server status no longer disrupts VoiceOver focus.</li>
+    <li>Protected channel data when a device reconnects with an older local cache. Stale channel-move markers can no longer remove a newer restored entry, duplicate historical identities converge consistently across clients, and Android immediately reloads channels after its subscriptions change.</li>
   </ul>
 
   <h3>2.9.1 Windows and macOS</h3>

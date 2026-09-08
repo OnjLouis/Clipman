@@ -149,6 +149,36 @@ func TestEmptyTextHashTombstoneMatchesOnlyById(t *testing.T) {
 	}
 }
 
+func TestNewerEntrySurvivesStaleRelocationMarkerWithSameIdentity(t *testing.T) {
+	now := int64(2_000_000_000_000)
+	target := model.NewDatabase(now)
+	target.Deleted = []model.DeletedEntry{{ID: "a", TextHash: "", DeletedUnixMs: now - 1, SourceMachine: "desktop"}}
+	entry := model.Entry{ID: "a", Text: "restored", CreatedUnixMs: now, LastUsedUnixMs: now, ModifiedUnixMs: now}
+	source := model.NewDatabase(now)
+	source.Entries = []model.Entry{entry}
+	Merge(&target, source, now)
+	if len(target.Entries) != 1 || target.Entries[0].ID != "a" {
+		t.Fatal("a stale relocation marker deleted a newer entry with the same id")
+	}
+	if len(target.Deleted) != 0 {
+		t.Fatal("a superseded relocation marker remained after the newer entry won")
+	}
+}
+
+func TestDuplicateTextConvergesOnStableIdentity(t *testing.T) {
+	now := int64(2_000_000_000_000)
+	first := model.NewDatabase(now)
+	first.Entries = []model.Entry{{ID: "b-id", Text: "same text", CreatedUnixMs: 100, LastUsedUnixMs: 200, ModifiedUnixMs: 300}}
+	second := model.NewDatabase(now)
+	second.Entries = []model.Entry{{ID: "a-id", Text: "same text", CreatedUnixMs: 100, LastUsedUnixMs: 200, ModifiedUnixMs: 300}}
+	leftFirst, rightFirst := first, second
+	Merge(&leftFirst, second, now)
+	Merge(&rightFirst, first, now)
+	if len(leftFirst.Entries) != 1 || len(rightFirst.Entries) != 1 || leftFirst.Entries[0].ID != "a-id" || rightFirst.Entries[0].ID != "a-id" {
+		t.Fatalf("duplicate text did not converge: left=%+v right=%+v", leftFirst.Entries, rightFirst.Entries)
+	}
+}
+
 func TestNormalizeKeepsEmptyTextHashTombstones(t *testing.T) {
 	now := int64(2_000_000_000_000)
 

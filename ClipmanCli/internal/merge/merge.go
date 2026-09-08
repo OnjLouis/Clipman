@@ -107,8 +107,12 @@ func IsDeleted(database model.Database, entry model.Entry) bool {
 	if entry.LastUsedUnixMs > entryChangedUnixMs {
 		entryChangedUnixMs = entry.LastUsedUnixMs
 	}
+	if entry.ModifiedUnixMs > entryChangedUnixMs {
+		entryChangedUnixMs = entry.ModifiedUnixMs
+	}
 	for _, marker := range database.Deleted {
-		if strings.EqualFold(marker.ID, entry.ID) ||
+		if (strings.EqualFold(marker.ID, entry.ID) &&
+			(marker.TextHash != "" || marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs)) ||
 			(marker.TextHash != "" && strings.EqualFold(marker.TextHash, hash) &&
 				(marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs)) {
 			return true
@@ -139,6 +143,9 @@ func AddDeleted(database *model.Database, entry model.Entry, machine string, now
 }
 
 func mergeEntry(existing *model.Entry, incoming model.Entry) {
+	if existing.Text == incoming.Text {
+		existing.ID = canonicalEntryID(existing.ID, incoming.ID)
+	}
 	incomingWins := incoming.LastUsedUnixMs >= existing.LastUsedUnixMs
 	createdWins := incoming.CreatedUnixMs > existing.CreatedUnixMs
 	incomingModifiedWins := incoming.ModifiedUnixMs > existing.ModifiedUnixMs
@@ -201,6 +208,27 @@ func mergeEntry(existing *model.Entry, incoming model.Entry) {
 	} else {
 		mergeRichTextExtra(existing.Extra, incoming.Extra)
 	}
+}
+
+func canonicalEntryID(left, right string) string {
+	if strings.TrimSpace(left) == "" {
+		return right
+	}
+	if strings.TrimSpace(right) == "" {
+		return left
+	}
+	lowerLeft := strings.ToLower(left)
+	lowerRight := strings.ToLower(right)
+	if lowerLeft != lowerRight {
+		if lowerLeft < lowerRight {
+			return left
+		}
+		return right
+	}
+	if left <= right {
+		return left
+	}
+	return right
 }
 
 func replaceRichTextAfterTextChange(existing, incoming map[string]json.RawMessage, modifiedUnixMs int64) {
@@ -272,6 +300,9 @@ func normalizeDeleted(database *model.Database, now int64) {
 	}
 	database.Deleted = database.Deleted[:0]
 	for _, marker := range byID {
+		if marker.TextHash == "" && hasNewerEntry(database.Entries, marker) {
+			continue
+		}
 		database.Deleted = append(database.Deleted, marker)
 	}
 	sort.Slice(database.Deleted, func(i, j int) bool {
@@ -280,6 +311,24 @@ func normalizeDeleted(database *model.Database, now int64) {
 		}
 		return database.Deleted[i].ID < database.Deleted[j].ID
 	})
+}
+func hasNewerEntry(entries []model.Entry, marker model.DeletedEntry) bool {
+	for _, entry := range entries {
+		if !strings.EqualFold(entry.ID, marker.ID) {
+			continue
+		}
+		changed := entry.CreatedUnixMs
+		if entry.LastUsedUnixMs > changed {
+			changed = entry.LastUsedUnixMs
+		}
+		if entry.ModifiedUnixMs > changed {
+			changed = entry.ModifiedUnixMs
+		}
+		if changed > marker.DeletedUnixMs {
+			return true
+		}
+	}
+	return false
 }
 func applyDeleted(database *model.Database) {
 	if len(database.Deleted) == 0 {

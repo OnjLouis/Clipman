@@ -49,6 +49,18 @@ class SyncConflictResolverTest {
     }
 
     @Test
+    fun duplicateTextConvergesOnStableIdentity() {
+        val first = database(entry("b-id", "Same text", 100).copy(LastUsedUnixMs = 200, ModifiedUnixMs = 300))
+        val second = database(entry("a-id", "Same text", 100).copy(LastUsedUnixMs = 200, ModifiedUnixMs = 300))
+
+        val leftFirst = SyncConflictResolver.merge(first, second)
+        val rightFirst = SyncConflictResolver.merge(second, first)
+
+        assertEquals(listOf("a-id"), leftFirst.Entries.map { it.Id })
+        assertEquals(listOf("a-id"), rightFirst.Entries.map { it.Id })
+    }
+
+    @Test
     fun mergeAppliesDeletionMarkersInsteadOfResurrectingEntries() {
         val now = TimeUtil.nowUnixMs()
         val removed = entry("removed", "Remove me", 1)
@@ -116,6 +128,31 @@ class SyncConflictResolverTest {
         val merged = SyncConflictResolver.merge(local, server)
 
         assertFalse(merged.Entries.any { it.Id == "same-id" })
+    }
+
+    @Test
+    fun newerEntrySurvivesStaleRelocationMarkerWithSameIdentity() {
+        val movedAt = TimeUtil.nowUnixMs() - 1_000
+        val marker = DeletedClipEntry("moved-id", "", movedAt, "Desktop")
+        val local = database().copy(DeletedEntries = listOf(marker))
+        val restored = entry("moved-id", "Restored", movedAt + 1).copy(ModifiedUnixMs = movedAt + 1)
+
+        val merged = SyncConflictResolver.merge(local, database(restored))
+
+        assertEquals(listOf("moved-id"), merged.Entries.map { it.Id })
+        assertTrue(merged.DeletedEntries.none { it.Id == "moved-id" })
+    }
+
+    @Test
+    fun staleEntryDoesNotSurviveNewerRelocationMarkerWithSameIdentity() {
+        val movedAt = TimeUtil.nowUnixMs()
+        val marker = DeletedClipEntry("moved-id", "", movedAt, "Desktop")
+        val local = database().copy(DeletedEntries = listOf(marker))
+        val stale = entry("moved-id", "Stale", movedAt - 1).copy(ModifiedUnixMs = movedAt - 1)
+
+        val merged = SyncConflictResolver.merge(local, database(stale))
+
+        assertTrue(merged.Entries.isEmpty())
     }
 
     @Test

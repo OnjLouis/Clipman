@@ -193,9 +193,10 @@ object SyncConflictResolver {
     }
 
     private class DeletionIndex(deletedEntries: List<DeletedClipEntry>) {
-        private val deletedIds = deletedEntries.mapNotNullTo(mutableSetOf()) { marker ->
-            marker.Id.takeIf { it.isNotBlank() }
-        }
+        private val latestDeletionById = deletedEntries
+            .filter { it.Id.isNotBlank() }
+            .groupBy { it.Id }
+            .mapValues { (_, markers) -> markers.maxBy { it.DeletedUnixMs } }
         private val latestDeletionByTextHash = buildMap {
             deletedEntries.forEach { marker ->
                 if (marker.TextHash.isNotBlank()) {
@@ -205,13 +206,21 @@ object SyncConflictResolver {
         }
 
         fun contains(entry: ClipEntry): Boolean {
-            if (entry.Id in deletedIds) return true
+            val changed = entryChangedUnixMs(entry)
+            val idMarker = latestDeletionById[entry.Id]
+            if (idMarker != null &&
+                (idMarker.TextHash.isNotBlank() || idMarker.DeletedUnixMs <= 0 || changed <= idMarker.DeletedUnixMs)
+            ) {
+                return true
+            }
             if (entry.Text.isEmpty()) return false
             val deletedUnixMs = latestDeletionByTextHash[textHash(entry.Text)] ?: return false
-            val entryChangedUnixMs = maxOf(entry.CreatedUnixMs, entry.LastUsedUnixMs)
-            return deletedUnixMs <= 0 || entryChangedUnixMs <= deletedUnixMs
+            return deletedUnixMs <= 0 || changed <= deletedUnixMs
         }
     }
+
+    private fun entryChangedUnixMs(entry: ClipEntry): Long =
+        maxOf(entry.CreatedUnixMs, entry.LastUsedUnixMs, entry.ModifiedUnixMs)
 
     private fun normalizeDeletedEntries(markers: List<DeletedClipEntry>): List<DeletedClipEntry> {
         val now = TimeUtil.nowUnixMs()
@@ -237,6 +246,7 @@ object SyncConflictResolver {
         val legacyTextRepair = bothLegacy && existing.Id.isNotBlank() && existing.Id.equals(incoming.Id, ignoreCase = true) && existing.Text != incoming.Text
         val textChangedByMerge = incomingModifiedWins && existing.Text != incoming.Text
         return existing.copy(
+            Id = if (existing.Text == incoming.Text) canonicalEntryId(existing.Id, incoming.Id) else existing.Id,
             Text = when {
                 incomingModifiedWins || legacyTextRepair -> incoming.Text
                 else -> existing.Text
@@ -283,17 +293,30 @@ object SyncConflictResolver {
         )
     }
 
+    private fun canonicalEntryId(left: String, right: String): String {
+        if (left.isBlank()) return right
+        if (right.isBlank()) return left
+        val insensitive = left.compareTo(right, ignoreCase = true)
+        if (insensitive != 0) return if (insensitive < 0) left else right
+        return if (left <= right) left else right
+    }
+
     private fun normalize(database: ClipDatabase): ClipDatabase {
         var order = 1L
         val normalized = database.Entries
             .filter { it.Text.isNotEmpty() }
             .sortedWith(compareBy<ClipEntry> { if (it.ManualOrder <= 0) Long.MAX_VALUE else it.ManualOrder }.thenBy { it.CreatedUnixMs })
             .map { it.normalized(order++) }
+        val deletedEntries = normalizeDeletedEntries(database.DeletedEntries).filterNot { marker ->
+            marker.TextHash.isEmpty() && normalized.any { entry ->
+                entry.Id.equals(marker.Id, ignoreCase = true) && entryChangedUnixMs(entry) > marker.DeletedUnixMs
+            }
+        }
         return database.copy(
             Version = maxOf(1, database.Version),
             UpdatedUnixMs = TimeUtil.nowUnixMs(),
             Entries = normalized,
-            DeletedEntries = normalizeDeletedEntries(database.DeletedEntries)
+            DeletedEntries = deletedEntries
         )
     }
 

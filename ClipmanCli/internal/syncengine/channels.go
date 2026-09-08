@@ -809,6 +809,9 @@ func textMarkerSuppresses(marker model.DeletedEntry, entry model.Entry) bool {
 	if entry.LastUsedUnixMs > changed {
 		changed = entry.LastUsedUnixMs
 	}
+	if entry.ModifiedUnixMs > changed {
+		changed = entry.ModifiedUnixMs
+	}
 	return marker.DeletedUnixMs <= 0 || changed <= marker.DeletedUnixMs
 }
 

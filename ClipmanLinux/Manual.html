@@ -19,7 +19,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 
 <h2 id="changelog">Changelog</h2>
 <h3>3.0.0 development candidate</h3>
-<ul><li>Added <kbd>Ctrl+Enter</kbd> to save F2 Entry Properties or Quick Clip while ordinary Enter continues to insert a new line.</li></ul>
+<ul><li>Added <kbd>Ctrl+Enter</kbd> to save F2 Entry Properties or Quick Clip while ordinary Enter continues to insert a new line.</li><li>Protected channel data when a device reconnects with an older local cache. Stale channel-move markers can no longer remove a newer restored entry, and duplicate historical identities now converge consistently across clients.</li></ul>
 
 <h3>2.9.0</h3>
 <ul><li>Added <strong>Quick Clip</strong>. Press <kbd>Ctrl+N</kbd>, use the File menu or assign an optional global hotkey to type a new entry directly without changing the system clipboard.</li><li>Added <kbd>Alt+Enter</kbd> to open one selected standalone HTTP or HTTPS link in the default browser. Links remain available when Links history is disabled, while ordinary prose and private <code>clipman://</code> configuration links are not launched.</li><li>Startup clipboard capture now leaves an existing entry's device, group and timestamp unchanged instead of treating a retained clipboard item as a fresh copy.</li></ul>

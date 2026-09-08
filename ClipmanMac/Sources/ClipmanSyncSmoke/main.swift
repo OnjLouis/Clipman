@@ -133,6 +133,27 @@ do {
     SyncConflictResolver.normalize(&staleIdentity)
     expect(staleIdentity.Entries.isEmpty, "exact deleted entry identity should never be resurrected")
 
+    let staleRelocation = DeletedClipEntry(Id: "moved-entry", TextHash: "", DeletedUnixMs: tombstoneTestNow - 10, SourceMachine: "Windows")
+    var restoredAfterMove = ClipDatabase(
+        Entries: [ClipEntry(Id: "moved-entry", Text: "restored", CreatedUnixMs: tombstoneTestNow, LastUsedUnixMs: tombstoneTestNow, ModifiedUnixMs: tombstoneTestNow, ManualOrder: 1)],
+        DeletedEntries: [staleRelocation]
+    )
+    SyncConflictResolver.normalize(&restoredAfterMove)
+    expect(restoredAfterMove.Entries.contains(where: { $0.Id == "moved-entry" }), "a newer entry should survive a stale relocation marker with the same identity")
+    expect(!restoredAfterMove.DeletedEntries.contains(where: { $0.Id == "moved-entry" }), "a superseded relocation marker should be removed after recovery")
+
+    let duplicateFirst = ClipDatabase(Entries: [
+        ClipEntry(Id: "b-id", Text: "Same text", CreatedUnixMs: 100, LastUsedUnixMs: 200, ModifiedUnixMs: 300, ManualOrder: 1)
+    ])
+    let duplicateSecond = ClipDatabase(Entries: [
+        ClipEntry(Id: "a-id", Text: "Same text", CreatedUnixMs: 100, LastUsedUnixMs: 200, ModifiedUnixMs: 300, ManualOrder: 1)
+    ])
+    var leftFirst = duplicateFirst
+    SyncConflictResolver.merge(into: &leftFirst, source: duplicateSecond)
+    var rightFirst = duplicateSecond
+    SyncConflictResolver.merge(into: &rightFirst, source: duplicateFirst)
+    expect(leftFirst.Entries.map(\.Id) == ["a-id"] && rightFirst.Entries.map(\.Id) == ["a-id"], "duplicate text should converge on one stable identity")
+
     print("Clipman sync smoke tests passed.")
 } catch {
     fputs("FAIL: \(error.localizedDescription)\n", stderr)

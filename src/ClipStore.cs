@@ -1629,12 +1629,24 @@ namespace Clipman
                 changed = MergeEntryMetadata(existing, entry) || changed;
             }
             ApplyDeletedEntries(target);
+            var markerCount = target.DeletedEntries == null ? 0 : target.DeletedEntries.Count;
+            NormalizeDeletedEntries(target);
+            if (target.DeletedEntries != null && target.DeletedEntries.Count != markerCount) changed = true;
             return changed;
         }
 
         private static bool MergeEntryMetadata(ClipEntry existing, ClipEntry incoming)
         {
             var changed = false;
+            if (string.Equals(existing.Text, incoming.Text, StringComparison.Ordinal))
+            {
+                var canonicalId = CanonicalEntryId(existing.Id, incoming.Id);
+                if (!string.Equals(existing.Id, canonicalId, StringComparison.Ordinal))
+                {
+                    existing.Id = canonicalId;
+                    changed = true;
+                }
+            }
             var incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs;
             var incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs;
             var incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs;
@@ -1726,6 +1738,15 @@ namespace Clipman
                 changed = true;
             }
             return changed;
+        }
+
+        private static string CanonicalEntryId(string left, string right)
+        {
+            if (string.IsNullOrWhiteSpace(left)) return right;
+            if (string.IsNullOrWhiteSpace(right)) return left;
+            var insensitive = StringComparer.OrdinalIgnoreCase.Compare(left, right);
+            if (insensitive != 0) return insensitive < 0 ? left : right;
+            return string.CompareOrdinal(left, right) <= 0 ? left : right;
         }
 
         public List<string> GetDevices()
@@ -2003,6 +2024,9 @@ namespace Clipman
                 })
                 .GroupBy(d => d.Id, StringComparer.Ordinal)
                 .Select(g => g.OrderByDescending(d => d.DeletedUnixMs).First())
+                .Where(marker => !string.IsNullOrWhiteSpace(marker.TextHash) || !(target.Entries ?? new List<ClipEntry>()).Any(entry =>
+                    string.Equals(entry.Id, marker.Id, StringComparison.Ordinal) &&
+                    Math.Max(Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs), entry.ModifiedUnixMs) > marker.DeletedUnixMs))
                 .ToList();
         }
 
@@ -2028,10 +2052,15 @@ namespace Clipman
         private static bool IsDeleted(ClipDatabase target, ClipEntry entry)
         {
             if (entry == null) return false;
-            if (IsDeleted(target, entry.Id)) return true;
+            var entryChangedUnixMs = Math.Max(Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs), entry.ModifiedUnixMs);
+            if (target != null && target.DeletedEntries != null && target.DeletedEntries.Any(d =>
+                string.Equals(d.Id, entry.Id, StringComparison.Ordinal) &&
+                (!string.IsNullOrWhiteSpace(d.TextHash) || d.DeletedUnixMs <= 0 || entryChangedUnixMs <= d.DeletedUnixMs)))
+            {
+                return true;
+            }
             if (target == null || target.DeletedEntries == null || string.IsNullOrEmpty(entry.Text)) return false;
             var textHash = ComputeTextHash(entry.Text);
-            var entryChangedUnixMs = Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs);
             return target.DeletedEntries.Any(d =>
                 !string.IsNullOrWhiteSpace(d.TextHash) &&
                 string.Equals(d.TextHash, textHash, StringComparison.Ordinal) &&
@@ -2743,7 +2772,7 @@ namespace Clipman
             if (marker == null || entry == null) return false;
             if (string.IsNullOrEmpty(marker.TextHash) || string.IsNullOrEmpty(entry.Text)) return false;
             if (!string.Equals(marker.TextHash, ComputeTextHash(entry.Text), StringComparison.OrdinalIgnoreCase)) return false;
-            var entryChangedUnixMs = Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs);
+            var entryChangedUnixMs = Math.Max(Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs), entry.ModifiedUnixMs);
             return marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs;
         }
 

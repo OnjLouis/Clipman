@@ -671,7 +671,7 @@ enum SyncChannelAssembler {
               marker.TextHash.caseInsensitiveCompare(SyncConflictResolver.textHash(entry.Text)) == .orderedSame else {
             return false
         }
-        let changed = max(entry.CreatedUnixMs, entry.LastUsedUnixMs)
+        let changed = max(entry.CreatedUnixMs, entry.LastUsedUnixMs, entry.ModifiedUnixMs)
         return marker.DeletedUnixMs <= 0 || changed <= marker.DeletedUnixMs
     }
 

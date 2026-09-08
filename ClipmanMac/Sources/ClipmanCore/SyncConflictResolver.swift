@@ -78,10 +78,13 @@ public enum SyncConflictResolver {
     }
 
     private static func isDeleted(_ entry: ClipEntry, deletedEntries: [DeletedClipEntry]) -> Bool {
-        if deletedEntries.contains(where: { $0.Id == entry.Id }) { return true }
+        let entryChangedUnixMs = max(entry.CreatedUnixMs, entry.LastUsedUnixMs, entry.ModifiedUnixMs)
+        if deletedEntries.contains(where: {
+            $0.Id == entry.Id
+                && (!$0.TextHash.isEmpty || $0.DeletedUnixMs <= 0 || entryChangedUnixMs <= $0.DeletedUnixMs)
+        }) { return true }
         guard !entry.Text.isEmpty else { return false }
         let hash = textHash(entry.Text)
-        let entryChangedUnixMs = max(entry.CreatedUnixMs, entry.LastUsedUnixMs)
         return deletedEntries.contains {
             !$0.TextHash.isEmpty
                 && $0.TextHash == hash
@@ -158,6 +161,13 @@ public enum SyncConflictResolver {
             if $0.DeletedUnixMs == $1.DeletedUnixMs { return $0.Id < $1.Id }
             return $0.DeletedUnixMs > $1.DeletedUnixMs
         }
+        let liveEntries = database.Entries
+        database.DeletedEntries.removeAll { marker in
+            marker.TextHash.isEmpty && liveEntries.contains { entry in
+                entry.Id.caseInsensitiveCompare(marker.Id) == .orderedSame
+                    && max(entry.CreatedUnixMs, entry.LastUsedUnixMs, entry.ModifiedUnixMs) > marker.DeletedUnixMs
+            }
+        }
     }
 
     public static func textHash(_ text: String) -> String {
@@ -181,6 +191,9 @@ public enum SyncConflictResolver {
     }
 
     private static func mergeEntry(existing: inout ClipEntry, incoming: ClipEntry) {
+        if existing.Text == incoming.Text {
+            existing.Id = canonicalEntryID(existing.Id, incoming.Id)
+        }
         let incomingLastUsed = incoming.LastUsedUnixMs
         let incomingWins = incomingLastUsed >= existing.LastUsedUnixMs
         let incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs
@@ -237,6 +250,14 @@ public enum SyncConflictResolver {
             existing.RichText = incoming.RichText
             existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs
         }
+    }
+
+    private static func canonicalEntryID(_ left: String, _ right: String) -> String {
+        if left.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return right }
+        if right.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return left }
+        let insensitive = left.caseInsensitiveCompare(right)
+        if insensitive != .orderedSame { return insensitive == .orderedAscending ? left : right }
+        return left <= right ? left : right
     }
 
     private static func isConflictName(_ name: String, baseName: String) -> Bool {

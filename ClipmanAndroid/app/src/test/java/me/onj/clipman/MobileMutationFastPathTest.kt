@@ -216,6 +216,41 @@ class MobileMutationFastPathTest {
     }
 
     @Test
+    fun restoredEntryRepairsStaleRelocationMarkerThenConverges() {
+        val movedAt = now - 1_000
+        val staleMarker = DeletedClipEntry("restored", "", movedAt, "Desktop")
+        val work = ClipDatabase(DeletedEntries = listOf(staleMarker))
+        val core = ClipDatabase()
+        val transport = FakeChannelTransport(
+            mapOf("" to SyncConflictResolver.normalized(core), "work" to SyncConflictResolver.normalized(work))
+        )
+        val channels = listOf(state("", core), state("work", work))
+        val restored = entry("restored", text = "Recovered text", group = "Work")
+
+        val repaired = MobileChannelEngine.commit(
+            transport = transport,
+            document = rules,
+            base = channels,
+            residence = emptyMap(),
+            previousMarkers = mapOf(comparableClipId(staleMarker.Id) to staleMarker),
+            mutated = ClipDatabase(Entries = listOf(restored), DeletedEntries = listOf(staleMarker)),
+            deviceName = "Android Pixel",
+            now = now
+        )
+
+        assertTrue(repaired.committed)
+        assertEquals(listOf("work"), transport.writes)
+        assertEquals(listOf("restored"), repaired.view.Entries.map { it.Id })
+        assertTrue(transport.stored.getValue("work").DeletedEntries.none { it.Id == "restored" })
+
+        transport.writes.clear()
+        val settled = commit(transport, repaired.channels) { it }
+        assertTrue(settled.committed)
+        assertEquals(0, settled.uploads)
+        assertTrue(transport.writes.isEmpty())
+    }
+
+    @Test
     fun relocationUploadsTheTargetBeforeRewritingTheSource() {
         // The entry lives in core and a rule change moves it into work.
         val core = ClipDatabase(Entries = listOf(entry("a", order = 1), entry("m", group = "Work", order = 2)))

@@ -748,7 +748,7 @@ internal object MobileChannelEngine {
     private fun textMarkerSuppresses(marker: DeletedClipEntry, entry: ClipEntry): Boolean {
         if (marker.TextHash.isEmpty()) return false
         if (!marker.TextHash.equals(SyncConflictResolver.textHash(entry.Text), ignoreCase = true)) return false
-        val changed = maxOf(entry.CreatedUnixMs, entry.LastUsedUnixMs)
+        val changed = maxOf(entry.CreatedUnixMs, entry.LastUsedUnixMs, entry.ModifiedUnixMs)
         return marker.DeletedUnixMs <= 0 || changed <= marker.DeletedUnixMs
     }
 
@@ -774,6 +774,14 @@ internal data class ChannelSyncRecord(
 internal data class ChannelSyncState(
     val RulesRevision: String = "",
     val Channels: List<ChannelSyncRecord> = emptyList()
+)
+
+internal fun channelStateAfterSubscriptionChange(
+    previous: ChannelSyncState,
+    rulesRevision: String
+): ChannelSyncState = previous.copy(
+    RulesRevision = rulesRevision,
+    Channels = emptyList()
 )
 
 private val channelStateJson = Json {
@@ -1091,7 +1099,7 @@ class MobileHistoryRepository(context: Context) {
         )
         val revision = uploadRules(client, updated, password, current.revision, coreSalt)
         storeSyncRules(updated)
-        storeChannelSyncState(persisted.copy(RulesRevision = revision))
+        storeChannelSyncState(channelStateAfterSubscriptionChange(persisted, revision))
         return updated
     }
 

@@ -155,10 +155,15 @@ namespace Clipman
                 MergeEntry(existing, entry);
             }
             ApplyDeletedEntries(target);
+            NormalizeDeletedEntries(target);
         }
 
         private static void MergeEntry(ClipEntry existing, ClipEntry incoming)
         {
+            if (string.Equals(existing.Text, incoming.Text, StringComparison.Ordinal))
+            {
+                existing.Id = CanonicalEntryId(existing.Id, incoming.Id);
+            }
             var incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs;
             var incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs;
             var incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs;
@@ -211,6 +216,15 @@ namespace Clipman
                 existing.RichText = RichTextData.Clone(incoming.RichText);
                 existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs;
             }
+        }
+
+        private static string CanonicalEntryId(string left, string right)
+        {
+            if (string.IsNullOrWhiteSpace(left)) return right;
+            if (string.IsNullOrWhiteSpace(right)) return left;
+            var insensitive = StringComparer.OrdinalIgnoreCase.Compare(left, right);
+            if (insensitive != 0) return insensitive < 0 ? left : right;
+            return string.CompareOrdinal(left, right) <= 0 ? left : right;
         }
 
         private static void NormalizeMergedDatabase(ClipDatabase database)
@@ -299,6 +313,9 @@ namespace Clipman
                 .Where(d => d != null && !string.IsNullOrWhiteSpace(d.Id) && d.DeletedUnixMs >= cutoff)
                 .GroupBy(d => d.Id, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderByDescending(d => d.DeletedUnixMs).First())
+                .Where(marker => !string.IsNullOrWhiteSpace(marker.TextHash) || !(database.Entries ?? new List<ClipEntry>()).Any(entry =>
+                    string.Equals(entry.Id, marker.Id, StringComparison.OrdinalIgnoreCase) &&
+                    Math.Max(Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs), entry.ModifiedUnixMs) > marker.DeletedUnixMs))
                 .ToList();
         }
 
@@ -311,10 +328,11 @@ namespace Clipman
         private static bool IsDeleted(ClipDatabase database, ClipEntry entry)
         {
             if (entry == null || database.DeletedEntries == null) return false;
-            var entryChangedUnixMs = Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs);
+            var entryChangedUnixMs = Math.Max(Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs), entry.ModifiedUnixMs);
             var hash = ComputeTextHash(entry.Text);
             return database.DeletedEntries.Any(marker =>
-                string.Equals(marker.Id, entry.Id, StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(marker.Id, entry.Id, StringComparison.OrdinalIgnoreCase) &&
+                 (!string.IsNullOrWhiteSpace(marker.TextHash) || marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs)) ||
                 (!string.IsNullOrWhiteSpace(marker.TextHash) &&
                  string.Equals(marker.TextHash, hash, StringComparison.OrdinalIgnoreCase) &&
                  (marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs)));

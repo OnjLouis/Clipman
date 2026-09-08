@@ -73,6 +73,8 @@ namespace Clipman.Tests
             Run("sync rules disabled keeps a single database file", RulesDisabledKeepsSingleDatabaseFile);
             Run("a group change relocates an entry between channel files", GroupChangeRelocatesEntryBetweenChannelFiles);
             Run("cross-channel tombstones suppress only matching text", CrossChannelTombstonesSuppressOnlyMatchingText);
+            Run("newer entries survive stale relocation markers", NewerEntriesSurviveStaleRelocationMarkers);
+            Run("duplicate text converges on one stable identity", DuplicateTextConvergesOnStableIdentity);
             Run("unsubscribed channel files are not loaded into the view", UnsubscribedChannelFileIsNotLoadedIntoView);
             Run("new channel entries stay at the end of manual order", NewChannelEntriesStayAtEndOfManualOrder);
             Run("dirty hashes skip rewriting untouched channel files", DirtyHashSkipsRewritingUntouchedChannelFiles);
@@ -1660,6 +1662,56 @@ namespace Clipman.Tests
             Assert(!EntryPropertiesForm.IsSaveShortcut(Keys.Enter) &&
                    !EntryPropertiesForm.IsSaveShortcut(Keys.Control | Keys.Shift | Keys.Enter),
                 description + " must reserve plain Enter for multiline text and require the exact save shortcut.");
+        }
+
+        private static void NewerEntriesSurviveStaleRelocationMarkers()
+        {
+            var movedAt = TimeUtil.NowUnixMs() - 1000;
+            var target = new ClipDatabase();
+            target.DeletedEntries.Add(new DeletedClipEntry
+            {
+                Id = "movedid",
+                TextHash = string.Empty,
+                DeletedUnixMs = movedAt,
+                SourceMachine = "Other"
+            });
+            var source = SingleEntryDatabase("movedid", "Restored", "Work");
+            source.Entries[0].CreatedUnixMs = movedAt + 1;
+            source.Entries[0].LastUsedUnixMs = movedAt + 1;
+            source.Entries[0].ModifiedUnixMs = movedAt + 1;
+
+            SyncConflictResolver.MergeInto(target, source);
+
+            Assert(target.Entries.Any(entry => entry.Id == "movedid"),
+                "A stale relocation marker deleted a newer entry with the same identity.");
+            Assert(!target.DeletedEntries.Any(marker => marker.Id == "movedid"),
+                "A superseded relocation marker remained after the newer entry won.");
+        }
+
+        private static void DuplicateTextConvergesOnStableIdentity()
+        {
+            var first = SingleEntryDatabase("b-id", "Same text", string.Empty);
+            var second = SingleEntryDatabase("a-id", "Same text", string.Empty);
+            first.Entries[0].CreatedUnixMs = second.Entries[0].CreatedUnixMs = 100;
+            first.Entries[0].LastUsedUnixMs = second.Entries[0].LastUsedUnixMs = 200;
+            first.Entries[0].ModifiedUnixMs = second.Entries[0].ModifiedUnixMs = 300;
+
+            var leftFirst = SingleEntryDatabase("b-id", "Same text", string.Empty);
+            leftFirst.Entries[0].CreatedUnixMs = 100;
+            leftFirst.Entries[0].LastUsedUnixMs = 200;
+            leftFirst.Entries[0].ModifiedUnixMs = 300;
+            SyncConflictResolver.MergeInto(leftFirst, second);
+
+            var rightFirst = SingleEntryDatabase("a-id", "Same text", string.Empty);
+            rightFirst.Entries[0].CreatedUnixMs = 100;
+            rightFirst.Entries[0].LastUsedUnixMs = 200;
+            rightFirst.Entries[0].ModifiedUnixMs = 300;
+            SyncConflictResolver.MergeInto(rightFirst, first);
+
+            Assert(leftFirst.Entries.Count == 1 && rightFirst.Entries.Count == 1,
+                "Merging duplicate text retained more than one entry.");
+            Assert(leftFirst.Entries[0].Id == "a-id" && rightFirst.Entries[0].Id == "a-id",
+                "Duplicate text selected different identities for opposite merge directions.");
         }
 
         private static void UnchangedServerDownloadsDoNotRewriteChannelCaches()

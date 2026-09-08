@@ -305,32 +305,52 @@ enum SyncConflictResolver {
             if $0.DeletedUnixMs == $1.DeletedUnixMs { return $0.Id < $1.Id }
             return $0.DeletedUnixMs > $1.DeletedUnixMs
         }
+        let liveEntries = database.Entries
+        database.DeletedEntries.removeAll { marker in
+            marker.TextHash.isEmpty && liveEntries.contains { entry in
+                entry.Id.caseInsensitiveCompare(marker.Id) == .orderedSame
+                    && max(entry.CreatedUnixMs, entry.LastUsedUnixMs, entry.ModifiedUnixMs) > marker.DeletedUnixMs
+            }
+        }
     }
 
     private struct DeletionIndex {
-        private let deletedIDs: Set<String>
+        private let latestDeletionByID: [String: DeletedClipEntry]
         private let latestDeletionByTextHash: [String: Int64]
 
         init(_ deletedEntries: [DeletedClipEntry]) {
-            deletedIDs = Set(deletedEntries.lazy.map(\.Id).filter { !$0.isEmpty })
+            var byID: [String: DeletedClipEntry] = [:]
             var byHash: [String: Int64] = [:]
-            for marker in deletedEntries where !marker.TextHash.isEmpty {
-                byHash[marker.TextHash] = max(byHash[marker.TextHash] ?? Int64.min, marker.DeletedUnixMs)
+            for marker in deletedEntries {
+                if !marker.Id.isEmpty,
+                   byID[marker.Id] == nil || marker.DeletedUnixMs > byID[marker.Id]!.DeletedUnixMs {
+                    byID[marker.Id] = marker
+                }
+                if !marker.TextHash.isEmpty {
+                    byHash[marker.TextHash] = max(byHash[marker.TextHash] ?? Int64.min, marker.DeletedUnixMs)
+                }
             }
+            latestDeletionByID = byID
             latestDeletionByTextHash = byHash
         }
 
         func contains(_ entry: ClipEntry) -> Bool {
-            if deletedIDs.contains(entry.Id) { return true }
+            let changed = max(entry.CreatedUnixMs, entry.LastUsedUnixMs, entry.ModifiedUnixMs)
+            if let marker = latestDeletionByID[entry.Id],
+               !marker.TextHash.isEmpty || marker.DeletedUnixMs <= 0 || changed <= marker.DeletedUnixMs {
+                return true
+            }
             guard !entry.Text.isEmpty else { return false }
             let hash = SyncConflictResolver.textHash(entry.Text)
             guard let deletedUnixMs = latestDeletionByTextHash[hash] else { return false }
-            let entryChangedUnixMs = max(entry.CreatedUnixMs, entry.LastUsedUnixMs)
-            return deletedUnixMs <= 0 || entryChangedUnixMs <= deletedUnixMs
+            return deletedUnixMs <= 0 || changed <= deletedUnixMs
         }
     }
 
     private static func mergeEntry(existing: inout ClipEntry, incoming: ClipEntry) {
+        if existing.Text == incoming.Text {
+            existing.Id = canonicalEntryID(existing.Id, incoming.Id)
+        }
         let incomingWins = incoming.LastUsedUnixMs >= existing.LastUsedUnixMs
         let incomingCreatedWins = incoming.CreatedUnixMs > existing.CreatedUnixMs
         let incomingModifiedWins = incoming.ModifiedUnixMs > existing.ModifiedUnixMs
@@ -383,5 +403,13 @@ enum SyncConflictResolver {
             existing.RichText = incoming.RichText
             existing.RichTextUpdatedUnixMs = incoming.RichTextUpdatedUnixMs
         }
+    }
+
+    private static func canonicalEntryID(_ left: String, _ right: String) -> String {
+        if left.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return right }
+        if right.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return left }
+        let insensitive = left.caseInsensitiveCompare(right)
+        if insensitive != .orderedSame { return insensitive == .orderedAscending ? left : right }
+        return left <= right ? left : right
     }
 }
