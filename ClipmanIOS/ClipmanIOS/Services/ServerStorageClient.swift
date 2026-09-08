@@ -9,12 +9,12 @@ protocol ServerStorageSettingsProviding {
     var historyPassword: String { get }
 }
 
-struct ServerDatabaseDownload {
+struct ServerDatabaseDownload: Sendable {
     var revision: String
     var data: Data
 }
 
-struct ServerDatabaseMetadata {
+struct ServerDatabaseMetadata: Sendable {
     var revision: String
 }
 
@@ -47,9 +47,10 @@ enum ServerStorageError: Error, LocalizedError {
 final class ServerStorageClient {
     let isConfigured: Bool
     let syncCacheIdentity: String
+    let databaseID: String
     private let baseURL: URL?
     private let token: String
-    private let databaseID: String
+    private let endpointIdentity: String
     private let displayEndpoint: String
     private let maximumResponseBytes: Int
     private let session: URLSession
@@ -66,6 +67,7 @@ final class ServerStorageClient {
         self.baseURL = URL(string: cleanedURL)
         self.token = cleanedToken
         self.databaseID = ServerDatabaseIdentity.fromTokenAndPassword(token: cleanedToken, password: settings.historyPassword)
+        self.endpointIdentity = cleanedURL
         self.syncCacheIdentity = cleanedURL + "|" + self.databaseID
         self.maximumResponseBytes = max(0, min(maximumResponseBytes, ClipDatabaseFile.maximumFileBytes))
         let authority = try? ServerSettingsSanitizer.parseCertificateAuthority(settings.serverCaCertPEM, address: settings.serverURL)
@@ -86,6 +88,66 @@ final class ServerStorageClient {
         self.isConfigured = self.baseURL != nil && !cleanedToken.isEmpty && !settings.historyPassword.isEmpty && authorityMatches && (settings.serverCaCertPEM.isEmpty || normalizedAuthority != nil)
     }
 
+    private init(
+        baseURL: URL?,
+        token: String,
+        databaseID: String,
+        endpointIdentity: String,
+        displayEndpoint: String,
+        maximumResponseBytes: Int,
+        session: URLSession,
+        sessionDelegate: ServerSessionDelegate
+    ) {
+        self.baseURL = baseURL
+        self.token = token
+        self.databaseID = databaseID
+        self.endpointIdentity = endpointIdentity
+        self.syncCacheIdentity = endpointIdentity + "|" + databaseID
+        self.displayEndpoint = displayEndpoint
+        self.maximumResponseBytes = maximumResponseBytes
+        self.session = session
+        self.sessionDelegate = sessionDelegate
+        self.isConfigured = true
+    }
+
+    /// A client for another bucket on the same server, reusing this client's
+    /// credentials, transport and certificate pinning. Sync channels and the
+    /// sync-rules document are ordinary buckets addressed by their derived ids
+    /// (`sync-rules-spec.md` section 2), so they need no server change at all.
+    func addressing(databaseID: String) -> ServerStorageClient? {
+        let cleanedID = databaseID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isConfigured, !cleanedID.isEmpty else { return nil }
+        if cleanedID == self.databaseID { return self }
+        return ServerStorageClient(
+            baseURL: baseURL,
+            token: token,
+            databaseID: cleanedID,
+            endpointIdentity: endpointIdentity,
+            displayEndpoint: displayEndpoint,
+            maximumResponseBytes: maximumResponseBytes,
+            session: session,
+            sessionDelegate: sessionDelegate
+        )
+    }
+
+    /// A client for the bucket of one sync channel. `channelKey` must already be
+    /// the normalized key of `sync-rules-spec.md` section 3.
+    func addressingChannel(_ channelKey: String, password: String) -> ServerStorageClient? {
+        addressing(databaseID: ServerDatabaseIdentity.channelDatabaseId(
+            token: token,
+            password: password,
+            channelKey: channelKey
+        ))
+    }
+
+    /// A client for the sync-rules document's bucket.
+    func addressingSyncRules(password: String) -> ServerStorageClient? {
+        addressing(databaseID: ServerDatabaseIdentity.syncRulesDatabaseId(
+            token: token,
+            password: password
+        ))
+    }
+
     func metadata() async throws -> ServerDatabaseMetadata {
         let (_, response) = try await request(method: "HEAD", body: nil, expectedRevision: nil)
         return metadata(from: response)
@@ -96,15 +158,28 @@ final class ServerStorageClient {
         return ServerDatabaseDownload(revision: metadata(from: response).revision, data: data)
     }
 
-    func upload(data: Data, expectedRevision: String) async throws -> String {
+    /// `createOnly` sends `If-None-Match: *`, so a bucket another device created
+    /// in the meantime wins instead of being overwritten. Channel and rules
+    /// buckets are created that way (`sync-rules-spec.md` sections 4 and 6).
+    func upload(data: Data, expectedRevision: String, createOnly: Bool = false) async throws -> String {
         guard data.count <= ClipDatabaseFile.maximumFileBytes else {
             throw ServerStorageError.responseTooLarge
         }
-        let (_, response) = try await request(method: "PUT", body: data, expectedRevision: expectedRevision)
+        let (_, response) = try await request(
+            method: "PUT",
+            body: data,
+            expectedRevision: expectedRevision,
+            createOnly: createOnly
+        )
         return metadata(from: response).revision
     }
 
-    private func request(method: String, body: Data?, expectedRevision: String?) async throws -> (Data, HTTPURLResponse) {
+    private func request(
+        method: String,
+        body: Data?,
+        expectedRevision: String?,
+        createOnly: Bool = false
+    ) async throws -> (Data, HTTPURLResponse) {
         guard let baseURL, isConfigured else { throw ServerStorageError.notConfigured }
         let url = baseURL.appendingPathComponent("api/v1/database/\(databaseID)")
         var request = URLRequest(url: url)
@@ -114,6 +189,8 @@ final class ServerStorageClient {
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         if let expectedRevision, !expectedRevision.isEmpty {
             request.setValue(expectedRevision, forHTTPHeaderField: "If-Match")
+        } else if createOnly {
+            request.setValue("*", forHTTPHeaderField: "If-None-Match")
         }
         if let body {
             request.httpBody = body

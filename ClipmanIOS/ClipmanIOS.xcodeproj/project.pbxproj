@@ -86,6 +86,9 @@
 		F9C33C3C942E9C0397FB4AFF /* ServerStorageClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */; };
 		FA810C3FF3B2BAA9100DBEDC /* off.wav in Resources */ = {isa = PBXBuildFile; fileRef = 60F380468EAD667D829F4D30 /* off.wav */; };
 		FD5B299F7F13570E50D93B8D /* TipJarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFA70C5093FAAF9882B23D9 /* TipJarStore.swift */; };
+		A1B2C3D4E5F60718293A4B01 /* SyncRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* SyncRules.swift */; };
+		A1B2C3D4E5F60718293A4B02 /* SyncRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* SyncRules.swift */; };
+		A1B2C3D4E5F60718293A4B03 /* SyncRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5D /* SyncRulesTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -189,6 +192,8 @@
 		F5958A72B23F83979A9200C6 /* HTMLEntityDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLEntityDecoder.swift; sourceTree = "<group>"; };
 		F65C86632F475E92A20913C8 /* ClipmanIOSTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ClipmanIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkExtractor.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5C /* SyncRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRules.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5D /* SyncRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRulesTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -263,6 +268,7 @@
 				DE80C6C473747E57E01F38BD /* PendingSharedImageStoreTests.swift */,
 				B732D83BB668CA4B519F9B18 /* PendingSharedTextStoreTests.swift */,
 				C622212374EB41352FE2ACC0 /* ShareSyncServiceTests.swift */,
+				A1B2C3D4E5F60718293A4B5D /* SyncRulesTests.swift */,
 				03032F860A00CBC6F3EB3214 /* SoundServiceTests.swift */,
 			);
 			path = ClipmanIOSTests;
@@ -360,6 +366,7 @@
 				642C84289DC631AC184C2C31 /* Models.swift */,
 				034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */,
 				59CAAE8407EA418223E6F30C /* SyncConflictResolver.swift */,
+				A1B2C3D4E5F60718293A4B5C /* SyncRules.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -548,6 +555,7 @@
 				96D6D4886289D3D0EF9275B8 /* ShareSyncService.swift in Sources */,
 				5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */,
 				9C4809F93BC5717D1C1645DD /* SyncConflictResolver.swift in Sources */,
+				A1B2C3D4E5F60718293A4B01 /* SyncRules.swift in Sources */,
 				FD5B299F7F13570E50D93B8D /* TipJarStore.swift in Sources */,
 				17D24F4160AF41A3AEE92FD4 /* WebsiteTitleFetcher.swift in Sources */,
 			);
@@ -573,6 +581,7 @@
 				CFE44E70EABB4AD867BCB97B /* ShareSyncService.swift in Sources */,
 				3853E72967534A420918CBF6 /* ShareViewController.swift in Sources */,
 				905F1829F21F84C4AD670C49 /* SyncConflictResolver.swift in Sources */,
+				A1B2C3D4E5F60718293A4B02 /* SyncRules.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -590,6 +599,7 @@
 				05EA2EAD81ABF61AD07F9704 /* PendingSharedImageStoreTests.swift in Sources */,
 				1D606F3AF13E42FEE401D59A /* PendingSharedTextStoreTests.swift in Sources */,
 				517D038A8DD78B4940576C43 /* ShareSyncServiceTests.swift in Sources */,
+				A1B2C3D4E5F60718293A4B03 /* SyncRulesTests.swift in Sources */,
 				38B8D1322F8D02C86F55A45C /* SoundServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

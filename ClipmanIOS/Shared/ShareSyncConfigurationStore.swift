@@ -43,6 +43,9 @@ enum ShareSyncConfigurationStore {
     private static let appGroup = "group.me.onj.clipman.ios"
     private static let directoryName = "ShareSync"
     private static let configurationName = "configuration.json"
+    private static let syncRulesName = "sync-rules.json"
+    private static let historySaltName = "history-salt.bin"
+    private static let maximumSyncRulesBytes = 256 * 1024
 
     static func publish(
         storageMode: String,
@@ -109,7 +112,59 @@ enum ShareSyncConfigurationStore {
         return settings
     }
 
+    /// Publishes the sync-rules document the Share extension routes with. The
+    /// extension cannot reach the rules bucket cheaply, so the app hands it the
+    /// document it last read (`sync-rules-spec.md` sections 4 and 6). A nil or
+    /// disabled document removes the cache, which puts the extension back on the
+    /// core bucket.
+    static func publishRules(_ document: SyncRulesDocument?) {
+        guard let url = try? sharedFileURL(named: syncRulesName, createDirectory: true) else { return }
+        guard let document, document.Enabled, let data = SyncRuleEngine.serialize(document),
+              data.count <= maximumSyncRulesBytes else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        try? data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+    }
+
+    static func loadRules() -> SyncRulesDocument? {
+        guard let url = try? sharedFileURL(named: syncRulesName, createDirectory: false),
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+              values.isRegularFile == true,
+              let byteCount = values.fileSize,
+              byteCount > 0,
+              byteCount <= maximumSyncRulesBytes,
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        guard let document = SyncRuleEngine.parse(data), document.Enabled else { return nil }
+        return document
+    }
+
+    /// Publishes the history database's PBKDF2 salt so a channel blob the Share
+    /// extension creates for the first time copies it, and one key derivation
+    /// keeps serving every bucket (`sync-rules-spec.md` section 5, Salt sharing).
+    /// The salt is not a secret; it is stored in the clear inside every blob.
+    static func publishHistorySalt(_ salt: Data) {
+        guard salt.count == 16,
+              let url = try? sharedFileURL(named: historySaltName, createDirectory: true) else { return }
+        try? salt.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+    }
+
+    static func loadHistorySalt() -> [UInt8]? {
+        guard let url = try? sharedFileURL(named: historySaltName, createDirectory: false),
+              let data = try? Data(contentsOf: url),
+              data.count == 16 else {
+            return nil
+        }
+        return Array(data)
+    }
+
     private static func configurationURL(createDirectory: Bool) throws -> URL {
+        try sharedFileURL(named: configurationName, createDirectory: createDirectory)
+    }
+
+    private static func sharedFileURL(named name: String, createDirectory: Bool) throws -> URL {
         guard let root = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroup
         ) else {
@@ -119,7 +174,7 @@ enum ShareSyncConfigurationStore {
         if createDirectory {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        return directory.appendingPathComponent(configurationName, isDirectory: false)
+        return directory.appendingPathComponent(name, isDirectory: false)
     }
 }
 

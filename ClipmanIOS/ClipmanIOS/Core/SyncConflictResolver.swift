@@ -168,6 +168,15 @@ enum SyncConflictResolver {
         return result
     }
 
+    /// The normalization the merge applies, exposed so channel databases and the
+    /// cross-channel view can be normalized the same way they would be after a
+    /// merge (`sync-rules-spec.md` section 5).
+    static func normalized(_ database: ClipDatabase) -> ClipDatabase {
+        var result = database
+        normalize(&result)
+        return result
+    }
+
     static func textHash(_ text: String) -> String {
         let digest = SHA256.hash(data: Data(text.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
