@@ -135,7 +135,16 @@ Field semantics:
   the entry's `RichText` is present and its `HtmlFragment` contains the ordinal
   substring `data:image/`.
 - Routing is evaluated top to bottom over `Channels`; the first matching route
-  wins; an entry matching no route lives in core.
+  wins; an entry matching no route lives in core. Evaluation STOPS at the first
+  matching route even when that route's channel key is unresolvable (possible
+  only under a future-version document): the entry then routes to core rather
+  than falling through to later routes the client only partly understands.
+- Read-only documents never trigger relocation: under a future-version document
+  a client treats every resident entry's current channel as authoritative (no
+  misrouted-entry migration, no channel re-routing), because a client that
+  cannot fully evaluate the rules must not fight newer clients over placement.
+  Only NEW captures are routed (first-match-stops rule above), with write-through
+  for resolvable unsubscribed targets.
 - `Devices[].Name`: the device's user-visible device name.
 - `Devices[].Channels`: channel keys, or the single element `"*"` meaning all
   channels. Core is implicit and always synced. A device whose name is not
