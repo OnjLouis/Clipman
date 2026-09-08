@@ -330,6 +330,25 @@ final class SyncRulesTests: XCTestCase {
         XCTAssertEqual(result.residence["a"], "")
     }
 
+    func testViewAssemblyKeepsNewChannelEntriesAtTheEndOfManualOrder() {
+        var coreFirst = entry(id: "core-first", text: "core first", modified: 1)
+        coreFirst.CreatedUnixMs = 1
+        coreFirst.ManualOrder = 1
+        var coreSecond = entry(id: "core-second", text: "core second", modified: 2)
+        coreSecond.CreatedUnixMs = 2
+        coreSecond.ManualOrder = 2
+        var channelNew = entry(id: "channel-new", text: "channel new", modified: 3)
+        channelNew.CreatedUnixMs = 3
+        channelNew.ManualOrder = 1
+
+        let result = SyncChannelAssembler.buildView([
+            SyncChannelSnapshot(key: "", database: ClipDatabase(Entries: [coreFirst, coreSecond])),
+            SyncChannelSnapshot(key: "work", database: ClipDatabase(Entries: [channelNew]))
+        ])
+
+        XCTAssertEqual(result.view.Entries.map(\.Id), ["core-first", "core-second", "channel-new"])
+    }
+
     func testTextTombstoneSuppressesMatchingEntryInAnotherChannel() {
         let core = ClipDatabase(Entries: [entry(id: "a", text: "shared", modified: 10)])
         let work = ClipDatabase(DeletedEntries: [DeletedClipEntry(

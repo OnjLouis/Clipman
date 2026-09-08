@@ -1279,14 +1279,16 @@ final class ClipStore: @unchecked Sendable {
         }
 
         var survivors: [ClipEntry] = []
+        var survivorOwners: [String] = []
         var owner: [String: String] = [:]
         var live = Set<String>()
         for (index, entry) in view.Entries.enumerated() where !suppressed[index] {
             survivors.append(entry)
+            survivorOwners.append(owners[index])
             owner[entry.Id] = owners[index]
             live.insert(Self.comparableID(entry.Id))
         }
-        view.Entries = survivors
+        view.Entries = SyncChannelManualOrder.merged(survivors, owners: survivorOwners)
 
         // The view carries every channel's markers, except those contradicted by
         // a live entry elsewhere: applying a relocation marker to the view would

@@ -335,6 +335,22 @@ class MobileMutationFastPathTest {
     }
 
     @Test
+    fun channelAssemblyKeepsNewEntriesAtTheEndOfManualOrder() {
+        val coreFirst = entry("core-first", order = 1).copy(CreatedUnixMs = now - 3_000)
+        val coreSecond = entry("core-second", order = 2).copy(CreatedUnixMs = now - 2_000)
+        val channelNew = entry("channel-new", group = "Work", order = 1).copy(CreatedUnixMs = now - 1_000)
+
+        val assembly = MobileChannelEngine.buildView(
+            listOf(
+                state("", ClipDatabase(Entries = listOf(coreFirst, coreSecond))),
+                state("work", ClipDatabase(Entries = listOf(channelNew)))
+            )
+        )
+
+        assertEquals(listOf("core-first", "core-second", "channel-new"), assembly.view.Entries.map { it.Id })
+    }
+
+    @Test
     fun relocationMarkersNeverSuppressTheEntryTheyMoved() {
         val moved = entry("m", text = "moved text", group = "Work")
         val assembly = MobileChannelEngine.buildView(

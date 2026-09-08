@@ -122,18 +122,18 @@ func syncRulesFixtureDatabases() (core, work, images model.Database) {
 // from engine output, so the verifier below compares the engine against the
 // contract, not against itself. Entries are listed sorted by id, matching how
 // every consumer sorts before comparing. Manual orders are the view
-// renumbering: same-order entries across channels interleave by
-// CreatedUnixMs, so the sequence is core-plain, work-standup, core-unmatched,
-// work-plan.
+// renumbering: channel-local sequences merge by the creation time of each
+// available head, so the sequence is core-plain, core-unmatched,
+// work-standup, work-plan.
 func syncRulesFixtureExpectedView() fixture.Expected {
 	return fixture.Expected{
 		Version:       1,
 		UpdatedUnixMs: fixtureBaseUnixMs,
 		Entries: []fixture.Entry{
 			{ID: "core-plain", Text: "Core grocery list", Group: "Personal", SourceMachine: "Jeff-iPhone", CreatedUnixMs: fixtureBaseUnixMs + 100, LastUsedUnixMs: fixtureBaseUnixMs + 100, ManualOrder: 1},
-			{ID: "core-unmatched", Text: "Loose note", SourceMachine: "Jeff-iPhone", CreatedUnixMs: fixtureBaseUnixMs + 200, LastUsedUnixMs: fixtureBaseUnixMs + 200, ManualOrder: 3},
+			{ID: "core-unmatched", Text: "Loose note", SourceMachine: "Jeff-iPhone", CreatedUnixMs: fixtureBaseUnixMs + 200, LastUsedUnixMs: fixtureBaseUnixMs + 200, ManualOrder: 2},
 			{ID: "work-plan", Text: "Quarterly plan", Group: "Work", SourceMachine: "Desktop", CreatedUnixMs: fixtureBaseUnixMs + 400, LastUsedUnixMs: fixtureBaseUnixMs + 400, ManualOrder: 4},
-			{ID: "work-standup", Text: "Standup notes", Group: "Standup", SourceMachine: "Jeff-iPhone", CreatedUnixMs: fixtureBaseUnixMs + 300, LastUsedUnixMs: fixtureBaseUnixMs + 300, ManualOrder: 2},
+			{ID: "work-standup", Text: "Standup notes", Group: "Standup", SourceMachine: "Jeff-iPhone", CreatedUnixMs: fixtureBaseUnixMs + 300, LastUsedUnixMs: fixtureBaseUnixMs + 300, ManualOrder: 3},
 		},
 		Deleted: []fixture.Deleted{},
 	}

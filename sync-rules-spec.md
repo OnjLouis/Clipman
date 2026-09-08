@@ -192,7 +192,14 @@ Download / poll (each poll tick):
    tombstone with a non-empty `TextHash` also suppresses matching-text entries
    in other channels, subject to the same entry-changed-before-deletion rule the
    entry-level merge uses. A relocation marker (empty `TextHash`) must never
-   suppress a live entry with the same id in another channel.
+   suppress a live entry with the same id in another channel. Manual order is
+   channel-local. To form the view, sort each channel by its own `ManualOrder`
+   (then `CreatedUnixMs` and `Id`), and merge those sequences by choosing the
+   available head with the earliest positive `CreatedUnixMs`; ties follow
+   channel assembly order. Treat a missing or nonpositive creation time as
+   later than a valid time. Renumber the resulting view from 1. This preserves
+   deliberate order within every channel while preventing a newly created
+   channel entry at local position 1 from jumping ahead of older history.
 4. The dropped loser of an `Id` collision is repaired (rewritten to its routed
    channel) on the next save.
 

@@ -85,11 +85,15 @@ class SyncRulesFixtureCorpusTest {
         assertTrue(work.Entries.isNotEmpty())
         assertTrue(images.Entries.isNotEmpty())
 
-        // Assemble the subscribed view exactly as the client does: core first,
-        // then the subscribed channels in document order; merge normalizes and
-        // renumbers manual order densely.
-        var view = SyncConflictResolver.merge(target = ClipDatabase(), source = core)
-        view = SyncConflictResolver.merge(target = view, source = work)
+        // Assemble the subscribed view through the channel engine used by the
+        // application. A plain database merge cannot reproduce channel-local
+        // manual order because it discards the owner of each entry.
+        val view = MobileChannelEngine.buildView(
+            listOf(
+                MobileChannelState(key = "", database = core),
+                MobileChannelState(key = "work", database = work)
+            )
+        ).view
 
         val expected = json.decodeFromString<FixtureExpectedView>(
             File(directory, "expected-view.json").readText(Charsets.UTF_8)

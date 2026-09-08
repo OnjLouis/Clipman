@@ -690,6 +690,7 @@ func buildView(channels []ChannelState, now int64) (*model.Database, map[string]
 		}
 	}
 	entries := make([]model.Entry, 0, len(view.Entries))
+	keptOwners := make([]string, 0, len(view.Entries))
 	residence := make(map[string]string, len(view.Entries))
 	live := make(map[string]bool, len(view.Entries))
 	for index, entry := range view.Entries {
@@ -697,10 +698,12 @@ func buildView(channels []ChannelState, now int64) (*model.Database, map[string]
 			continue
 		}
 		entries = append(entries, entry)
+		keptOwners = append(keptOwners, owners[index])
 		residence[entry.ID] = owners[index]
 		live[comparableID(entry.ID)] = true
 	}
 	view.Entries = entries
+	applyCombinedManualOrder(view.Entries, keptOwners)
 
 	// The view carries every channel's markers so callers see the same deleted
 	// history a single-bucket client would, except for markers contradicted by
@@ -727,6 +730,73 @@ func buildView(channels []ChannelState, now int64) (*model.Database, map[string]
 		}
 	}
 	return view, final
+}
+
+// applyCombinedManualOrder merges channel-local manual sequences by creation
+// time. This preserves each channel's deliberate order without letting order 1
+// in a newly created channel jump ahead of older entries in another channel.
+func applyCombinedManualOrder(entries []model.Entry, owners []string) {
+	type sequence struct {
+		indices []int
+		next    int
+	}
+	sequences := make([]sequence, 0)
+	sequenceByOwner := make(map[string]int)
+	for index, owner := range owners {
+		sequenceIndex, ok := sequenceByOwner[owner]
+		if !ok {
+			sequenceIndex = len(sequences)
+			sequenceByOwner[owner] = sequenceIndex
+			sequences = append(sequences, sequence{})
+		}
+		sequences[sequenceIndex].indices = append(sequences[sequenceIndex].indices, index)
+	}
+	for index := range sequences {
+		sort.SliceStable(sequences[index].indices, func(left, right int) bool {
+			first := entries[sequences[index].indices[left]]
+			second := entries[sequences[index].indices[right]]
+			firstOrder, secondOrder := first.ManualOrder, second.ManualOrder
+			if firstOrder <= 0 {
+				firstOrder = int64(^uint64(0) >> 1)
+			}
+			if secondOrder <= 0 {
+				secondOrder = int64(^uint64(0) >> 1)
+			}
+			if firstOrder != secondOrder {
+				return firstOrder < secondOrder
+			}
+			if first.CreatedUnixMs != second.CreatedUnixMs {
+				return first.CreatedUnixMs < second.CreatedUnixMs
+			}
+			return first.ID < second.ID
+		})
+	}
+
+	ordered := make([]model.Entry, 0, len(entries))
+	for len(ordered) < len(entries) {
+		chosen := -1
+		var chosenCreated int64
+		for index := range sequences {
+			if sequences[index].next >= len(sequences[index].indices) {
+				continue
+			}
+			entry := entries[sequences[index].indices[sequences[index].next]]
+			created := entry.CreatedUnixMs
+			if created <= 0 {
+				created = int64(^uint64(0) >> 1)
+			}
+			if chosen < 0 || created < chosenCreated {
+				chosen = index
+				chosenCreated = created
+			}
+		}
+		entryIndex := sequences[chosen].indices[sequences[chosen].next]
+		sequences[chosen].next++
+		entry := entries[entryIndex]
+		entry.ManualOrder = int64(len(ordered) + 1)
+		ordered = append(ordered, entry)
+	}
+	copy(entries, ordered)
 }
 
 // textMarkerSuppresses applies the text-hash half of merge.IsDeleted, which is

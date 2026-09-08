@@ -578,14 +578,17 @@ enum SyncChannelAssembler {
         }
 
         var survivors: [ClipEntry] = []
+        var survivorOwners: [String] = []
         var residence: [String: String] = [:]
         var live = Set<String>()
         for index in entries.indices where !suppressed[index] {
             survivors.append(entries[index])
+            survivorOwners.append(owners[index])
             residence[entries[index].Id] = owners[index]
             live.insert(comparableID(entries[index].Id))
         }
         view.Entries = survivors
+        applyCombinedManualOrder(&view.Entries, owners: survivorOwners)
 
         // The view carries every channel's markers, except those contradicted by
         // a live entry elsewhere: a relocation marker names an id that now lives
@@ -607,6 +610,58 @@ enum SyncChannelAssembler {
             }
         }
         return (view, finalResidence)
+    }
+
+    /// Merges channel-local manual sequences by creation time. Every channel's
+    /// own order is retained, while a new channel's first item no longer jumps
+    /// ahead of older entries merely because both have ManualOrder 1.
+    private static func applyCombinedManualOrder(_ entries: inout [ClipEntry], owners: [String]) {
+        var sequences: [[Int]] = []
+        var sequenceByOwner: [String: Int] = [:]
+        for (index, owner) in owners.enumerated() {
+            let sequenceIndex: Int
+            if let existing = sequenceByOwner[owner] {
+                sequenceIndex = existing
+            } else {
+                sequenceIndex = sequences.count
+                sequenceByOwner[owner] = sequenceIndex
+                sequences.append([])
+            }
+            sequences[sequenceIndex].append(index)
+        }
+        for index in sequences.indices {
+            sequences[index].sort {
+                let left = entries[$0]
+                let right = entries[$1]
+                let leftOrder = left.ManualOrder <= 0 ? Int64.max : left.ManualOrder
+                let rightOrder = right.ManualOrder <= 0 ? Int64.max : right.ManualOrder
+                if leftOrder != rightOrder { return leftOrder < rightOrder }
+                if left.CreatedUnixMs != right.CreatedUnixMs { return left.CreatedUnixMs < right.CreatedUnixMs }
+                return left.Id < right.Id
+            }
+        }
+
+        var offsets = [Int](repeating: 0, count: sequences.count)
+        var ordered: [ClipEntry] = []
+        ordered.reserveCapacity(entries.count)
+        while ordered.count < entries.count {
+            var chosen: Int?
+            var chosenCreated = Int64.max
+            for index in sequences.indices where offsets[index] < sequences[index].count {
+                let entry = entries[sequences[index][offsets[index]]]
+                let created = entry.CreatedUnixMs <= 0 ? Int64.max : entry.CreatedUnixMs
+                if chosen == nil || created < chosenCreated {
+                    chosen = index
+                    chosenCreated = created
+                }
+            }
+            guard let chosen else { break }
+            var entry = entries[sequences[chosen][offsets[chosen]]]
+            offsets[chosen] += 1
+            entry.ManualOrder = Int64(ordered.count + 1)
+            ordered.append(entry)
+        }
+        entries = ordered
     }
 
     /// The text-hash half of the entry-level deletion rule, which is the only

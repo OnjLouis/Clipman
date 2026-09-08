@@ -73,6 +73,7 @@ namespace Clipman.Tests
             Run("a group change relocates an entry between channel files", GroupChangeRelocatesEntryBetweenChannelFiles);
             Run("cross-channel tombstones suppress only matching text", CrossChannelTombstonesSuppressOnlyMatchingText);
             Run("unsubscribed channel files are not loaded into the view", UnsubscribedChannelFileIsNotLoadedIntoView);
+            Run("new channel entries stay at the end of manual order", NewChannelEntriesStayAtEndOfManualOrder);
             Run("dirty hashes skip rewriting untouched channel files", DirtyHashSkipsRewritingUntouchedChannelFiles);
             Run("relocations write the target file before the source", RelocationWritesTargetFileBeforeSource);
             Run("sync rules round trip through the store", SyncRulesRoundTripThroughStore);
@@ -614,20 +615,20 @@ namespace Clipman.Tests
             Assert(core.Entries.Count > 0 && work.Entries.Count > 0 && images.Entries.Count > 0,
                 "Every fixture channel blob must decode to at least one entry.");
 
-            // Assemble the subscribed view exactly as the client does: core
-            // first, then the subscribed channels in document order, then the
-            // dense manual-order renumbering of the merged database.
+            // Assemble the subscribed view and retain each entry's channel so
+            // the same channel-local ordering pass used by ClipStore can form
+            // the combined manual sequence.
             var view = new ClipDatabase();
             SyncConflictResolver.MergeInto(view, core);
             SyncConflictResolver.MergeInto(view, work);
-            var renumbered = view.Entries
-                .OrderBy(e => e.ManualOrder <= 0 ? long.MaxValue : e.ManualOrder)
-                .ThenBy(e => e.CreatedUnixMs)
+            var owners = view.Entries
+                .Select(e => e.Group == "Work" || e.Group == "Standup" ? "work" : string.Empty)
                 .ToList();
-            for (var index = 0; index < renumbered.Count; index++)
-            {
-                renumbered[index].ManualOrder = index + 1;
-            }
+            var applyOrder = typeof(ClipStore).GetMethod(
+                "ApplyCombinedManualOrder",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(applyOrder != null, "The channel-local manual-order assembler was not found.");
+            view.Entries = (List<ClipEntry>)applyOrder.Invoke(null, new object[] { view.Entries, owners });
 
             var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
             var expected = serializer.Deserialize<FixtureExpectedView>(
@@ -1657,6 +1658,37 @@ namespace Clipman.Tests
             Assert(!EntryPropertiesForm.IsSaveShortcut(Keys.Enter) &&
                    !EntryPropertiesForm.IsSaveShortcut(Keys.Control | Keys.Shift | Keys.Enter),
                 description + " must reserve plain Enter for multiline text and require the exact save shortcut.");
+        }
+
+        private static void NewChannelEntriesStayAtEndOfManualOrder()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var channelPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                ClipDatabaseFile.SaveAtomic(Path.Combine(directory, "clipman-sync-rules.clipdb"), WorkChannelRules("Desktop"), string.Empty);
+
+                var core = new ClipDatabase();
+                core.Entries.Add(new ClipEntry { Id = "core-first", Text = "Core first", CreatedUnixMs = 1000, LastUsedUnixMs = 1000, ModifiedUnixMs = 1000, ManualOrder = 1 });
+                core.Entries.Add(new ClipEntry { Id = "core-second", Text = "Core second", CreatedUnixMs = 2000, LastUsedUnixMs = 2000, ModifiedUnixMs = 2000, ManualOrder = 2 });
+                ClipDatabaseFile.SaveAtomic(databasePath, core, string.Empty);
+
+                var work = new ClipDatabase();
+                work.Entries.Add(new ClipEntry { Id = "channel-new", Text = "Channel new", Group = "Work", CreatedUnixMs = 3000, LastUsedUnixMs = 3000, ModifiedUnixMs = 3000, ManualOrder = 1 });
+                ClipDatabaseFile.SaveAtomic(channelPath, work, string.Empty);
+
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    var ids = store.GetEntries("Manual", "All", false).Select(entry => entry.Id).ToList();
+                    Assert(ids.SequenceEqual(new[] { "core-first", "core-second", "channel-new" }),
+                        "A newly created entry in another channel jumped ahead of older manual-order entries.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
         }
 
         private static void HistoryWindowConstructsWithoutSelection()

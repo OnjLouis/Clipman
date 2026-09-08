@@ -23,7 +23,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios
         PRODUCT_NAME: Clipman
         MARKETING_VERSION: "3.0.0"
-        CURRENT_PROJECT_VERSION: "30000"
+        CURRENT_PROJECT_VERSION: "30001"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanIOS/Support/Info.plist
         SDKROOT: iphoneos
@@ -61,7 +61,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios.share
         PRODUCT_NAME: Share to Clipman
         MARKETING_VERSION: "3.0.0"
-        CURRENT_PROJECT_VERSION: "30000"
+        CURRENT_PROJECT_VERSION: "30001"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanShareExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: ClipmanShareExtension/ClipmanShareExtension.entitlements

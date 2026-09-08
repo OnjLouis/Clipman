@@ -1054,7 +1054,7 @@
 
   <p>Deleting a channel does not delete any entries. Its entries fall through to the next channel whose rule matches them, or to core if none does. The emptied server-side database bucket left behind for that channel is not deleted automatically; a server administrator can prune it with the server's existing database maintenance tools.</p>
 
-  <p>With sync rules enabled, manual order is kept separately within each channel. The combined history list orders entries by their position within their own channel, then by creation time, so reordering entries in one channel does not reorder entries that live in a different channel.</p>
+  <p>With sync rules enabled, manual order is kept separately within each channel. The combined history list preserves each channel's order while merging newer entries after older history, so a new channel entry does not unexpectedly jump to the top. Reordering entries in one channel does not reorder entries that live in a different channel.</p>
 
   <p><strong>Known limitations:</strong></p>
   <ul>

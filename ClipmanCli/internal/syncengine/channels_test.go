@@ -371,6 +371,26 @@ func TestReadViewMergesSubscribedChannelsOnly(t *testing.T) {
 	}
 }
 
+func TestBuildViewKeepsNewChannelEntriesAtTheEndOfManualOrder(t *testing.T) {
+	coreFirst := testEntry("core-first", "core first", "", 1000)
+	coreFirst.ManualOrder = 1
+	coreSecond := testEntry("core-second", "core second", "", 2000)
+	coreSecond.ManualOrder = 2
+	channelNew := testEntry("channel-new", "channel new", "Work", 3000)
+	channelNew.ManualOrder = 1
+	coreDatabase := databaseWith(coreFirst, coreSecond)
+	workDatabase := databaseWith(channelNew)
+
+	view, _ := buildView([]ChannelState{
+		{Key: "", Database: &coreDatabase},
+		{Key: "work", Database: &workDatabase},
+	}, 4000)
+
+	if got := entryIDs(view); !reflect.DeepEqual(got, []string{"core-first", "core-second", "channel-new"}) {
+		t.Fatalf("manual order = %v, want newly created channel entry at the end", got)
+	}
+}
+
 func TestMutateViewUploadsOnlyDirtyChannels(t *testing.T) {
 	fake, engine := newChannelEngine(t)
 	// Interleaved creation times across the two channels: the merged view

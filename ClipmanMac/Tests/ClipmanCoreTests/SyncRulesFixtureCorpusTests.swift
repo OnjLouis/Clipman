@@ -75,12 +75,13 @@ final class SyncRulesFixtureCorpusTests: XCTestCase {
         XCTAssertFalse(work.Entries.isEmpty)
         XCTAssertFalse(images.Entries.isEmpty)
 
-        // Assemble the subscribed view exactly as the client does: core first,
-        // then the subscribed channels in document order, then the dense
-        // manual-order renumbering of the merged database.
-        var view = ClipDatabase()
-        SyncConflictResolver.merge(into: &view, source: core)
-        SyncConflictResolver.merge(into: &view, source: work)
+        // This fixture has no collisions or tombstones, so assembly reduces to
+        // combining the two channel-local manual sequences.
+        var view = ClipDatabase(Entries: SyncChannelManualOrder.merged(
+            core.Entries + work.Entries,
+            owners: Array(repeating: "", count: core.Entries.count)
+                + Array(repeating: "work", count: work.Entries.count)
+        ))
         SyncConflictResolver.normalize(&view)
 
         let expectedData = try Data(contentsOf: directory.appendingPathComponent("expected-view.json"))

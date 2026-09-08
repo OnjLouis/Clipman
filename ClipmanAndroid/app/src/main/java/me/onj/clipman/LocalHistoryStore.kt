@@ -291,14 +291,17 @@ internal object MobileChannelEngine {
         }
 
         val kept = mutableListOf<ClipEntry>()
+        val keptOwners = mutableListOf<String>()
         val residence = HashMap<String, String>()
         val live = HashSet<String>()
         for (index in entries.indices) {
             if (suppressed[index]) continue
             kept.add(entries[index])
+            keptOwners.add(owners[index])
             residence[entries[index].Id] = owners[index]
             live.add(comparableClipId(entries[index].Id))
         }
+        applyCombinedManualOrder(kept, keptOwners)
 
         // The view carries every channel's markers except those contradicted by
         // a live entry elsewhere: a relocation marker names an id that now lives
@@ -319,6 +322,49 @@ internal object MobileChannelEngine {
             residence[entry.Id]?.let { finalResidence[entry.Id] = it }
         }
         return MobileChannelAssembly(view, finalResidence)
+    }
+
+    /** Preserves each channel's manual sequence while placing newer channel entries after older history. */
+    private fun applyCombinedManualOrder(entries: MutableList<ClipEntry>, owners: List<String>) {
+        val sequences = mutableListOf<MutableList<Int>>()
+        val sequenceByOwner = linkedMapOf<String, Int>()
+        owners.forEachIndexed { index, owner ->
+            val sequenceIndex = sequenceByOwner.getOrPut(owner) {
+                sequences.add(mutableListOf())
+                sequences.lastIndex
+            }
+            sequences[sequenceIndex].add(index)
+        }
+        sequences.forEach { sequence ->
+            sequence.sortWith(
+                compareBy<Int> {
+                    entries[it].ManualOrder.takeIf { order -> order > 0 } ?: Long.MAX_VALUE
+                }
+                    .thenBy { entries[it].CreatedUnixMs }
+                    .thenBy { entries[it].Id }
+            )
+        }
+
+        val offsets = IntArray(sequences.size)
+        val ordered = ArrayList<ClipEntry>(entries.size)
+        while (ordered.size < entries.size) {
+            var chosen = -1
+            var chosenCreated = Long.MAX_VALUE
+            sequences.indices.forEach { index ->
+                if (offsets[index] >= sequences[index].size) return@forEach
+                val entry = entries[sequences[index][offsets[index]]]
+                val created = if (entry.CreatedUnixMs <= 0) Long.MAX_VALUE else entry.CreatedUnixMs
+                if (chosen < 0 || created < chosenCreated) {
+                    chosen = index
+                    chosenCreated = created
+                }
+            }
+            if (chosen < 0) break
+            val entry = entries[sequences[chosen][offsets[chosen]++]]
+            ordered.add(entry.copy(ManualOrder = ordered.size.toLong() + 1))
+        }
+        entries.clear()
+        entries.addAll(ordered)
     }
 
     /**

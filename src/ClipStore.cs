@@ -2650,7 +2650,7 @@ namespace Clipman
                 keptOwners.Add(owners[index]);
                 live.Add(ComparableId(view.Entries[index].Id));
             }
-            view.Entries = kept;
+            view.Entries = ApplyCombinedManualOrder(kept, keptOwners);
 
             // The view carries every channel's markers except those contradicted by a live entry
             // elsewhere: applying a relocation marker to the view would delete the entry it only
@@ -2676,6 +2676,66 @@ namespace Clipman
                 residence[kept[index].Id ?? string.Empty] = keptOwners[index];
             }
             assembledMarkers = MarkersById(database.DeletedEntries);
+        }
+
+        /// <summary>
+        /// Merges channel-local manual sequences by creation time. This retains deliberate order
+        /// inside each channel without promoting a new channel's first entry above older history.
+        /// </summary>
+        private static List<ClipEntry> ApplyCombinedManualOrder(List<ClipEntry> entries, List<string> owners)
+        {
+            var sequences = new List<List<int>>();
+            var sequenceByOwner = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (var index = 0; index < entries.Count; index++)
+            {
+                var owner = index < owners.Count ? owners[index] ?? string.Empty : string.Empty;
+                int sequenceIndex;
+                if (!sequenceByOwner.TryGetValue(owner, out sequenceIndex))
+                {
+                    sequenceIndex = sequences.Count;
+                    sequenceByOwner[owner] = sequenceIndex;
+                    sequences.Add(new List<int>());
+                }
+                sequences[sequenceIndex].Add(index);
+            }
+            foreach (var sequence in sequences)
+            {
+                sequence.Sort((leftIndex, rightIndex) =>
+                {
+                    var left = entries[leftIndex];
+                    var right = entries[rightIndex];
+                    var leftOrder = left.ManualOrder <= 0 ? long.MaxValue : left.ManualOrder;
+                    var rightOrder = right.ManualOrder <= 0 ? long.MaxValue : right.ManualOrder;
+                    var comparison = leftOrder.CompareTo(rightOrder);
+                    if (comparison != 0) return comparison;
+                    comparison = left.CreatedUnixMs.CompareTo(right.CreatedUnixMs);
+                    if (comparison != 0) return comparison;
+                    return string.Compare(left.Id ?? string.Empty, right.Id ?? string.Empty, StringComparison.Ordinal);
+                });
+            }
+
+            var offsets = new int[sequences.Count];
+            var ordered = new List<ClipEntry>(entries.Count);
+            while (ordered.Count < entries.Count)
+            {
+                var chosen = -1;
+                var chosenCreated = long.MaxValue;
+                for (var index = 0; index < sequences.Count; index++)
+                {
+                    if (offsets[index] >= sequences[index].Count) continue;
+                    var entry = entries[sequences[index][offsets[index]]];
+                    var created = entry.CreatedUnixMs <= 0 ? long.MaxValue : entry.CreatedUnixMs;
+                    if (chosen >= 0 && created >= chosenCreated) continue;
+                    chosen = index;
+                    chosenCreated = created;
+                }
+                if (chosen < 0) break;
+                var entryIndex = sequences[chosen][offsets[chosen]++];
+                var selected = entries[entryIndex];
+                selected.ManualOrder = ordered.Count + 1;
+                ordered.Add(selected);
+            }
+            return ordered;
         }
 
         private static bool TextMarkerSuppresses(DeletedClipEntry marker, ClipEntry entry)

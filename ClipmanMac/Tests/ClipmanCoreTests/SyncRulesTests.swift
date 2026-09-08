@@ -445,6 +445,29 @@ final class SyncRulesTests: XCTestCase {
         XCTAssertEqual(SyncRuleEngine.serialize(reparsed), first)
     }
 
+    func testCombinedManualOrderKeepsANewChannelEntryAtTheEnd() {
+        var coreFirst = entry()
+        coreFirst.Id = "core-first"
+        coreFirst.CreatedUnixMs = 1
+        coreFirst.ManualOrder = 1
+        var coreSecond = entry()
+        coreSecond.Id = "core-second"
+        coreSecond.CreatedUnixMs = 2
+        coreSecond.ManualOrder = 2
+        var channelNew = entry(group: "Work")
+        channelNew.Id = "channel-new"
+        channelNew.CreatedUnixMs = 3
+        channelNew.ManualOrder = 1
+
+        let merged = SyncChannelManualOrder.merged(
+            [coreFirst, coreSecond, channelNew],
+            owners: ["", "", "work"]
+        )
+
+        XCTAssertEqual(merged.map(\.Id), ["core-first", "core-second", "channel-new"])
+        XCTAssertEqual(merged.map(\.ManualOrder), [1, 2, 3])
+    }
+
     // MARK: - Fixtures
 
     private func exampleDocument() -> SyncRulesDocument {
