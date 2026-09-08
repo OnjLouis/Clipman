@@ -30,6 +30,57 @@ namespace Clipman
         private bool lastChangeWasExternal;
         private string machineName;
 
+        // Sync channels (sync-rules-spec.md sections 3-6). Every field below is inert while
+        // RulesActiveLocked() is false, which is the state of a client without the feature.
+        private const string SyncRulesFileName = "clipman-sync-rules.clipdb";
+        private const string ChannelFilePrefix = "clipman-channel-";
+        private const string PendingWritesFileName = "pending-writes.json";
+        private const long ChannelAnnouncementLifetimeMs = 10000;
+        private const long SyncRulesAbsentRecheckMs = 60000;
+
+        private readonly List<ChannelSlot> channelSlots = new List<ChannelSlot>();
+        private Dictionary<string, string> residence = new Dictionary<string, string>(StringComparer.Ordinal);
+        private Dictionary<string, DeletedClipEntry> assembledMarkers = new Dictionary<string, DeletedClipEntry>(StringComparer.Ordinal);
+        private List<string> channelWriteOrder = new List<string>();
+        private SyncRulesDocument syncRules;
+        private string syncRulesRevision = string.Empty;
+        private ServerStorageClient syncRulesClient;
+        private string serverUrl = string.Empty;
+        private string serverToken = string.Empty;
+        private string serverCaCertPem = string.Empty;
+        private string serverCaHost = string.Empty;
+        private long syncRulesNextCheckUnixMs;
+        private bool selfRegistrationAttempted;
+        private string channelAnnouncement = string.Empty;
+        private long channelAnnouncementUnixMs;
+
+        /// <summary>
+        /// One sync channel as it stood at the last transfer. <see cref="Key"/> is the empty string
+        /// for the core channel, which keeps using the existing database file and bucket.
+        /// <see cref="PlainHash"/> is the dirty-detection hash of the plaintext with the
+        /// database-level UpdatedUnixMs zeroed (spec section 5, upload step 4).
+        /// </summary>
+        private sealed class ChannelSlot
+        {
+            public string Key;
+            public string Revision;
+            public string PlainHash;
+            public ClipDatabase Database;
+            public ServerStorageClient Client;
+            public string CacheFilePath;
+            public bool Exists;
+            public bool NeedsUpload;
+
+            public ChannelSlot()
+            {
+                Key = string.Empty;
+                Revision = string.Empty;
+                PlainHash = string.Empty;
+                CacheFilePath = string.Empty;
+                Database = new ClipDatabase();
+            }
+        }
+
         public event EventHandler Changed;
 
         public string DatabasePath { get; private set; }
@@ -143,6 +194,10 @@ namespace Clipman
                     serverPollTimer = null;
                 }
 
+                this.serverUrl = serverUrl ?? string.Empty;
+                this.serverToken = ServerSettingsSanitizer.CleanToken(serverToken);
+                this.serverCaCertPem = serverCaCertPem ?? string.Empty;
+                this.serverCaHost = serverCaHost ?? string.Empty;
                 serverClient = enabled
                     ? new ServerStorageClient(
                         serverUrl,
@@ -152,6 +207,11 @@ namespace Clipman
                         serverCaHost)
                     : null;
                 serverRevision = string.Empty;
+                syncRulesClient = null;
+                syncRulesRevision = string.Empty;
+                syncRulesNextCheckUnixMs = 0;
+                selfRegistrationAttempted = false;
+                ConfigureChannelClientsLocked();
                 ResetServerStatusLocked();
                 if (serverClient == null || !serverClient.IsConfigured)
                 {
@@ -189,7 +249,7 @@ namespace Clipman
                 LoadLocked();
                 if (serverClient != null && serverClient.IsConfigured)
                 {
-                    SyncFromServerLocked(false);
+                    ServerSyncLocked(false, false);
                 }
                 ResetWatcherLocked();
             }
@@ -1002,6 +1062,17 @@ namespace Clipman
             try
             {
                 SyncConflictResolver.ResolveDatabaseConflicts(DatabasePath, password);
+                ResolveSyncRulesConflictsLocked(password);
+                LoadSyncRulesFromDiskLocked(password);
+                if (RulesActiveLocked())
+                {
+                    LoadChannelsFromDiskLocked(password);
+                    storageUnavailable = false;
+                    LastStorageError = string.Empty;
+                    return;
+                }
+
+                ClearChannelStateLocked();
                 database = ClipDatabaseFile.Load(DatabasePath, password);
                 if (database.Entries == null) database.Entries = new List<ClipEntry>();
                 NormalizeDeletedEntriesLocked();
@@ -1014,6 +1085,7 @@ namespace Clipman
             {
                 if (!IsStorageAccessException(ex)) throw;
                 database = new ClipDatabase();
+                ClearChannelStateLocked();
                 storageUnavailable = true;
                 LastStorageError = ex.Message;
             }
@@ -1021,6 +1093,12 @@ namespace Clipman
 
         private void SaveLocked()
         {
+            if (RulesActiveLocked())
+            {
+                SaveChannelsLocked(false);
+                return;
+            }
+
             database.UpdatedUnixMs = TimeUtil.NowUnixMs();
             try
             {
@@ -1113,7 +1191,11 @@ namespace Clipman
             {
                 Directory.CreateDirectory(dir);
                 reloadTimer = new Timer(delegate { ReloadFromWatcher(); }, null, Timeout.Infinite, Timeout.Infinite);
-                watcher = new FileSystemWatcher(dir, file)
+                // Channel and rules files are siblings of the history file, so the watcher covers
+                // every container in the folder and WatcherChanged filters by name. A rules file is
+                // watched even while rules are inactive, or a device would never notice another
+                // device enabling them in a shared folder.
+                watcher = new FileSystemWatcher(dir, "*" + ClipDatabaseFile.CompressedExtension)
                 {
                     NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName | NotifyFilters.CreationTime
                 };
@@ -1204,15 +1286,7 @@ namespace Clipman
                         var now = TimeUtil.NowUnixMs();
                         if (serverNextPollUnixMs > now) return;
                         serverLastPollUnixMs = now;
-                        var metadata = serverClient.GetMetadata();
-                        storageUnavailable = false;
-                        LastStorageError = string.Empty;
-                        MarkServerSuccessLocked(false);
-                        if (!string.IsNullOrWhiteSpace(metadata.Revision) &&
-                            !string.Equals(metadata.Revision, serverRevision, StringComparison.Ordinal))
-                        {
-                            changed = SyncFromServerLocked(false);
-                        }
+                        changed = ServerSyncLocked(false, true);
                     }
                     catch (WebException ex)
                     {
@@ -1258,10 +1332,54 @@ namespace Clipman
             }
         }
 
+        /// <summary>
+        /// One server sync pass. The sync rules bucket is consulted first (spec section 5, download
+        /// step 1) so that enabling the feature elsewhere is noticed; with rules inactive the rest
+        /// is the unchanged single-bucket flow.
+        /// </summary>
+        private bool ServerSyncLocked(bool uploadLocalWhenMissing, bool headFirst)
+        {
+            if (serverClient == null || !serverClient.IsConfigured) return false;
+
+            var changed = false;
+            if (RefreshSyncRulesFromServerLocked())
+            {
+                ReconfigureChannelsLocked();
+                changed = true;
+            }
+
+            if (!RulesActiveLocked())
+            {
+                if (headFirst)
+                {
+                    var metadata = serverClient.GetMetadata();
+                    storageUnavailable = false;
+                    LastStorageError = string.Empty;
+                    MarkServerSuccessLocked(false);
+                    if (string.IsNullOrWhiteSpace(metadata.Revision) ||
+                        string.Equals(metadata.Revision, serverRevision, StringComparison.Ordinal))
+                    {
+                        return changed;
+                    }
+                }
+                return SyncFromServerLocked(uploadLocalWhenMissing) || changed;
+            }
+
+            changed = SyncChannelsFromServerLocked(uploadLocalWhenMissing) || changed;
+            SelfRegisterDeviceLocked();
+            RetryPendingWritesLocked(TimeUtil.NowUnixMs());
+            if (AnyChannelNeedsUploadLocked())
+            {
+                SaveChannelsLocked(false);
+            }
+            return changed;
+        }
+
         private bool SyncFromServerLocked(bool uploadLocalWhenMissing)
         {
             if (serverClient == null || !serverClient.IsConfigured) return false;
             if (serverSyncInProgress) return false;
+            if (RulesActiveLocked()) return SyncChannelsFromServerLocked(uploadLocalWhenMissing);
 
             serverSyncInProgress = true;
             try
@@ -1325,7 +1443,7 @@ namespace Clipman
                 {
                     try
                     {
-                        changed = SyncFromServerLocked(true);
+                        changed = ServerSyncLocked(true, false);
                     }
                     catch (Exception ex)
                     {
@@ -1613,7 +1731,29 @@ namespace Clipman
 
         private void WatcherChanged(object sender, FileSystemEventArgs e)
         {
+            if (!IsWatchedDatabaseFile(Path.GetFileName(DatabasePath), e == null ? null : e.Name)) return;
             if (reloadTimer != null) reloadTimer.Change(500, Timeout.Infinite);
+        }
+
+        /// <summary>
+        /// Whether a container in the history folder is one this store reads: the history file
+        /// itself, the sync rules document, or a sync channel.
+        /// </summary>
+        internal static bool IsWatchedDatabaseFile(string coreFileName, string changedFileName)
+        {
+            var name = (changedFileName ?? string.Empty).Trim();
+            if (name.Length == 0) return false;
+            name = Path.GetFileName(name);
+            if (string.Equals(name, coreFileName, StringComparison.OrdinalIgnoreCase)) return true;
+            return IsChannelOrRulesFileName(name);
+        }
+
+        private static bool IsChannelOrRulesFileName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            if (string.Equals(name, SyncRulesFileName, StringComparison.OrdinalIgnoreCase)) return true;
+            return name.StartsWith(ChannelFilePrefix, StringComparison.OrdinalIgnoreCase) &&
+                   name.EndsWith(ClipDatabaseFile.CompressedExtension, StringComparison.OrdinalIgnoreCase);
         }
 
         private void ReloadFromWatcher()
@@ -1653,6 +1793,11 @@ namespace Clipman
         {
             lock (sync)
             {
+                if (RulesActiveLocked())
+                {
+                    SaveChannelsLocked(true);
+                    return;
+                }
                 UploadToServerLocked();
             }
         }
@@ -1844,6 +1989,1409 @@ namespace Clipman
             {
                 return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text))).Replace("-", string.Empty).ToLowerInvariant();
             }
+        }
+
+        // ---------------------------------------------------------------------------------------
+        // Sync channels. Everything below runs only while a usable, enabled sync rules document is
+        // in effect; sync-rules-spec.md sections 5 and 6 are the algorithm.
+        // ---------------------------------------------------------------------------------------
+
+        public SyncRulesDocument GetSyncRules()
+        {
+            lock (sync)
+            {
+                return SyncRuleEngine.Copy(syncRules);
+            }
+        }
+
+        public bool SyncRulesReadOnly()
+        {
+            lock (sync)
+            {
+                return SyncRuleEngine.ReadOnly(syncRules);
+            }
+        }
+
+        public List<string> GetSyncChannelKeys()
+        {
+            lock (sync)
+            {
+                return AllChannelKeysLocked();
+            }
+        }
+
+        /// <summary>
+        /// Publishes a new sync rules document and re-routes this device immediately (spec section
+        /// 5, "Rules edits"). Returns null on success or a message describing why the edit was
+        /// refused.
+        /// </summary>
+        public string SetSyncRules(SyncRulesDocument doc)
+        {
+            var error = SyncRuleEngine.Validate(doc);
+            if (error != null) return error;
+
+            lock (sync)
+            {
+                if (SyncRuleEngine.ReadOnly(syncRules))
+                {
+                    return "These sync rules were written by a newer version of Clipman, so this device can only apply them.";
+                }
+
+                var next = SyncRuleEngine.Copy(doc);
+                next.Clipman = SyncRuleEngine.DocumentKind;
+                if (next.Version < SyncRuleEngine.CurrentVersion) next.Version = SyncRuleEngine.CurrentVersion;
+                next.UpdatedUnixMs = TimeUtil.NowUnixMs();
+                next.UpdatedBy = CurrentMachineName();
+
+                try
+                {
+                    PublishSyncRulesLocked(next);
+                }
+                catch (Exception ex)
+                {
+                    if (!IsStorageAccessException(ex) && !IsRecoverableServerException(ex)) throw;
+                    return "Clipman could not save the sync rules: " + ex.Message;
+                }
+
+                selfRegistrationAttempted = false;
+                LoadLocked();
+                SaveLocked();
+                ResetWatcherLocked();
+            }
+
+            OnChanged();
+            return null;
+        }
+
+        /// <summary>
+        /// The channels committed by the most recent save, in commit order. Relocations must list
+        /// the gaining channel before the losing one (spec section 5, upload step 5).
+        /// </summary>
+        internal List<string> LastChannelWriteOrder()
+        {
+            lock (sync)
+            {
+                return new List<string>(channelWriteOrder);
+            }
+        }
+
+        /// <summary>
+        /// The one-shot notice for an entry delivered to a channel this device does not subscribe
+        /// to (spec section 6). Empty once it has aged out.
+        /// </summary>
+        public string ChannelAnnouncement()
+        {
+            lock (sync)
+            {
+                if (channelAnnouncement.Length == 0) return string.Empty;
+                if (TimeUtil.NowUnixMs() - channelAnnouncementUnixMs > ChannelAnnouncementLifetimeMs)
+                {
+                    channelAnnouncement = string.Empty;
+                    return string.Empty;
+                }
+                return channelAnnouncement;
+            }
+        }
+
+        private bool RulesActiveLocked()
+        {
+            return syncRules != null && syncRules.Enabled;
+        }
+
+        private void ClearChannelStateLocked()
+        {
+            channelSlots.Clear();
+            residence = new Dictionary<string, string>(StringComparer.Ordinal);
+            assembledMarkers = new Dictionary<string, DeletedClipEntry>(StringComparer.Ordinal);
+        }
+
+        private string DatabaseDirectoryLocked()
+        {
+            var directory = Path.GetDirectoryName(DatabasePath);
+            return string.IsNullOrEmpty(directory) ? string.Empty : directory;
+        }
+
+        internal static string ChannelFileName(string channelKey)
+        {
+            return ChannelFilePrefix + (channelKey ?? string.Empty).Replace(' ', '-') + ClipDatabaseFile.CompressedExtension;
+        }
+
+        private string ChannelPathLocked(string channelKey)
+        {
+            if (string.IsNullOrEmpty(channelKey)) return DatabasePath;
+            return Path.Combine(DatabaseDirectoryLocked(), ChannelFileName(channelKey));
+        }
+
+        private string SyncRulesPathLocked()
+        {
+            return Path.Combine(DatabaseDirectoryLocked(), SyncRulesFileName);
+        }
+
+        private string PendingWritesPathLocked()
+        {
+            return Path.Combine(DatabaseDirectoryLocked(), PendingWritesFileName);
+        }
+
+        private List<string> AllChannelKeysLocked()
+        {
+            var keys = new List<string>();
+            if (syncRules == null) return keys;
+            foreach (var channel in syncRules.Channels ?? new List<SyncChannel>())
+            {
+                if (channel == null) continue;
+                var key = SyncRuleEngine.ChannelKey(channel.Name);
+                if (key.Length > 0 && !keys.Contains(key)) keys.Add(key);
+            }
+            return keys;
+        }
+
+        /// <summary>
+        /// The channels this device downloads besides core, in rules-document order. A device that
+        /// is not listed in the document subscribes to everything (spec section 4).
+        /// </summary>
+        private List<string> SubscribedChannelKeysLocked()
+        {
+            var keys = new List<string>();
+            if (!RulesActiveLocked()) return keys;
+
+            var subscribed = SyncRuleEngine.SubscribedChannels(syncRules, CurrentMachineName());
+            foreach (var key in AllChannelKeysLocked())
+            {
+                if (subscribed != null && !subscribed.Contains(key)) continue;
+                keys.Add(key);
+            }
+            return keys;
+        }
+
+        private string ChannelDisplayNameLocked(string channelKey)
+        {
+            if (string.IsNullOrEmpty(channelKey)) return "the main history";
+            if (syncRules != null)
+            {
+                foreach (var channel in syncRules.Channels ?? new List<SyncChannel>())
+                {
+                    if (channel == null) continue;
+                    if (string.Equals(SyncRuleEngine.ChannelKey(channel.Name), channelKey, StringComparison.Ordinal))
+                    {
+                        return (channel.Name ?? string.Empty).Trim().Length == 0 ? channelKey : channel.Name.Trim();
+                    }
+                }
+            }
+            return channelKey;
+        }
+
+        private void AnnounceChannelWriteLocked(string channelKey)
+        {
+            channelAnnouncement = "Added to " + ChannelDisplayNameLocked(channelKey) + " for your other devices.";
+            channelAnnouncementUnixMs = TimeUtil.NowUnixMs();
+        }
+
+        private void LoadSyncRulesFromDiskLocked(string password)
+        {
+            syncRules = null;
+            var path = SyncRulesPathLocked();
+            if (!File.Exists(path)) return;
+            try
+            {
+                var document = ClipDatabaseFile.Load<SyncRulesDocument>(path, password);
+                if (SyncRuleEngine.IsUsable(document)) syncRules = document;
+            }
+            catch (Exception)
+            {
+                // A damaged or unreadable rules document must never stop history from syncing;
+                // the client simply behaves as one without the feature.
+                syncRules = null;
+            }
+        }
+
+        private void PersistSyncRulesCacheLocked()
+        {
+            if (syncRules == null) return;
+            try
+            {
+                ClipDatabaseFile.SaveAtomic(SyncRulesPathLocked(), syncRules, CurrentPassword(), DatabasePath);
+            }
+            catch (Exception ex)
+            {
+                if (!IsStorageAccessException(ex)) throw;
+            }
+        }
+
+        /// <summary>
+        /// Resolves cloud-storage conflict copies of the rules document by whole-document
+        /// last-writer-wins (spec section 4). The history merger must never be used here: it would
+        /// rewrite the rules file as an empty history database.
+        /// </summary>
+        private void ResolveSyncRulesConflictsLocked(string password)
+        {
+            try
+            {
+                var path = SyncRulesPathLocked();
+                var conflicts = SyncConflictResolver.FindConflictSiblings(path).ToList();
+                if (conflicts.Count == 0) return;
+
+                SyncRulesDocument winner = null;
+                if (File.Exists(path))
+                {
+                    var current = ClipDatabaseFile.Load<SyncRulesDocument>(path, password);
+                    if (SyncRuleEngine.IsUsable(current)) winner = current;
+                }
+                foreach (var conflict in conflicts)
+                {
+                    var candidate = ClipDatabaseFile.Load<SyncRulesDocument>(conflict, password);
+                    if (SyncRuleEngine.IsUsable(candidate)) winner = SyncRuleEngine.MergeDocuments(winner, candidate);
+                }
+
+                if (winner != null)
+                {
+                    ClipDatabaseFile.SaveAtomic(path, winner, password, DatabasePath);
+                }
+                foreach (var conflict in conflicts)
+                {
+                    TryDelete(conflict);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Resolves conflict copies of one channel file. A second channel whose key extends the
+        /// first ("work" and "work-pc") looks exactly like a conflict copy of it, so the resolver
+        /// is skipped whenever any candidate is itself a channel or rules container.
+        /// </summary>
+        private static void ResolveChannelConflictsLocked(string path, string password)
+        {
+            foreach (var sibling in SyncConflictResolver.FindConflictSiblings(path))
+            {
+                if (IsChannelOrRulesFileName(Path.GetFileName(sibling))) return;
+            }
+            SyncConflictResolver.ResolveDatabaseConflicts(path, password);
+        }
+
+        private void LoadChannelsFromDiskLocked(string password)
+        {
+            channelSlots.Clear();
+
+            // Exists tracks the server bucket, which a local load knows nothing about. It starts
+            // true so an upload before the first poll behaves exactly as it does today; a 404
+            // during a poll corrects it and the next upload then creates the bucket conditionally.
+            var core = new ChannelSlot();
+            core.CacheFilePath = DatabasePath;
+            core.Database = LoadChannelDatabase(DatabasePath, password);
+            core.Exists = true;
+            core.PlainHash = PlainHash(core.Database);
+            channelSlots.Add(core);
+
+            foreach (var key in SubscribedChannelKeysLocked())
+            {
+                var path = ChannelPathLocked(key);
+                ResolveChannelConflictsLocked(path, password);
+                var slot = new ChannelSlot();
+                slot.Key = key;
+                slot.CacheFilePath = path;
+                slot.Database = LoadChannelDatabase(path, password);
+                slot.Exists = true;
+                slot.PlainHash = PlainHash(slot.Database);
+                channelSlots.Add(slot);
+            }
+
+            ConfigureChannelClientsLocked();
+            AssembleViewLocked();
+        }
+
+        private static ClipDatabase LoadChannelDatabase(string path, string password)
+        {
+            var loaded = ClipDatabaseFile.Load(path, password);
+            NormalizeChannelDatabase(loaded);
+            return loaded;
+        }
+
+        private static void NormalizeChannelDatabase(ClipDatabase target)
+        {
+            if (target == null) return;
+            if (target.Entries == null) target.Entries = new List<ClipEntry>();
+            if (target.Version < 1) target.Version = 1;
+            NormalizeDeletedEntries(target);
+            ApplyDeletedEntries(target);
+        }
+
+        private void ConfigureChannelClientsLocked()
+        {
+            foreach (var slot in channelSlots)
+            {
+                slot.Client = slot.Key.Length == 0 ? serverClient : ChannelClientLocked(slot.Key);
+            }
+        }
+
+        private ServerStorageClient ChannelClientLocked(string channelKey)
+        {
+            if (serverClient == null || !serverClient.IsConfigured) return null;
+            var databaseId = ServerDatabaseIdentity.ChannelFromTokenAndPassword(serverToken, CurrentPassword(), channelKey);
+            if (databaseId.Length == 0) return null;
+            return new ServerStorageClient(serverUrl, serverToken, CurrentPassword(), serverCaCertPem, serverCaHost, databaseId);
+        }
+
+        private void EnsureSyncRulesClientLocked()
+        {
+            if (syncRulesClient != null) return;
+            if (serverClient == null || !serverClient.IsConfigured) return;
+            var databaseId = ServerDatabaseIdentity.SyncRulesFromTokenAndPassword(serverToken, CurrentPassword());
+            if (databaseId.Length == 0) return;
+            syncRulesClient = new ServerStorageClient(serverUrl, serverToken, CurrentPassword(), serverCaCertPem, serverCaHost, databaseId);
+        }
+
+        /// <summary>
+        /// Merges every subscribed channel into the single view the user sees and records which
+        /// channel each surviving entry came from (spec section 5, download steps 3 and 4).
+        /// </summary>
+        private void AssembleViewLocked()
+        {
+            var now = TimeUtil.NowUnixMs();
+            var view = new ClipDatabase();
+            view.Version = 1;
+            view.UpdatedUnixMs = now;
+            var owners = new List<string>();
+            var indexById = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            foreach (var slot in channelSlots)
+            {
+                if (slot.Database == null || slot.Database.Entries == null) continue;
+                if (slot.Database.Version > view.Version) view.Version = slot.Database.Version;
+                foreach (var entry in slot.Database.Entries)
+                {
+                    if (entry == null) continue;
+                    var identifier = ComparableId(entry.Id);
+                    int index;
+                    if (identifier.Length > 0 && indexById.TryGetValue(identifier, out index))
+                    {
+                        // The same id in two channels is a move race: the copy with the higher
+                        // ModifiedUnixMs wins wholesale, and a tie keeps the earlier channel.
+                        if (entry.ModifiedUnixMs > view.Entries[index].ModifiedUnixMs)
+                        {
+                            view.Entries[index] = Clone(entry);
+                            owners[index] = slot.Key;
+                        }
+                        continue;
+                    }
+                    view.Entries.Add(Clone(entry));
+                    owners.Add(slot.Key);
+                    if (identifier.Length > 0) indexById[identifier] = view.Entries.Count - 1;
+                }
+            }
+
+            // Tombstones apply within their own channel only, with one exception: a marker with a
+            // non-empty TextHash also suppresses matching text in other channels. A relocation
+            // marker has an empty TextHash and never reaches across.
+            var suppressed = new bool[view.Entries.Count];
+            foreach (var slot in channelSlots)
+            {
+                if (slot.Database == null || slot.Database.DeletedEntries == null) continue;
+                foreach (var marker in slot.Database.DeletedEntries)
+                {
+                    if (marker == null || string.IsNullOrEmpty(marker.TextHash)) continue;
+                    for (var index = 0; index < view.Entries.Count; index++)
+                    {
+                        if (suppressed[index]) continue;
+                        if (string.Equals(owners[index], slot.Key, StringComparison.Ordinal)) continue;
+                        if (TextMarkerSuppresses(marker, view.Entries[index])) suppressed[index] = true;
+                    }
+                }
+            }
+
+            var kept = new List<ClipEntry>();
+            var keptOwners = new List<string>();
+            var live = new HashSet<string>(StringComparer.Ordinal);
+            for (var index = 0; index < view.Entries.Count; index++)
+            {
+                if (suppressed[index]) continue;
+                kept.Add(view.Entries[index]);
+                keptOwners.Add(owners[index]);
+                live.Add(ComparableId(view.Entries[index].Id));
+            }
+            view.Entries = kept;
+
+            // The view carries every channel's markers except those contradicted by a live entry
+            // elsewhere: applying a relocation marker to the view would delete the entry it only
+            // meant to move.
+            foreach (var slot in channelSlots)
+            {
+                if (slot.Database == null || slot.Database.DeletedEntries == null) continue;
+                foreach (var marker in slot.Database.DeletedEntries)
+                {
+                    if (marker == null) continue;
+                    if (live.Contains(ComparableId(marker.Id))) continue;
+                    view.DeletedEntries.Add(CloneMarker(marker));
+                }
+            }
+
+            database = view;
+            NormalizeDeletedEntriesLocked();
+            NormalizeManualOrderLocked();
+
+            residence = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (var index = 0; index < kept.Count; index++)
+            {
+                residence[kept[index].Id ?? string.Empty] = keptOwners[index];
+            }
+            assembledMarkers = MarkersById(database.DeletedEntries);
+        }
+
+        private static bool TextMarkerSuppresses(DeletedClipEntry marker, ClipEntry entry)
+        {
+            if (marker == null || entry == null) return false;
+            if (string.IsNullOrEmpty(marker.TextHash) || string.IsNullOrEmpty(entry.Text)) return false;
+            if (!string.Equals(marker.TextHash, ComputeTextHash(entry.Text), StringComparison.OrdinalIgnoreCase)) return false;
+            var entryChangedUnixMs = Math.Max(entry.CreatedUnixMs, entry.LastUsedUnixMs);
+            return marker.DeletedUnixMs <= 0 || entryChangedUnixMs <= marker.DeletedUnixMs;
+        }
+
+        private static string ComparableId(string value)
+        {
+            return (value ?? string.Empty).Trim().ToLowerInvariant();
+        }
+
+        private static DeletedClipEntry CloneMarker(DeletedClipEntry marker)
+        {
+            return new DeletedClipEntry
+            {
+                Id = marker.Id ?? string.Empty,
+                TextHash = marker.TextHash ?? string.Empty,
+                DeletedUnixMs = marker.DeletedUnixMs,
+                SourceMachine = marker.SourceMachine ?? string.Empty
+            };
+        }
+
+        private static Dictionary<string, DeletedClipEntry> MarkersById(List<DeletedClipEntry> markers)
+        {
+            var byId = new Dictionary<string, DeletedClipEntry>(StringComparer.Ordinal);
+            foreach (var marker in markers ?? new List<DeletedClipEntry>())
+            {
+                if (marker == null) continue;
+                byId[ComparableId(marker.Id)] = CloneMarker(marker);
+            }
+            return byId;
+        }
+
+        /// <summary>
+        /// The dirty-detection hash of spec section 5, upload step 4: SHA-256 over the deterministic
+        /// plaintext with the database-level UpdatedUnixMs zeroed, which is what makes the hash
+        /// durable across poll cycles that restamp that field.
+        /// </summary>
+        private static string PlainHash(ClipDatabase target)
+        {
+            if (target == null) return string.Empty;
+            var stamp = target.UpdatedUnixMs;
+            target.UpdatedUnixMs = 0;
+            try
+            {
+                using (var sha = SHA256.Create())
+                {
+                    return BitConverter
+                        .ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(JsonUtil.SerializePretty(target))))
+                        .Replace("-", string.Empty);
+                }
+            }
+            finally
+            {
+                target.UpdatedUnixMs = stamp;
+            }
+        }
+
+        private static List<TValue> ListFor<TValue>(Dictionary<string, List<TValue>> map, string key)
+        {
+            List<TValue> list;
+            if (!map.TryGetValue(key ?? string.Empty, out list))
+            {
+                list = new List<TValue>();
+                map[key ?? string.Empty] = list;
+            }
+            return list;
+        }
+
+        private static List<TValue> ListOrEmpty<TValue>(Dictionary<string, List<TValue>> map, string key)
+        {
+            List<TValue> list;
+            return map.TryGetValue(key ?? string.Empty, out list) ? list : new List<TValue>();
+        }
+
+        private void SaveChannelsLocked(bool forceServerUpload)
+        {
+            database.UpdatedUnixMs = TimeUtil.NowUnixMs();
+            channelWriteOrder = new List<string>();
+            try
+            {
+                if (storageUnavailable)
+                {
+                    MergeExistingChannelsIfAvailableLocked();
+                }
+
+                NormalizeDeletedEntriesLocked();
+                ApplyDeletedEntriesLocked();
+                NormalizeManualOrderLocked();
+                CommitRoutedChannelsLocked(TimeUtil.NowUnixMs(), forceServerUpload);
+
+                storageUnavailable = false;
+                LastStorageError = string.Empty;
+                if (watcher == null)
+                {
+                    ResetWatcherLocked();
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!IsStorageAccessException(ex) && !IsRecoverableServerException(ex)) throw;
+                storageUnavailable = true;
+                LastStorageError = ex.Message;
+            }
+        }
+
+        private void MergeExistingChannelsIfAvailableLocked()
+        {
+            var password = CurrentPassword();
+            foreach (var slot in channelSlots)
+            {
+                if (!File.Exists(slot.CacheFilePath)) continue;
+                var existing = ClipDatabaseFile.Load(slot.CacheFilePath, password);
+                if (existing == null || existing.Entries == null || existing.Entries.Count == 0) continue;
+                MergeDatabaseIntoLocked(database, existing);
+            }
+            NormalizeManualOrderLocked();
+        }
+
+        /// <summary>
+        /// The upload half of spec section 5: route every entry, rebuild one database per channel,
+        /// write entries bound for unsubscribed channels straight through, and commit only the
+        /// channels whose plaintext actually changed, in the add-then-remove two-phase order.
+        /// </summary>
+        private void CommitRoutedChannelsLocked(long now, bool forceServerUpload)
+        {
+            var subscribed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var slot in channelSlots) subscribed.Add(slot.Key);
+
+            var fetched = FetchedEntriesByChannelLocked();
+            var previousMarkers = assembledMarkers;
+
+            var routed = new Dictionary<string, List<ClipEntry>>(StringComparer.Ordinal);
+            var departures = new Dictionary<string, List<ClipEntry>>(StringComparer.Ordinal);
+            var relocations = new Dictionary<string, List<DeletedClipEntry>>(StringComparer.Ordinal);
+            var pending = new Dictionary<string, List<ClipEntry>>(StringComparer.Ordinal);
+            var pendingKeys = new List<string>();
+
+            foreach (var entry in database.Entries)
+            {
+                if (entry == null) continue;
+                var target = SyncRuleEngine.RouteEntry(syncRules, entry);
+                string source;
+                var resident = residence.TryGetValue(entry.Id ?? string.Empty, out source);
+                if (resident && !string.Equals(source, target, StringComparison.Ordinal))
+                {
+                    // Leaving a channel leaves a relocation marker behind: an empty TextHash
+                    // distinguishes "moved" from "deleted" (spec section 5, upload step 3).
+                    ListFor(departures, source).Add(entry);
+                    ListFor(relocations, source).Add(new DeletedClipEntry
+                    {
+                        Id = entry.Id,
+                        TextHash = string.Empty,
+                        DeletedUnixMs = now,
+                        SourceMachine = CurrentMachineName()
+                    });
+                }
+
+                if (subscribed.Contains(target))
+                {
+                    ListFor(routed, target).Add(entry);
+                    continue;
+                }
+                if (!pending.ContainsKey(target)) pendingKeys.Add(target);
+                ListFor(pending, target).Add(entry);
+            }
+
+            // First save: create the core container before anything else so every container beside
+            // it copies its salt and one key derivation serves them all.
+            if (!File.Exists(DatabasePath))
+            {
+                var initial = BuildChannelDatabasesLocked(
+                    WithDepartures(routed, departures, fetched),
+                    AssembleMarkersLocked(previousMarkers, subscribed, null),
+                    now);
+                var writes = pendingKeys.Count > 0;
+                for (var index = 0; index < channelSlots.Count && !writes; index++)
+                {
+                    if (!string.Equals(PlainHash(initial[index]), channelSlots[index].PlainHash, StringComparison.Ordinal))
+                    {
+                        writes = true;
+                    }
+                }
+                if (writes)
+                {
+                    CommitChannelLocked(channelSlots[0], initial[0], now, true);
+                }
+            }
+
+            // Write-through (spec section 6) is committed first: its targets gain entries that
+            // their source channels are about to lose. When one fails the entry is not taken away
+            // from where it already lives - the departure and its marker are cancelled - and the
+            // entry is parked for retry after the next successful poll.
+            pendingKeys.Sort(StringComparer.Ordinal);
+            var delivered = new List<string>();
+            foreach (var channelKey in pendingKeys)
+            {
+                if (WriteThroughLocked(channelKey, pending[channelKey], now))
+                {
+                    AnnounceChannelWriteLocked(channelKey);
+                    foreach (var entry in pending[channelKey])
+                    {
+                        delivered.Add(entry.Id ?? string.Empty);
+                    }
+                    continue;
+                }
+
+                ParkPendingWritesLocked(channelKey, pending[channelKey]);
+                foreach (var entry in pending[channelKey])
+                {
+                    string source;
+                    if (!residence.TryGetValue(entry.Id ?? string.Empty, out source)) continue;
+                    ListFor(routed, source).Add(entry);
+                    RemoveEntryById(ListFor(departures, source), entry.Id);
+                    RemoveMarkerById(ListFor(relocations, source), entry.Id);
+                }
+            }
+
+            // Phase 1: every channel keeps the entries it is about to lose and withholds its new
+            // relocation markers, so this pass only ever adds. A departing entry is carried in the
+            // copy the channel was fetched with, so the target's higher ModifiedUnixMs wins view
+            // assembly for the window in which both channels hold the id.
+            var phaseOne = BuildChannelDatabasesLocked(
+                WithDepartures(routed, departures, fetched),
+                AssembleMarkersLocked(previousMarkers, subscribed, null),
+                now);
+            for (var index = 0; index < channelSlots.Count; index++)
+            {
+                var slot = channelSlots[index];
+                var dirty = !string.Equals(PlainHash(phaseOne[index]), slot.PlainHash, StringComparison.Ordinal);
+                if (!dirty && !forceServerUpload && !slot.NeedsUpload) continue;
+                CommitChannelLocked(slot, phaseOne[index], now, dirty);
+            }
+
+            // Phase 2: with every addition committed, the losing channels drop their departures and
+            // gain their relocation markers. A failure here is safe: the entry exists in both
+            // channels and view assembly resolves the duplicate until the next save repairs it.
+            var phaseTwo = BuildChannelDatabasesLocked(
+                routed,
+                AssembleMarkersLocked(previousMarkers, subscribed, relocations),
+                now);
+            for (var index = 0; index < channelSlots.Count; index++)
+            {
+                var slot = channelSlots[index];
+                if (ListOrEmpty(departures, slot.Key).Count == 0) continue;
+                if (string.Equals(PlainHash(phaseTwo[index]), slot.PlainHash, StringComparison.Ordinal)) continue;
+                CommitChannelLocked(slot, phaseTwo[index], now, true);
+            }
+
+            // Entries handed to an unsubscribed channel do not appear in the local view.
+            if (delivered.Count > 0)
+            {
+                var deliveredIds = new HashSet<string>(delivered, StringComparer.Ordinal);
+                database.Entries.RemoveAll(entry => entry != null && deliveredIds.Contains(entry.Id ?? string.Empty));
+                foreach (var id in delivered) residence.Remove(id);
+            }
+
+            foreach (var slot in channelSlots)
+            {
+                foreach (var entry in ListOrEmpty(routed, slot.Key))
+                {
+                    residence[entry.Id ?? string.Empty] = slot.Key;
+                }
+            }
+            assembledMarkers = MarkersById(database.DeletedEntries);
+        }
+
+        private Dictionary<string, Dictionary<string, ClipEntry>> FetchedEntriesByChannelLocked()
+        {
+            var byChannel = new Dictionary<string, Dictionary<string, ClipEntry>>(StringComparer.Ordinal);
+            foreach (var slot in channelSlots)
+            {
+                var entries = new Dictionary<string, ClipEntry>(StringComparer.Ordinal);
+                if (slot.Database != null && slot.Database.Entries != null)
+                {
+                    foreach (var entry in slot.Database.Entries)
+                    {
+                        if (entry != null) entries[ComparableId(entry.Id)] = entry;
+                    }
+                }
+                byChannel[slot.Key] = entries;
+            }
+            return byChannel;
+        }
+
+        private static Dictionary<string, List<ClipEntry>> WithDepartures(
+            Dictionary<string, List<ClipEntry>> routed,
+            Dictionary<string, List<ClipEntry>> departures,
+            Dictionary<string, Dictionary<string, ClipEntry>> fetched)
+        {
+            if (departures.Count == 0) return routed;
+
+            var combined = new Dictionary<string, List<ClipEntry>>(StringComparer.Ordinal);
+            foreach (var pair in routed) combined[pair.Key] = new List<ClipEntry>(pair.Value);
+            foreach (var pair in departures)
+            {
+                if (pair.Value.Count == 0) continue;
+                var staying = ListFor(combined, pair.Key);
+                foreach (var entry in pair.Value)
+                {
+                    Dictionary<string, ClipEntry> byId;
+                    ClipEntry before;
+                    if (fetched.TryGetValue(pair.Key, out byId) &&
+                        byId.TryGetValue(ComparableId(entry.Id), out before))
+                    {
+                        staying.Add(before);
+                        continue;
+                    }
+                    staying.Add(entry);
+                }
+            }
+            return combined;
+        }
+
+        private static void RemoveEntryById(List<ClipEntry> entries, string id)
+        {
+            entries.RemoveAll(entry => entry != null && string.Equals(ComparableId(entry.Id), ComparableId(id), StringComparison.Ordinal));
+        }
+
+        private static void RemoveMarkerById(List<DeletedClipEntry> markers, string id)
+        {
+            markers.RemoveAll(marker => marker != null && string.Equals(ComparableId(marker.Id), ComparableId(id), StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// Files tombstones per channel: each channel keeps the markers it already carried, markers
+        /// this mutation created or refreshed go to the channel their entry lived in, and relocation
+        /// markers are added last for the channels their entries left.
+        /// </summary>
+        private Dictionary<string, List<DeletedClipEntry>> AssembleMarkersLocked(
+            Dictionary<string, DeletedClipEntry> previousMarkers,
+            HashSet<string> subscribed,
+            Dictionary<string, List<DeletedClipEntry>> relocations)
+        {
+            var markers = new Dictionary<string, List<DeletedClipEntry>>(StringComparer.Ordinal);
+            foreach (var slot in channelSlots)
+            {
+                var carried = new List<DeletedClipEntry>();
+                if (slot.Database != null && slot.Database.DeletedEntries != null)
+                {
+                    foreach (var marker in slot.Database.DeletedEntries)
+                    {
+                        if (marker != null) carried.Add(CloneMarker(marker));
+                    }
+                }
+                markers[slot.Key] = carried;
+            }
+
+            foreach (var marker in database.DeletedEntries ?? new List<DeletedClipEntry>())
+            {
+                if (marker == null) continue;
+                DeletedClipEntry before;
+                if (previousMarkers.TryGetValue(ComparableId(marker.Id), out before) &&
+                    before.DeletedUnixMs == marker.DeletedUnixMs &&
+                    string.Equals(before.TextHash ?? string.Empty, marker.TextHash ?? string.Empty, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string home;
+                if (!residence.TryGetValue(marker.Id ?? string.Empty, out home) || !subscribed.Contains(home))
+                {
+                    home = string.Empty;
+                }
+                ListFor(markers, home).Add(CloneMarker(marker));
+            }
+
+            if (relocations != null)
+            {
+                foreach (var pair in relocations)
+                {
+                    if (!subscribed.Contains(pair.Key)) continue;
+                    foreach (var marker in pair.Value) ListFor(markers, pair.Key).Add(CloneMarker(marker));
+                }
+            }
+            return markers;
+        }
+
+        private List<ClipDatabase> BuildChannelDatabasesLocked(
+            Dictionary<string, List<ClipEntry>> routed,
+            Dictionary<string, List<DeletedClipEntry>> markers,
+            long now)
+        {
+            var databases = new List<ClipDatabase>();
+            foreach (var slot in channelSlots)
+            {
+                var entries = ListOrEmpty(routed, slot.Key);
+                var built = new ClipDatabase();
+                built.Version = slot.Database == null || slot.Database.Version < 1 ? 1 : slot.Database.Version;
+                built.UpdatedUnixMs = now;
+                built.Entries = new List<ClipEntry>();
+                foreach (var entry in entries) built.Entries.Add(Clone(entry));
+                built.DeletedEntries = DropMarkersForEntries(ListOrEmpty(markers, slot.Key), entries);
+                NormalizeDeletedEntries(built);
+                databases.Add(built);
+            }
+            return databases;
+        }
+
+        /// <summary>
+        /// Drops markers naming an entry being written into the same channel, so a relocation marker
+        /// left by an earlier move cannot delete the entry again when a rule change moves it back.
+        /// </summary>
+        private static List<DeletedClipEntry> DropMarkersForEntries(List<DeletedClipEntry> markers, List<ClipEntry> entries)
+        {
+            if (markers.Count == 0 || entries.Count == 0) return markers;
+            var resident = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in entries)
+            {
+                if (entry != null) resident.Add(ComparableId(entry.Id));
+            }
+            var kept = new List<DeletedClipEntry>();
+            foreach (var marker in markers)
+            {
+                if (marker == null || resident.Contains(ComparableId(marker.Id))) continue;
+                kept.Add(marker);
+            }
+            return kept;
+        }
+
+        private void CommitChannelLocked(ChannelSlot slot, ClipDatabase built, long now, bool writeFile)
+        {
+            var password = CurrentPassword();
+            if (writeFile || !File.Exists(slot.CacheFilePath))
+            {
+                ClipDatabaseFile.SaveAtomic(slot.CacheFilePath, built, password, DatabasePath);
+            }
+            channelWriteOrder.Add(slot.Key);
+
+            var committed = built;
+            if (slot.Client != null && slot.Client.IsConfigured)
+            {
+                committed = UploadChannelLocked(slot, built, now);
+            }
+
+            slot.Database = committed;
+            slot.PlainHash = PlainHash(committed);
+            slot.Exists = true;
+            slot.NeedsUpload = false;
+            if (slot.Key.Length == 0) serverRevision = slot.Revision;
+        }
+
+        /// <summary>
+        /// Uploads one channel with its own If-Match, re-reading and merging that channel alone on a
+        /// conflict (spec section 5, upload step 5). Returns the database that actually committed.
+        /// </summary>
+        private ClipDatabase UploadChannelLocked(ChannelSlot slot, ClipDatabase built, long now)
+        {
+            var password = CurrentPassword();
+            var target = built;
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    // A bucket that does not exist yet is created with If-None-Match, so a channel
+                    // two devices reach for at the same time is never silently overwritten.
+                    var metadata = slot.Client.Upload(File.ReadAllBytes(slot.CacheFilePath), slot.Revision, !slot.Exists);
+                    slot.Revision = metadata == null ? string.Empty : metadata.Revision;
+                    slot.Exists = true;
+                    MarkServerSuccessLocked(true);
+                    return target;
+                }
+                catch (WebException ex)
+                {
+                    if (!slot.Client.IsConflict(ex) || attempt >= 3)
+                    {
+                        slot.Revision = string.Empty;
+                        MarkServerFailureLocked();
+                        throw;
+                    }
+                }
+
+                string revision;
+                bool exists;
+                var remote = DownloadChannelLocked(slot.Client, slot.CacheFilePath, password, out revision, out exists);
+                MergeDatabaseIntoLocked(remote, target);
+                NormalizeChannelDatabase(remote);
+                remote.UpdatedUnixMs = now;
+                slot.Revision = revision;
+                slot.Exists = exists;
+                target = remote;
+                ClipDatabaseFile.SaveAtomic(slot.CacheFilePath, target, password, DatabasePath);
+            }
+        }
+
+        private ClipDatabase DownloadChannelLocked(
+            ServerStorageClient client,
+            string nearbyPath,
+            string password,
+            out string revision,
+            out bool exists)
+        {
+            revision = string.Empty;
+            exists = false;
+            ServerDatabaseDownload download;
+            try
+            {
+                download = client.Download();
+            }
+            catch (WebException ex)
+            {
+                if (client.IsNotFound(ex)) return new ClipDatabase();
+                throw;
+            }
+
+            if (download.Data == null || download.Data.Length == 0) return new ClipDatabase();
+            var tempPath = nearbyPath + ".server-download.tmp";
+            WriteBytesAtomic(tempPath, download.Data);
+            var downloaded = ClipDatabaseFile.Load(tempPath, password);
+            TryDelete(tempPath);
+            NormalizeChannelDatabase(downloaded);
+            revision = download.Metadata == null ? string.Empty : download.Metadata.Revision;
+            exists = true;
+            return downloaded;
+        }
+
+        /// <summary>
+        /// The one-shot fetch-merge-put of spec section 6 for a channel this device does not
+        /// subscribe to. The channel is discarded again afterwards, so it never reaches the view.
+        /// </summary>
+        private bool WriteThroughLocked(string channelKey, List<ClipEntry> entries, long now)
+        {
+            if (entries == null || entries.Count == 0) return true;
+
+            var password = CurrentPassword();
+            var channelPath = ChannelPathLocked(channelKey);
+            var client = ChannelClientLocked(channelKey);
+            var throughServer = client != null && client.IsConfigured;
+            var scratchPath = throughServer
+                ? Path.Combine(DatabaseDirectoryLocked(), "writethrough-" + channelKey.Replace(' ', '-') + ClipDatabaseFile.CompressedExtension)
+                : channelPath;
+
+            try
+            {
+                var slot = new ChannelSlot();
+                slot.Key = channelKey;
+                slot.CacheFilePath = scratchPath;
+                slot.Client = client;
+
+                ClipDatabase target;
+                if (throughServer)
+                {
+                    string revision;
+                    bool exists;
+                    target = DownloadChannelLocked(client, scratchPath, password, out revision, out exists);
+                    slot.Revision = revision;
+                    slot.Exists = exists;
+                }
+                else
+                {
+                    ResolveChannelConflictsLocked(channelPath, password);
+                    target = LoadChannelDatabase(channelPath, password);
+                }
+
+                var source = new ClipDatabase();
+                source.UpdatedUnixMs = now;
+                foreach (var entry in entries)
+                {
+                    if (entry != null) source.Entries.Add(Clone(entry));
+                }
+                target.DeletedEntries = DropMarkersForEntries(
+                    target.DeletedEntries ?? new List<DeletedClipEntry>(),
+                    source.Entries);
+                MergeDatabaseIntoLocked(target, source);
+                target.UpdatedUnixMs = now;
+
+                ClipDatabaseFile.SaveAtomic(scratchPath, target, password, DatabasePath);
+                if (throughServer)
+                {
+                    UploadChannelLocked(slot, target, now);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (!IsStorageAccessException(ex) && !IsRecoverableServerException(ex)) throw;
+                return false;
+            }
+            finally
+            {
+                if (throughServer) TryDelete(scratchPath);
+            }
+        }
+
+        private void ParkPendingWritesLocked(string channelKey, List<ClipEntry> entries)
+        {
+            try
+            {
+                var path = PendingWritesPathLocked();
+                var store = JsonUtil.Load<PendingChannelWrites>(path);
+                if (store.Channels == null) store.Channels = new List<PendingChannelWrite>();
+
+                PendingChannelWrite bucket = null;
+                foreach (var candidate in store.Channels)
+                {
+                    if (candidate == null) continue;
+                    if (string.Equals(candidate.ChannelKey, channelKey, StringComparison.Ordinal))
+                    {
+                        bucket = candidate;
+                        break;
+                    }
+                }
+                if (bucket == null)
+                {
+                    bucket = new PendingChannelWrite { ChannelKey = channelKey };
+                    store.Channels.Add(bucket);
+                }
+                if (bucket.Entries == null) bucket.Entries = new List<ClipEntry>();
+
+                foreach (var entry in entries)
+                {
+                    if (entry == null) continue;
+                    var known = false;
+                    foreach (var existing in bucket.Entries)
+                    {
+                        if (existing != null && string.Equals(ComparableId(existing.Id), ComparableId(entry.Id), StringComparison.Ordinal))
+                        {
+                            known = true;
+                            break;
+                        }
+                    }
+                    if (!known) bucket.Entries.Add(Clone(entry));
+                }
+                JsonUtil.SaveAtomic(path, store);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void RetryPendingWritesLocked(long now)
+        {
+            var path = PendingWritesPathLocked();
+            if (!File.Exists(path)) return;
+
+            PendingChannelWrites store;
+            try
+            {
+                store = JsonUtil.Load<PendingChannelWrites>(path);
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            if (store.Channels == null || store.Channels.Count == 0)
+            {
+                TryDelete(path);
+                return;
+            }
+
+            var remaining = new List<PendingChannelWrite>();
+            var delivered = false;
+            foreach (var bucket in store.Channels)
+            {
+                if (bucket == null || bucket.Entries == null || bucket.Entries.Count == 0) continue;
+                if (WriteThroughLocked(bucket.ChannelKey, bucket.Entries, now))
+                {
+                    AnnounceChannelWriteLocked(bucket.ChannelKey);
+                    delivered = true;
+                    continue;
+                }
+                remaining.Add(bucket);
+            }
+            if (!delivered) return;
+
+            try
+            {
+                if (remaining.Count == 0)
+                {
+                    TryDelete(path);
+                    return;
+                }
+                JsonUtil.SaveAtomic(path, new PendingChannelWrites { Channels = remaining });
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private bool AnyChannelNeedsUploadLocked()
+        {
+            foreach (var slot in channelSlots)
+            {
+                if (slot.NeedsUpload) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Download half of the poll for a channel-partitioned history: HEAD every subscribed
+        /// channel, GET only the ones whose revision changed, merge each into its own channel, and
+        /// reassemble the view (spec section 5, download steps 1-3).
+        /// </summary>
+        private bool SyncChannelsFromServerLocked(bool uploadLocalWhenMissing)
+        {
+            if (serverClient == null || !serverClient.IsConfigured) return false;
+            if (serverSyncInProgress) return false;
+
+            serverSyncInProgress = true;
+            try
+            {
+                var password = CurrentPassword();
+                var changed = false;
+                try
+                {
+                    DownloadChannelsLocked(password, uploadLocalWhenMissing, ref changed);
+                }
+                finally
+                {
+                    // A channel that failed part way through must not leave the view describing
+                    // channels that have already moved on.
+                    serverRevision = channelSlots.Count == 0 ? string.Empty : channelSlots[0].Revision;
+                    if (changed) AssembleViewLocked();
+                }
+
+                storageUnavailable = false;
+                LastStorageError = string.Empty;
+                MarkServerSuccessLocked(false);
+                return changed;
+            }
+            finally
+            {
+                serverSyncInProgress = false;
+            }
+        }
+
+        /// <summary>
+        /// HEADs every subscribed channel and GETs only the ones whose revision changed, merging
+        /// each into its own channel. <paramref name="changed"/> is written through as the pass
+        /// proceeds so a failure part way still tells the caller the view needs reassembling.
+        /// </summary>
+        private void DownloadChannelsLocked(string password, bool uploadLocalWhenMissing, ref bool changed)
+        {
+            foreach (var slot in channelSlots)
+            {
+                if (slot.Client == null || !slot.Client.IsConfigured) continue;
+
+                try
+                {
+                    var head = slot.Client.GetMetadata();
+                    if (!string.IsNullOrWhiteSpace(head.Revision) &&
+                        string.Equals(head.Revision, slot.Revision, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                }
+                catch (WebException ex)
+                {
+                    if (!slot.Client.IsNotFound(ex)) throw;
+                    MarkChannelBucketMissingLocked(slot, uploadLocalWhenMissing);
+                    continue;
+                }
+
+                string revision;
+                bool exists;
+                var remote = DownloadChannelLocked(slot.Client, slot.CacheFilePath, password, out revision, out exists);
+                if (!exists)
+                {
+                    MarkChannelBucketMissingLocked(slot, uploadLocalWhenMissing);
+                    continue;
+                }
+
+                if (HasLocalStateMissingFromServer(remote, slot.Database)) slot.NeedsUpload = true;
+                if (MergeDatabaseIntoLocked(slot.Database, remote)) changed = true;
+                NormalizeChannelDatabase(slot.Database);
+                slot.Revision = revision;
+                slot.Exists = true;
+                ClipDatabaseFile.SaveAtomic(slot.CacheFilePath, slot.Database, password, DatabasePath);
+                slot.PlainHash = PlainHash(slot.Database);
+            }
+        }
+
+        private static void MarkChannelBucketMissingLocked(ChannelSlot slot, bool uploadLocalWhenMissing)
+        {
+            slot.Revision = string.Empty;
+            slot.Exists = false;
+            if (uploadLocalWhenMissing && slot.Database != null && slot.Database.Entries.Count > 0)
+            {
+                slot.NeedsUpload = true;
+            }
+        }
+
+        /// <summary>
+        /// Spec section 5, download step 1. A missing bucket falls back to the local cache and
+        /// re-uploads it create-only; a damaged document leaves rules untouched rather than
+        /// stopping history from syncing.
+        /// </summary>
+        private bool RefreshSyncRulesFromServerLocked()
+        {
+            if (serverClient == null || !serverClient.IsConfigured) return false;
+            var now = TimeUtil.NowUnixMs();
+            if (syncRulesNextCheckUnixMs > now) return false;
+
+            EnsureSyncRulesClientLocked();
+            if (syncRulesClient == null || !syncRulesClient.IsConfigured) return false;
+
+            try
+            {
+                var head = syncRulesClient.GetMetadata();
+                syncRulesNextCheckUnixMs = 0;
+                if (syncRules != null &&
+                    !string.IsNullOrWhiteSpace(head.Revision) &&
+                    string.Equals(head.Revision, syncRulesRevision, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var download = syncRulesClient.Download();
+                var tempPath = SyncRulesPathLocked() + ".server-download.tmp";
+                WriteBytesAtomic(tempPath, download.Data);
+                var remote = ClipDatabaseFile.Load<SyncRulesDocument>(tempPath, CurrentPassword());
+                TryDelete(tempPath);
+                if (!SyncRuleEngine.IsUsable(remote)) return false;
+
+                var merged = SyncRuleEngine.MergeDocuments(syncRules, remote);
+                // When the cache wins the merge the effective document is not the one the server
+                // holds, so no revision is recorded: an If-Match against it would claim an edit was
+                // based on a document it never saw.
+                syncRulesRevision = ReferenceEquals(merged, remote)
+                    ? (download.Metadata == null ? string.Empty : download.Metadata.Revision)
+                    : string.Empty;
+                var changed = !SameSyncRules(syncRules, merged);
+                syncRules = merged;
+                return changed;
+            }
+            catch (WebException ex)
+            {
+                syncRulesNextCheckUnixMs = now + SyncRulesAbsentRecheckMs;
+                if (syncRulesClient.IsNotFound(ex) && syncRules != null)
+                {
+                    UploadCachedSyncRulesLocked();
+                }
+                return false;
+            }
+            catch (Exception)
+            {
+                syncRulesNextCheckUnixMs = now + SyncRulesAbsentRecheckMs;
+                return false;
+            }
+        }
+
+        private static bool SameSyncRules(SyncRulesDocument left, SyncRulesDocument right)
+        {
+            if (ReferenceEquals(left, right)) return true;
+            if (left == null || right == null) return false;
+            return string.Equals(JsonUtil.SerializePretty(left), JsonUtil.SerializePretty(right), StringComparison.Ordinal);
+        }
+
+        private void UploadCachedSyncRulesLocked()
+        {
+            try
+            {
+                var path = SyncRulesPathLocked();
+                ClipDatabaseFile.SaveAtomic(path, syncRules, CurrentPassword(), DatabasePath);
+                var metadata = syncRulesClient.Upload(File.ReadAllBytes(path), string.Empty, true);
+                syncRulesRevision = metadata == null ? string.Empty : metadata.Revision;
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void PublishSyncRulesLocked(SyncRulesDocument document)
+        {
+            var path = SyncRulesPathLocked();
+            var published = document;
+            ClipDatabaseFile.SaveAtomic(path, published, CurrentPassword(), DatabasePath);
+
+            EnsureSyncRulesClientLocked();
+            if (syncRulesClient == null || !syncRulesClient.IsConfigured)
+            {
+                syncRules = published;
+                return;
+            }
+
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    var metadata = syncRulesClient.Upload(File.ReadAllBytes(path), syncRulesRevision);
+                    syncRulesRevision = metadata == null ? string.Empty : metadata.Revision;
+                    break;
+                }
+                catch (WebException ex)
+                {
+                    if (!syncRulesClient.IsConflict(ex) || attempt >= 2) throw;
+
+                    var download = syncRulesClient.Download();
+                    var tempPath = path + ".server-download.tmp";
+                    WriteBytesAtomic(tempPath, download.Data);
+                    var remote = ClipDatabaseFile.Load<SyncRulesDocument>(tempPath, CurrentPassword());
+                    TryDelete(tempPath);
+                    syncRulesRevision = download.Metadata == null ? string.Empty : download.Metadata.Revision;
+                    if (SyncRuleEngine.IsUsable(remote) &&
+                        ReferenceEquals(SyncRuleEngine.MergeDocuments(published, remote), remote))
+                    {
+                        // The concurrent edit is newer, so it wins the whole document.
+                        published = remote;
+                        ClipDatabaseFile.SaveAtomic(path, published, CurrentPassword(), DatabasePath);
+                        break;
+                    }
+                }
+            }
+
+            syncRules = published;
+        }
+
+        /// <summary>
+        /// Spec section 4, Registry behavior: an updated client whose device name is missing from
+        /// Devices adds itself with all channels on its next successful sync. One best-effort
+        /// attempt per configuration.
+        /// </summary>
+        private void SelfRegisterDeviceLocked()
+        {
+            if (selfRegistrationAttempted) return;
+            if (!RulesActiveLocked() || SyncRuleEngine.ReadOnly(syncRules)) return;
+
+            var deviceName = CurrentMachineName();
+            var normalized = deviceName.Trim().ToLowerInvariant();
+            foreach (var device in syncRules.Devices ?? new List<SyncDevice>())
+            {
+                if (device == null) continue;
+                if (string.Equals((device.Name ?? string.Empty).Trim().ToLowerInvariant(), normalized, StringComparison.Ordinal))
+                {
+                    selfRegistrationAttempted = true;
+                    return;
+                }
+            }
+
+            selfRegistrationAttempted = true;
+            var updated = SyncRuleEngine.Copy(syncRules);
+            updated.Devices.Add(new SyncDevice { Name = deviceName, Channels = new List<string> { "*" } });
+            updated.UpdatedUnixMs = TimeUtil.NowUnixMs();
+            updated.UpdatedBy = deviceName;
+            if (SyncRuleEngine.Validate(updated) != null) return;
+
+            try
+            {
+                PublishSyncRulesLocked(updated);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void ReconfigureChannelsLocked()
+        {
+            PersistSyncRulesCacheLocked();
+            selfRegistrationAttempted = false;
+            LoadLocked();
+            ResetWatcherLocked();
         }
 
         private static bool IsStorageAccessException(Exception ex)

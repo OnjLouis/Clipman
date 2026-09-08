@@ -62,8 +62,38 @@ namespace Clipman
         }
     }
 
+    /// <summary>
+    /// Entries captured on this device that route to a channel it does not subscribe to and whose
+    /// write-through failed (spec section 6). They are kept here and retried after the next
+    /// successful poll; they never appear in the local view.
+    /// </summary>
+    public sealed class PendingChannelWrites
+    {
+        public List<PendingChannelWrite> Channels { get; set; }
+
+        public PendingChannelWrites()
+        {
+            Channels = new List<PendingChannelWrite>();
+        }
+    }
+
+    public sealed class PendingChannelWrite
+    {
+        public string ChannelKey { get; set; }
+        public List<ClipEntry> Entries { get; set; }
+
+        public PendingChannelWrite()
+        {
+            ChannelKey = string.Empty;
+            Entries = new List<ClipEntry>();
+        }
+    }
+
     public static class SyncRuleEngine
     {
+        public const string DocumentKind = "sync-rules";
+        public const int CurrentVersion = 1;
+
         private const string RichTextImagesKind = "RichTextImages";
         private const string DataImagePrefix = "data:image/";
 
@@ -80,10 +110,75 @@ namespace Clipman
             return ChannelKeyPattern.IsMatch(key) ? key : string.Empty;
         }
 
+        /// <summary>
+        /// A document written by a future format version is applied but never rewritten by this
+        /// client (spec section 4, Version).
+        /// </summary>
+        public static bool ReadOnly(SyncRulesDocument doc)
+        {
+            return doc != null && doc.Version > CurrentVersion;
+        }
+
+        /// <summary>
+        /// Whether a document read from storage may be applied. A future-version document is
+        /// accepted leniently - a client must never fail entirely on a document it only partly
+        /// understands - while a current-version document must still pass strict validation.
+        /// Channels whose name yields no valid key stay in the document but never route.
+        /// </summary>
+        public static bool IsUsable(SyncRulesDocument doc)
+        {
+            if (doc == null) return false;
+            if (doc.Clipman != DocumentKind) return false;
+            if (ReadOnly(doc)) return true;
+            return Validate(doc) == null;
+        }
+
+        public static SyncRulesDocument Copy(SyncRulesDocument doc)
+        {
+            if (doc == null) return null;
+
+            var copy = new SyncRulesDocument
+            {
+                Clipman = doc.Clipman,
+                Version = doc.Version,
+                Enabled = doc.Enabled,
+                UpdatedUnixMs = doc.UpdatedUnixMs,
+                UpdatedBy = doc.UpdatedBy ?? string.Empty
+            };
+
+            foreach (var channel in doc.Channels ?? new List<SyncChannel>())
+            {
+                if (channel == null) continue;
+                var route = channel.Route ?? new SyncRoute();
+                copy.Channels.Add(new SyncChannel
+                {
+                    Name = channel.Name ?? string.Empty,
+                    Route = new SyncRoute
+                    {
+                        Groups = new List<string>(route.Groups ?? new List<string>()),
+                        SourceDevices = new List<string>(route.SourceDevices ?? new List<string>()),
+                        Kind = route.Kind ?? string.Empty
+                    }
+                });
+            }
+
+            foreach (var device in doc.Devices ?? new List<SyncDevice>())
+            {
+                if (device == null) continue;
+                copy.Devices.Add(new SyncDevice
+                {
+                    Name = device.Name ?? string.Empty,
+                    Channels = new List<string>(device.Channels ?? new List<string>())
+                });
+            }
+
+            return copy;
+        }
+
         public static string Validate(SyncRulesDocument doc)
         {
             if (doc == null) return "The sync rules document is missing.";
-            if (doc.Clipman != "sync-rules") return "The sync rules document has an unrecognized format.";
+            if (doc.Clipman != DocumentKind) return "The sync rules document has an unrecognized format.";
 
             var channels = doc.Channels ?? new List<SyncChannel>();
             var knownKeys = new HashSet<string>();

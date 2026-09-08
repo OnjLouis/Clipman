@@ -61,6 +61,15 @@ namespace Clipman.Tests
             Run("sync rule subscriptions resolve per device", SyncRuleSubscriptions);
             Run("sync rules document round trips through JSON", SyncRulesDocumentJsonRoundTrip);
             Run("sync rules documents merge with last-writer-wins", SyncRulesMergeDocumentsLastWriterWins);
+            Run("future sync rules documents are read-only and parsed leniently", SyncRulesLenientParsingAndReadOnlyDocuments);
+            Run("sync rules route entries into channel files on save", RulesRouteEntriesIntoChannelFilesOnSave);
+            Run("sync rules disabled keeps a single database file", RulesDisabledKeepsSingleDatabaseFile);
+            Run("a group change relocates an entry between channel files", GroupChangeRelocatesEntryBetweenChannelFiles);
+            Run("cross-channel tombstones suppress only matching text", CrossChannelTombstonesSuppressOnlyMatchingText);
+            Run("unsubscribed channel files are not loaded into the view", UnsubscribedChannelFileIsNotLoadedIntoView);
+            Run("dirty hashes skip rewriting untouched channel files", DirtyHashSkipsRewritingUntouchedChannelFiles);
+            Run("relocations write the target file before the source", RelocationWritesTargetFileBeforeSource);
+            Run("sync rules round trip through the store", SyncRulesRoundTripThroughStore);
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
@@ -628,6 +637,389 @@ namespace Clipman.Tests
 
             Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(null, newer), newer), "A null local document should lose to a non-null remote document.");
             Assert(ReferenceEquals(SyncRuleEngine.MergeDocuments(newer, null), newer), "A null remote document should lose to a non-null local document.");
+        }
+
+        private static void SyncRulesLenientParsingAndReadOnlyDocuments()
+        {
+            var future = new SyncRulesDocument { Version = 2, Enabled = true };
+            future.Channels.Add(new SyncChannel { Name = "core", Route = new SyncRoute { Kind = "FutureKind" } });
+            Assert(SyncRuleEngine.ReadOnly(future), "A document from a future version should be read-only.");
+            Assert(SyncRuleEngine.IsUsable(future), "A future-version document should be applied leniently rather than rejected.");
+            Assert(SyncRuleEngine.Validate(future) != null, "Strict validation should still reject a reserved channel name.");
+
+            var current = new SyncRulesDocument { Enabled = true };
+            current.Channels.Add(new SyncChannel { Name = "core", Route = new SyncRoute { Groups = new List<string> { "x" } } });
+            Assert(!SyncRuleEngine.ReadOnly(current), "A version-1 document should stay editable.");
+            Assert(!SyncRuleEngine.IsUsable(current), "A version-1 document must pass strict validation to be usable.");
+
+            var unknownKind = new SyncRulesDocument { Enabled = true };
+            unknownKind.Channels.Add(new SyncChannel { Name = "Future", Route = new SyncRoute { Kind = "FutureKind" } });
+            unknownKind.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+            Assert(SyncRuleEngine.RouteEntry(unknownKind, new ClipEntry { Group = "Work" }) == "work",
+                "An unrecognized route kind must never match, so a later rule still applies.");
+            Assert(SyncRuleEngine.RouteEntry(unknownKind, new ClipEntry { Group = "Other" }) == string.Empty,
+                "An unrecognized route kind must never match.");
+
+            var alien = new SyncRulesDocument { Clipman = "something-else" };
+            Assert(!SyncRuleEngine.IsUsable(alien), "A document with an unrecognized marker must be rejected.");
+            Assert(!SyncRuleEngine.IsUsable(null), "A missing document must be rejected.");
+        }
+
+        private static string NewRegressionDirectory()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+
+        private static SyncRulesDocument WorkChannelRules(string deviceName)
+        {
+            var doc = new SyncRulesDocument { Enabled = true };
+            doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+            doc.Devices.Add(new SyncDevice { Name = deviceName, Channels = new List<string> { "*" } });
+            return doc;
+        }
+
+        private static void RulesRouteEntriesIntoChannelFilesOnSave()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var channelPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) == null, "Enabling sync rules should succeed.");
+                    store.AddText("Work note", "MoveToTop", 100, 0, "Work");
+                    store.AddText("Plain note", "MoveToTop", 100, 0, string.Empty);
+
+                    Assert(File.Exists(channelPath), "A routed entry did not create its channel file.");
+                    var channel = ClipDatabaseFile.Load(channelPath, string.Empty);
+                    Assert(channel.Entries.Count == 1 && channel.Entries[0].Text == "Work note",
+                        "The work channel file did not receive exactly the routed entry.");
+
+                    var core = ClipDatabaseFile.Load(databasePath, string.Empty);
+                    Assert(core.Entries.Any(entry => entry.Text == "Plain note"), "The core file lost its unrouted entry.");
+                    Assert(!core.Entries.Any(entry => entry.Text == "Work note"), "The core file kept a routed entry.");
+
+                    var view = store.GetEntries();
+                    Assert(view.Count(entry => entry.Text == "Work note") == 1,
+                        "The merged view did not show the routed entry exactly once.");
+                    Assert(view.Count(entry => entry.Text == "Plain note") == 1, "The merged view lost the core entry.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void RulesDisabledKeepsSingleDatabaseFile()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    store.AddText("Plain note", "MoveToTop", 100, 0);
+                    store.AddText("Work note", "MoveToTop", 100, 0, "Work");
+                    Assert(store.GetSyncRules() == null, "No sync rules document should exist by default.");
+                    Assert(store.GetSyncChannelKeys().Count == 0, "No channels should exist without sync rules.");
+                    Assert(!store.SyncRulesReadOnly(), "Absent sync rules should not be reported as read-only.");
+                    Assert(store.GetEntries().Count == 2, "Disabled sync rules should keep every entry in the single view.");
+                }
+
+                var files = Directory.GetFiles(directory).Select(Path.GetFileName).OrderBy(name => name, StringComparer.Ordinal).ToList();
+                Assert(files.Count == 1 && files[0] == "clipman-history.clipdb",
+                    "Sync rules disabled must leave exactly the legacy history file, found: " + string.Join(", ", files.ToArray()));
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void GroupChangeRelocatesEntryBetweenChannelFiles()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var channelPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) == null, "Enabling sync rules should succeed.");
+                    var entry = store.AddText("Movable note", "MoveToTop", 100, 0);
+                    Assert(entry != null, "The relocation fixture entry was not created.");
+                    Assert(ClipDatabaseFile.Load(databasePath, string.Empty).Entries.Any(item => item.Id == entry.Id),
+                        "The fixture entry did not start in the core file.");
+
+                    store.SetGroup(new[] { entry.Id }, "Work");
+
+                    var channel = ClipDatabaseFile.Load(channelPath, string.Empty);
+                    Assert(channel.Entries.Any(item => item.Id == entry.Id), "The gaining channel file did not receive the entry.");
+
+                    var core = ClipDatabaseFile.Load(databasePath, string.Empty);
+                    Assert(!core.Entries.Any(item => item.Id == entry.Id), "The losing channel file kept the relocated entry.");
+                    Assert(core.DeletedEntries.Any(marker =>
+                            marker.Id == entry.Id && string.IsNullOrEmpty(marker.TextHash)),
+                        "The losing channel file did not receive an empty-TextHash relocation marker.");
+
+                    Assert(store.GetEntries().Count(item => item.Id == entry.Id) == 1,
+                        "The view did not show the relocated entry exactly once.");
+
+                    store.Reload();
+                    Assert(store.GetEntries().Count(item => item.Id == entry.Id) == 1,
+                        "Reloading after a relocation lost or duplicated the entry.");
+                    Assert(store.GetEntries().Any(item => item.Id == entry.Id && item.Group == "Work"),
+                        "The relocated entry lost the group change that moved it.");
+
+                    // A deletion is filed against the channel the entry actually lived in, or the
+                    // channel would resurrect it on the next assembly.
+                    store.Delete(entry.Id);
+                    var channelAfterDelete = ClipDatabaseFile.Load(channelPath, string.Empty);
+                    Assert(channelAfterDelete.DeletedEntries.Any(marker =>
+                            marker.Id == entry.Id && !string.IsNullOrEmpty(marker.TextHash)),
+                        "Deleting a channel-resident entry did not leave a tombstone in that channel.");
+                    Assert(!ClipDatabaseFile.Load(databasePath, string.Empty).DeletedEntries.Any(marker =>
+                            marker.Id == entry.Id && !string.IsNullOrEmpty(marker.TextHash)),
+                        "A channel entry's deletion tombstone was misfiled into the core channel.");
+
+                    store.Reload();
+                    Assert(!store.GetEntries().Any(item => item.Id == entry.Id),
+                        "A deleted channel entry came back after a reload.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static string TextHashOf(string text)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text)))
+                    .Replace("-", string.Empty)
+                    .ToLowerInvariant();
+            }
+        }
+
+        private static void CrossChannelTombstonesSuppressOnlyMatchingText()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var channelPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                var rulesPath = Path.Combine(directory, "clipman-sync-rules.clipdb");
+                ClipDatabaseFile.SaveAtomic(rulesPath, WorkChannelRules("Desktop"), string.Empty);
+
+                var deletedAt = TimeUtil.NowUnixMs();
+                var core = new ClipDatabase();
+                core.DeletedEntries.Add(new DeletedClipEntry
+                {
+                    Id = "deletedelsewhereid",
+                    TextHash = TextHashOf("Shared text"),
+                    DeletedUnixMs = deletedAt,
+                    SourceMachine = "Other"
+                });
+                core.DeletedEntries.Add(new DeletedClipEntry
+                {
+                    Id = "relocatedid",
+                    TextHash = string.Empty,
+                    DeletedUnixMs = deletedAt,
+                    SourceMachine = "Other"
+                });
+                ClipDatabaseFile.SaveAtomic(databasePath, core, string.Empty);
+
+                var work = new ClipDatabase();
+                work.Entries.Add(new ClipEntry
+                {
+                    Id = "suppressedid",
+                    Text = "Shared text",
+                    Group = "Work",
+                    CreatedUnixMs = deletedAt - 1000,
+                    LastUsedUnixMs = deletedAt - 1000,
+                    ModifiedUnixMs = deletedAt - 1000
+                });
+                work.Entries.Add(new ClipEntry
+                {
+                    Id = "relocatedid",
+                    Text = "Relocated text",
+                    Group = "Work",
+                    CreatedUnixMs = deletedAt - 1000,
+                    LastUsedUnixMs = deletedAt - 1000,
+                    ModifiedUnixMs = deletedAt - 1000
+                });
+                ClipDatabaseFile.SaveAtomic(channelPath, work, string.Empty);
+
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    var view = store.GetEntries();
+                    Assert(!view.Any(entry => entry.Id == "suppressedid"),
+                        "A non-empty TextHash tombstone did not suppress matching text in another channel.");
+                    Assert(view.Any(entry => entry.Id == "relocatedid"),
+                        "A relocation marker must never suppress a live entry with the same id in another channel.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void UnsubscribedChannelFileIsNotLoadedIntoView()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var doc = new SyncRulesDocument { Enabled = true };
+                doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+                doc.Channels.Add(new SyncChannel { Name = "Images", Route = new SyncRoute { Kind = "RichTextImages" } });
+                doc.Devices.Add(new SyncDevice { Name = "Limited-PC", Channels = new List<string> { "work" } });
+
+                using (var store = new ClipStore(databasePath, string.Empty, "Limited-PC"))
+                {
+                    Assert(store.SetSyncRules(doc) == null, "Enabling a restricted subscription should succeed.");
+                    store.AddText("Work note", "MoveToTop", 100, 0, "Work");
+
+                    var images = new ClipDatabase();
+                    images.Entries.Add(new ClipEntry
+                    {
+                        Id = "unsubscribedentryid",
+                        Text = "Image entry",
+                        CreatedUnixMs = TimeUtil.NowUnixMs(),
+                        LastUsedUnixMs = TimeUtil.NowUnixMs(),
+                        ModifiedUnixMs = TimeUtil.NowUnixMs()
+                    });
+                    ClipDatabaseFile.SaveAtomic(Path.Combine(directory, "clipman-channel-images.clipdb"), images, string.Empty);
+
+                    store.Reload();
+                    Assert(!store.GetEntries().Any(entry => entry.Text == "Image entry"),
+                        "An unsubscribed channel file leaked into the merged view.");
+                    Assert(store.GetEntries().Any(entry => entry.Text == "Work note"),
+                        "A subscribed channel file was dropped from the merged view.");
+                    Assert(store.GetSyncChannelKeys().Count == 2,
+                        "Channel keys should list every channel in the rules document.");
+                    Assert(File.Exists(Path.Combine(directory, "clipman-channel-images.clipdb")),
+                        "An unsubscribed channel file must never be removed.");
+                    var untouched = ClipDatabaseFile.Load(Path.Combine(directory, "clipman-channel-images.clipdb"), string.Empty);
+                    Assert(untouched.Entries.Count == 1, "An unsubscribed channel file must never be rewritten from the view.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void DirtyHashSkipsRewritingUntouchedChannelFiles()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var channelPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) == null, "Enabling sync rules should succeed.");
+                    store.AddText("Work note", "MoveToTop", 100, 0, "Work");
+                    var plain = store.AddText("Plain note", "MoveToTop", 100, 0);
+                    Assert(plain != null, "The core fixture entry was not created.");
+                    Assert(File.Exists(channelPath), "The channel file was not created before the dirty-hash check.");
+
+                    var before = File.GetLastWriteTimeUtc(channelPath);
+                    System.Threading.Thread.Sleep(60);
+                    store.SetName(plain.Id, "Renamed");
+
+                    Assert(File.GetLastWriteTimeUtc(channelPath) == before,
+                        "A channel with unchanged content was rewritten by an unrelated save.");
+                    Assert(store.LastChannelWriteOrder().Contains(string.Empty),
+                        "The core channel should still have been written by the save that changed it.");
+                    Assert(!store.LastChannelWriteOrder().Contains("work"),
+                        "An unchanged channel must not be committed.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void RelocationWritesTargetFileBeforeSource()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) == null, "Enabling sync rules should succeed.");
+                    var entry = store.AddText("Movable note", "MoveToTop", 100, 0);
+                    store.SetGroup(new[] { entry.Id }, "Work");
+
+                    var order = store.LastChannelWriteOrder();
+                    var target = order.IndexOf("work");
+                    var source = order.LastIndexOf(string.Empty);
+                    Assert(target >= 0, "The gaining channel was not committed during a relocation.");
+                    Assert(source >= 0, "The losing channel was not rewritten during a relocation.");
+                    Assert(target < source,
+                        "A relocation must commit the gaining channel before the losing channel drops the entry.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void SyncRulesRoundTripThroughStore()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var rulesPath = Path.Combine(directory, "clipman-sync-rules.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) == null, "Enabling sync rules should succeed.");
+                    Assert(File.Exists(rulesPath), "The rules document was not persisted beside the history file.");
+
+                    var restored = store.GetSyncRules();
+                    Assert(restored != null && restored.Enabled, "The stored rules document did not round trip.");
+                    Assert(restored.Channels.Count == 1 && restored.Channels[0].Name == "Work",
+                        "The stored rules document lost its channel.");
+                    Assert(restored.UpdatedBy == "Desktop", "SetSyncRules should stamp the editing device.");
+                    Assert(!ReferenceEquals(restored, store.GetSyncRules()), "GetSyncRules should return a deep copy.");
+                    restored.Channels.Clear();
+                    Assert(store.GetSyncChannelKeys().Count == 1, "Mutating the returned copy must not affect the store.");
+                    Assert(store.GetSyncChannelKeys()[0] == "work", "Channel keys should be normalized.");
+                    Assert(!store.SyncRulesReadOnly(), "A version-1 rules document should stay editable.");
+
+                    var reserved = new SyncRulesDocument { Enabled = true };
+                    reserved.Channels.Add(new SyncChannel { Name = "core", Route = new SyncRoute { Groups = new List<string> { "x" } } });
+                    Assert(store.SetSyncRules(reserved) != null, "A reserved channel name should be rejected by the store.");
+                    Assert(store.GetSyncChannelKeys().Count == 1, "A rejected edit must not replace the stored rules.");
+                }
+
+                var future = new SyncRulesDocument { Version = 2, Enabled = true };
+                future.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+                ClipDatabaseFile.SaveAtomic(rulesPath, future, string.Empty);
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SyncRulesReadOnly(), "A future-version rules document must be treated as read-only.");
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) != null,
+                        "A read-only rules document must not be rewritten by this client.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
         }
 
         private static void ServerPollSchedulingIsBounded()

@@ -2423,6 +2423,11 @@ namespace Clipman
         {
             var monitoring = settings.Active ? string.Empty : "Monitoring off. ";
             var fileStorageError = fileEventStore == null ? string.Empty : fileEventStore.LastStorageError;
+            var channelNotice = store == null ? string.Empty : store.ChannelAnnouncement();
+            if (!string.IsNullOrEmpty(channelNotice))
+            {
+                return monitoring + channelNotice;
+            }
             var sync = store == null ? null : store.GetServerSyncStatus();
             if (IsServerStorageEnabled())
             {
