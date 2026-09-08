@@ -146,6 +146,10 @@ Field semantics:
 - Caching: every client caches the last-seen rules document locally. If the rules
   bucket returns 404 but a cache exists, the cache stays in effect and the client
   re-uploads it with `If-None-Match: *`. If neither exists, rules are disabled.
+  Exception: a cached FUTURE-VERSION document (Section "Version" above) is kept
+  for display only - it must never be re-uploaded, so it does not arm the 404
+  re-upload fallback; on a genuine rules-bucket loss such a client falls back to
+  disabled rules until an up-to-date client restores the document.
 - Registry behavior: after rules are enabled, an updated client whose device name
   is missing from `Devices` adds itself with `Channels: ["*"]` on its next
   successful sync.
