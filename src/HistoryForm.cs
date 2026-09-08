@@ -3082,13 +3082,15 @@ namespace Clipman
 
             if (!selectedEntries[0].Pinned)
             {
-                var visibleOrder = entries.Where(e => !e.Pinned).Select(e => e.Id).ToList();
-                store.SetManualOrder(visibleOrder);
                 settings.SortMode = "Manual";
                 saveSettings();
             }
 
-            store.MoveEntries(selectedIds, direction);
+            var visibleOrder = entries
+                .Where(entry => entry.Pinned == selectedEntries[0].Pinned)
+                .Select(entry => entry.Id)
+                .ToList();
+            store.MoveEntries(selectedIds, direction, visibleOrder);
             Reload();
             RestoreSelection(selectedIds);
             statusText.Text = direction < 0 ? "Moved selected entry or entries up." : "Moved selected entry or entries down.";

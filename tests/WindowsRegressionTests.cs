@@ -39,6 +39,7 @@ namespace Clipman.Tests
             Run("single-modifier hotkey warning preference defaults and round trips", SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips);
             Run("Quick Clip settings and manual entries round trip", QuickClipSettingsAndManualEntriesRoundTrip);
             Run("startup capture preserves existing clip ownership", StartupCapturePreservesExistingClipOwnership);
+            Run("filtered pinned links move within the visible section", FilteredPinnedLinksMoveWithinVisibleSection);
             Run("entry editors reserve Enter for multiline text", EntryEditorsReserveEnterForMultilineText);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
@@ -610,6 +611,37 @@ namespace Clipman.Tests
                 "Startup capture must not retouch an existing clip.");
             Assert(ClipmanApplicationContext.DuplicateModeForCapture(false, "MoveToTop") == "MoveToTop",
                 "Ordinary clipboard capture must retain the configured duplicate behavior.");
+        }
+
+        private static void FilteredPinnedLinksMoveWithinVisibleSection()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb"), string.Empty, "Test device"))
+                {
+                    var firstLink = store.AddManualEntry("https://example.com/first", string.Empty, string.Empty, true, false, "Keep", 100, 0);
+                    store.AddManualEntry("Hidden pinned text", string.Empty, string.Empty, true, false, "Keep", 100, 0);
+                    var secondLink = store.AddManualEntry("https://example.com/second", string.Empty, string.Empty, true, false, "Keep", 100, 0);
+
+                    store.MoveEntries(
+                        new[] { secondLink.Id },
+                        -1,
+                        new[] { firstLink.Id, secondLink.Id });
+
+                    var visibleLinks = store.GetEntries("Manual", "All", false)
+                        .Where(entry => entry.Pinned && LinkClassifier.IsLinkOnlyText(entry.Text))
+                        .Select(entry => entry.Id)
+                        .ToList();
+                    Assert(visibleLinks.SequenceEqual(new[] { secondLink.Id, firstLink.Id }),
+                        "Moving a pinned link acted on a hidden Text entry instead of the adjacent visible link.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
         }
 
         private static void AssertEntryEditorUsesExplicitSave(EntryPropertiesForm form, string description)

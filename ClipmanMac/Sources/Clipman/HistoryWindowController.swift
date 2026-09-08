@@ -2492,6 +2492,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
 
+    func visibleEntryIDsForMove(pinned: Bool) -> [String] {
+        filteredEntries.filter { $0.Pinned == pinned }.map(\.Id)
+    }
+
     private func cutSelectedEntries() {
         guard mode != .files else {
             copySelectedEntries()

@@ -571,7 +571,7 @@ final class ClipStore: @unchecked Sendable {
         .first?.label ?? requested
     }
 
-    func moveEntries(ids: [String], direction: Int) {
+    func moveEntries(ids: [String], direction: Int, visibleIDs: [String]) {
         let idSet = Set(ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         guard !idSet.isEmpty, direction != 0 else { return }
         queue.async {
@@ -583,31 +583,26 @@ final class ClipStore: @unchecked Sendable {
                 return
             }
 
-            var ordered = self.database.Entries
+            let band = self.database.Entries
                 .filter { $0.Pinned == first.Pinned }
                 .sorted {
                     if $0.ManualOrder == $1.ManualOrder { return $0.CreatedUnixMs < $1.CreatedUnixMs }
                     return $0.ManualOrder < $1.ManualOrder
                 }
-            let indexes = ordered.indices.filter { idSet.contains(ordered[$0].Id) }
-            guard let firstIndex = indexes.first, let lastIndex = indexes.last else { return }
-            if direction < 0, firstIndex == 0 { return }
-            if direction > 0, lastIndex >= ordered.count - 1 { return }
-
-            let moving = ordered.filter { idSet.contains($0.Id) }
-            ordered.removeAll { idSet.contains($0.Id) }
-            let insertionIndex: Int
-            if direction < 0 {
-                insertionIndex = max(0, firstIndex - 1)
-            } else {
-                insertionIndex = min(ordered.count, lastIndex + 1 - moving.count + 1)
-            }
-            ordered.insert(contentsOf: moving, at: insertionIndex)
+            let bandByID = Dictionary(uniqueKeysWithValues: band.map { ($0.Id, $0) })
+            let ordered = visibleIDs.compactMap { bandByID[$0] }
+            guard ordered.count == visibleIDs.count,
+                  let reorderedIDs = VisibleEntryOrder.moving(
+                    visibleIDs: ordered.map(\.Id),
+                    selectedIDs: ids,
+                    direction: direction
+                  ) else { return }
+            let manualOrderSlots = ordered.map(\.ManualOrder).sorted()
 
             let now = TimeUtil.nowUnixMs()
-            for (offset, entry) in ordered.enumerated() {
-                guard let index = self.database.Entries.firstIndex(where: { $0.Id == entry.Id }) else { continue }
-                let nextOrder = Int64(offset + 1)
+            for (offset, id) in reorderedIDs.enumerated() {
+                guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { continue }
+                let nextOrder = manualOrderSlots[offset]
                 if self.database.Entries[index].ManualOrder != nextOrder {
                     self.database.Entries[index].ManualOrder = nextOrder
                     self.database.Entries[index].ModifiedUnixMs = now

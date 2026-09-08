@@ -1270,7 +1270,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
-        store.moveEntries(ids: entries.map(\.Id), direction: direction)
+        store.moveEntries(
+            ids: entries.map(\.Id),
+            direction: direction,
+            visibleIDs: controller.visibleEntryIDsForMove(pinned: entries[0].Pinned)
+        )
     }
 
     func historyWindowDidRequestPaste(_ controller: HistoryWindowController, after entry: ClipEntry?) {

@@ -837,8 +837,17 @@ namespace Clipman
 
         public void MoveEntries(IEnumerable<string> ids, int direction)
         {
+            MoveEntries(ids, direction, null);
+        }
+
+        public void MoveEntries(IEnumerable<string> ids, int direction, IEnumerable<string> visibleIds)
+        {
             var selectedIds = new HashSet<string>((ids ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)));
             if (selectedIds.Count == 0 || direction == 0) return;
+            var visibleOrder = (visibleIds ?? Enumerable.Empty<string>())
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Distinct()
+                .ToList();
 
             lock (sync)
             {
@@ -848,15 +857,23 @@ namespace Clipman
                 if (selectedEntries.Any(e => e.Pinned != selectedEntries[0].Pinned)) return;
 
                 var pinnedBand = selectedEntries[0].Pinned;
-                var ordered = database.Entries
+                var band = database.Entries
                     .Where(e => e.Pinned == pinnedBand)
                     .OrderBy(e => e.ManualOrder)
                     .ToList();
+                var ordered = visibleOrder.Count == 0
+                    ? band
+                    : visibleOrder
+                        .Select(id => band.FirstOrDefault(entry => entry.Id == id))
+                        .Where(entry => entry != null)
+                        .ToList();
                 var selected = ordered.Where(e => selectedIds.Contains(e.Id)).ToList();
-                if (selected.Count == 0) return;
+                if (selected.Count != selectedEntries.Count) return;
                 var indexes = selected.Select(e => ordered.IndexOf(e)).OrderBy(i => i).ToList();
                 var first = indexes.First();
                 var last = indexes.Last();
+                if ((direction < 0 && first == 0) || (direction > 0 && last == ordered.Count - 1)) return;
+                var manualOrderSlots = ordered.Select(e => e.ManualOrder).OrderBy(value => value).ToList();
                 foreach (var entry in selected)
                 {
                     ordered.Remove(entry);
@@ -874,7 +891,7 @@ namespace Clipman
                 var now = TimeUtil.NowUnixMs();
                 for (var i = 0; i < ordered.Count; i++)
                 {
-                    var nextOrder = i + 1L;
+                    var nextOrder = manualOrderSlots[i];
                     if (ordered[i].ManualOrder != nextOrder)
                     {
                         ordered[i].ManualOrder = nextOrder;
