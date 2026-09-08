@@ -3624,13 +3624,25 @@ namespace Clipman
                 }
 
                 if (HasLocalStateMissingFromServer(remote, slot.Database)) slot.NeedsUpload = true;
-                if (MergeDatabaseIntoLocked(slot.Database, remote)) changed = true;
+                var channelChanged = MergeDatabaseIntoLocked(slot.Database, remote);
+                if (channelChanged) changed = true;
                 NormalizeChannelDatabase(slot.Database);
                 slot.Revision = revision;
                 slot.Exists = true;
-                ClipDatabaseFile.SaveAtomic(slot.CacheFilePath, slot.Database, password, DatabasePath);
-                slot.PlainHash = PlainHash(slot.Database);
+                var nextPlainHash = PlainHash(slot.Database);
+                // Server responses can omit a stable revision, but an identical poll must not
+                // rewrite the cache and wake the history FileSystemWatcher every two seconds.
+                if (DownloadedCacheNeedsWrite(slot.PlainHash, nextPlainHash, File.Exists(slot.CacheFilePath)))
+                {
+                    ClipDatabaseFile.SaveAtomic(slot.CacheFilePath, slot.Database, password, DatabasePath);
+                }
+                slot.PlainHash = nextPlainHash;
             }
+        }
+
+        internal static bool DownloadedCacheNeedsWrite(string previousPlainHash, string nextPlainHash, bool cacheExists)
+        {
+            return !cacheExists || !string.Equals(previousPlainHash, nextPlainHash, StringComparison.Ordinal);
         }
 
         private static void MarkChannelBucketMissingLocked(ChannelSlot slot, bool uploadLocalWhenMissing)

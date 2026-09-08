@@ -226,7 +226,7 @@ final class ClipmanAppModel: ObservableObject {
     func setTransientStatus(_ message: String) {
         statusResetTask?.cancel()
         transientStatusActive = true
-        status = message
+        publishStatus(message)
         statusResetTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 10_000_000_000)
@@ -235,7 +235,7 @@ final class ClipmanAppModel: ObservableObject {
             }
             guard let self, !Task.isCancelled else { return }
             transientStatusActive = false
-            status = steadyStatus
+            publishStatus(steadyStatus)
             statusResetTask = nil
         }
     }
@@ -246,8 +246,13 @@ final class ClipmanAppModel: ObservableObject {
             statusResetTask?.cancel()
             statusResetTask = nil
             transientStatusActive = false
-            status = message
+            publishStatus(message)
         }
+    }
+
+    private func publishStatus(_ message: String) {
+        guard status != message else { return }
+        status = message
     }
 
     func switchSection(_ section: Section) {

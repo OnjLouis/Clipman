@@ -42,6 +42,7 @@ namespace Clipman.Tests
             Run("filtered pinned links move within the visible section", FilteredPinnedLinksMoveWithinVisibleSection);
             Run("entry editors reserve Enter for multiline text", EntryEditorsReserveEnterForMultilineText);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
+            Run("unchanged history reloads keep native rows stable", UnchangedHistoryReloadsKeepNativeRowsStable);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
             Run("multiple-entry separators are configurable", MultipleEntrySeparatorsAreConfigurable);
             Run("bursts of Windows clipboard notifications settle on the newest sequence", ClipboardNotificationsSettleOnNewestSequence);
@@ -75,6 +76,7 @@ namespace Clipman.Tests
             Run("unsubscribed channel files are not loaded into the view", UnsubscribedChannelFileIsNotLoadedIntoView);
             Run("new channel entries stay at the end of manual order", NewChannelEntriesStayAtEndOfManualOrder);
             Run("dirty hashes skip rewriting untouched channel files", DirtyHashSkipsRewritingUntouchedChannelFiles);
+            Run("unchanged server downloads do not rewrite channel caches", UnchangedServerDownloadsDoNotRewriteChannelCaches);
             Run("relocations write the target file before the source", RelocationWritesTargetFileBeforeSource);
             Run("sync rules round trip through the store", SyncRulesRoundTripThroughStore);
             Run("routing stops at the first matching route even when unresolvable", RouteStopsAtUnresolvableFirstMatch);
@@ -1660,6 +1662,16 @@ namespace Clipman.Tests
                 description + " must reserve plain Enter for multiline text and require the exact save shortcut.");
         }
 
+        private static void UnchangedServerDownloadsDoNotRewriteChannelCaches()
+        {
+            Assert(!ClipStore.DownloadedCacheNeedsWrite("same", "same", true),
+                "An unchanged downloaded channel should preserve its existing cache file.");
+            Assert(ClipStore.DownloadedCacheNeedsWrite("old", "new", true),
+                "Changed downloaded channel content must replace its cache file.");
+            Assert(ClipStore.DownloadedCacheNeedsWrite("same", "same", false),
+                "A missing downloaded channel cache must be created.");
+        }
+
         private static void NewChannelEntriesStayAtEndOfManualOrder()
         {
             var directory = NewRegressionDirectory();
@@ -1698,30 +1710,7 @@ namespace Clipman.Tests
             try
             {
                 using (var store = new ClipStore(Path.Combine(directory, "history.clipdb")))
-                using (var form = new HistoryForm(
-                    store,
-                    new AppSettings(),
-                    () => { },
-                    () => { },
-                    entry => { },
-                    entries => { },
-                    (text, entries) => true,
-                    () => { },
-                    () => { },
-                    () => new System.Collections.Generic.List<ClipboardEventSummary>(),
-                    ids => 0,
-                    () => 0,
-                    () => 0,
-                    id => false,
-                    (ids, offset) => { },
-                    () => true,
-                    () => { },
-                    () => { },
-                    () => { },
-                    () => { },
-                    () => { },
-                    () => string.Empty,
-                    () => "Ready. Using local or shared-folder history."))
+                using (var form = CreateTestHistoryForm(store, () => new List<ClipboardEventSummary>()))
                 {
                     Assert(form.MainMenuStrip != null, "The history window did not finish constructing its menu.");
                     var textList = (ListView)typeof(HistoryForm)
@@ -1755,6 +1744,82 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void UnchangedHistoryReloadsKeepNativeRowsStable()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb")))
+                {
+                    store.AddManualEntry("Stable history row", string.Empty, string.Empty, false, false, string.Empty, 100, 0);
+                    var fileEvents = new List<ClipboardEventSummary>
+                    {
+                        new ClipboardEventSummary
+                        {
+                            Id = "stable-file-row",
+                            CapturedAt = new DateTime(2026, 9, 8, 18, 0, 0),
+                            Source = "Explorer",
+                            Operation = "Copy",
+                            FileCount = 1,
+                            Files = new List<string> { @"C:\stable.txt" }
+                        }
+                    };
+                    using (var form = CreateTestHistoryForm(store, () => fileEvents))
+                    {
+                        var textList = (ListView)typeof(HistoryForm)
+                            .GetField("list", BindingFlags.Instance | BindingFlags.NonPublic)
+                            .GetValue(form);
+                        var fileList = (ListView)typeof(HistoryForm)
+                            .GetField("fileEventsList", BindingFlags.Instance | BindingFlags.NonPublic)
+                            .GetValue(form);
+                        var originalTextRow = textList.Items.Cast<ListViewItem>().Single(item => item.Tag is ClipEntry);
+                        var originalFileRow = fileList.Items.Cast<ListViewItem>().Single(item => item.Tag is ClipboardEventSummary);
+
+                        form.Reload();
+
+                        Assert(ReferenceEquals(originalTextRow, textList.Items.Cast<ListViewItem>().Single(item => item.Tag is ClipEntry)),
+                            "An unchanged history reload replaced the focused text row control.");
+                        Assert(ReferenceEquals(originalFileRow, fileList.Items.Cast<ListViewItem>().Single(item => item.Tag is ClipboardEventSummary)),
+                            "An unchanged history reload replaced the focused file row control.");
+                    }
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static HistoryForm CreateTestHistoryForm(
+            ClipStore store,
+            Func<List<ClipboardEventSummary>> recentClipboardEvents)
+        {
+            return new HistoryForm(
+                store,
+                new AppSettings(),
+                () => { },
+                () => { },
+                entry => { },
+                entries => { },
+                (text, entries) => true,
+                () => { },
+                () => { },
+                recentClipboardEvents,
+                ids => 0,
+                () => 0,
+                () => 0,
+                id => false,
+                (ids, offset) => { },
+                () => true,
+                () => { },
+                () => { },
+                () => { },
+                () => { },
+                () => { },
+                () => string.Empty,
+                () => "Ready. Using local or shared-folder history.");
         }
 
         private static void NameAndContentCopyFormattingIsDeterministic()

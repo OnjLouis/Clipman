@@ -9,6 +9,9 @@ struct HistoryView: View {
     @State private var pendingWebsiteTitleItem: LinkExtractor.LinkItem?
     @State private var imageShareFile: EmbeddedImageShareFile?
     @State private var showingHistoryFilter = false
+    @State private var showingMoreActions = false
+    @State private var moreActionSections: [ClipmanAppModel.Section] = []
+    @State private var pendingMoreAction: HistoryMoreAction?
     @AccessibilityFocusState private var focusedHistoryItemID: String?
 
     private let statusFocusID = "history-status"
@@ -40,13 +43,9 @@ struct HistoryView: View {
                         app.showingQuickClip = true
                     }
                     .accessibilityHint("Creates a clipboard entry without changing the iOS clipboard.")
-                    Menu("More", systemImage: "ellipsis.circle") {
-                        ForEach(app.visibleSections.filter { $0 != app.selectedSection }) { section in
-                            Button("Switch to \(section.rawValue)") {
-                                app.switchSection(section)
-                            }
-                        }
-                        Button("Settings") { app.showingSettings = true }
+                    Button("More", systemImage: "ellipsis.circle") {
+                        moreActionSections = app.visibleSections.filter { $0 != app.selectedSection }
+                        showingMoreActions = true
                     }
                     .accessibilityLabel("More")
                 }
@@ -88,6 +87,12 @@ struct HistoryView: View {
                 HistoryFilterChooser()
                     .environmentObject(app)
             }
+            .sheet(isPresented: $showingMoreActions, onDismiss: performPendingMoreAction) {
+                HistoryMoreActionsSheet(sections: moreActionSections) { action in
+                    pendingMoreAction = action
+                    showingMoreActions = false
+                }
+            }
             .alert("Delete clipboard entry?", isPresented: Binding(
                 get: { pendingDeleteEntry != nil },
                 set: { if !$0 { pendingDeleteEntry = nil } }
@@ -114,6 +119,17 @@ struct HistoryView: View {
             } message: {
                 Text("Clipman will contact \(pendingWebsiteTitleItem?.url.host ?? "the website") once to read the page title. The website can see that it was contacted. Clipman sends the selected link request, but no cookies, credentials or other clipboard content.")
             }
+        }
+    }
+
+    private func performPendingMoreAction() {
+        guard let action = pendingMoreAction else { return }
+        pendingMoreAction = nil
+        switch action {
+        case .section(let section):
+            app.switchSection(section)
+        case .settings:
+            app.showingSettings = true
         }
     }
 
@@ -286,6 +302,42 @@ struct HistoryView: View {
             app.setHistorySortMode(mode)
         }
         .accessibilityFocused($focusedHistoryItemID, equals: statusFocusID)
+    }
+}
+
+private enum HistoryMoreAction {
+    case section(ClipmanAppModel.Section)
+    case settings
+}
+
+private struct HistoryMoreActionsSheet: View {
+    let sections: [ClipmanAppModel.Section]
+    let select: (HistoryMoreAction?) -> Void
+    @AccessibilityFocusState private var focusedActionID: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(sections) { section in
+                    Button("Switch to \(section.rawValue)") {
+                        select(.section(section))
+                    }
+                    .accessibilityFocused($focusedActionID, equals: section.id)
+                }
+                Button("Settings") {
+                    select(.settings)
+                }
+                .accessibilityFocused($focusedActionID, equals: "settings")
+                Button("Close", role: .cancel) {
+                    select(nil)
+                }
+                .accessibilityFocused($focusedActionID, equals: "close")
+            }
+            .navigationTitle("More")
+            .onAppear {
+                focusedActionID = sections.first?.id ?? "settings"
+            }
+        }
     }
 }
 

@@ -79,6 +79,13 @@ namespace Clipman
         private bool settingSteadyStatus;
         private readonly HashSet<string> linkTitleFetches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        private sealed class RenderedHistoryRow
+        {
+            public string[] Cells;
+            public object Value;
+            public bool IsSeparator;
+        }
+
         public HistoryForm(ClipStore store, AppSettings settings, Action saveSettings, Action refreshHotkeys, Action<ClipEntry> copyEntry, Action<List<ClipEntry>> copyEntries, Func<string, List<ClipEntry>, bool> copyPlainText, Action pasteIntoPreviousApplication, Action saveCurrentClipboard, Func<List<ClipboardEventSummary>> recentClipboardEvents, Func<List<string>, int> deleteRecentClipboardEvents, Func<int> clearRecentClipboardEvents, Func<int> removeUnavailableRecentClipboardEvents, Func<string, bool> toggleRecentClipboardEventPinned, Action<List<string>, int> moveRecentClipboardEvents, Func<bool> clearTextHistory, Action showPreferences, Action showSecrets, Action toggleActive, Action exitApp, Action playSkipSound, Func<string> diagnosticsText, Func<string> steadyStatusText)
         {
             this.store = store;
@@ -304,38 +311,42 @@ namespace Clipman
             var selectedIndex = preferredIndex >= 0
                 ? preferredIndex
                 : fileEventsList.SelectedIndices.Count > 0 ? fileEventsList.SelectedIndices[0] : -1;
-            fileEventsList.BeginUpdate();
-            fileEventsList.Items.Clear();
+            var rows = new List<RenderedHistoryRow>();
             var insertedSeparator = false;
             var pinnedEventPosition = 0;
             foreach (var item in events)
             {
                 if (!item.Pinned && !insertedSeparator && events.Any(e => e.Pinned))
                 {
-                    var separator = new ListViewItem("----- Normal entries -----");
-                    separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
-                    separator.Tag = null;
-                    separator.ForeColor = SystemColors.GrayText;
-                    fileEventsList.Items.Add(separator);
+                    rows.Add(new RenderedHistoryRow
+                    {
+                        Cells = new[] { "----- Normal entries -----", string.Empty, string.Empty, string.Empty, string.Empty, string.Empty },
+                        IsSeparator = true
+                    });
                     insertedSeparator = true;
                 }
 
                 NormalizeFileClipboardEvent(item);
                 var text = item.Pinned ? NumberedPinnedDisplayText(FileEventDisplayText(item), pinnedEventPosition++) : FileEventDisplayText(item);
-                var row = new ListViewItem(text);
-                row.SubItems.Add(NormalizeDropEffectText(item.Operation));
-                row.SubItems.Add(item.FileCount > 0 ? item.FileCount.ToString() : string.Empty);
-                row.SubItems.Add(item.Source ?? string.Empty);
-                row.SubItems.Add(item.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss"));
-                row.SubItems.Add(item.Pinned ? "Pinned" : string.Empty);
-                row.Tag = item;
-                fileEventsList.Items.Add(row);
+                rows.Add(new RenderedHistoryRow
+                {
+                    Cells = new[]
+                    {
+                        text,
+                        NormalizeDropEffectText(item.Operation),
+                        item.FileCount > 0 ? item.FileCount.ToString() : string.Empty,
+                        item.Source ?? string.Empty,
+                        item.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                        item.Pinned ? "Pinned" : string.Empty
+                    },
+                    Value = item
+                });
             }
-            fileEventsList.EndUpdate();
+            if (!ApplyRenderedRows(fileEventsList, rows))
+            {
+                if (IsFileClipboardTabActive()) ShowSteadyStatus();
+                return;
+            }
             if (fileEventsList.Items.Count > 0)
             {
                 if (selectedIndex < 0) selectedIndex = 0;
@@ -347,6 +358,64 @@ namespace Clipman
                 fileEventsList.Items[selectedIndex].EnsureVisible();
             }
             if (IsFileClipboardTabActive()) ShowSteadyStatus();
+        }
+
+        private static bool ApplyRenderedRows(ListView target, List<RenderedHistoryRow> rows)
+        {
+            var same = target.Items.Count == rows.Count;
+            if (same)
+            {
+                for (var rowIndex = 0; rowIndex < rows.Count && same; rowIndex++)
+                {
+                    var current = target.Items[rowIndex];
+                    var expected = rows[rowIndex];
+                    if ((current.Tag == null) != expected.IsSeparator || current.SubItems.Count != expected.Cells.Length)
+                    {
+                        same = false;
+                        break;
+                    }
+                    for (var cellIndex = 0; cellIndex < expected.Cells.Length; cellIndex++)
+                    {
+                        if (!string.Equals(current.SubItems[cellIndex].Text, expected.Cells[cellIndex], StringComparison.Ordinal))
+                        {
+                            same = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (same)
+            {
+                // Keep the native row controls and accessibility focus, but refresh their models.
+                for (var index = 0; index < rows.Count; index++)
+                {
+                    target.Items[index].Tag = rows[index].Value;
+                }
+                return false;
+            }
+
+            target.BeginUpdate();
+            try
+            {
+                target.Items.Clear();
+                foreach (var expected in rows)
+                {
+                    var row = new ListViewItem(expected.Cells[0]);
+                    for (var index = 1; index < expected.Cells.Length; index++)
+                    {
+                        row.SubItems.Add(expected.Cells[index]);
+                    }
+                    row.Tag = expected.Value;
+                    if (expected.IsSeparator) row.ForeColor = SystemColors.GrayText;
+                    target.Items.Add(row);
+                }
+            }
+            finally
+            {
+                target.EndUpdate();
+            }
+            return true;
         }
 
         private void Reload(string preferredSelectedId, int preferredIndex)
@@ -366,34 +435,39 @@ namespace Clipman
                     .Where(e => string.Equals((e.SourceMachine ?? string.Empty).Trim(), settings.DeviceFilter, StringComparison.CurrentCultureIgnoreCase))
                     .ToList();
             }
-            list.BeginUpdate();
-            list.Items.Clear();
+            var rows = new List<RenderedHistoryRow>();
             var insertedSeparator = false;
             var pinnedEntryPosition = 0;
             foreach (var entry in entries)
             {
                 if (!entry.Pinned && !insertedSeparator && entries.Any(e => e.Pinned))
                 {
-                    var separator = new ListViewItem("----- Normal entries -----");
-                    separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
-                    separator.SubItems.Add(string.Empty);
-                    separator.Tag = null;
-                    separator.ForeColor = SystemColors.GrayText;
-                    list.Items.Add(separator);
+                    rows.Add(new RenderedHistoryRow
+                    {
+                        Cells = new[] { "----- Normal entries -----", string.Empty, string.Empty, string.Empty, string.Empty },
+                        IsSeparator = true
+                    });
                     insertedSeparator = true;
                 }
 
-                var item = new ListViewItem(EntryDisplayText(entry, ref pinnedEntryPosition));
-                item.SubItems.Add(entry.Group ?? string.Empty);
-                item.SubItems.Add(entry.SourceMachine ?? string.Empty);
-                item.SubItems.Add(TimeUtil.FromUnixMs(entry.LastUsedUnixMs).ToString("yyyy-MM-dd HH:mm:ss"));
-                item.SubItems.Add(TimeUtil.FromUnixMs(entry.CreatedUnixMs).ToString("yyyy-MM-dd HH:mm:ss"));
-                item.Tag = entry;
-                list.Items.Add(item);
+                rows.Add(new RenderedHistoryRow
+                {
+                    Cells = new[]
+                    {
+                        EntryDisplayText(entry, ref pinnedEntryPosition),
+                        entry.Group ?? string.Empty,
+                        entry.SourceMachine ?? string.Empty,
+                        TimeUtil.FromUnixMs(entry.LastUsedUnixMs).ToString("yyyy-MM-dd HH:mm:ss"),
+                        TimeUtil.FromUnixMs(entry.CreatedUnixMs).ToString("yyyy-MM-dd HH:mm:ss")
+                    },
+                    Value = entry
+                });
             }
-            list.EndUpdate();
+            if (!ApplyRenderedRows(list, rows))
+            {
+                ShowSteadyStatus();
+                return;
+            }
 
             var index = -1;
             if (!string.IsNullOrEmpty(selectedId))
