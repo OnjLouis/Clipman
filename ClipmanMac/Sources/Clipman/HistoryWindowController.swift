@@ -2328,7 +2328,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         alert.accessoryView = stack
         if isNew { alert.window.initialFirstResponder = textView }
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard DialogSaveShortcut.runModal(alert, acceptsCommandReturn: true) == .alertFirstButtonReturn else { return }
         if isNew {
             guard !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 showPropertyError("Quick Clip was not saved because it contains no text.")
@@ -2557,7 +2557,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         stack.spacing = 8
         stack.frame = NSRect(x: 0, y: 0, width: 360, height: 28)
         alert.accessoryView = stack
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard DialogSaveShortcut.runModal(alert, acceptsCommandReturn: false) == .alertFirstButtonReturn else { return }
         let value = groupBox.stringValue == "(No group)" ? "" : groupBox.stringValue
         historyDelegate?.historyWindow(self, didSetGroup: value, for: entries)
     }

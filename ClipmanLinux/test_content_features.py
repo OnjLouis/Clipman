@@ -53,6 +53,15 @@ def image_rich_text_with_filename(filename, data=None, mime_type="image/png"):
 
 
 class LinkLabelTests(unittest.TestCase):
+    def test_entry_editor_save_shortcut_requires_exact_control_enter(self):
+        self.assertTrue(clipman.dialog_save_shortcut(clipman.Gdk.KEY_Return, clipman.Gdk.ModifierType.CONTROL_MASK))
+        self.assertTrue(clipman.dialog_save_shortcut(clipman.Gdk.KEY_KP_Enter, clipman.Gdk.ModifierType.CONTROL_MASK))
+        self.assertFalse(clipman.dialog_save_shortcut(clipman.Gdk.KEY_Return, 0))
+        self.assertFalse(clipman.dialog_save_shortcut(
+            clipman.Gdk.KEY_Return,
+            clipman.Gdk.ModifierType.CONTROL_MASK | clipman.Gdk.ModifierType.SHIFT_MASK,
+        ))
+
     def test_open_link_accepts_only_standalone_web_links(self):
         self.assertEqual(
             clipman.openable_web_link(" https://example.com/path "),

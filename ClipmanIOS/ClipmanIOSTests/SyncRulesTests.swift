@@ -1,5 +1,5 @@
 import XCTest
-@testable import ClipmanIOS
+@testable import Clipman
 
 final class SyncRulesTests: XCTestCase {
     private let token = "example-token"

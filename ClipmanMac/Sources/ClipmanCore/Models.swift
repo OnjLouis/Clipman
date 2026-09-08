@@ -112,6 +112,21 @@ public struct RichTextPayload: Codable, Equatable, Sendable {
         self.RtfBase64 = RtfBase64
         self.PreferredFormat = PreferredFormat
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case Version
+        case HtmlFragment
+        case RtfBase64
+        case PreferredFormat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        Version = try container.decodeIfPresent(Int.self, forKey: .Version) ?? 1
+        HtmlFragment = try container.decodeIfPresent(String.self, forKey: .HtmlFragment) ?? ""
+        RtfBase64 = try container.decodeIfPresent(String.self, forKey: .RtfBase64) ?? ""
+        PreferredFormat = try container.decodeIfPresent(String.self, forKey: .PreferredFormat) ?? ""
+    }
 }
 
 public struct ClipDatabase: Codable, Equatable, Sendable {

@@ -8,7 +8,7 @@ import ClipmanCore
 @MainActor
 final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     private let store: ClipStore
-    private var document = SyncRulesDocument()
+    private var rulesDocument = SyncRulesDocument()
     private var readOnly = false
     private var deviceName = ""
     /// Channel keys of the document in effect in the store, and the subset this
@@ -38,7 +38,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
 
     init(store: ClipStore) {
         self.store = store
-        let window = NSWindow(
+        let window = SaveShortcutWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
@@ -47,6 +47,9 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         window.title = "Clipman Sync Rules"
         window.center()
         super.init(window: window)
+        window.saveShortcutHandler = { [weak self] in
+            self?.saveAndClose(nil)
+        }
         buildUI()
         reload()
     }
@@ -70,7 +73,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         let stored = store.getSyncRules()
         storeChannelKeys = Set(SyncRuleEngine.allChannelKeys(stored))
         storeSubscribedKeys = store.syncSubscribedChannelKeys().map { Set($0) }
-        document = stored ?? SyncRulesDocument(
+        rulesDocument = stored ?? SyncRulesDocument(
             Clipman: SyncRuleEngine.documentKind,
             Version: SyncRuleEngine.currentVersion,
             Enabled: false,
@@ -83,10 +86,10 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         let normalizedDeviceName = SyncRuleEngine.normalized(deviceName)
         if !readOnly,
            !normalizedDeviceName.isEmpty,
-           !document.Devices.contains(where: { SyncRuleEngine.normalized($0.Name) == normalizedDeviceName }) {
-            document.Devices.append(SyncDevice(Name: deviceName, Channels: ["*"]))
+           !rulesDocument.Devices.contains(where: { SyncRuleEngine.normalized($0.Name) == normalizedDeviceName }) {
+            rulesDocument.Devices.append(SyncDevice(Name: deviceName, Channels: ["*"]))
         }
-        enabledCheckbox.state = document.Enabled ? .on : .off
+        enabledCheckbox.state = rulesDocument.Enabled ? .on : .off
         baselineStatusText = readOnly
             ? "These sync rules were written by a newer version of Clipman. They are shown here but cannot be changed on this Mac."
             : "This Mac is called \"\(deviceName)\" in these rules."
@@ -236,7 +239,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
     // MARK: - Table data
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tableView === channelsTable ? document.Channels.count : document.Devices.count
+        tableView === channelsTable ? rulesDocument.Channels.count : rulesDocument.Devices.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -253,12 +256,12 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
 
     private func cellText(tableView: NSTableView, identifier: NSUserInterfaceItemIdentifier, row: Int) -> String {
         if tableView === channelsTable {
-            guard row >= 0, row < document.Channels.count else { return "" }
-            let channel = document.Channels[row]
+            guard row >= 0, row < rulesDocument.Channels.count else { return "" }
+            let channel = rulesDocument.Channels[row]
             return identifier == channelNameColumn ? channel.Name : routeSummary(channel.Route)
         }
-        guard row >= 0, row < document.Devices.count else { return "" }
-        let device = document.Devices[row]
+        guard row >= 0, row < rulesDocument.Devices.count else { return "" }
+        let device = rulesDocument.Devices[row]
         return identifier == deviceNameColumn ? device.Name : subscriptionSummary(device)
     }
 
@@ -314,8 +317,8 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
 
     private func selectedChannelName() -> String? {
         let row = channelsTable.selectedRow
-        guard row >= 0, row < document.Channels.count else { return nil }
-        return document.Channels[row].Name
+        guard row >= 0, row < rulesDocument.Channels.count else { return nil }
+        return rulesDocument.Channels[row].Name
     }
 
     /// Why the named channel cannot be removed from this Mac, or nil when it
@@ -349,27 +352,27 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
     }
 
     @objc private func enabledChanged(_ sender: Any?) {
-        document.Enabled = enabledCheckbox.state == .on
+        rulesDocument.Enabled = enabledCheckbox.state == .on
     }
 
     @objc private func addChannel(_ sender: Any?) {
         guard !readOnly else { return }
         var channel = SyncChannel()
         guard runChannelSheet(&channel, replacing: nil) else { return }
-        document.Channels.append(channel)
+        rulesDocument.Channels.append(channel)
         channelsTable.reloadData()
-        select(row: document.Channels.count - 1, in: channelsTable)
+        select(row: rulesDocument.Channels.count - 1, in: channelsTable)
         statusLabel.stringValue = "Added the \(channel.Name) channel. Choose Save and Close to apply it."
     }
 
     @objc private func editChannel(_ sender: Any?) {
         guard !readOnly else { return }
         let row = channelsTable.selectedRow
-        guard row >= 0, row < document.Channels.count else { return }
-        var channel = document.Channels[row]
+        guard row >= 0, row < rulesDocument.Channels.count else { return }
+        var channel = rulesDocument.Channels[row]
         let previousKey = SyncRuleEngine.channelKey(channel.Name)
         guard runChannelSheet(&channel, replacing: row) else { return }
-        document.Channels[row] = channel
+        rulesDocument.Channels[row] = channel
         let newKey = SyncRuleEngine.channelKey(channel.Name)
         if previousKey != newKey {
             renameSubscriptions(from: previousKey, to: newKey)
@@ -382,8 +385,8 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
     @objc private func removeChannel(_ sender: Any?) {
         guard !readOnly else { return }
         let row = channelsTable.selectedRow
-        guard row >= 0, row < document.Channels.count else { return }
-        let channel = document.Channels[row]
+        guard row >= 0, row < rulesDocument.Channels.count else { return }
+        let channel = rulesDocument.Channels[row]
         if let reason = removalRefusal(channelName: channel.Name) {
             showError(reason)
             return
@@ -398,44 +401,44 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         let key = SyncRuleEngine.channelKey(channel.Name)
-        document.Channels.remove(at: row)
+        rulesDocument.Channels.remove(at: row)
         removeSubscriptions(to: key)
         channelsTable.reloadData()
         devicesTable.reloadData()
-        select(row: min(row, document.Channels.count - 1), in: channelsTable)
+        select(row: min(row, rulesDocument.Channels.count - 1), in: channelsTable)
         statusLabel.stringValue = "Removed the \(channel.Name) channel. Choose Save and Close to move its entries."
     }
 
     @objc private func editSubscriptions(_ sender: Any?) {
         guard !readOnly else { return }
         let row = devicesTable.selectedRow
-        guard row >= 0, row < document.Devices.count else { return }
-        var device = document.Devices[row]
+        guard row >= 0, row < rulesDocument.Devices.count else { return }
+        var device = rulesDocument.Devices[row]
         guard runSubscriptionsSheet(&device) else { return }
-        document.Devices[row] = device
+        rulesDocument.Devices[row] = device
         devicesTable.reloadData()
         select(row: row, in: devicesTable)
     }
 
     @objc private func saveAndClose(_ sender: Any?) {
         guard !readOnly else { return }
-        document.Enabled = enabledCheckbox.state == .on
-        document.Clipman = SyncRuleEngine.documentKind
-        document.Version = SyncRuleEngine.currentVersion
+        rulesDocument.Enabled = enabledCheckbox.state == .on
+        rulesDocument.Clipman = SyncRuleEngine.documentKind
+        rulesDocument.Version = SyncRuleEngine.currentVersion
         // Subscriptions are stored as channel keys, and a channel that was
         // renamed or removed during this edit must not leave a dangling
         // reference behind.
-        let known = Set(SyncRuleEngine.allChannelKeys(document))
-        for index in document.Devices.indices {
-            if document.Devices[index].Channels.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "*" }) {
-                document.Devices[index].Channels = ["*"]
+        let known = Set(SyncRuleEngine.allChannelKeys(rulesDocument))
+        for index in rulesDocument.Devices.indices {
+            if rulesDocument.Devices[index].Channels.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "*" }) {
+                rulesDocument.Devices[index].Channels = ["*"]
                 continue
             }
-            document.Devices[index].Channels = document.Devices[index].Channels
+            rulesDocument.Devices[index].Channels = rulesDocument.Devices[index].Channels
                 .map { SyncRuleEngine.normalized($0) }
                 .filter { known.contains($0) }
         }
-        if let reason = store.setSyncRules(document) {
+        if let reason = store.setSyncRules(rulesDocument) {
             statusLabel.stringValue = reason
             NSAccessibility.post(
                 element: NSApplication.shared,
@@ -459,8 +462,8 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
 
     private func renameSubscriptions(from previousKey: String, to newKey: String) {
         guard !previousKey.isEmpty, !newKey.isEmpty else { return }
-        for index in document.Devices.indices {
-            document.Devices[index].Channels = document.Devices[index].Channels.map {
+        for index in rulesDocument.Devices.indices {
+            rulesDocument.Devices[index].Channels = rulesDocument.Devices[index].Channels.map {
                 SyncRuleEngine.normalized($0) == previousKey ? newKey : $0
             }
         }
@@ -468,8 +471,8 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
 
     private func removeSubscriptions(to key: String) {
         guard !key.isEmpty else { return }
-        for index in document.Devices.indices {
-            document.Devices[index].Channels.removeAll { SyncRuleEngine.normalized($0) == key }
+        for index in rulesDocument.Devices.indices {
+            rulesDocument.Devices[index].Channels.removeAll { SyncRuleEngine.normalized($0) == key }
         }
     }
 
@@ -524,7 +527,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
                     Kind: imagesCheckbox.state == .on ? SyncRuleEngine.richTextImagesKind : nil
                 )
             )
-            var probe = document
+            var probe = rulesDocument
             if let replacing, replacing >= 0, replacing < probe.Channels.count {
                 probe.Channels[replacing] = candidate
             } else {
@@ -561,7 +564,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         stack.alignment = .leading
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for channel in document.Channels {
+        for channel in rulesDocument.Channels {
             let key = SyncRuleEngine.channelKey(channel.Name)
             guard !key.isEmpty else { continue }
             let checkbox = NSButton(checkboxWithTitle: channel.Name, target: nil, action: nil)

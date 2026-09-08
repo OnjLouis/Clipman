@@ -1002,6 +1002,18 @@ def clean_tracking_text(text, sharing=False):
     return PLAIN_URL.sub(replace, text)
 
 
+def dialog_save_shortcut(keyval, state):
+    primary_modifiers = state & (
+        Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+        Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.SUPER_MASK |
+        Gdk.ModifierType.META_MASK | Gdk.ModifierType.HYPER_MASK
+    )
+    return (
+        keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and
+        primary_modifiers == Gdk.ModifierType.CONTROL_MASK
+    )
+
+
 class HotkeyEntry(Gtk.Entry):
     MODIFIERS = (
         Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
@@ -3846,6 +3858,15 @@ class ClipmanApplication(Gtk.Application):
     def show_entry_dialog(self, entry, focus_quick_paste=False):
         dialog = Gtk.Dialog(title="Quick Clip" if entry is None else "Clipboard Entry Properties", transient_for=self.window, modal=True)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.OK)
+        save_shortcut = Gtk.EventControllerKey()
+        save_shortcut.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        def save_key_pressed(_controller, keyval, _keycode, state):
+            if not dialog_save_shortcut(keyval, state):
+                return False
+            dialog.response(Gtk.ResponseType.OK)
+            return True
+        save_shortcut.connect("key-pressed", save_key_pressed)
+        dialog.add_controller(save_shortcut)
         content = dialog.get_content_area(); content.set_spacing(8); content.set_margin_top(12); content.set_margin_bottom(12); content.set_margin_start(12); content.set_margin_end(12)
         name = Gtk.Entry(text=entry.get("name", "") if entry else "", placeholder_text="Optional name")
         group = Gtk.Entry(text=entry.get("group", "") if entry else "", placeholder_text="Optional group")

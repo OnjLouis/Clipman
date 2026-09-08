@@ -44,7 +44,9 @@ enum ServerStorageError: Error, LocalizedError {
     }
 }
 
-final class ServerStorageClient {
+// Instances are immutable after initialization. URLSession is safe for
+// concurrent use, and ServerSessionDelegate protects its task state with a lock.
+final class ServerStorageClient: @unchecked Sendable {
     let isConfigured: Bool
     let syncCacheIdentity: String
     let databaseID: String

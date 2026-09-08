@@ -16,6 +16,7 @@ namespace Clipman
         private readonly RadioButton pasteKeepMode;
         private readonly RadioButton copyOnlyMode;
         private readonly TextBox textBox;
+        private readonly Button saveButton;
         private readonly bool isNewEntry;
         private bool deleteRequested;
 
@@ -256,18 +257,34 @@ namespace Clipman
             };
             Controls.Add(delete);
 
-            var ok = new Button { Text = "&Save", DialogResult = DialogResult.OK, Location = new Point(500, 546), Width = 85 };
-            Controls.Add(ok);
+            saveButton = new Button { Text = "&Save", DialogResult = DialogResult.OK, Location = new Point(500, 546), Width = 85 };
+            Controls.Add(saveButton);
 
             var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 546), Width = 85 };
             Controls.Add(cancel);
 
-            AcceptButton = ok;
+            AcceptButton = saveButton;
             CancelButton = cancel;
             if (focusQuickCopy)
             {
                 Shown += (s, e) => quickCopyHotkeyBox.Focus();
             }
+        }
+
+        internal static bool IsSaveShortcut(Keys keyData)
+        {
+            return keyData == (Keys.Control | Keys.Enter);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (IsSaveShortcut(keyData))
+            {
+                saveButton.PerformClick();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         protected override void OnShown(EventArgs e)

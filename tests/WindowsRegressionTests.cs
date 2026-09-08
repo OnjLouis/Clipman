@@ -1652,6 +1652,11 @@ namespace Clipman.Tests
                 description + " must insert a new line when Enter is pressed in Clipboard text.");
             Assert(save.Text == "&Save" && ReferenceEquals(form.AcceptButton, save),
                 description + " must expose an explicit Alt+S Save action.");
+            Assert(EntryPropertiesForm.IsSaveShortcut(Keys.Control | Keys.Enter),
+                description + " must save with Ctrl+Enter.");
+            Assert(!EntryPropertiesForm.IsSaveShortcut(Keys.Enter) &&
+                   !EntryPropertiesForm.IsSaveShortcut(Keys.Control | Keys.Shift | Keys.Enter),
+                description + " must reserve plain Enter for multiline text and require the exact save shortcut.");
         }
 
         private static void HistoryWindowConstructsWithoutSelection()

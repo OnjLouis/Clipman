@@ -11,7 +11,7 @@ protocol PreferencesWindowControllerDelegate: AnyObject {
     func preferencesWindowShowSyncRules(_ controller: PreferencesWindowController)
 }
 
-final class PreferencesWindow: NSWindow {
+final class PreferencesWindow: SaveShortcutWindow {
     override func cancelOperation(_ sender: Any?) {
         close()
     }
@@ -129,6 +129,9 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         )
         window.title = "Clipman Preferences"
         super.init(window: window)
+        window.saveShortcutHandler = { [weak self] in
+            self?.saveClicked()
+        }
         buildUI()
         loadFields()
     }

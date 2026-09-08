@@ -18,6 +18,9 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 </ul></nav>
 
 <h2 id="changelog">Changelog</h2>
+<h3>Unreleased</h3>
+<ul><li>Added <kbd>Ctrl+Enter</kbd> to save F2 Entry Properties or Quick Clip while ordinary Enter continues to insert a new line.</li></ul>
+
 <h3>2.9.0</h3>
 <ul><li>Added <strong>Quick Clip</strong>. Press <kbd>Ctrl+N</kbd>, use the File menu or assign an optional global hotkey to type a new entry directly without changing the system clipboard.</li><li>Added <kbd>Alt+Enter</kbd> to open one selected standalone HTTP or HTTPS link in the default browser. Links remain available when Links history is disabled, while ordinary prose and private <code>clipman://</code> configuration links are not launched.</li><li>Startup clipboard capture now leaves an existing entry's device, group and timestamp unchanged instead of treating a retained clipboard item as a fresh copy.</li></ul>
 
@@ -69,7 +72,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <p>Group names are case-insensitive, so spellings such as <strong>GitHub</strong>, <strong>Github</strong>, and <strong>github</strong> remain one group. If existing entries use several capitalizations, Clipman displays the spelling used most often and uses the newest spelling to resolve a tie. Groups are stored in the shared database, so group names and assignments travel with entries. File History is machine-local and does not use groups.</p>
 
 <h2 id="entries">Entries and templates</h2>
-<p><strong>Entry Properties</strong> changes the name, group, text, pinned state and template state. The editor includes template samples, individual fields and a resolved preview. Insertions occur at the text cursor and automatically mark the entry as a template. Stored template text remains literal; fields resolve only when copied.</p>
+<p><strong>Entry Properties</strong> changes the name, group, text, pinned state and template state. The editor includes template samples, individual fields and a resolved preview. Enter inserts a new line; press <kbd>Ctrl+Enter</kbd> to save directly. Insertions occur at the text cursor and automatically mark the entry as a template. Stored template text remains literal; fields resolve only when copied.</p>
 <p>Unnamed website links use a useful offline label followed by the scheme-less destination in history, while View and copy retain the complete unchanged URL. For one unnamed public HTTP or HTTPS entry, choose <strong>Use Website Title as Name</strong> from Edit or the context menu. Clipman explains that the site will be contacted and waits for confirmation. The confirmation includes <strong>Do not show this again</strong>; restore it with <strong>Ask before contacting a website for its title</strong> in General preferences. Clipman can find useful titles on modern script-heavy pages, ignores misleading bot-check titles, and stores a successful result in the ordinary Name field where Entry Properties can review or change it. Local or private destinations, non-standard ports, credential-related parameters, signed requests and token-like paths are refused, while long paths made from several readable article words and a date or number are allowed.</p>
 <p><strong>Automatically name copied website links from page headings</strong> is a separate per-device option and is off by default. It considers only newly captured, unnamed, link-only public HTTP or HTTPS entries and processes them one at a time in a small background queue. Existing history, imports, synchronized entries, manually added exceptions and refused addresses are never scanned. Automatic lookups do not delay capture, change the clipboard, play another sound or display a failure dialog.</p>
 <p><strong>View Full Text</strong> shows the complete text, a safe formatted preview when HTML is available, and a details list containing name, group, device, character and word counts, stored formatting, pin/template state, added time and last-used time. Multiline entries are condensed into one navigable history row while preserving all text in Properties and Details.</p>
@@ -118,7 +121,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 </tbody></table>
 <p>Automatic remote clipboard receipt, dynamic history and automatic tracking removal are opt-in. Dynamic history makes a newly accepted item select its matching section the next time history opens. That automatic selection is used once, so a section you choose manually remains selected until another new item arrives. Missing custom sounds fall back to factory sounds.</p>
 <p>Entry deletion asks for confirmation by default. The confirmation can remember <strong>Do not ask again</strong>; re-enable it from General preferences. Clearing an entire history area keeps its separate confirmation.</p>
-<p><strong>Quick Clip</strong> creates a new saved entry without reading or changing the system clipboard. Use <kbd>Ctrl+N</kbd>, the File menu, or assign its optional global hotkey. <strong>Open Link</strong> uses <kbd>Alt+Enter</kbd> to open exactly one selected standalone HTTP or HTTPS entry; ordinary prose and private <code>clipman://</code> configuration links are not launched.</p>
+<p><strong>Quick Clip</strong> creates a new saved entry without reading or changing the system clipboard. Use <kbd>Ctrl+N</kbd>, the File menu, or assign its optional global hotkey. Enter inserts a new line in the editor and <kbd>Ctrl+Enter</kbd> saves. <strong>Open Link</strong> uses <kbd>Alt+Enter</kbd> to open exactly one selected standalone HTTP or HTTPS entry; ordinary prose and private <code>clipman://</code> configuration links are not launched.</p>
 
 <h2 id="shortcuts">Keyboard shortcuts</h2>
 <table><thead><tr><th>Action</th><th>Shortcut</th></tr></thead><tbody>
@@ -128,6 +131,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <tr><td>Cut selected unpinned text entry</td><td><kbd>Ctrl+X</kbd></td></tr>
 <tr><td>Paste clipboard text after selected entry</td><td><kbd>Ctrl+V</kbd></td></tr>
 <tr><td>Open Quick Clip</td><td><kbd>Ctrl+N</kbd></td></tr>
+<tr><td>Save Entry Properties or Quick Clip</td><td><kbd>Ctrl+Enter</kbd></td></tr>
 <tr><td>Open selected standalone website link</td><td><kbd>Alt+Enter</kbd></td></tr>
 <tr><td>Select all visible entries</td><td><kbd>Ctrl+A</kbd></td></tr>
 <tr><td>Import or export</td><td><kbd>Ctrl+I</kbd> or <kbd>Ctrl+E</kbd></td></tr>

@@ -3236,14 +3236,14 @@ private fun SyncRulesScreen(
 
         if (document == null) return@Column
 
-        if (snapshot != null && !snapshot.registered) {
+        if (!snapshot.registered) {
             Text(
                 text = "$deviceName is not listed in the sync rules yet, so it downloads every channel. " +
                     "Clipman adds it on the next successful sync.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        if (snapshot != null && snapshot.pendingChannelKeys.isNotEmpty()) {
+        if (snapshot.pendingChannelKeys.isNotEmpty()) {
             val waiting = snapshot.pendingChannelKeys.joinToString(", ") {
                 SyncRuleEngine.channelDisplayName(document, it)
             }
