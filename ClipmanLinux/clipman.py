@@ -1357,6 +1357,12 @@ class Backend:
         if self.process and self.process.poll() is None:
             self.call("shutdown")
 
+    def rules_get(self, callback):
+        self.call("rules_get", {}, callback)
+
+    def rules_set(self, document, revision, callback):
+        self.call("rules_set", {"rules": document, "revision": revision}, callback)
+
 
 class GlobalHotkeys:
     def __init__(self, application):
@@ -2548,6 +2554,7 @@ class ClipmanApplication(Gtk.Application):
         if not message.get("ok"):
             self.show_error(message.get("error", "History could not be loaded.")); return
         result = message.get("result", {})
+        pending_channels = result.get("pendingChannels")
         if "history" in result: result = result["history"]
         self.ready_for_history = True
         changed = result.get("changed", result.get("file_history_changed", False)) or ("revision" in result and result.get("revision") != self.current_revision)
@@ -2575,7 +2582,10 @@ class ClipmanApplication(Gtk.Application):
             self.file_events = incoming_file_events
         if changed or history_changed or (not self.entries and not self.file_events):
             self.rebuild_list()
-        self.set_steady_status(force=announce, announce=announce)
+        if pending_channels:
+            self.set_status("Entry saved for channel delivery on next sync.", True)
+        else:
+            self.set_steady_status(force=announce, announce=announce)
 
     def _maybe_copy_remote_entry(self, entries):
         stamps = {entry.get("id", ""): entry.get("created_unix_ms", 0) for entry in entries if entry.get("id")}
@@ -4400,6 +4410,270 @@ class ClipmanApplication(Gtk.Application):
         self._history_response(message, True)
         self._open_pending_connection()
 
+    # --- Sync rules -----------------------------------------------------
+
+    SYNC_RULES_MIXED_FLEET_WARNING = (
+        "Enable sync rules only after every device runs a Clipman version that "
+        "supports them. Older devices will continue to sync the main history only."
+    )
+
+    @staticmethod
+    def _blank_sync_rules_document(machine_name):
+        return {
+            "Clipman": "sync-rules", "Version": 1, "Enabled": False,
+            "UpdatedUnixMs": 0, "UpdatedBy": machine_name,
+            "Channels": [], "Devices": [],
+        }
+
+    @staticmethod
+    def _describe_sync_route(route):
+        route = route or {}
+        parts = []
+        groups = route.get("Groups") or []
+        if groups: parts.append("group is one of: " + ", ".join(groups))
+        devices = route.get("SourceDevices") or []
+        if devices: parts.append("source device is one of: " + ", ".join(devices))
+        kind = route.get("Kind") or ""
+        if kind: parts.append("kind is " + kind)
+        return " and ".join(parts) if parts else "matches nothing"
+
+    @staticmethod
+    def _describe_sync_subscription(channels):
+        channels = channels or []
+        if "*" in channels: return "All channels"
+        if not channels: return "Core history only"
+        return ", ".join(channels)
+
+    def show_sync_rules(self, parent):
+        self.backend.rules_get(lambda message: self._sync_rules_loaded(message, parent))
+
+    def _sync_rules_loaded(self, message, parent):
+        if not message.get("ok"):
+            self.show_error(message.get("error")); return
+        result = message["result"]
+        state = {
+            "rules": result.get("rules"),
+            "revision": result.get("revision", ""),
+            "read_only": bool(result.get("readOnly")),
+        }
+        self._open_sync_rules_manager(state, parent)
+
+    def _open_sync_rules_manager(self, state, parent):
+        dialog = Gtk.Dialog(title="Sync Rules", transient_for=parent, modal=True)
+        dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+        dialog.set_default_size(680, 560)
+        area = dialog.get_content_area(); area.set_spacing(8)
+        area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
+        area.append(Gtk.Label(label=self.SYNC_RULES_MIXED_FLEET_WARNING, wrap=True, xalign=0))
+        readonly_warning = Gtk.Label(label="", wrap=True, xalign=0, accessible_role=Gtk.AccessibleRole.STATUS)
+        area.append(readonly_warning)
+
+        ui_guard = {"updating": False}
+        enabled_check = Gtk.CheckButton(label="Enable sync rules")
+        area.append(enabled_check)
+
+        area.append(Gtk.Label(label="Sync channels", xalign=0))
+        channel_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, activate_on_single_click=False)
+        channel_list.update_property([Gtk.AccessibleProperty.LABEL], ["Sync channels"])
+        channel_scroll = Gtk.ScrolledWindow(vexpand=True); channel_scroll.set_min_content_height(120)
+        channel_scroll.set_child(channel_list); area.append(channel_scroll)
+        channel_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        add_channel_button = Gtk.Button(label="Add Channel")
+        edit_channel_button = Gtk.Button(label="Edit Channel")
+        remove_channel_button = Gtk.Button(label="Remove Channel")
+        for button in (add_channel_button, edit_channel_button, remove_channel_button): channel_buttons.append(button)
+        area.append(channel_buttons)
+
+        area.append(Gtk.Label(label="Devices", xalign=0))
+        device_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, activate_on_single_click=False)
+        device_list.update_property([Gtk.AccessibleProperty.LABEL], ["Devices"])
+        device_scroll = Gtk.ScrolledWindow(vexpand=True); device_scroll.set_min_content_height(120)
+        device_scroll.set_child(device_list); area.append(device_scroll)
+        device_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        edit_device_button = Gtk.Button(label="Edit Device Subscriptions")
+        device_buttons.append(edit_device_button); area.append(device_buttons)
+
+        def selected_channel():
+            row = channel_list.get_selected_row(); return getattr(row, "clipman_channel", None) if row else None
+
+        def selected_device():
+            row = device_list.get_selected_row(); return getattr(row, "clipman_device", None) if row else None
+
+        def rebuild():
+            doc = state.get("rules") or {}
+            ui_guard["updating"] = True
+            enabled_check.set_active(bool(doc.get("Enabled")))
+            ui_guard["updating"] = False
+            read_only = state.get("read_only", False)
+            readonly_warning.set_text(
+                "This sync rules document uses a newer format understood only "
+                "partially by this version; editing is disabled here."
+                if read_only else ""
+            )
+            for widget in (enabled_check, add_channel_button, edit_channel_button, remove_channel_button, edit_device_button):
+                widget.set_sensitive(not read_only)
+
+            child = channel_list.get_first_child()
+            while child:
+                following = child.get_next_sibling(); channel_list.remove(child); child = following
+            for channel in doc.get("Channels", []):
+                label = channel.get("Name", "") + ": " + self._describe_sync_route(channel.get("Route"))
+                row = Gtk.ListBoxRow(); row.clipman_channel = channel
+                row.set_child(Gtk.Label(label=label, xalign=0, wrap=True, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6))
+                row.update_property([Gtk.AccessibleProperty.LABEL], [label]); channel_list.append(row)
+
+            child = device_list.get_first_child()
+            while child:
+                following = child.get_next_sibling(); device_list.remove(child); child = following
+            for device in doc.get("Devices", []):
+                label = device.get("Name", "") + ": " + self._describe_sync_subscription(device.get("Channels"))
+                row = Gtk.ListBoxRow(); row.clipman_device = device
+                row.set_child(Gtk.Label(label=label, xalign=0, wrap=True, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6))
+                row.update_property([Gtk.AccessibleProperty.LABEL], [label]); device_list.append(row)
+
+        def on_enabled_toggled(button):
+            if ui_guard["updating"]: return
+            doc = json.loads(json.dumps(state["rules"])) if state.get("rules") else self._blank_sync_rules_document(self.machine_name)
+            doc["Enabled"] = button.get_active()
+            self._save_sync_rules(doc, state, dialog, rebuild, None)
+        enabled_check.connect("toggled", on_enabled_toggled)
+
+        add_channel_button.connect("clicked", lambda *_: self._show_sync_channel_editor(None, state, dialog, rebuild))
+        edit_channel_button.connect("clicked", lambda *_: self._show_sync_channel_editor(selected_channel(), state, dialog, rebuild))
+        remove_channel_button.connect("clicked", lambda *_: self._remove_sync_channel(selected_channel(), state, dialog, rebuild))
+        edit_device_button.connect("clicked", lambda *_: self._show_sync_device_editor(selected_device(), state, dialog, rebuild))
+
+        rebuild(); dialog.connect("response", lambda d, _r: d.destroy()); dialog.present(); channel_list.grab_focus()
+
+    def _save_sync_rules(self, doc, state, parent, rebuild, editor):
+        def on_result(message):
+            if not message.get("ok"):
+                self.show_error(message.get("error")); return
+            result = message["result"]
+            state["rules"] = result.get("rules")
+            state["revision"] = result.get("revision", "")
+            state["read_only"] = bool(result.get("readOnly"))
+            rebuild()
+            if editor is not None:
+                editor.destroy()
+        self.backend.rules_set(doc, state.get("revision", ""), on_result)
+
+    def _show_sync_channel_editor(self, channel, state, parent, rebuild):
+        if state.get("read_only"): return
+        editor = Gtk.Dialog(title="Edit Channel" if channel else "Add Channel", transient_for=parent, modal=True)
+        editor.add_button("Cancel", Gtk.ResponseType.CANCEL); editor.add_button("Save", Gtk.ResponseType.OK)
+        area = editor.get_content_area(); area.set_spacing(8)
+        area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
+        existing_route = (channel or {}).get("Route", {})
+        name = Gtk.Entry(text=(channel or {}).get("Name", ""))
+        groups = Gtk.Entry(text=", ".join(existing_route.get("Groups") or []))
+        devices = Gtk.Entry(text=", ".join(existing_route.get("SourceDevices") or []))
+        for label, field in (
+            ("Channel name", name),
+            ("Groups, comma-separated", groups),
+            ("Source devices, comma-separated", devices),
+        ):
+            visible = Gtk.Label(label=label, xalign=0); visible.set_mnemonic_widget(field)
+            area.append(visible); area.append(field)
+        images = Gtk.CheckButton(label="Match rich text containing embedded images", active=(existing_route.get("Kind") == "RichTextImages"))
+        area.append(images)
+        error = Gtk.Label(label="", wrap=True, xalign=0, accessible_role=Gtk.AccessibleRole.STATUS); area.append(error)
+
+        def response(_dialog, code):
+            if code != Gtk.ResponseType.OK: editor.destroy(); return
+            new_name = name.get_text().strip()
+            if not new_name:
+                error.set_text("Channel name is required."); return
+            group_list = [item.strip() for item in groups.get_text().split(",") if item.strip()]
+            device_list = [item.strip() for item in devices.get_text().split(",") if item.strip()]
+            route = {}
+            if group_list: route["Groups"] = group_list
+            if device_list: route["SourceDevices"] = device_list
+            if images.get_active(): route["Kind"] = "RichTextImages"
+            if not route:
+                error.set_text("Select at least one condition: groups, source devices, or embedded images."); return
+            doc = json.loads(json.dumps(state["rules"])) if state.get("rules") else self._blank_sync_rules_document(self.machine_name)
+            channels = doc.setdefault("Channels", [])
+            if channel is not None:
+                original_key = channel.get("Name", "").strip().casefold()
+                channels[:] = [entry for entry in channels if entry.get("Name", "").strip().casefold() != original_key]
+            channels.append({"Name": new_name, "Route": route})
+            self._save_sync_rules(doc, state, parent, rebuild, editor)
+        editor.connect("response", response); editor.present(); name.grab_focus()
+
+    def _remove_sync_channel(self, channel, state, parent, rebuild):
+        if not channel or state.get("read_only"): return
+        confirm = Gtk.AlertDialog(
+            message=f"Remove the \"{channel.get('Name', '')}\" channel?",
+            detail="Entries from this channel will move back to matching channels or the main history as your devices sync. No entries are deleted.",
+            buttons=["Cancel", "Remove"], cancel_button=0, default_button=0,
+        )
+        confirm.choose(parent, None, lambda d, r: self._remove_sync_channel_choice(d, r, channel, state, parent, rebuild))
+
+    def _remove_sync_channel_choice(self, dialog, result, channel, state, parent, rebuild):
+        try: choice = dialog.choose_finish(result)
+        except GLib.Error: return
+        if choice != 1: return
+        doc = json.loads(json.dumps(state["rules"])) if state.get("rules") else None
+        if not doc: return
+        key = channel.get("Name", "").strip().casefold()
+        doc["Channels"] = [entry for entry in doc.get("Channels", []) if entry.get("Name", "").strip().casefold() != key]
+        for device in doc.get("Devices", []):
+            channels = device.get("Channels") or []
+            if "*" not in channels:
+                device["Channels"] = [item for item in channels if item.strip().casefold() != key]
+        self._save_sync_rules(doc, state, parent, rebuild, None)
+
+    def _show_sync_device_editor(self, device, state, parent, rebuild):
+        if not device or state.get("read_only"): return
+        doc = state.get("rules") or {}
+        channels = doc.get("Channels", [])
+        editor = Gtk.Dialog(title="Edit Subscriptions for " + device.get("Name", ""), transient_for=parent, modal=True)
+        editor.add_button("Cancel", Gtk.ResponseType.CANCEL); editor.add_button("Save", Gtk.ResponseType.OK)
+        area = editor.get_content_area(); area.set_spacing(6)
+        area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
+        area.append(Gtk.Label(
+            label=device.get("Name", "") + " downloads the channels checked below. Core history always syncs.",
+            wrap=True, xalign=0,
+        ))
+        current = device.get("Channels") or []
+        current_keys = {item.strip().casefold() for item in current}
+        all_selected = "*" in current
+        all_check = Gtk.CheckButton(label="All channels", active=all_selected)
+        area.append(all_check)
+        channel_checks = []
+        for channel in channels:
+            name_value = channel.get("Name", "")
+            key = name_value.strip().casefold()
+            check = Gtk.CheckButton(label=name_value, active=(all_selected or key in current_keys))
+            check.set_sensitive(not all_selected)
+            area.append(check)
+            channel_checks.append((name_value, check))
+
+        def on_all_toggled(button):
+            active = button.get_active()
+            for _name_value, check in channel_checks:
+                check.set_sensitive(not active)
+        all_check.connect("toggled", on_all_toggled)
+
+        def response(_dialog, code):
+            if code != Gtk.ResponseType.OK: editor.destroy(); return
+            if all_check.get_active():
+                selected = ["*"]
+            else:
+                selected = [name_value for name_value, check in channel_checks if check.get_active()]
+            new_doc = json.loads(json.dumps(doc))
+            devices = new_doc.setdefault("Devices", [])
+            target_key = device.get("Name", "").strip().casefold()
+            for entry in devices:
+                if entry.get("Name", "").strip().casefold() == target_key:
+                    entry["Channels"] = selected
+                    break
+            else:
+                devices.append({"Name": device.get("Name", ""), "Channels": selected})
+            self._save_sync_rules(new_doc, state, parent, rebuild, editor)
+        editor.connect("response", response); editor.present()
+
     def _register_hotkeys(self):
         quick_bindings = {
             entry_id: binding["hotkey"]
@@ -4705,6 +4979,10 @@ class ClipmanApplication(Gtk.Application):
         connection.connect("clicked", lambda *_: self.show_connection_settings(dialog))
         storage.append(Gtk.Label(label="Clipman Server connection", xalign=0)); storage.append(connection)
         storage.append(Gtk.Label(label="The server token and remembered history password are protected for this Linux user. Clipman Server stores only encrypted clipboard database blobs and cannot read the history password.", wrap=True, xalign=0))
+        sync_rules_button = Gtk.Button(label="Sync Rules...")
+        sync_rules_button.connect("clicked", lambda *_: self.show_sync_rules(dialog))
+        storage.append(sync_rules_button)
+        storage.append(Gtk.Label(label=self.SYNC_RULES_MIXED_FLEET_WARNING, wrap=True, xalign=0))
         storage.append(Gtk.Label(label="Ignored applications, one process or application name per line", wrap=True, xalign=0))
         ignored = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, vexpand=True)
         ignored.set_accepts_tab(False)
