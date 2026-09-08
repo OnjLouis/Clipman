@@ -1572,7 +1572,7 @@ func (s *session) rulesSet(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	doc := p.Rules
-	if err := rules.Validate(&doc); err != nil {
+	if err := rules.ValidateForEdit(&doc); err != nil {
 		return nil, err
 	}
 	if rules.ReadOnly(&doc) {

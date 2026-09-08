@@ -91,6 +91,15 @@ func ChannelKey(name string) string {
 	return key
 }
 
+// ChannelStorageName folds a channel key into the form it takes in
+// shared-folder file names, where spaces become dashes (spec section 2).
+// Two distinct keys can fold to the same storage name - "my work" and
+// "my-work" - and would then share one file, so ValidateForEdit rejects
+// that at edit time.
+func ChannelStorageName(key string) string {
+	return strings.ReplaceAll(key, " ", "-")
+}
+
 // ReadOnly reports whether doc is a future-version document that this
 // client must not rewrite (spec section 4): it applies what it understands
 // but never PUTs its own interpretation back.
@@ -152,6 +161,28 @@ func Validate(doc *Document) error {
 		}
 	}
 
+	return nil
+}
+
+// ValidateForEdit checks everything Validate checks plus the edit-time-only
+// rules of spec section 3: two distinct channel keys must not fold to the
+// same shared-folder storage name. Editors call this before writing a
+// document; the read path (Parse) deliberately does not, so a document
+// another client already saved with such a collision keeps loading and
+// routing rather than degrading this client to disabled rules.
+func ValidateForEdit(doc *Document) error {
+	if err := Validate(doc); err != nil {
+		return err
+	}
+	storageNames := make(map[string]string, len(doc.Channels))
+	for _, channel := range doc.Channels {
+		key := ChannelKey(channel.Name)
+		folded := ChannelStorageName(key)
+		if other, ok := storageNames[folded]; ok {
+			return fmt.Errorf("rules: channel %q would share a storage file with channel %q: spaces and dashes are interchangeable in channel file names", channel.Name, other)
+		}
+		storageNames[folded] = channel.Name
+	}
 	return nil
 }
 

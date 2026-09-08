@@ -143,6 +143,43 @@ func TestValidateAcceptsWellFormedDocument(t *testing.T) {
 	if err := Validate(doc); err != nil {
 		t.Fatalf("Validate rejected a well-formed document: %v", err)
 	}
+	if err := ValidateForEdit(doc); err != nil {
+		t.Fatalf("ValidateForEdit rejected a well-formed document: %v", err)
+	}
+}
+
+func TestValidateForEditRejectsFoldedStorageNameCollisions(t *testing.T) {
+	if got := ChannelStorageName("desktop only"); got != "desktop-only" {
+		t.Fatalf("ChannelStorageName(%q) = %q, want %q", "desktop only", got, "desktop-only")
+	}
+
+	// "my work" and "my-work" are distinct keys but would share the
+	// shared-folder file clipman-channel-my-work.clipdb (spec section 3).
+	doc := &Document{
+		Clipman: "sync-rules",
+		Version: 1,
+		Enabled: true,
+		Channels: []Channel{
+			{Name: "my work", Route: Route{Groups: []string{"Work"}}},
+			{Name: "my-work", Route: Route{Groups: []string{"Other"}}},
+		},
+	}
+	if err := ValidateForEdit(doc); err == nil {
+		t.Fatal("ValidateForEdit must reject two channel keys folding to one storage name")
+	}
+
+	// The collision is an edit-time rule only: a document another editor
+	// already saved must still validate on the read path, parse, and route.
+	if err := Validate(doc); err != nil {
+		t.Fatalf("Validate must tolerate a folded-storage-name collision: %v", err)
+	}
+	data, err := Serialize(doc)
+	if err != nil {
+		t.Fatalf("Serialize error: %v", err)
+	}
+	if _, err := Parse(data); err != nil {
+		t.Fatalf("Parse must tolerate a folded-storage-name collision: %v", err)
+	}
 }
 
 func richTextEntry(html string) *model.Entry {

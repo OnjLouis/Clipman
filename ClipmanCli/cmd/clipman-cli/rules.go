@@ -714,7 +714,7 @@ func runRulesEnable(ctx *appContext, args []string) error {
 		doc.UpdatedUnixMs = now
 		doc.UpdatedBy = ctx.config.Machine
 	}
-	if err := rules.Validate(doc); err != nil {
+	if err := rules.ValidateForEdit(doc); err != nil {
 		return fail(2, "%v", err)
 	}
 	if err := putRulesDocument(ctx, doc, revision, blob, createOnly); err != nil {
@@ -816,7 +816,7 @@ func runRulesChannelAdd(ctx *appContext, args []string) error {
 		Name:  name,
 		Route: rules.Route{Groups: []string(groups), SourceDevices: []string(sourceDevices), Kind: routeKind},
 	})
-	if err := rules.Validate(candidate); err != nil {
+	if err := rules.ValidateForEdit(candidate); err != nil {
 		return fail(2, "%v", err)
 	}
 	candidate.UpdatedUnixMs = time.Now().UnixMilli()
@@ -953,7 +953,7 @@ func runRulesChannelRemove(ctx *appContext, args []string) error {
 	}
 	finalDoc.UpdatedUnixMs = nextTimestamp(doc.UpdatedUnixMs)
 	finalDoc.UpdatedBy = machine
-	if err := rules.Validate(finalDoc); err != nil {
+	if err := rules.ValidateForEdit(finalDoc); err != nil {
 		return fail(2, "%v", err)
 	}
 	if err := putRulesDocument(ctx, finalDoc, revision, blob, false); err != nil {
@@ -1021,7 +1021,7 @@ func runRulesDeviceSet(ctx *appContext, args []string) error {
 	if !found {
 		candidate.Devices = append(candidate.Devices, rules.Device{Name: deviceName, Channels: channelRefs})
 	}
-	if err := rules.Validate(candidate); err != nil {
+	if err := rules.ValidateForEdit(candidate); err != nil {
 		return fail(2, "%v", err)
 	}
 	candidate.UpdatedUnixMs = time.Now().UnixMilli()

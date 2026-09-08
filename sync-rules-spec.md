@@ -84,6 +84,13 @@ clipman-sync-rules.clipdb
   1-32 chars, no leading/trailing space, dash, or underscore). Non-ASCII names are
   rejected so no Unicode normalization library is required anywhere.
 - Reserved keys, rejected as channel names: `core`, `all`, `pinned`, `sync-rules`.
+- Storage-name collisions: spaces fold to dashes in shared-folder file names
+  (Section 2), so the distinct keys `my work` and `my-work` would share
+  `clipman-channel-my-work.clipdb`. Every rules editor rejects a document in
+  which two channel keys fold to the same storage name. This is an edit-time
+  rule only: readers accept an already-saved document with such a collision and
+  route with it, because a client must not drop to disabled rules over a
+  document other clients are still routing by.
 - Device-name matching (both `Devices[].Name` against the local device name and
   `Route.SourceDevices` against `Entry.SourceMachine`) compares
   `lowerInvariant(trim(x))` on both sides. This is deliberately stricter and more
