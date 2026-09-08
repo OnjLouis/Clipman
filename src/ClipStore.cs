@@ -51,6 +51,8 @@ namespace Clipman
         private string serverCaHost = string.Empty;
         private long syncRulesNextCheckUnixMs;
         private bool selfRegistrationAttempted;
+        private bool channelsAdoptedRemoteState;
+        private bool viewChangedNotificationPending;
         private string channelAnnouncement = string.Empty;
         private long channelAnnouncementUnixMs;
 
@@ -1099,6 +1101,11 @@ namespace Clipman
                 return;
             }
 
+            SaveSingleDatabaseLocked();
+        }
+
+        private void SaveSingleDatabaseLocked()
+        {
             database.UpdatedUnixMs = TimeUtil.NowUnixMs();
             try
             {
@@ -1321,14 +1328,27 @@ namespace Clipman
                     }
                 }
 
-                if (changed)
-                {
-                    OnChanged(true);
-                }
             }
             finally
             {
+                // A channel pass that failed part way can still have changed the view, and every
+                // failure branch above returns early, so the latch is consulted here rather than
+                // relying on the value returned by the pass.
+                if (changed || TakeViewChangedNotification())
+                {
+                    OnChanged(true);
+                }
                 ScheduleNextServerPoll(pollGeneration);
+            }
+        }
+
+        private bool TakeViewChangedNotification()
+        {
+            lock (sync)
+            {
+                var pending = viewChangedNotificationPending;
+                viewChangedNotificationPending = false;
+                return pending;
             }
         }
 
@@ -1367,7 +1387,7 @@ namespace Clipman
 
             changed = SyncChannelsFromServerLocked(uploadLocalWhenMissing) || changed;
             SelfRegisterDeviceLocked();
-            RetryPendingWritesLocked(TimeUtil.NowUnixMs());
+            changed = RetryPendingWritesLocked(TimeUtil.NowUnixMs()) || changed;
             if (AnyChannelNeedsUploadLocked())
             {
                 SaveChannelsLocked(false);
@@ -2045,6 +2065,16 @@ namespace Clipman
 
                 try
                 {
+                    RerouteChannelsLeavingDocumentLocked(next);
+                }
+                catch (Exception ex)
+                {
+                    if (!IsStorageAccessException(ex) && !IsRecoverableServerException(ex)) throw;
+                    return "Clipman could not move the entries out of the channels being removed: " + ex.Message;
+                }
+
+                try
+                {
                     PublishSyncRulesLocked(next);
                 }
                 catch (Exception ex)
@@ -2061,6 +2091,62 @@ namespace Clipman
 
             OnChanged();
             return null;
+        }
+
+        /// <summary>
+        /// Spec section 5, "Channel deletion": the editing client re-routes a departing channel's
+        /// entries and uploads the affected channels before the document forgets the channel. The
+        /// re-route runs under a transitional document that keeps the old channel list - so this
+        /// device stays subscribed and can still see those entries - while carrying the new routes,
+        /// with a route that is disappearing neutralized so its entries fall through to whatever
+        /// else matches, or to core. Only then is the real document published.
+        /// </summary>
+        private void RerouteChannelsLeavingDocumentLocked(SyncRulesDocument next)
+        {
+            if (!RulesActiveLocked() || channelSlots.Count == 0) return;
+
+            var surviving = new Dictionary<string, SyncRoute>(StringComparer.Ordinal);
+            foreach (var channel in (next == null ? null : next.Channels) ?? new List<SyncChannel>())
+            {
+                if (channel == null) continue;
+                var key = SyncRuleEngine.ChannelKey(channel.Name);
+                if (key.Length > 0 && !surviving.ContainsKey(key)) surviving[key] = channel.Route;
+            }
+
+            var leaving = false;
+            var transitional = SyncRuleEngine.Copy(syncRules);
+            foreach (var channel in transitional.Channels)
+            {
+                var key = SyncRuleEngine.ChannelKey(channel.Name);
+                SyncRoute replacement;
+                if (surviving.TryGetValue(key, out replacement))
+                {
+                    channel.Route = replacement == null ? new SyncRoute() : replacement;
+                    continue;
+                }
+                // This channel is being removed: neutralizing its route re-routes its residents
+                // through the remaining rules and empties the channel under gain-before-lose.
+                channel.Route = new SyncRoute();
+                leaving = true;
+            }
+            if (!leaving) return;
+
+            var previous = syncRules;
+            syncRules = transitional;
+            try
+            {
+                SaveChannelsLocked(false);
+            }
+            finally
+            {
+                syncRules = previous;
+            }
+            if (storageUnavailable)
+            {
+                throw new IOException(string.IsNullOrEmpty(LastStorageError)
+                    ? "The entries in the channels being removed could not be relocated."
+                    : LastStorageError);
+            }
         }
 
         /// <summary>
@@ -2113,7 +2199,7 @@ namespace Clipman
 
         internal static string ChannelFileName(string channelKey)
         {
-            return ChannelFilePrefix + (channelKey ?? string.Empty).Replace(' ', '-') + ClipDatabaseFile.CompressedExtension;
+            return ChannelFilePrefix + SyncRuleEngine.ChannelStorageName(channelKey) + ClipDatabaseFile.CompressedExtension;
         }
 
         private string ChannelPathLocked(string channelKey)
@@ -2236,17 +2322,35 @@ namespace Clipman
                     var current = ClipDatabaseFile.Load<SyncRulesDocument>(path, password);
                     if (SyncRuleEngine.IsUsable(current)) winner = current;
                 }
+
+                // Only copies that were actually understood and folded into the winner are removed.
+                // Deleting one that could not be read - a different password, a truncated download -
+                // would throw away the only copy of an edit made on another device.
+                var consumed = new List<string>();
+                var replaced = false;
                 foreach (var conflict in conflicts)
                 {
-                    var candidate = ClipDatabaseFile.Load<SyncRulesDocument>(conflict, password);
-                    if (SyncRuleEngine.IsUsable(candidate)) winner = SyncRuleEngine.MergeDocuments(winner, candidate);
+                    SyncRulesDocument candidate;
+                    try
+                    {
+                        candidate = ClipDatabaseFile.Load<SyncRulesDocument>(conflict, password);
+                    }
+                    catch (Exception)
+                    {
+                        continue;
+                    }
+                    if (!SyncRuleEngine.IsUsable(candidate)) continue;
+                    var merged = SyncRuleEngine.MergeDocuments(winner, candidate);
+                    if (!ReferenceEquals(merged, winner)) replaced = true;
+                    winner = merged;
+                    consumed.Add(conflict);
                 }
 
-                if (winner != null)
+                if (winner != null && replaced)
                 {
                     ClipDatabaseFile.SaveAtomic(path, winner, password, DatabasePath);
                 }
-                foreach (var conflict in conflicts)
+                foreach (var conflict in consumed)
                 {
                     TryDelete(conflict);
                 }
@@ -2257,17 +2361,33 @@ namespace Clipman
         }
 
         /// <summary>
-        /// Resolves conflict copies of one channel file. A second channel whose key extends the
-        /// first ("work" and "work-pc") looks exactly like a conflict copy of it, so the resolver
-        /// is skipped whenever any candidate is itself a channel or rules container.
+        /// Resolves cloud-storage conflict copies of one channel file. Every sibling the conflict
+        /// scanner yields starts with this channel's own stem, so shape alone cannot tell a
+        /// conflict copy from a second channel whose key extends this one ("work" and "work-pc").
+        /// The discriminator is the rules document: a sibling that is a container this store owns -
+        /// another declared channel, or the rules document itself - is never a conflict copy, and
+        /// its presence makes the whole resolution unsafe to run.
         /// </summary>
-        private static void ResolveChannelConflictsLocked(string path, string password)
+        private void ResolveChannelConflictsLocked(string path, string password)
         {
+            var owned = OwnedContainerFileNamesLocked();
             foreach (var sibling in SyncConflictResolver.FindConflictSiblings(path))
             {
-                if (IsChannelOrRulesFileName(Path.GetFileName(sibling))) return;
+                if (owned.Contains(Path.GetFileName(sibling))) return;
             }
             SyncConflictResolver.ResolveDatabaseConflicts(path, password);
+        }
+
+        private HashSet<string> OwnedContainerFileNamesLocked()
+        {
+            var owned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            owned.Add(SyncRulesFileName);
+            owned.Add(Path.GetFileName(DatabasePath));
+            foreach (var key in AllChannelKeysLocked())
+            {
+                owned.Add(ChannelFileName(key));
+            }
+            return owned;
         }
 
         private void LoadChannelsFromDiskLocked(string password)
@@ -2327,6 +2447,9 @@ namespace Clipman
 
         private ServerStorageClient ChannelClientLocked(string channelKey)
         {
+            // Core is never addressed as a channel; deriving a channel id for the empty key would
+            // point at a bucket that is nobody's history.
+            if (string.IsNullOrEmpty(channelKey)) return null;
             if (serverClient == null || !serverClient.IsConfigured) return null;
             var databaseId = ServerDatabaseIdentity.ChannelFromTokenAndPassword(serverToken, CurrentPassword(), channelKey);
             if (databaseId.Length == 0) return null;
@@ -2518,8 +2641,20 @@ namespace Clipman
 
         private void SaveChannelsLocked(bool forceServerUpload)
         {
+            if (channelSlots.Count == 0)
+            {
+                // Rules are in effect but the channel state could not be loaded, which a storage
+                // failure during the last load can leave behind. Routing against no channels at all
+                // would treat even core as unsubscribed and write the whole history through to a
+                // phantom bucket, so the view is persisted whole to the history file instead and
+                // the next successful load re-partitions it.
+                SaveSingleDatabaseLocked();
+                return;
+            }
+
             database.UpdatedUnixMs = TimeUtil.NowUnixMs();
             channelWriteOrder = new List<string>();
+            channelsAdoptedRemoteState = false;
             try
             {
                 if (storageUnavailable)
@@ -2698,6 +2833,16 @@ namespace Clipman
                 foreach (var id in delivered) residence.Remove(id);
             }
 
+            if (channelsAdoptedRemoteState)
+            {
+                // A conflict or read-before-mutate merged entries another device had added into a
+                // channel. They are committed but absent from the view, and rebuilding that channel
+                // from the view on the next save would delete them again, so the view is re-derived
+                // from the channel state that actually committed.
+                AssembleViewLocked();
+                return;
+            }
+
             foreach (var slot in channelSlots)
             {
                 foreach (var entry in ListOrEmpty(routed, slot.Key))
@@ -2835,9 +2980,32 @@ namespace Clipman
                 foreach (var entry in entries) built.Entries.Add(Clone(entry));
                 built.DeletedEntries = DropMarkersForEntries(ListOrEmpty(markers, slot.Key), entries);
                 NormalizeDeletedEntries(built);
+                NormalizeChannelManualOrder(built);
                 databases.Add(built);
             }
             return databases;
+        }
+
+        /// <summary>
+        /// Numbers manual order within one channel database. Each channel is normalized on its own,
+        /// so two devices subscribed to different sets of channels write the same bytes for a shared
+        /// channel instead of stamping it with their own whole-view numbering and fighting over it
+        /// on every poll.
+        /// </summary>
+        private static void NormalizeChannelManualOrder(ClipDatabase target)
+        {
+            var next = 1L;
+            foreach (var entry in target.Entries
+                .OrderBy(e => e.ManualOrder <= 0 ? long.MaxValue : e.ManualOrder)
+                .ThenBy(e => e.CreatedUnixMs))
+            {
+                if (entry.CreatedUnixMs == 0) entry.CreatedUnixMs = TimeUtil.NowUnixMs();
+                if (entry.LastUsedUnixMs == 0) entry.LastUsedUnixMs = entry.CreatedUnixMs;
+                if (entry.Name == null) entry.Name = string.Empty;
+                if (entry.Group == null) entry.Group = string.Empty;
+                if (entry.SourceMachine == null) entry.SourceMachine = string.Empty;
+                entry.ManualOrder = next++;
+            }
         }
 
         /// <summary>
@@ -2891,6 +3059,15 @@ namespace Clipman
         {
             var password = CurrentPassword();
             var target = built;
+
+            // Read before mutate: a slot whose revision is unknown - a fresh start, or a channel
+            // whose last transfer failed - would otherwise PUT unconditionally and overwrite
+            // whatever another device wrote in the meantime.
+            if (slot.Exists && string.IsNullOrWhiteSpace(slot.Revision))
+            {
+                target = AdoptRemoteChannelLocked(slot, target, password, now);
+            }
+
             for (var attempt = 0; ; attempt++)
             {
                 try
@@ -2913,17 +3090,30 @@ namespace Clipman
                     }
                 }
 
-                string revision;
-                bool exists;
-                var remote = DownloadChannelLocked(slot.Client, slot.CacheFilePath, password, out revision, out exists);
-                MergeDatabaseIntoLocked(remote, target);
-                NormalizeChannelDatabase(remote);
-                remote.UpdatedUnixMs = now;
-                slot.Revision = revision;
-                slot.Exists = exists;
-                target = remote;
-                ClipDatabaseFile.SaveAtomic(slot.CacheFilePath, target, password, DatabasePath);
+                target = AdoptRemoteChannelLocked(slot, target, password, now);
             }
+        }
+
+        /// <summary>
+        /// Re-reads one channel and merges the build about to be uploaded into the server's copy.
+        /// Entries the merge brings back are not in the view yet, so the caller must reassemble
+        /// before the next save rebuilds this channel and PUTs them away again.
+        /// </summary>
+        private ClipDatabase AdoptRemoteChannelLocked(ChannelSlot slot, ClipDatabase built, string password, long now)
+        {
+            string revision;
+            bool exists;
+            var remote = DownloadChannelLocked(slot.Client, slot.CacheFilePath, password, out revision, out exists);
+            slot.Revision = revision;
+            slot.Exists = exists;
+            if (!exists) return built;
+
+            MergeDatabaseIntoLocked(remote, built);
+            NormalizeChannelDatabase(remote);
+            remote.UpdatedUnixMs = now;
+            channelsAdoptedRemoteState = true;
+            ClipDatabaseFile.SaveAtomic(slot.CacheFilePath, remote, password, DatabasePath);
+            return remote;
         }
 
         private ClipDatabase DownloadChannelLocked(
@@ -2964,13 +3154,16 @@ namespace Clipman
         private bool WriteThroughLocked(string channelKey, List<ClipEntry> entries, long now)
         {
             if (entries == null || entries.Count == 0) return true;
+            // Core is always subscribed, so it is never a write-through target. Treating it as one
+            // would send the whole history to a bucket derived as if core were a channel.
+            if (string.IsNullOrEmpty(channelKey)) return false;
 
             var password = CurrentPassword();
             var channelPath = ChannelPathLocked(channelKey);
             var client = ChannelClientLocked(channelKey);
             var throughServer = client != null && client.IsConfigured;
             var scratchPath = throughServer
-                ? Path.Combine(DatabaseDirectoryLocked(), "writethrough-" + channelKey.Replace(' ', '-') + ClipDatabaseFile.CompressedExtension)
+                ? Path.Combine(DatabaseDirectoryLocked(), "writethrough-" + SyncRuleEngine.ChannelStorageName(channelKey) + ClipDatabaseFile.CompressedExtension)
                 : channelPath;
 
             try
@@ -3071,10 +3264,16 @@ namespace Clipman
             }
         }
 
-        private void RetryPendingWritesLocked(long now)
+        /// <summary>
+        /// Retries the entries parked by a failed write-through (spec section 6). A parked entry was
+        /// left in the channel it already lived in, so a successful delivery leaves it in two
+        /// places: it is dropped from the view here and its source channel is marked for the repair
+        /// save, which rebuilds that channel without it. Returns whether the view changed.
+        /// </summary>
+        private bool RetryPendingWritesLocked(long now)
         {
             var path = PendingWritesPathLocked();
-            if (!File.Exists(path)) return;
+            if (!File.Exists(path)) return false;
 
             PendingChannelWrites store;
             try
@@ -3083,41 +3282,73 @@ namespace Clipman
             }
             catch (Exception)
             {
-                return;
+                return false;
             }
             if (store.Channels == null || store.Channels.Count == 0)
             {
                 TryDelete(path);
-                return;
+                return false;
             }
 
             var remaining = new List<PendingChannelWrite>();
-            var delivered = false;
+            var deliveredIds = new List<string>();
             foreach (var bucket in store.Channels)
             {
                 if (bucket == null || bucket.Entries == null || bucket.Entries.Count == 0) continue;
                 if (WriteThroughLocked(bucket.ChannelKey, bucket.Entries, now))
                 {
                     AnnounceChannelWriteLocked(bucket.ChannelKey);
-                    delivered = true;
+                    foreach (var entry in bucket.Entries)
+                    {
+                        if (entry != null) deliveredIds.Add(entry.Id ?? string.Empty);
+                    }
                     continue;
                 }
                 remaining.Add(bucket);
             }
-            if (!delivered) return;
+            if (deliveredIds.Count == 0) return false;
 
             try
             {
                 if (remaining.Count == 0)
                 {
                     TryDelete(path);
-                    return;
                 }
-                JsonUtil.SaveAtomic(path, new PendingChannelWrites { Channels = remaining });
+                else
+                {
+                    JsonUtil.SaveAtomic(path, new PendingChannelWrites { Channels = remaining });
+                }
             }
             catch (Exception)
             {
             }
+
+            var changed = false;
+            foreach (var id in deliveredIds)
+            {
+                string source;
+                if (residence.TryGetValue(id, out source))
+                {
+                    var slot = FindChannelSlotLocked(source);
+                    if (slot != null) slot.NeedsUpload = true;
+                    residence.Remove(id);
+                }
+            }
+            var removedIds = new HashSet<string>(deliveredIds, StringComparer.Ordinal);
+            if (database.Entries.RemoveAll(entry => entry != null && removedIds.Contains(entry.Id ?? string.Empty)) > 0)
+            {
+                changed = true;
+            }
+            return changed;
+        }
+
+        private ChannelSlot FindChannelSlotLocked(string channelKey)
+        {
+            foreach (var slot in channelSlots)
+            {
+                if (string.Equals(slot.Key, channelKey ?? string.Empty, StringComparison.Ordinal)) return slot;
+            }
+            return null;
         }
 
         private bool AnyChannelNeedsUploadLocked()
@@ -3151,9 +3382,14 @@ namespace Clipman
                 finally
                 {
                     // A channel that failed part way through must not leave the view describing
-                    // channels that have already moved on.
+                    // channels that have already moved on. The notification is latched because the
+                    // failure propagates past the caller's own return value.
                     serverRevision = channelSlots.Count == 0 ? string.Empty : channelSlots[0].Revision;
-                    if (changed) AssembleViewLocked();
+                    if (changed)
+                    {
+                        AssembleViewLocked();
+                        viewChangedNotificationPending = true;
+                    }
                 }
 
                 storageUnavailable = false;
@@ -3269,7 +3505,9 @@ namespace Clipman
             catch (WebException ex)
             {
                 syncRulesNextCheckUnixMs = now + SyncRulesAbsentRecheckMs;
-                if (syncRulesClient.IsNotFound(ex) && syncRules != null)
+                // A future-version document is display-only: this client applies what it understands
+                // but must never write its own interpretation back, restore included.
+                if (syncRulesClient.IsNotFound(ex) && syncRules != null && !SyncRuleEngine.ReadOnly(syncRules))
                 {
                     UploadCachedSyncRulesLocked();
                 }

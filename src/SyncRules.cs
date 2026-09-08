@@ -111,6 +111,16 @@ namespace Clipman
         }
 
         /// <summary>
+        /// The channel key as it appears in shared-folder file names, where spaces become dashes
+        /// (sync-rules-spec.md section 2). Two distinct keys that fold to the same storage name
+        /// would share one file, so <see cref="Validate"/> rejects such a document.
+        /// </summary>
+        public static string ChannelStorageName(string channelKey)
+        {
+            return (channelKey ?? string.Empty).Replace(' ', '-');
+        }
+
+        /// <summary>
         /// A document written by a future format version is applied but never rewritten by this
         /// client (spec section 4, Version).
         /// </summary>
@@ -182,6 +192,7 @@ namespace Clipman
 
             var channels = doc.Channels ?? new List<SyncChannel>();
             var knownKeys = new HashSet<string>();
+            var storageNames = new HashSet<string>();
             foreach (var channel in channels)
             {
                 if (channel == null) return "A sync channel entry is missing.";
@@ -190,6 +201,10 @@ namespace Clipman
                 if (key.Length == 0) return "Channel name \"" + (channel.Name ?? string.Empty) + "\" is not valid.";
                 if (ReservedChannelKeys.Contains(key)) return "Channel name \"" + channel.Name + "\" is reserved.";
                 if (!knownKeys.Add(key)) return "Channel name \"" + channel.Name + "\" is not unique.";
+                if (!storageNames.Add(ChannelStorageName(key)))
+                {
+                    return "Channel name \"" + channel.Name + "\" would share a storage file with another channel.";
+                }
 
                 var route = channel.Route;
                 var hasGroups = route != null && route.Groups != null && route.Groups.Count > 0;

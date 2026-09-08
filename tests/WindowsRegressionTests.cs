@@ -70,6 +70,9 @@ namespace Clipman.Tests
             Run("dirty hashes skip rewriting untouched channel files", DirtyHashSkipsRewritingUntouchedChannelFiles);
             Run("relocations write the target file before the source", RelocationWritesTargetFileBeforeSource);
             Run("sync rules round trip through the store", SyncRulesRoundTripThroughStore);
+            Run("channel conflict copies are merged into the channel file", ChannelConflictCopiesAreMergedIntoTheChannelFile);
+            Run("a channel file is never consumed as another channel's conflict copy", ChannelFilesAreNeverConsumedAsConflictCopies);
+            Run("removing a channel relocates its entries first", RemovingAChannelRelocatesItsEntries);
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
@@ -530,6 +533,18 @@ namespace Clipman.Tests
             var longName = new string('a', 33);
             Assert(SyncRuleEngine.ChannelKey(longName) == string.Empty, "A 33-character channel name should exceed the grammar's length limit.");
             Assert(SyncRuleEngine.ChannelKey("café") == string.Empty, "A non-ASCII channel name should be rejected.");
+
+            // Spaces become dashes in file names, so two keys that differ only there would share
+            // one channel file.
+            Assert(SyncRuleEngine.ChannelStorageName("my work") == "my-work",
+                "The storage name should fold spaces to dashes.");
+            var folded = new SyncRulesDocument { Enabled = true };
+            folded.Channels.Add(new SyncChannel { Name = "My Work", Route = new SyncRoute { Groups = new List<string> { "A" } } });
+            folded.Channels.Add(new SyncChannel { Name = "My-Work", Route = new SyncRoute { Groups = new List<string> { "B" } } });
+            Assert(SyncRuleEngine.Validate(folded) != null,
+                "Two channel names that fold to the same storage name should be rejected.");
+            Assert(SyncRuleEngine.ChannelKey("My Work") != SyncRuleEngine.ChannelKey("My-Work"),
+                "The two folded names should still be distinct channel keys.");
         }
 
         private static void SyncRuleRoutingFirstMatchAndAndSemantics()
@@ -1014,6 +1029,128 @@ namespace Clipman.Tests
                     Assert(store.SyncRulesReadOnly(), "A future-version rules document must be treated as read-only.");
                     Assert(store.SetSyncRules(WorkChannelRules("Desktop")) != null,
                         "A read-only rules document must not be rewritten by this client.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static ClipDatabase SingleEntryDatabase(string id, string text, string group)
+        {
+            var now = TimeUtil.NowUnixMs();
+            var database = new ClipDatabase();
+            database.Entries.Add(new ClipEntry
+            {
+                Id = id,
+                Text = text,
+                Group = group,
+                CreatedUnixMs = now,
+                LastUsedUnixMs = now,
+                ModifiedUnixMs = now
+            });
+            return database;
+        }
+
+        private static void ChannelConflictCopiesAreMergedIntoTheChannelFile()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var conflictPath = Path.Combine(directory, "clipman-channel-work-OTHER-PC.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) == null, "Enabling sync rules should succeed.");
+                    store.AddText("Work note", "MoveToTop", 100, 0, "Work");
+
+                    ClipDatabaseFile.SaveAtomic(
+                        conflictPath,
+                        SingleEntryDatabase("conflictcopyentryid", "Conflict copy note", "Work"),
+                        string.Empty);
+
+                    store.Reload();
+
+                    Assert(store.GetEntries().Any(entry => entry.Text == "Conflict copy note"),
+                        "A channel's cloud conflict copy was not merged into the channel.");
+                    Assert(store.GetEntries().Any(entry => entry.Text == "Work note"),
+                        "Merging a conflict copy lost the channel's own entry.");
+                    Assert(!File.Exists(conflictPath), "A merged channel conflict copy was not removed.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void ChannelFilesAreNeverConsumedAsConflictCopies()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var workPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                var workPcPath = Path.Combine(directory, "clipman-channel-work-pc.clipdb");
+
+                var doc = new SyncRulesDocument { Enabled = true };
+                doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+                doc.Channels.Add(new SyncChannel { Name = "Work-PC", Route = new SyncRoute { Groups = new List<string> { "WorkPc" } } });
+                doc.Devices.Add(new SyncDevice { Name = "Desktop", Channels = new List<string> { "*" } });
+
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(doc) == null, "Enabling two similarly named channels should succeed.");
+
+                    ClipDatabaseFile.SaveAtomic(workPath, SingleEntryDatabase("workentryid", "Work channel note", "Work"), string.Empty);
+                    ClipDatabaseFile.SaveAtomic(workPcPath, SingleEntryDatabase("workpcentryid", "Work PC channel note", "WorkPc"), string.Empty);
+
+                    store.Reload();
+
+                    Assert(File.Exists(workPath) && File.Exists(workPcPath),
+                        "A declared channel file was consumed as another channel's conflict copy.");
+                    var view = store.GetEntries();
+                    Assert(view.Any(entry => entry.Text == "Work channel note"), "The work channel was lost.");
+                    Assert(view.Any(entry => entry.Text == "Work PC channel note"), "The work-pc channel was lost.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void RemovingAChannelRelocatesItsEntries()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var channelPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SetSyncRules(WorkChannelRules("Desktop")) == null, "Enabling sync rules should succeed.");
+                    var entry = store.AddText("Work note", "MoveToTop", 100, 0, "Work");
+                    Assert(entry != null, "The channel fixture entry was not created.");
+                    Assert(ClipDatabaseFile.Load(channelPath, string.Empty).Entries.Any(item => item.Id == entry.Id),
+                        "The fixture entry did not start in the work channel.");
+
+                    var withoutWork = new SyncRulesDocument { Enabled = true };
+                    withoutWork.Devices.Add(new SyncDevice { Name = "Desktop", Channels = new List<string> { "*" } });
+                    Assert(store.SetSyncRules(withoutWork) == null, "Removing a channel should succeed.");
+
+                    Assert(store.GetSyncChannelKeys().Count == 0, "The removed channel is still in the rules document.");
+                    Assert(ClipDatabaseFile.Load(databasePath, string.Empty).Entries.Any(item => item.Id == entry.Id),
+                        "Removing a channel did not relocate its entry back into the history file.");
+                    Assert(!ClipDatabaseFile.Load(channelPath, string.Empty).Entries.Any(item => item.Id == entry.Id),
+                        "The removed channel's file kept the entry it should have handed back.");
+                    Assert(store.GetEntries().Count(item => item.Id == entry.Id) == 1,
+                        "The view lost or duplicated an entry whose channel was removed.");
+
+                    store.Reload();
+                    Assert(store.GetEntries().Count(item => item.Id == entry.Id) == 1,
+                        "Reloading after a channel removal lost or duplicated the entry.");
                 }
             }
             finally
