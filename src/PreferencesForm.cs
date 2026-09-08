@@ -15,6 +15,7 @@ namespace Clipman
         private readonly TextBox showHotkey;
         private readonly TextBox toggleHotkey;
         private readonly TextBox saveCurrentClipboardHotkey;
+        private readonly TextBox quickClipHotkey;
         private readonly CheckBox confirmSingleModifierHotkeys;
         private readonly CheckBox removeDuplicates;
         private readonly ComboBox duplicateMode;
@@ -236,12 +237,14 @@ namespace Clipman
             showHotkey = NewHotkeyBox(settings.ShowHistoryHotkey, "Show or hide clipboard history global hotkey");
             toggleHotkey = NewHotkeyBox(settings.ToggleActiveHotkey, "Toggle clipboard monitoring global hotkey");
             saveCurrentClipboardHotkey = NewHotkeyBox(settings.SaveCurrentClipboardHotkey, "Save current clipboard to history global hotkey, optional");
+            quickClipHotkey = NewHotkeyBox(settings.QuickClipHotkey, "Open Quick Clip global hotkey, optional");
             confirmSingleModifierHotkeys = NewCheckBox("&Warn before saving single-modifier global hotkeys", settings.ConfirmSingleModifierHotkeys);
             confirmSingleModifierHotkeys.AccessibleDescription = "When checked, Clipman warns before saving an allowed global hotkey that uses only one modifier. You can also turn this warning off from its confirmation dialog.";
             var hotkeyLayout = NewRows();
             AddRow(hotkeyLayout, "&Show history hotkey:", showHotkey);
             AddRow(hotkeyLayout, "&Toggle on/off hotkey:", toggleHotkey);
             AddRow(hotkeyLayout, "Save current &clipboard hotkey:", saveCurrentClipboardHotkey);
+            AddRow(hotkeyLayout, "Open &Quick Clip hotkey:", quickClipHotkey);
             AddFullRow(hotkeyLayout, confirmSingleModifierHotkeys);
             AddFullRow(hotkeyLayout, NewNote("The Save Current Clipboard hotkey is optional and works as a deliberate one-shot save even when clipboard monitoring is off."));
             AddFullRow(hotkeyLayout, NewNote("Most global hotkeys should use at least two modifiers. For compatibility, one modifier is allowed with function keys, Grave, or Backslash. Single-modifier letters, numbers, comma, and ordinary editing keys are rejected."));
@@ -445,6 +448,7 @@ namespace Clipman
             showHotkey.TextChanged += (s, e) => ApplyNow();
             toggleHotkey.TextChanged += (s, e) => ApplyNow();
             saveCurrentClipboardHotkey.TextChanged += (s, e) => ApplyNow();
+            quickClipHotkey.TextChanged += (s, e) => ApplyNow();
             removeDuplicates.CheckedChanged += (s, e) =>
             {
                 if (!loading)
@@ -515,8 +519,10 @@ namespace Clipman
             if (!HotkeyDefinition.TryParse(showHotkey.Text, out parsed) ||
                 !HotkeyDefinition.TryParse(toggleHotkey.Text, out parsed) ||
                 (!string.IsNullOrWhiteSpace(saveCurrentClipboardHotkey.Text) && !HotkeyDefinition.TryParse(saveCurrentClipboardHotkey.Text, out parsed)) ||
-                HotkeysConflict(showHotkey.Text, toggleHotkey.Text, saveCurrentClipboardHotkey.Text) ||
+                (!string.IsNullOrWhiteSpace(quickClipHotkey.Text) && !HotkeyDefinition.TryParse(quickClipHotkey.Text, out parsed)) ||
+                HotkeysConflict(showHotkey.Text, toggleHotkey.Text, saveCurrentClipboardHotkey.Text, quickClipHotkey.Text) ||
                 ConflictsWithQuickPasteHotkey(saveCurrentClipboardHotkey.Text) ||
+                ConflictsWithQuickPasteHotkey(quickClipHotkey.Text) ||
                 string.IsNullOrWhiteSpace(databasePath.Text))
             {
                 return;
@@ -527,6 +533,7 @@ namespace Clipman
             settings.ShowHistoryHotkey = showHotkey.Text.Trim();
             settings.ToggleActiveHotkey = toggleHotkey.Text.Trim();
             settings.SaveCurrentClipboardHotkey = saveCurrentClipboardHotkey.Text.Trim();
+            settings.QuickClipHotkey = quickClipHotkey.Text.Trim();
             settings.DuplicateMode = StoredDuplicateMode(Convert.ToString(duplicateMode.SelectedItem));
             settings.RemoveDuplicates = !string.Equals(settings.DuplicateMode, "KeepBoth", StringComparison.OrdinalIgnoreCase);
             settings.SoundsEnabled = soundsEnabled.Checked;
@@ -973,7 +980,8 @@ namespace Clipman
 
             if (!HotkeyDefinition.IsSingleModifierHotkey(showHotkey.Text) &&
                 !HotkeyDefinition.IsSingleModifierHotkey(toggleHotkey.Text) &&
-                !HotkeyDefinition.IsSingleModifierHotkey(saveCurrentClipboardHotkey.Text))
+                !HotkeyDefinition.IsSingleModifierHotkey(saveCurrentClipboardHotkey.Text) &&
+                !HotkeyDefinition.IsSingleModifierHotkey(quickClipHotkey.Text))
             {
                 return true;
             }
@@ -1141,6 +1149,7 @@ namespace Clipman
                 ShowHistoryHotkey = current.ShowHistoryHotkey,
                 ToggleActiveHotkey = current.ToggleActiveHotkey,
                 SaveCurrentClipboardHotkey = current.SaveCurrentClipboardHotkey,
+                QuickClipHotkey = current.QuickClipHotkey,
                 QuickCopyHotkeys = current.QuickCopyHotkeys == null
                     ? new List<QuickCopyBinding>()
                     : current.QuickCopyHotkeys.Select(b => new QuickCopyBinding { EntryId = b.EntryId, Hotkey = b.Hotkey, Mode = QuickPasteModes.Normalize(b.Mode) }).ToList(),

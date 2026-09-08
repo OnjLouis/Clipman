@@ -92,11 +92,12 @@ func (s *session) codecLimits() clipdb.Limits {
 
 func (s *session) addFileEvent(raw json.RawMessage) (any, error) {
 	var p struct {
-		Files        []string `json:"files"`
-		Formats      []string `json:"formats"`
-		Source       string   `json:"source"`
-		Operation    string   `json:"operation"`
-		ContainsText bool     `json:"contains_text"`
+		Files            []string `json:"files"`
+		Formats          []string `json:"formats"`
+		Source           string   `json:"source"`
+		Operation        string   `json:"operation"`
+		ContainsText     bool     `json:"contains_text"`
+		PreserveExisting bool     `json:"preserve_existing"`
 	}
 	if err := decode(raw, &p); err != nil {
 		return nil, err
@@ -120,6 +121,9 @@ func (s *session) addFileEvent(raw json.RawMessage) (any, error) {
 	}
 	for index := range s.fileDB.Events {
 		if sameFileSet(s.fileDB.Events[index].Files, event.Files) {
+			if p.PreserveExisting {
+				return s.fileHistoryResult(false), nil
+			}
 			event.Pinned = s.fileDB.Events[index].Pinned
 			event.ManualOrder = s.fileDB.Events[index].ManualOrder
 			s.fileDB.Events = append(s.fileDB.Events[:index], s.fileDB.Events[index+1:]...)

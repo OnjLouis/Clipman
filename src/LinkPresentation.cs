@@ -33,6 +33,13 @@ namespace Clipman
             return LinkClassifier.TryGetLinkOnlyUri(text, out uri) && IsUrlWithinLimit(uri);
         }
 
+        public static bool TryGetWebUri(ClipEntry entry, out Uri uri)
+        {
+            if (!TryGetUri(entry, out uri)) return false;
+            return uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                   uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        }
+
         internal static bool IsUrlWithinLimit(Uri uri)
         {
             return uri != null && (uri.OriginalString ?? string.Empty).Length <= MaximumUrlCharacters;

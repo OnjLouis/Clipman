@@ -408,12 +408,14 @@ hotkey_application = types.SimpleNamespace(
 )
 hotkey_manager = types.SimpleNamespace(
     generation=7, show_registered=False, toggle_registered=False,
-    save_configured=True, save_registered=False, quick_registered={},
+    save_configured=True, save_registered=False,
+    quick_clip_configured=True, quick_clip_registered=False, quick_registered={},
     application=hotkey_application,
 )
-assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "ready", "registered": {"show": True, "toggle": True, "save": True, "quick:entry": True}}, 7) is False
+assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "ready", "registered": {"show": True, "toggle": True, "save": True, "quick-clip": True, "quick:entry": True}}, 7) is False
 assert hotkey_manager.show_registered and hotkey_manager.toggle_registered
 assert hotkey_manager.save_registered
+assert hotkey_manager.quick_clip_registered
 assert hotkey_manager.quick_registered == {"entry": True}
 assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "activated", "action": "show"}, 7) is False
 assert module.GlobalHotkeys._deliver(hotkey_manager, {"event": "activated", "action": "toggle"}, 7) is False
@@ -544,7 +546,7 @@ def harness(capture_on_start):
         captured=[],
         sounds=types.SimpleNamespace(play=lambda _name: None),
     )
-    value._put_text = lambda text, quiet=False, automatic=False, source="", rich_text=None, capture_observation=None: value.captured.append((text, quiet, automatic, source))
+    value._put_text = lambda text, quiet=False, automatic=False, source="", rich_text=None, capture_observation=None, preserve_existing=False: value.captured.append((text, quiet, automatic, source, preserve_existing))
     value._capture_file_paths = lambda *_args: None
     value._standalone_image_mime = lambda _clipboard: None
     value._clear_clipboard_image_file = lambda: None
@@ -556,17 +558,17 @@ value = harness(False)
 module.ClipmanApplication._clipboard_read(value, Clipboard("baseline"), None, None)
 assert value.captured == []
 module.ClipmanApplication._clipboard_read(value, Clipboard("next"), None, None)
-assert value.captured == [("next", True, True, "")]
+assert value.captured == [("next", True, True, "", False)]
 
 value = harness(False)
 module.ClipmanApplication._clipboard_read(value, Clipboard(None), None, None)
 assert value.clipboard_baseline_ready and value.captured == []
 module.ClipmanApplication._clipboard_read(value, Clipboard("first copy after empty baseline"), None, None)
-assert value.captured == [("first copy after empty baseline", True, True, "")]
+assert value.captured == [("first copy after empty baseline", True, True, "", False)]
 
 value = harness(True)
 module.ClipmanApplication._clipboard_read(value, Clipboard("capture at startup"), None, None)
-assert value.captured == [("capture at startup", True, True, "")]
+assert value.captured == [("capture at startup", True, True, "", True)]
 
 value = harness(True)
 module.ClipmanApplication._clipboard_read(value, Clipboard("x-special/nautilus-clipboard\ncopy\nfile:///tmp/test"), None, None)
@@ -590,6 +592,14 @@ paths, operation = module.parse_file_clipboard_payload(
     "text/plain",
 )
 assert paths == ["/tmp/moved.txt"] and operation == "Move"
+assert module.file_history_contains_paths(
+    [{"files": ["/tmp/One.txt", "/tmp/Two.txt"]}],
+    ["/tmp/two.txt", "/tmp/one.txt"],
+)
+assert not module.file_history_contains_paths(
+    [{"files": ["/tmp/One.txt"]}],
+    ["/tmp/two.txt"],
+)
 paths, operation = module.parse_file_clipboard_payload(
     "cut\nfile:///tmp/raw-payload.txt\n",
     "text/plain",

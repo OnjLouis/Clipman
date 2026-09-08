@@ -4,9 +4,21 @@ struct EntryEditView: View {
     @EnvironmentObject private var app: ClipmanAppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ClipEntry
+    @FocusState private var focusedField: Field?
+    private let isNew: Bool
+
+    private enum Field {
+        case text
+    }
 
     init(entry: ClipEntry) {
         _draft = State(initialValue: entry)
+        isNew = false
+    }
+
+    init() {
+        _draft = State(initialValue: ClipEntry())
+        isNew = true
     }
 
     var body: some View {
@@ -25,21 +37,30 @@ struct EntryEditView: View {
                 Section("Clipboard text") {
                     TextEditor(text: $draft.Text)
                         .frame(minHeight: 180)
+                        .focused($focusedField, equals: .text)
                         .accessibilityLabel("Clipboard text")
-                        .accessibilityHint("Edits the clipboard text stored in this entry.")
+                        .accessibilityHint(isNew ? "Enter the text for the new clip." : "Edits the clipboard text stored in this entry.")
                 }
             }
-            .navigationTitle("Edit Entry")
+            .navigationTitle(isNew ? "Quick Clip" : "Edit Entry")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        app.update(draft)
+                        if isNew {
+                            app.addQuickClip(draft)
+                        } else {
+                            app.update(draft)
+                        }
                         dismiss()
                     }
+                    .disabled(draft.Text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+            }
+            .onAppear {
+                if isNew { focusedField = .text }
             }
         }
     }

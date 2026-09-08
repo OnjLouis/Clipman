@@ -36,12 +36,19 @@ struct HistoryView: View {
                         app.addPastedClipboardPayload(values.first)
                     }
                         .accessibilityHint("Adds the current iOS clipboard text and available formatting to Clipman.")
-                    Button("Switch to \(app.nextSection.rawValue)") {
-                        app.switchSection(app.nextSection)
+                    Button("Quick Clip", systemImage: "square.and.pencil") {
+                        app.showingQuickClip = true
                     }
-                    .disabled(app.visibleSections.count < 2)
-                    .accessibilityLabel("Switch to \(app.nextSection.rawValue)")
-                    Button("Settings") { app.showingSettings = true }
+                    .accessibilityHint("Creates a clipboard entry without changing the iOS clipboard.")
+                    Menu("More", systemImage: "ellipsis.circle") {
+                        ForEach(app.visibleSections.filter { $0 != app.selectedSection }) { section in
+                            Button("Switch to \(section.rawValue)") {
+                                app.switchSection(section)
+                            }
+                        }
+                        Button("Settings") { app.showingSettings = true }
+                    }
+                    .accessibilityLabel("More")
                 }
             }
             .refreshable {
@@ -58,6 +65,9 @@ struct HistoryView: View {
             }
             .sheet(item: $editingEntry) { entry in
                 EntryEditView(entry: entry)
+            }
+            .sheet(isPresented: $app.showingQuickClip) {
+                EntryEditView()
             }
             .sheet(item: $imageShareFile) { file in
                 EmbeddedImageShareSheet(file: file) { completed, error in

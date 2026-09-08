@@ -16,6 +16,7 @@ namespace Clipman
         private readonly RadioButton pasteKeepMode;
         private readonly RadioButton copyOnlyMode;
         private readonly TextBox textBox;
+        private readonly bool isNewEntry;
         private bool deleteRequested;
 
         public string EntryName { get { return nameBox.Text; } }
@@ -37,8 +38,14 @@ namespace Clipman
         public bool DeleteRequested { get { return deleteRequested; } }
 
         public EntryPropertiesForm(ClipEntry entry, bool isQuickCopyTarget, string quickCopyHotkey, string quickPasteMode, bool focusQuickCopy)
+            : this(entry, isQuickCopyTarget, quickCopyHotkey, quickPasteMode, focusQuickCopy, false)
         {
-            Text = "Clipboard Entry Properties";
+        }
+
+        public EntryPropertiesForm(ClipEntry entry, bool isQuickCopyTarget, string quickCopyHotkey, string quickPasteMode, bool focusQuickCopy, bool isNewEntry)
+        {
+            this.isNewEntry = isNewEntry;
+            Text = isNewEntry ? "Quick Clip" : "Clipboard Entry Properties";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MinimizeBox = false;
@@ -152,14 +159,24 @@ namespace Clipman
             modeBox.Controls.Add(copyOnlyMode);
             Controls.Add(modeBox);
 
-            var textLabel = new Label { Text = "&Clipboard text:", Location = new Point(12, 238), AutoSize = true };
+            if (isNewEntry)
+            {
+                quickCopyTargetBox.Visible = false;
+                quickCopyHotkeyLabel.Visible = false;
+                quickCopyHotkeyBox.Visible = false;
+                modeBox.Visible = false;
+            }
+
+            var textTop = isNewEntry ? 112 : 238;
+            var textLabel = new Label { Text = "&Clipboard text:", Location = new Point(12, textTop), AutoSize = true };
             Controls.Add(textLabel);
             textBox = new TextBox
             {
-                Location = new Point(15, 262),
+                Location = new Point(15, textTop + 24),
                 Width = 665,
-                Height = 190,
+                Height = isNewEntry ? 316 : 190,
                 Multiline = true,
+                AcceptsReturn = true,
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
                 Text = entry == null ? string.Empty : entry.Text ?? string.Empty,
@@ -171,7 +188,7 @@ namespace Clipman
 
             var insertPreset = new Button
             {
-                Text = "Insert &sample...",
+                Text = "Insert s&ample...",
                 Location = new Point(15, 466),
                 Width = 125,
                 AccessibleName = "Insert sample template",
@@ -230,6 +247,7 @@ namespace Clipman
             Controls.Add(variables);
 
             var delete = new Button { Text = "&Delete", Location = new Point(400, 546), Width = 85 };
+            delete.Visible = !isNewEntry;
             delete.Click += (s, e) =>
             {
                 deleteRequested = true;
@@ -238,7 +256,7 @@ namespace Clipman
             };
             Controls.Add(delete);
 
-            var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(500, 546), Width = 85 };
+            var ok = new Button { Text = "&Save", DialogResult = DialogResult.OK, Location = new Point(500, 546), Width = 85 };
             Controls.Add(ok);
 
             var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(595, 546), Width = 85 };
@@ -256,6 +274,11 @@ namespace Clipman
         {
             base.OnShown(e);
             if (quickCopyHotkeyBox.Focused) return;
+            if (isNewEntry)
+            {
+                textBox.Focus();
+                return;
+            }
             nameBox.Focus();
             nameBox.SelectAll();
         }

@@ -71,6 +71,8 @@ The history window includes an accessible toolbar after the history type control
 - `Command+C`: copy selected text entries or selected file paths.
 - `Command+X`: cut selected text entries.
 - `Command+V`: paste clipboard text after the selected text entry.
+- `Command+N`: open Quick Clip and type a new saved entry directly.
+- `Option+Enter`: open the selected standalone HTTP or HTTPS link in the default browser.
 - `Command+I`: import clipboard entries from `.clipdb`, JSON, or text.
 - `Command+E`: export clipboard entries to `.clipdb`, JSON, or text.
 - `Command+Shift+R`: remove URL tracking from selected text entries.
@@ -80,6 +82,10 @@ The history window includes an accessible toolbar after the history type control
 - `Backspace`: jump to the first normal item below pinned items.
 - `Command+F`: focus search.
 - `Escape`: hide the history window.
+
+Preferences can assign an optional global Quick Clip hotkey. It is unset by default and opens the same editor from another application without reading or replacing the current clipboard.
+
+Add current clipboard item on start adds genuinely new content but leaves an existing entry or file event unchanged, including its original device, group, and timestamp.
 
 For VoiceOver users, `Option+M` opens the history window's Clipman command menu directly. If macOS reports a new Clipman window but focus lands badly, press the Show History global hotkey once to dismiss the window and again to reopen it with a fresh focus attempt.
 

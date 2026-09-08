@@ -730,6 +730,65 @@ namespace Clipman
             }
         }
 
+        private string CanonicalGroupLocked(string groupName)
+        {
+            var requested = (groupName ?? string.Empty).Trim();
+            return CanonicalLabels(database.Entries, entry => entry.Group)
+                .FirstOrDefault(group => string.Equals(group, requested, StringComparison.CurrentCultureIgnoreCase))
+                ?? requested;
+        }
+
+        public ClipEntry AddManualEntry(string text, string name, string group, bool pinned, bool isTemplate, string duplicateMode, int maxEntries, int maxDays)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            text = text.Trim();
+            lock (sync)
+            {
+                var now = TimeUtil.NowUnixMs();
+                var existing = database.Entries.FirstOrDefault(e => e.Text == text);
+                var mode = (duplicateMode ?? "MoveToTop").Trim();
+                if (existing != null && mode.Equals("Ignore", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Clone(existing);
+                }
+
+                ClipEntry entry;
+                if (existing != null && mode.Equals("MoveToTop", StringComparison.OrdinalIgnoreCase))
+                {
+                    entry = existing;
+                    entry.Name = (name ?? string.Empty).Trim();
+                    entry.Group = CanonicalGroupLocked(group);
+                    entry.Pinned = pinned;
+                    entry.IsTemplate = isTemplate;
+                    entry.SourceMachine = CurrentMachineName();
+                    entry.LastUsedUnixMs = now;
+                    entry.ModifiedUnixMs = now;
+                }
+                else
+                {
+                    entry = new ClipEntry
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Text = text,
+                        Name = (name ?? string.Empty).Trim(),
+                        Group = CanonicalGroupLocked(group),
+                        Pinned = pinned,
+                        IsTemplate = isTemplate,
+                        SourceMachine = CurrentMachineName(),
+                        CreatedUnixMs = now,
+                        LastUsedUnixMs = now,
+                        ModifiedUnixMs = now,
+                        ManualOrder = NextManualOrderLocked()
+                    };
+                    database.Entries.Add(entry);
+                }
+                PruneLocked(maxEntries, maxDays);
+                SaveLocked();
+                OnChanged();
+                return Clone(entry);
+            }
+        }
+
         public ClipEntry MergeCapturedText(string baseId, string firstTapId, string mergedText, int maxEntries, int maxDays, string group)
         {
             if (string.IsNullOrEmpty(mergedText)) return null;
@@ -840,8 +899,17 @@ namespace Clipman
 
         public void MoveEntries(IEnumerable<string> ids, int direction)
         {
+            MoveEntries(ids, direction, null);
+        }
+
+        public void MoveEntries(IEnumerable<string> ids, int direction, IEnumerable<string> visibleIds)
+        {
             var selectedIds = new HashSet<string>((ids ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)));
             if (selectedIds.Count == 0 || direction == 0) return;
+            var visibleOrder = (visibleIds ?? Enumerable.Empty<string>())
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Distinct()
+                .ToList();
 
             lock (sync)
             {
@@ -851,15 +919,23 @@ namespace Clipman
                 if (selectedEntries.Any(e => e.Pinned != selectedEntries[0].Pinned)) return;
 
                 var pinnedBand = selectedEntries[0].Pinned;
-                var ordered = database.Entries
+                var band = database.Entries
                     .Where(e => e.Pinned == pinnedBand)
                     .OrderBy(e => e.ManualOrder)
                     .ToList();
+                var ordered = visibleOrder.Count == 0
+                    ? band
+                    : visibleOrder
+                        .Select(id => band.FirstOrDefault(entry => entry.Id == id))
+                        .Where(entry => entry != null)
+                        .ToList();
                 var selected = ordered.Where(e => selectedIds.Contains(e.Id)).ToList();
-                if (selected.Count == 0) return;
+                if (selected.Count != selectedEntries.Count) return;
                 var indexes = selected.Select(e => ordered.IndexOf(e)).OrderBy(i => i).ToList();
                 var first = indexes.First();
                 var last = indexes.Last();
+                if ((direction < 0 && first == 0) || (direction > 0 && last == ordered.Count - 1)) return;
+                var manualOrderSlots = ordered.Select(e => e.ManualOrder).OrderBy(value => value).ToList();
                 foreach (var entry in selected)
                 {
                     ordered.Remove(entry);
@@ -877,7 +953,7 @@ namespace Clipman
                 var now = TimeUtil.NowUnixMs();
                 for (var i = 0; i < ordered.Count; i++)
                 {
-                    var nextOrder = i + 1L;
+                    var nextOrder = manualOrderSlots[i];
                     if (ordered[i].ManualOrder != nextOrder)
                     {
                         ordered[i].ManualOrder = nextOrder;

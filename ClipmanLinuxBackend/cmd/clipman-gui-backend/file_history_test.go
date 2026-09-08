@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/clipdb"
@@ -97,6 +98,30 @@ func TestFileHistoryPersistsDeduplicatesAndProtectsPinnedEvents(t *testing.T) {
 	}
 	if len(decoded.Events) != 1 || !decoded.Events[0].Pinned || decoded.Events[0].SourceMachine != "Fedora Test" {
 		t.Fatalf("unexpected persisted file history: %+v", decoded)
+	}
+}
+
+func TestStartupFileCapturePreservesExistingMetadata(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "one.txt")
+	existing := model.FileEvent{
+		ID: "original", CapturedUnixMs: 123, Source: "Files",
+		SourceMachine: "Original device", Files: []string{path}, FileCount: 1,
+	}
+	s := &session{
+		cfg: config.Config{Machine: "Restarted device"}, password: "secret",
+		filePath: filepath.Join(directory, "files.clipdb"), fileLoaded: true,
+		fileDB: model.FileDatabase{Version: 1, Events: []model.FileEvent{existing}},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"files": []string{path}, "source": "Foreground app", "operation": "Copy",
+		"preserve_existing": true,
+	})
+	if _, err := s.addFileEvent(raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.fileDB.Events) != 1 || !reflect.DeepEqual(s.fileDB.Events[0], existing) {
+		t.Fatalf("startup capture changed existing metadata: %+v", s.fileDB.Events)
 	}
 }
 

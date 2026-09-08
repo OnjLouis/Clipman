@@ -97,6 +97,20 @@
     <li>Added write-through delivery for sync rules: capturing an entry that routes to a channel this device does not subscribe to still delivers it to that channel for other devices, announced once as <code>Added to &lt;channel name&gt; for your other devices.</code>, and retried automatically if the device is offline at the time.</li>
   </ul>
 
+  <h3>2.9.1 Windows and macOS</h3>
+  <ul>
+    <li>Fixed <code>Alt+Up</code>/<code>Alt+Down</code> on Windows and <code>Option+Up</code>/<code>Option+Down</code> on macOS sometimes moving an entry against a hidden Text, Links or Rich Text item. Manual movement now consistently reorders against the adjacent visible item, including pinned links and filtered history views.</li>
+  </ul>
+
+  <h3>2.9.0</h3>
+  <ul>
+    <li>Added <strong>Quick Clip</strong> across Windows, Mac, Linux, Android and iOS. Type a new entry directly with its optional Name, Group, pin and template setting without first replacing the system clipboard. Desktop clients provide <code>Ctrl+N</code> or <code>Command+N</code> and an optional unassigned global hotkey; mobile clients place Quick Clip beside Paste and in the launcher icon's long-press menu. iOS also exposes it through Siri, Shortcuts and the Action Button.</li>
+    <li>Added <code>Alt+Enter</code> on Windows and Linux, or <code>Option+Enter</code> on Mac, to open one selected standalone HTTP or HTTPS link in the default browser. It also works for links stored in Text history, while prose containing a URL and private <code>clipman://</code> configuration links remain excluded.</li>
+    <li>Protected clipboard content and entry ownership during startup on every client. Android and iOS preserve meaningful phone clipboard content across the initial server refresh, while all clients now treat an item already present in history as unchanged instead of reassigning its device, group, or timestamp to the client that relaunched.</li>
+    <li>Made the optional iOS Tip Jar consistently visible in Settings, with clear loading, unavailable and retry states. Tips use Apple's one-time in-app purchases, remain entirely optional and unlock no features.</li>
+    <li>Aligned Windows entry editing with the other clients. Enter now inserts a new line in the Clipboard text field for both Quick Clip and F2 Entry Properties; tab to Save or press <code>Alt+S</code> when finished.</li>
+  </ul>
+
   <h3>2.8.11 Windows</h3>
   <ul>
     <li>Fixed Retry storage blocking the Clipman interface and exposing an unhandled timeout when Clipman Server was unavailable. Retry now runs in the background, preserves the local cache, reports failure accessibly, and leaves automatic reconnection active. Starting the same Clipman copy again while storage is unavailable now asks the running instance to recover instead of silently returning to the stuck state.</li>
@@ -689,6 +703,7 @@
       <tr><td>Show or hide clipboard history</td><td><code>Ctrl+Alt+\</code></td><td><code>Option+Shift+`</code></td></tr>
       <tr><td>Toggle monitoring on or off</td><td><code>Ctrl+Alt+`</code></td><td><code>Option+Shift+\</code></td></tr>
       <tr><td>Save the current clipboard to history, even while monitoring is off</td><td>User-assigned in Preferences; unset by default</td><td>User-assigned in Preferences; unset by default</td></tr>
+      <tr><td>Open Quick Clip from any application</td><td>User-assigned in Preferences; unset by default</td><td>User-assigned in Preferences; unset by default</td></tr>
       <tr><td>Paste an entry assigned to Quick Paste</td><td>User-assigned in Entry Properties</td><td>User-assigned in Entry Properties</td></tr>
       <tr><td>Paste a saved secret</td><td>User-assigned in Secrets</td><td>User-assigned in Secrets</td></tr>
       <tr><td>Open Secrets</td><td><code>Ctrl+Shift+E</code></td><td><code>Command+Shift+E</code></td></tr>
@@ -717,6 +732,8 @@
       <tr><td>Copy each selected entry's Name and resolved content, then close history</td><td><code>Ctrl+Enter</code></td><td><code>Command+Enter</code></td></tr>
       <tr><td>Cut selected unpinned text entries</td><td><code>Ctrl+X</code></td><td><code>Command+X</code></td></tr>
       <tr><td>Paste clipboard text into history</td><td><code>Ctrl+V</code></td><td><code>Command+V</code></td></tr>
+      <tr><td>Create a new entry with Quick Clip</td><td><code>Ctrl+N</code></td><td><code>Command+N</code></td></tr>
+      <tr><td>Open the selected standalone website link</td><td><code>Alt+Enter</code></td><td><code>Option+Enter</code></td></tr>
       <tr><td>Push selected text entry to other synced devices</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
       <tr><td>Pin or unpin selected entry</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
       <tr><td>Open Entry Properties</td><td><code>F2</code></td><td><code>F2</code></td></tr>
@@ -755,6 +772,10 @@
   <p><strong>Quick Paste:</strong> Assign Quick Paste from Entry properties or the selected entry's menu. Each assignment is stored in this machine's settings, so several entries can have their own global hotkeys, and each computer can use different Quick Paste assignments even when several computers share the same clipboard database. Quick Paste still works while clipboard monitoring is off, because it is an explicit user command rather than automatic capture.</p>
 
   <p><strong>Save Current Clipboard to History</strong> is another deliberate command that works while monitoring is off. Use it from the Clipman menu, or assign its optional global hotkey in Preferences. It reads the clipboard once and sends supported text, links, rich text, or files through normal duplicate, storage, and synchronization handling without turning monitoring on. Ignored-application and sensitive-pattern rules apply to automatic capture, so they do not block this explicit save; cooperative private-clipboard markers and concealed pasteboard data remain protected.</p>
+
+  <p><strong>Quick Clip</strong> creates a new saved entry without changing or reading the system clipboard. Press <code>Ctrl+N</code> on Windows or Linux, or <code>Command+N</code> on Mac, then enter the text and optional Name, Group, pin, or template setting. Enter adds a new line in the Clipboard text field; tab to Save when finished. On Windows, <code>Alt+S</code> also saves. Desktop Preferences can assign an optional global Quick Clip hotkey so the editor can be opened from another application. On mobile, use the Quick Clip button beside Paste or long-press the Clipman launcher icon. iOS also offers Quick Clip through Siri, Shortcuts and the Action Button.</p>
+
+  <p><strong>Open Link</strong> opens exactly one selected standalone HTTP or HTTPS entry in the default browser with <code>Alt+Enter</code> on Windows or Linux, or <code>Option+Enter</code> on Mac. It also works when Links history is disabled and the standalone link appears in Text history. Clipman does not launch ordinary prose containing a link or private <code>clipman://</code> configuration links through this command.</p>
 
   <p>Each Quick Paste target has a mode. <strong>Paste and restore previous clipboard</strong> temporarily places the entry on the system clipboard, sends the normal paste command to the active app, and then restores the previous clipboard contents where possible. <strong>Paste and keep target on clipboard</strong> pastes the entry and leaves that entry on the clipboard. <strong>Copy to clipboard only</strong> places the entry on the clipboard without sending a paste command.</p>
 
@@ -809,7 +830,7 @@
   <p>Deletion confirmation is enabled by default. Android and iOS provide a Settings toggle. Windows, Mac and Linux also let you turn future entry confirmations off from the first confirmation dialog; the preference can be restored later. Commands that clear an entire history area keep their separate stronger confirmation.</p>
 
   <h2 id="entry-names-and-text">Entry Names and Text</h2>
-  <p>Use <code>F2</code> to open Entry Properties for the selected entry. You can add a short name or hint, assign a group, configure a Quick Paste hotkey, and edit the stored clipboard text itself. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
+  <p>Use <code>F2</code> to open Entry Properties for the selected entry. You can add a short name or hint, assign a group, configure a Quick Paste hotkey, and edit the stored clipboard text itself. Enter adds a new line in the Clipboard text field; tab to Save when finished. On Windows, <code>Alt+S</code> also saves. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
 
   <p>In Entry Properties and the <code>F4</code> text review window, word navigation is tuned for URLs and code-like strings. On Windows, <code>Ctrl+Left</code> and <code>Ctrl+Right</code> stop at punctuation and symbol boundaries such as slashes, question marks, ampersands, equals signs, dashes, and underscores. On Mac, use <code>Option+Left</code> and <code>Option+Right</code>. Add <code>Shift</code> on either platform to extend the selection.</p>
 
@@ -1081,11 +1102,13 @@
 
   <p>Android and iOS Settings can optionally back up encrypted history to a folder you choose through the system file picker, including supported cloud and document providers. A nonblank history password is required. Clipman writes one <code>Clipman History.clipdb</code> file containing history only; server details, tokens, settings, and passwords are never included. Use <strong>Restore and merge history backup</strong> to combine its entries and deletion records with current history instead of replacing newer information.</p>
 
-  <p>When a mobile client starts in Server mode, it displays its encrypted on-device cache first and refreshes from the server in the background. A normal launch therefore does not show an empty history merely because the network response has not arrived yet.</p>
+  <p>When a mobile client starts in Server mode, it displays its encrypted on-device cache first and refreshes from the server in the background. A normal launch therefore does not show an empty history merely because the network response has not arrived yet. If both startup clipboard import and automatic copying of new remote entries are enabled, Clipman preserves a snapshot of supported phone clipboard content across the initial refresh and adds it only when it is not already in history. Across every client, startup capture never reassigns an existing entry's device, group, or timestamp merely because that client relaunched.</p>
 
   <p>After a normal Android or iOS addition, edit, pin, title change, or deletion, Clipman writes the encrypted local cache and uploads that database against the last server revision it received. It does not download and process the complete history again unless another client changed the server first. In that conflict case, Clipman downloads, decrypts, merges, and retries through the normal conflict resolver. Mobile status reports synchronization in progress and does not claim the change is synced until the server accepts it.</p>
 
-  <p>Clipman iOS provides <strong>Add Clipboard to Clipman</strong> and <strong>Copy Latest Clip</strong> actions through Apple's Shortcuts app and Siri. Either action can be assigned to the iPhone Action Button. Add Clipboard stores the current iOS clipboard text and available formatting; Copy Latest places the newest Clipman history entry on the iOS clipboard. Both honour Clipman's biometric or device-authentication setting, save through the encrypted local cache, and continue safely when the server is temporarily unavailable. Long-press the Clipman Home Screen icon to use the same two commands without creating a shortcut. Suggested Siri phrases include <strong>Add clipboard to Clipman</strong> and <strong>Copy latest from Clipman</strong>. Clipboard access follows the <strong>Paste from Other Apps</strong> choice in iOS Settings; Clipman does not add a second confirmation screen.</p>
+  <p>Clipman iOS provides <strong>Quick Clip</strong>, <strong>Add Clipboard to Clipman</strong> and <strong>Copy Latest Clip</strong> actions through Apple's Shortcuts app and Siri. Any action can be assigned to the iPhone Action Button. Quick Clip opens a blank entry editor, Add Clipboard stores the current iOS clipboard text and available formatting, and Copy Latest places the newest Clipman history entry on the iOS clipboard. The actions honour Clipman's biometric or device-authentication setting, save through the encrypted local cache, and continue safely when the server is temporarily unavailable. Long-press the Clipman Home Screen icon to use the same three commands without creating a shortcut. Suggested Siri phrases include <strong>Create a Quick Clip in Clipman</strong>, <strong>Add clipboard to Clipman</strong> and <strong>Copy latest from Clipman</strong>. Clipboard access follows the <strong>Paste from Other Apps</strong> choice in iOS Settings; Clipman does not add a second confirmation screen.</p>
+
+  <p>Android and iOS also provide <strong>Quick Clip</strong> beside Paste and in the launcher icon's long-press menu. It opens a labelled editor for a new entry, optional Name and Group, pinning, and template fields, then saves through the same local-cache and server-conflict path as an edited entry.</p>
 
   <p>Android and iOS Settings also offer <strong>Require biometric or device authentication</strong>. It is off by default. When enabled, Clipman asks for Face ID, Touch ID, biometrics, or the device credential before showing history after the app returns to the foreground.</p>
 

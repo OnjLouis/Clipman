@@ -138,6 +138,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             case .showHistory: self?.toggleHistoryFromHotkey()
             case .toggleMonitoring: self?.toggleMonitoring(nil)
             case .saveCurrentClipboard: self?.saveCurrentClipboard(nil)
+            case .quickClip: self?.showQuickClip(nil)
             case .quickCopy(let entryID): self?.quickPasteEntry(id: entryID)
             case .secret(let entryID): self?.quickPasteSecret(id: entryID)
             }
@@ -236,6 +237,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         appMenu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Toggle Monitoring", action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Save Current Clipboard to History", action: #selector(saveCurrentClipboard(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "New Quick Clip...", action: #selector(showQuickClip(_:)), keyEquivalent: "n"))
         let appSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
         appSecretsItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(appSecretsItem)
@@ -284,6 +286,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             : "Monitoring Paused Until Storage Returns"
         menu.addItem(NSMenuItem(title: monitorTitle, action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Save Current Clipboard to History", action: #selector(saveCurrentClipboard(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "New Quick Clip...", action: #selector(showQuickClip(_:)), keyEquivalent: ""))
         let statusSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
         statusSecretsItem.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(statusSecretsItem)
@@ -736,10 +739,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.saveCurrentContents()
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCapture text: String, richText: RichTextPayload?, sourceApplication: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool, startupCapture: Bool) {
         guard storageUnavailableReason.isEmpty else {
             clipMergeDetector.reset()
             sounds.play(.skip)
+            return
+        }
+        if startupCapture && !store.entryID(forText: text).isEmpty {
+            clipMergeDetector.reset()
             return
         }
         if !deliberate && store.hasRecentlyTouchedRemoteText(text, excluding: settings.deviceName) {
@@ -826,10 +833,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         )
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureFiles files: [String], formats: [String], containsText: Bool, sourceApplication: String, operation: String, observedAtMilliseconds: Int64, changeIdentifier: Int, deliberate: Bool, startupCapture: Bool) {
         guard storageUnavailableReason.isEmpty else {
             clipMergeDetector.reset()
             sounds.play(.skip)
+            return
+        }
+        if startupCapture && !fileStore.eventID(files: files).isEmpty {
+            clipMergeDetector.reset()
             return
         }
         let normalizedOperation = operation.isEmpty ? "Copy" : operation
@@ -881,8 +892,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
     }
 
-    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String) {
+    func clipboardMonitor(_ monitor: ClipboardMonitor, didCaptureAdditionalImage text: String, richText: RichTextPayload, sourceApplication: String, startupCapture: Bool) {
         guard storageUnavailableReason.isEmpty else { return }
+        if startupCapture && !store.entryID(forText: text).isEmpty { return }
         store.addTextWithResult(
             text,
             group: sourceApplication,
@@ -1043,6 +1055,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         rebuildMenu()
         historyWindow.refreshSteadyStatus()
         // Background connectivity failures are status information, not skipped clipboard actions.
+    }
+
+    @objc private func showQuickClip(_ sender: Any?) {
+        showHistory(sender)
+        historyWindow.showQuickClip()
     }
 
     private func clearServerSyncWarningIfNeeded() {
@@ -1270,7 +1287,11 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             richTextHistoryEnabled: settings.richTextHistoryEnabled,
             groupFilter: settings.groupFilter
         )
-        store.moveEntries(ids: entries.map(\.Id), direction: direction)
+        store.moveEntries(
+            ids: entries.map(\.Id),
+            direction: direction,
+            visibleIDs: controller.visibleEntryIDsForMove(pinned: entries[0].Pinned)
+        )
     }
 
     func historyWindowDidRequestPaste(_ controller: HistoryWindowController, after entry: ClipEntry?) {
@@ -2034,6 +2055,23 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         sounds.play(.copy)
     }
 
+    func historyWindow(_ controller: HistoryWindowController, didCreateQuickClipWithName name: String, group: String, text: String, isPinned: Bool, isTemplate: Bool) {
+        store.addManualEntry(text: text, name: name, group: group, isPinned: isPinned, isTemplate: isTemplate) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .saved:
+                sounds.play(.copy)
+                refreshHistoryWindow()
+            case .refused(let reason):
+                sounds.play(.skip)
+                controller.reportPasteStatus(reason)
+            case .failed:
+                sounds.play(.skip)
+                controller.reportPasteStatus("Quick Clip could not be saved.")
+            }
+        }
+    }
+
     private func selectedEntriesSeparator() -> String {
         ClipmanSettings.multipleEntrySeparator(
             mode: settings.multipleEntrySeparatorMode,
@@ -2054,6 +2092,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             showHistoryHotkey: settings.showHistoryHotkey,
             toggleMonitoringHotkey: settings.toggleMonitoringHotkey,
             saveCurrentClipboardHotkey: settings.saveCurrentClipboardHotkey,
+            quickClipHotkey: settings.quickClipHotkey,
             quickCopyHotkeys: settings.quickCopyHotkeys,
             quickPasteModes: settings.quickPasteModes
         )
@@ -2064,6 +2103,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             showHistory: settings.showHistoryHotkey,
             toggleMonitoring: settings.toggleMonitoringHotkey,
             saveCurrentClipboard: settings.saveCurrentClipboardHotkey,
+            quickClip: settings.quickClipHotkey,
             quickCopies: settings.quickCopyHotkeys,
             secrets: secretHotkeys()
         )

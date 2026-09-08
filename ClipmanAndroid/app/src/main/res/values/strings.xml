@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_clip_short_label">Quick Clip</string>
+    <string name="quick_clip_long_label">Create a Quick Clip</string>
+</resources>

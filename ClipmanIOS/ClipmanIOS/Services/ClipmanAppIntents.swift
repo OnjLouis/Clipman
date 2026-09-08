@@ -1,5 +1,17 @@
 import AppIntents
 
+struct CreateQuickClipIntent: AppIntent {
+    static let title: LocalizedStringResource = "Create Quick Clip"
+    static let description = IntentDescription("Opens Clipman to type and save a new clipboard entry.")
+    static let openAppWhenRun = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        ClipmanQuickActionCenter.shared.request(.quickClip)
+        return .result(dialog: "Opening Quick Clip.")
+    }
+}
+
 struct AddClipboardToClipmanIntent: AppIntent {
     static let title: LocalizedStringResource = "Add Clipboard to Clipman"
     static let description = IntentDescription("Adds the current iOS clipboard text to Clipman history.")
@@ -27,6 +39,15 @@ struct CopyLatestClipmanEntryIntent: AppIntent {
 struct ClipmanAppShortcuts: AppShortcutsProvider {
     @AppShortcutsBuilder
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: CreateQuickClipIntent(),
+            phrases: [
+                "Create a Quick Clip in \(.applicationName)",
+                "New Quick Clip in \(.applicationName)"
+            ],
+            shortTitle: "Quick Clip",
+            systemImageName: "square.and.pencil"
+        )
         AppShortcut(
             intent: AddClipboardToClipmanIntent(),
             phrases: [

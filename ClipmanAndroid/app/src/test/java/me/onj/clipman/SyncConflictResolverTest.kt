@@ -7,6 +7,23 @@ import org.junit.Test
 
 class SyncConflictResolverTest {
     @Test
+    fun addManualEntryStoresMetadataAndCanonicalizesGroup() {
+        val original = database(ClipEntry(Text = "Existing", Group = "GitHub"))
+
+        val updated = SyncConflictResolver.addManualEntry(
+            original,
+            ClipEntry(Text = "  New note  ", Name = " Note ", Group = "github", Pinned = true, IsTemplate = true),
+            "Android phone"
+        )
+
+        val entry = updated.Entries.single { it.Text == "New note" }
+        assertEquals("Note", entry.Name)
+        assertEquals("GitHub", entry.Group)
+        assertEquals("Android phone", entry.SourceMachine)
+        assertTrue(entry.Pinned)
+        assertTrue(entry.IsTemplate)
+    }
+    @Test
     fun updateNormalizesGroupCaseToEstablishedSpelling() {
         val target = entry("target", "Target", 1).copy(Group = "")
         val history = database(
@@ -186,6 +203,26 @@ class SyncConflictResolverTest {
 
         assertEquals("<h1>Heading</h1>", updated.Entries.single().RichText?.HtmlFragment)
         assertEquals(50, updated.Entries.single().RichTextUpdatedUnixMs)
+    }
+
+    @Test
+    fun startupCaptureDoesNotRetouchExistingEntry() {
+        val original = entry("existing", "Shared text", 100).copy(
+            Name = "Original name",
+            Group = "Original group",
+            SourceMachine = "Windows",
+            LastUsedUnixMs = 200,
+            ModifiedUnixMs = 150
+        )
+
+        val updated = SyncConflictResolver.addText(
+            database(original),
+            original.Text,
+            "Android",
+            preserveExistingMetadata = true
+        )
+
+        assertEquals(original, updated.Entries.single())
     }
 
     @Test

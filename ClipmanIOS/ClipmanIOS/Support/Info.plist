@@ -58,7 +58,7 @@
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true />
     <key>ClipmanBuildStampUtcMs</key>
-    <string>1787149642484</string>
+    <string>1788811749107</string>
     <key>LSRequiresIPhoneOS</key>
     <true />
     <key>NSFaceIDUsageDescription</key>
@@ -103,6 +103,14 @@
     <true />
     <key>UIApplicationShortcutItems</key>
     <array>
+        <dict>
+            <key>UIApplicationShortcutItemIconType</key>
+            <string>UIApplicationShortcutIconTypeCompose</string>
+            <key>UIApplicationShortcutItemTitle</key>
+            <string>Quick Clip</string>
+            <key>UIApplicationShortcutItemType</key>
+            <string>me.onj.clipman.ios.quick-clip</string>
+        </dict>
         <dict>
             <key>UIApplicationShortcutItemIconType</key>
             <string>UIApplicationShortcutIconTypeAdd</string>

@@ -54,6 +54,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -93,6 +95,10 @@ import java.util.Locale
 import java.util.TimeZone
 
 class MainActivity : FragmentActivity() {
+    private companion object {
+        const val ACTION_QUICK_CLIP = "me.onj.clipman.action.QUICK_CLIP"
+    }
+
     private var isUnlocked by mutableStateOf(false)
     private var appIsForeground by mutableStateOf(false)
     private var unlockMessage by mutableStateOf("Clipman is locked.")
@@ -104,6 +110,7 @@ class MainActivity : FragmentActivity() {
     private var nextExternalImageImportId = 0L
     private var externalTextImports by mutableStateOf<List<ExternalSharedTextImport>>(emptyList())
     private var nextExternalTextImportId = 0L
+    private var externalQuickClipRequestId by mutableStateOf(0L)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -125,6 +132,10 @@ class MainActivity : FragmentActivity() {
                             externalTextImport = externalTextImports.firstOrNull(),
                             onExternalTextImportConsumed = { id ->
                                 externalTextImports = externalTextImports.filterNot { it.id == id }
+                            },
+                            externalQuickClipRequestId = externalQuickClipRequestId,
+                            onExternalQuickClipConsumed = { id ->
+                                if (externalQuickClipRequestId == id) externalQuickClipRequestId = 0
                             }
                         )
                     } else {
@@ -182,11 +193,19 @@ class MainActivity : FragmentActivity() {
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
         when {
+            intent.action == ACTION_QUICK_CLIP -> enqueueQuickClip()
             intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/", ignoreCase = true) == true ->
                 enqueueSharedText(intent)
             intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE ->
                 enqueueSharedImage(intent)
             else -> handleConfigurationIntent(intent)
+        }
+    }
+
+    private fun enqueueQuickClip() {
+        externalQuickClipRequestId += 1
+        if (AndroidSettings(this).requireAuthentication) {
+            unlockMessage = "Unlock Clipman to create a Quick Clip."
         }
     }
 
@@ -448,7 +467,9 @@ private fun ClipmanApp(
     externalImageImport: ExternalSharedImageImport?,
     onExternalImageImportConsumed: (Long) -> Unit,
     externalTextImport: ExternalSharedTextImport?,
-    onExternalTextImportConsumed: (Long) -> Unit
+    onExternalTextImportConsumed: (Long) -> Unit,
+    externalQuickClipRequestId: Long,
+    onExternalQuickClipConsumed: (Long) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? MainActivity
@@ -499,6 +520,7 @@ private fun ClipmanApp(
     var database by remember { mutableStateOf(ClipDatabase()) }
     var viewingEntry by remember { mutableStateOf<ClipEntry?>(null) }
     var editingEntry by remember { mutableStateOf<ClipEntry?>(null) }
+    var showingQuickClip by remember { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<ClipEntry?>(null) }
     var showGroupPicker by remember { mutableStateOf(false) }
     var attemptedInitialLoad by remember { mutableStateOf(false) }
@@ -533,6 +555,14 @@ private fun ClipmanApp(
     var syncRulesSelection by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isSavingSyncRules by remember { mutableStateOf(false) }
     var syncRulesStatus by remember { mutableStateOf("") }
+
+    LaunchedEffect(externalQuickClipRequestId, hasLoadedHistory, isLoadingHistory, showConnectionSettings) {
+        if (externalQuickClipRequestId == 0L || !hasLoadedHistory || isLoadingHistory || showConnectionSettings) {
+            return@LaunchedEffect
+        }
+        showingQuickClip = true
+        onExternalQuickClipConsumed(externalQuickClipRequestId)
+    }
 
     fun setTransientStatus(message: String) {
         statusSequence += 1
@@ -834,6 +864,7 @@ private fun ClipmanApp(
         val requestedRevision = currentRevision
         val requestedPendingChanges = hasPendingLocalChanges
         val requestedBackup = backupOptions()
+        val preserveClipboardDuringInitialLoad = !launchClipboardHandled && addClipboardOnLaunch
         isLoadingHistory = true
         if (announceResult) {
             status = "Loading history..."
@@ -939,7 +970,7 @@ private fun ClipmanApp(
                         newEntries = loadedDatabase.Entries,
                         enabled = storageMode == MobileStorageMode.Server && !announceResult,
                         localMachine = deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
-                        shouldCopyToClipboard = copyRemoteToClipboard,
+                        shouldCopyToClipboard = copyRemoteToClipboard && !preserveClipboardDuringInitialLoad,
                         richTextEnabled = richTextEnabled,
                         playSounds = playSounds,
                         useHaptics = useHaptics
@@ -956,9 +987,11 @@ private fun ClipmanApp(
                     announce(view, message)
                 }
                 if (announceResult) announce(view, "History refreshed")
-                if (!launchClipboardHandled) {
+                if (preserveClipboardDuringInitialLoad) {
                     launchClipboardHandled = true
-                    addClipboardAfterLoad = addClipboardOnLaunch
+                    addClipboardAfterLoad = true
+                } else if (!launchClipboardHandled) {
+                    launchClipboardHandled = true
                 }
             }.onFailure { error ->
                 pollingFailureCount = minOf(pollingFailureCount + 1, 4)
@@ -1117,7 +1150,7 @@ private fun ClipmanApp(
         }
     }
 
-    fun addCurrentClipboardText() {
+    fun addCurrentClipboardText(preserveExistingMetadata: Boolean = false) {
         val entrySnapshot = database.Entries
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -1137,6 +1170,9 @@ private fun ClipmanApp(
                     setTransientStatus("The Android clipboard does not contain text or an image to add.")
                     return@onSuccess
                 }
+                if (preserveExistingMetadata && database.Entries.any { it.Text == clipboardText }) {
+                    return@onSuccess
+                }
                 val image = EmbeddedImageRichText.parse(clipboardContent.richText)
                 if (image != null && EmbeddedImageRichText.exceedsTotalBudget(database.Entries, clipboardText, image.bytes.size)) {
                     setTransientStatus("Clipman's 8 MiB embedded-image history limit has been reached. Delete an image entry before adding another.")
@@ -1148,7 +1184,8 @@ private fun ClipmanApp(
                         current,
                         clipboardText,
                         deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
-                        clipboardContent.richText
+                        clipboardContent.richText,
+                        preserveExistingMetadata
                     )
                 }
             }.onFailure { error ->
@@ -1355,7 +1392,7 @@ private fun ClipmanApp(
     LaunchedEffect(addClipboardAfterLoad) {
         if (addClipboardAfterLoad) {
             addClipboardAfterLoad = false
-            addCurrentClipboardText()
+            addCurrentClipboardText(preserveExistingMetadata = true)
         }
     }
 
@@ -1506,6 +1543,24 @@ private fun ClipmanApp(
                     SyncConflictResolver.deleteEntry(database, entry.Id)
                 }
             }
+        )
+    }
+    if (showingQuickClip) {
+        EntryPropertiesDialog(
+            entry = ClipEntry(),
+            isNew = true,
+            onDismiss = { showingQuickClip = false },
+            onSave = { entry ->
+                showingQuickClip = false
+                saveDatabaseChange("Saving Quick Clip", "Quick Clip saved.") { current ->
+                    SyncConflictResolver.addManualEntry(
+                        current,
+                        entry,
+                        deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
+                    )
+                }
+            },
+            onDelete = null
         )
     }
     updateCandidate?.let { candidate ->
@@ -1940,6 +1995,7 @@ private fun ClipmanApp(
                 groupFilter = ""
             },
             onAddClipboard = { addCurrentClipboardText() },
+            onQuickClip = { showingQuickClip = true },
             onOpenSettings = { showConnectionSettings = true },
             onGroup = { showGroupPicker = true },
             onTop = { scope.launch { selectedListState.animateScrollToItem(0) } }
@@ -2275,6 +2331,7 @@ private fun HistoryToolbar(
     filterLabel: String,
     onSectionChanged: (HistorySection) -> Unit,
     onAddClipboard: () -> Unit,
+    onQuickClip: () -> Unit,
     onOpenSettings: () -> Unit,
     onGroup: () -> Unit,
     onTop: () -> Unit
@@ -2286,6 +2343,12 @@ private fun HistoryToolbar(
                 onClick = onAddClipboard
             ) {
                 Text("Paste")
+            }
+            TextButton(
+                modifier = Modifier.weight(1f),
+                onClick = onQuickClip
+            ) {
+                Text("Quick Clip")
             }
             TextButton(
                 modifier = Modifier.weight(1f),
@@ -2758,19 +2821,25 @@ internal fun SettingCheckboxRow(
 @Composable
 private fun EntryPropertiesDialog(
     entry: ClipEntry,
+    isNew: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (ClipEntry) -> Unit,
-    onDelete: () -> Unit
+    onDelete: (() -> Unit)?
 ) {
     var name by remember(entry.Id) { mutableStateOf(entry.Name) }
     var group by remember(entry.Id) { mutableStateOf(entry.Group) }
     var text by remember(entry.Id) { mutableStateOf(entry.Text) }
     var pinned by remember(entry.Id) { mutableStateOf(entry.Pinned) }
     var isTemplate by remember(entry.Id) { mutableStateOf(entry.IsTemplate) }
+    val textFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isNew) {
+        if (isNew) textFocusRequester.requestFocus()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Clipboard Entry Properties") },
+        title = { Text(if (isNew) "Quick Clip" else "Clipboard Entry Properties") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -2809,28 +2878,34 @@ private fun EntryPropertiesDialog(
                     maxLines = 8,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .focusRequester(textFocusRequester)
                         .semantics { contentDescription = "Clipboard text" }
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                onSave(
-                    entry.copy(
-                        Name = name,
-                        Group = group,
-                        Text = text,
-                        Pinned = pinned,
-                        IsTemplate = isTemplate
+            TextButton(
+                enabled = text.isNotBlank(),
+                onClick = {
+                    onSave(
+                        entry.copy(
+                            Name = name,
+                            Group = group,
+                            Text = text,
+                            Pinned = pinned,
+                            IsTemplate = isTemplate
+                        )
                     )
-                )
-            }) {
+                }
+            ) {
                 Text("Save")
             }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDelete) { Text("Delete") }
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete) { Text("Delete") }
+                }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         }

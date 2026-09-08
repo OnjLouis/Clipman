@@ -51,11 +51,18 @@ object SyncConflictResolver {
     fun hasSameContent(left: ClipDatabase, right: ClipDatabase): Boolean =
         left.Entries == right.Entries && left.DeletedEntries == right.DeletedEntries
 
-    fun addText(database: ClipDatabase, text: String, machineName: String, richText: RichTextPayload? = null): ClipDatabase {
+    fun addText(
+        database: ClipDatabase,
+        text: String,
+        machineName: String,
+        richText: RichTextPayload? = null,
+        preserveExistingMetadata: Boolean = false
+    ): ClipDatabase {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return database
         val now = TimeUtil.nowUnixMs()
         val existing = database.Entries.firstOrNull { it.Text == trimmed }
+        if (preserveExistingMetadata && existing != null) return database
         val normalizedRichText = RichTextClipboard.normalize(richText)
         val storedRichText = normalizedRichText ?: existing?.RichText
         val richTextUpdated = if (normalizedRichText == null) existing?.RichTextUpdatedUnixMs ?: 0 else now
@@ -73,6 +80,43 @@ object SyncConflictResolver {
             RichTextUpdatedUnixMs = richTextUpdated
         )
         return normalize(database.copy(Entries = withoutDuplicate + entry, UpdatedUnixMs = now))
+    }
+
+    fun addManualEntry(database: ClipDatabase, entry: ClipEntry, machineName: String): ClipDatabase {
+        val text = entry.Text.trim()
+        if (text.isEmpty()) return database
+        val now = TimeUtil.nowUnixMs()
+        val group = canonicalGroup(database.Entries, entry.Group.trim())
+        val existing = database.Entries.firstOrNull { it.Text == text }
+        val withoutDuplicate = database.Entries.filterNot { it.Text == text }
+        val nextManualOrder = withoutDuplicate.maxOfOrNull { it.ManualOrder }?.plus(1) ?: 1
+        val updated = if (existing == null) {
+            ClipEntry(
+                Id = UUID.randomUUID().toString().replace("-", ""),
+                Text = text,
+                Name = entry.Name.trim(),
+                Group = group,
+                SourceMachine = machineName,
+                CreatedUnixMs = now,
+                LastUsedUnixMs = now,
+                ModifiedUnixMs = now,
+                Pinned = entry.Pinned,
+                IsTemplate = entry.IsTemplate,
+                ManualOrder = nextManualOrder
+            )
+        } else {
+            existing.copy(
+                Text = text,
+                Name = entry.Name.trim(),
+                Group = group,
+                SourceMachine = machineName,
+                LastUsedUnixMs = now,
+                ModifiedUnixMs = now,
+                Pinned = entry.Pinned,
+                IsTemplate = entry.IsTemplate
+            )
+        }
+        return normalize(database.copy(Entries = withoutDuplicate + updated, UpdatedUnixMs = now))
     }
 
     fun updateEntry(database: ClipDatabase, entry: ClipEntry): ClipDatabase {

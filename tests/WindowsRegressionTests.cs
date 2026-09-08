@@ -26,6 +26,7 @@ namespace Clipman.Tests
             Run("bounded exact reads handle partial streams", BoundedExactReadsHandlePartialStreams);
             Run("encrypted database round trip", EncryptedDatabaseRoundTrip);
             Run("URL length is bounded before presentation or fetch", UrlLengthIsBounded);
+            Run("Open Link accepts only standalone web links", OpenLinkAcceptsOnlyStandaloneWebLinks);
             Run("URL labels accept characters that are illegal in Windows paths", UrlLabelsAcceptWindowsPathCharacters);
             Run("website title safety distinguishes readable slugs from capability tokens", WebsiteTitleSafetyDistinguishesReadableSlugs);
             Run("link labels remove unsafe Unicode categories", LinkLabelsRemoveUnsafeUnicode);
@@ -36,6 +37,10 @@ namespace Clipman.Tests
             Run("copied image files use the bounded Rich Text image path", CopiedImageFilesUseBoundedRichTextPath);
             Run("Quick Paste snapshots avoid opaque OLE clipboard formats", QuickPasteSnapshotAvoidsOpaqueOleFormats);
             Run("single-modifier hotkey warning preference defaults and round trips", SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips);
+            Run("Quick Clip settings and manual entries round trip", QuickClipSettingsAndManualEntriesRoundTrip);
+            Run("startup capture preserves existing clip ownership", StartupCapturePreservesExistingClipOwnership);
+            Run("filtered pinned links move within the visible section", FilteredPinnedLinksMoveWithinVisibleSection);
+            Run("entry editors reserve Enter for multiline text", EntryEditorsReserveEnterForMultilineText);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
             Run("multiple-entry separators are configurable", MultipleEntrySeparatorsAreConfigurable);
@@ -148,6 +153,19 @@ namespace Clipman.Tests
             Assert(reason.IndexOf("8192", StringComparison.Ordinal) >= 0, "The overlong URL rejection was not useful to the user.");
             Assert(LinkPresentation.Destination(parsedOverlong).Length == 0, "An overlong URL reached destination unescaping.");
             Assert(LinkPresentation.OfflineLabel(parsedOverlong).Length == 0, "An overlong URL reached offline-label parsing.");
+        }
+
+        private static void OpenLinkAcceptsOnlyStandaloneWebLinks()
+        {
+            Uri uri;
+            Assert(LinkPresentation.TryGetWebUri(new ClipEntry { Text = "https://example.com/article" }, out uri),
+                "A standalone HTTPS entry should be openable.");
+            Assert(LinkPresentation.TryGetWebUri(new ClipEntry { Text = "https://example.com/article  link" }, out uri),
+                "A standalone URL with a screen-reader role suffix should be openable.");
+            Assert(!LinkPresentation.TryGetWebUri(new ClipEntry { Text = "Read https://example.com/article" }, out uri),
+                "Ordinary prose containing an URL must not be opened as a link.");
+            Assert(!LinkPresentation.TryGetWebUri(new ClipEntry { Text = "clipman://example.com/setup" }, out uri),
+                "Clipman configuration links must not be opened by the browser shortcut.");
         }
 
         private static void LinkLabelsRemoveUnsafeUnicode()
@@ -1542,6 +1560,98 @@ namespace Clipman.Tests
             var restored = JsonUtil.Deserialize<AppSettings>(JsonUtil.SerializePretty(settings));
             Assert(!restored.ConfirmSingleModifierHotkeys,
                 "Suppressing the single-modifier warning did not survive settings serialization.");
+        }
+
+        private static void QuickClipSettingsAndManualEntriesRoundTrip()
+        {
+            Assert(string.IsNullOrEmpty(new AppSettings().QuickClipHotkey),
+                "Quick Clip's global hotkey must be unset by default.");
+            var settings = new AppSettings { QuickClipHotkey = "Ctrl+Shift+N" };
+            var restored = JsonUtil.Deserialize<AppSettings>(JsonUtil.SerializePretty(settings));
+            Assert(restored.QuickClipHotkey == "Ctrl+Shift+N",
+                "The Quick Clip global hotkey did not survive settings serialization.");
+
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb"), string.Empty, "Quick Clip device"))
+                {
+                    store.AddManualEntry("Earlier", string.Empty, "GitHub", false, false, "MoveToTop", 100, 0);
+                    var saved = store.AddManualEntry("Quick note", "Release note", "github", true, true, "MoveToTop", 100, 0);
+                    var entries = store.GetEntries();
+                    Assert(saved != null && saved.Text == "Quick note" && saved.Name == "Release note",
+                        "Quick Clip did not preserve its text and optional name.");
+                    Assert(saved.Group == "GitHub" && saved.SourceMachine == "Quick Clip device",
+                        "Quick Clip did not canonicalize its group or retain the configured device name.");
+                    Assert(saved.Pinned && saved.IsTemplate && entries.Count == 2,
+                        "Quick Clip did not preserve its entry options or created an unexpected duplicate.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void EntryEditorsReserveEnterForMultilineText()
+        {
+            var existing = new ClipEntry { Text = "First line" };
+            using (var properties = new EntryPropertiesForm(existing, false, string.Empty, QuickPasteModes.PasteRestore, false))
+            using (var quickClip = new EntryPropertiesForm(null, false, string.Empty, QuickPasteModes.PasteRestore, false, true))
+            {
+                AssertEntryEditorUsesExplicitSave(properties, "Entry Properties");
+                AssertEntryEditorUsesExplicitSave(quickClip, "Quick Clip");
+            }
+        }
+
+        private static void StartupCapturePreservesExistingClipOwnership()
+        {
+            Assert(ClipmanApplicationContext.DuplicateModeForCapture(true, "MoveToTop") == "Ignore",
+                "Startup capture must not retouch an existing clip.");
+            Assert(ClipmanApplicationContext.DuplicateModeForCapture(false, "MoveToTop") == "MoveToTop",
+                "Ordinary clipboard capture must retain the configured duplicate behavior.");
+        }
+
+        private static void FilteredPinnedLinksMoveWithinVisibleSection()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb"), string.Empty, "Test device"))
+                {
+                    var firstLink = store.AddManualEntry("https://example.com/first", string.Empty, string.Empty, true, false, "Keep", 100, 0);
+                    store.AddManualEntry("Hidden pinned text", string.Empty, string.Empty, true, false, "Keep", 100, 0);
+                    var secondLink = store.AddManualEntry("https://example.com/second", string.Empty, string.Empty, true, false, "Keep", 100, 0);
+
+                    store.MoveEntries(
+                        new[] { secondLink.Id },
+                        -1,
+                        new[] { firstLink.Id, secondLink.Id });
+
+                    var visibleLinks = store.GetEntries("Manual", "All", false)
+                        .Where(entry => entry.Pinned && LinkClassifier.IsLinkOnlyText(entry.Text))
+                        .Select(entry => entry.Id)
+                        .ToList();
+                    Assert(visibleLinks.SequenceEqual(new[] { secondLink.Id, firstLink.Id }),
+                        "Moving a pinned link acted on a hidden Text entry instead of the adjacent visible link.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void AssertEntryEditorUsesExplicitSave(EntryPropertiesForm form, string description)
+        {
+            var editor = form.Controls.OfType<TextBox>().Single(control => control.AccessibleName == "Clipboard text");
+            var save = form.Controls.OfType<Button>().Single(control => control.DialogResult == DialogResult.OK);
+            Assert(editor.Multiline && editor.AcceptsReturn,
+                description + " must insert a new line when Enter is pressed in Clipboard text.");
+            Assert(save.Text == "&Save" && ReferenceEquals(form.AcceptButton, save),
+                description + " must expose an explicit Alt+S Save action.");
         }
 
         private static void HistoryWindowConstructsWithoutSelection()

@@ -1,6 +1,7 @@
 import UIKit
 
 enum ClipmanQuickAction: String {
+    case quickClip = "me.onj.clipman.ios.quick-clip"
     case addClipboard = "me.onj.clipman.ios.add-clipboard"
     case copyLatest = "me.onj.clipman.ios.copy-latest"
 }

@@ -74,6 +74,21 @@ final class LinkDisplayTests: XCTestCase {
         XCTAssertFalse(LinkExtractor.isPureLinkEntry(ClipEntry(Text: "Read \(stored)")))
     }
 
+    func testLinksHistoryContainsOnlyStandaloneLinkEntries() throws {
+        let standalone = ClipEntry(Id: "standalone", Text: "https://example.com/one", Pinned: true)
+        let prose = ClipEntry(
+            Id: "prose",
+            Text: "Read https://example.com/two and https://example.com/three",
+            Pinned: true
+        )
+
+        let items = LinkExtractor.historyLinkItems(in: [standalone, prose])
+
+        XCTAssertEqual(items.map(\.entry.Id), ["standalone"])
+        XCTAssertEqual(items.map(\.url.absoluteString), ["https://example.com/one"])
+        XCTAssertTrue(items[0].entry.Pinned)
+    }
+
     func testWebsiteTitleParserPrefersOpenGraphAndSanitizesOutput() {
         let html = """
         <html><head>
