@@ -1438,6 +1438,11 @@ func (s *session) rulesSalt(ctx context.Context, existingBlob []byte) []byte {
 
 // fetchRulesDocument downloads and decodes the rules document directly,
 // without touching history, for rules-get/rules-set and self-registration.
+// It intentionally returns the server's document as-is, not run through
+// Engine.CachedRules/MergeDocuments (readRules's edit-vs-display split, also
+// used by the CLI): rules-set's own conflict handling merges against exactly
+// what the server holds, and self-registration's CAS must be based on the
+// same. Do not "fix" this to fold in the local cache.
 func (s *session) fetchRulesDocument(ctx context.Context) (doc *rules.Document, revision string, blob []byte, exists bool, err error) {
 	rulesID := identity.SyncRulesDatabaseID(s.engine.Token, s.password)
 	if rulesID == "" {
@@ -1580,10 +1585,15 @@ func (s *session) rulesSet(raw json.RawMessage) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	client := s.bucketClient(rulesID)
+	// Always advance past the caller-supplied timestamp (the revision this
+	// edit was based on), never merely fill a blank one: doc.UpdatedUnixMs
+	// otherwise stays pinned to the stale value the client fetched, so a 409
+	// below would compare that stale stamp against whatever the server
+	// already holds (which is, by definition, newer than what this client
+	// last saw) and MergeDocuments would silently prefer the remote copy,
+	// discarding this edit while still reporting success.
+	doc.UpdatedUnixMs = nextRulesTimestamp(doc.UpdatedUnixMs)
 	doc.UpdatedBy = s.cfg.Machine
-	if doc.UpdatedUnixMs <= 0 {
-		doc.UpdatedUnixMs = time.Now().UnixMilli()
-	}
 	revision := p.Revision
 	createOnly := revision == ""
 	var existingBlob []byte

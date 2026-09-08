@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,9 +15,11 @@ import (
 
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/clipdb"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/identity"
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/merge"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/model"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/platform"
 	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/rules"
+	"github.com/OnjLouis/Clipman/ClipmanLinuxBackend/internal/syncengine"
 )
 
 // The cross-client test vectors from sync-rules-spec.md section 2 are used as
@@ -445,5 +448,152 @@ func TestMutatePendingWriteThroughRetry(t *testing.T) {
 	imagesDB := fake.database(t, rulesTestChannelID("images"))
 	if len(imagesDB.Entries) != 1 {
 		t.Fatalf("images channel entries after retry = %#v", imagesDB.Entries)
+	}
+}
+
+// TestRulesSetConflictPreservesLocalEditOnLWW guards against a regression
+// where rulesSet only stamped UpdatedUnixMs when it was blank, leaving a
+// client-submitted document pinned at the stale timestamp it was fetched
+// with. On a 409 that stale timestamp always loses spec section 4's
+// whole-document LWW merge against whatever the server already holds (which
+// is, by definition, newer than what this client last saw), silently
+// discarding the user's edit while rules-set still reported success.
+func TestRulesSetConflictPreservesLocalEditOnLWW(t *testing.T) {
+	fake, s := newRulesSession(t)
+	original := &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 1000, UpdatedBy: "Desktop",
+		Channels: []rules.Channel{{Name: "Original", Route: rules.Route{Groups: []string{"A"}}}},
+		Devices:  []rules.Device{},
+	}
+	fake.storeRules(t, original)
+
+	getResult, err := s.rulesGet()
+	if err != nil {
+		t.Fatalf("rules-get: %v", err)
+	}
+	got, ok := getResult.(map[string]any)
+	if !ok {
+		t.Fatalf("rules-get result = %#v", getResult)
+	}
+	staleRevision, _ := got["revision"].(string)
+	if staleRevision == "" {
+		t.Fatal("rules-get returned a blank revision for an existing document")
+	}
+
+	// A concurrent edit from another device lands after the local fetch,
+	// advancing the bucket to a revision the stale local fetch does not
+	// know, but its UpdatedUnixMs (2000) is nowhere close to "now": the
+	// local edit below is the actual most-recent action in wall-clock time,
+	// even though it is based on a stale fetch.
+	concurrent := &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 2000, UpdatedBy: "Other device",
+		Channels: []rules.Channel{{Name: "Original", Route: rules.Route{Groups: []string{"A"}}}},
+		Devices:  []rules.Device{},
+	}
+	fake.storeRules(t, concurrent)
+
+	// A naive client echoes back exactly what rules-get returned, plus the
+	// user's change, and submits it against the now-superseded revision.
+	localEdit := map[string]any{
+		"Clipman": "sync-rules", "Version": 1, "Enabled": true,
+		"UpdatedUnixMs": 1000, "UpdatedBy": "Desktop",
+		"Channels": []map[string]any{
+			{"Name": "Original", "Route": map[string]any{"Groups": []string{"A"}}},
+			{"Name": "Local Edit", "Route": map[string]any{"Groups": []string{"B"}}},
+		},
+		"Devices": []map[string]any{},
+	}
+	setRequest, _ := json.Marshal(map[string]any{"rules": localEdit, "revision": staleRevision})
+	result, err := s.rulesSet(setRequest)
+	if err != nil {
+		t.Fatalf("rules-set: %v", err)
+	}
+	setResult, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("rules-set result = %#v", result)
+	}
+	stored, ok := setResult["rules"].(rules.Document)
+	if !ok {
+		t.Fatalf("rules-set did not return the stored document: %#v", setResult["rules"])
+	}
+	found := false
+	for _, channel := range stored.Channels {
+		if channel.Name == "Local Edit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("local edit was discarded by the LWW merge; stored channels = %#v", stored.Channels)
+	}
+	if stored.UpdatedUnixMs <= concurrent.UpdatedUnixMs {
+		t.Fatalf("local edit's timestamp (%d) was not advanced past the concurrent edit (%d)", stored.UpdatedUnixMs, concurrent.UpdatedUnixMs)
+	}
+
+	final := fake.rulesDocument(t)
+	onServer := false
+	for _, channel := range final.Channels {
+		if channel.Name == "Local Edit" {
+			onServer = true
+		}
+	}
+	if !onServer {
+		t.Fatal("local edit was not persisted to the server")
+	}
+}
+
+// TestMutateFailsWhenSubscribedChannelUploadFails guards the distinction
+// WriteThroughError.Committed draws (see its doc comment in
+// internal/syncengine/channels.go): when a SUBSCRIBED channel's own upload
+// fails in the same save as an unsubscribed-channel write-through, the save
+// must be reported as failed - not as a success carrying pendingChannels -
+// even though the write-through entries are still parked for later retry.
+func TestMutateFailsWhenSubscribedChannelUploadFails(t *testing.T) {
+	fake, s := newRulesSession(t)
+	// "Linux test" subscribes to "work" only; "images" stays unsubscribed so
+	// an image entry created in the same save requires a write-through.
+	fake.storeRules(t, enabledTestRules(rules.Device{Name: "Linux test", Channels: []string{"work"}}))
+	if _, err := s.refresh(true); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	fake.breakBucket(rulesTestChannelID("work"))
+	fake.breakBucket(rulesTestChannelID("images"))
+
+	result, err := s.mutate(func(db *model.Database, now int64) (bool, any, error) {
+		db.Entries = append(db.Entries,
+			model.Entry{
+				ID: merge.NewID(), Text: "work note", Group: "Work",
+				CreatedUnixMs: now, LastUsedUnixMs: now, ModifiedUnixMs: now,
+				Extra: map[string]json.RawMessage{},
+			},
+			model.Entry{
+				ID: merge.NewID(), Text: "picture",
+				CreatedUnixMs: now, LastUsedUnixMs: now, ModifiedUnixMs: now,
+				Extra: map[string]json.RawMessage{"RichText": json.RawMessage(`{"HtmlFragment":"<img src=\"data:image/png;base64,AAAA\">"}`)},
+			},
+		)
+		db.UpdatedUnixMs = now
+		return true, nil, nil
+	})
+	if err == nil {
+		t.Fatalf("mutate succeeded despite a broken subscribed channel: result=%#v", result)
+	}
+	if result != nil {
+		t.Fatalf("mutate returned a non-nil result on failure: %#v", result)
+	}
+	var pending *syncengine.WriteThroughError
+	if !errors.As(err, &pending) {
+		t.Fatalf("error was not a WriteThroughError: %v", err)
+	}
+	if pending.Committed {
+		t.Fatal("WriteThroughError reported Committed=true despite the subscribed work channel upload failing")
+	}
+	if _, ok := pending.Pending["images"]; !ok {
+		t.Fatalf("pending entries did not include the images channel: %#v", pending.Pending)
+	}
+	if data, readErr := platform.ReadPrivate(s.pendingWritesFile()); readErr != nil || len(data) == 0 {
+		t.Fatalf("pending write was not parked to disk despite Committed=false: data=%q err=%v", data, readErr)
 	}
 }

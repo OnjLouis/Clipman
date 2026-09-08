@@ -4516,30 +4516,34 @@ class ClipmanApplication(Gtk.Application):
             child = channel_list.get_first_child()
             while child:
                 following = child.get_next_sibling(); channel_list.remove(child); child = following
-            for channel in doc.get("Channels", []):
+            channels = doc.get("Channels", [])
+            for channel in channels:
                 label = channel.get("Name", "") + ": " + self._describe_sync_route(channel.get("Route"))
                 row = Gtk.ListBoxRow(); row.clipman_channel = channel
                 row.set_child(Gtk.Label(label=label, xalign=0, wrap=True, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6))
                 row.update_property([Gtk.AccessibleProperty.LABEL], [label]); channel_list.append(row)
+            if channels: channel_list.select_row(channel_list.get_row_at_index(0))
 
             child = device_list.get_first_child()
             while child:
                 following = child.get_next_sibling(); device_list.remove(child); child = following
-            for device in doc.get("Devices", []):
+            devices = doc.get("Devices", [])
+            for device in devices:
                 label = device.get("Name", "") + ": " + self._describe_sync_subscription(device.get("Channels"))
                 row = Gtk.ListBoxRow(); row.clipman_device = device
                 row.set_child(Gtk.Label(label=label, xalign=0, wrap=True, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6))
                 row.update_property([Gtk.AccessibleProperty.LABEL], [label]); device_list.append(row)
+            if devices: device_list.select_row(device_list.get_row_at_index(0))
 
         def on_enabled_toggled(button):
-            if ui_guard["updating"]: return
+            if ui_guard["updating"] or state.get("read_only"): return
             doc = json.loads(json.dumps(state["rules"])) if state.get("rules") else self._blank_sync_rules_document(self.machine_name)
             doc["Enabled"] = button.get_active()
             self._save_sync_rules(doc, state, dialog, rebuild, None)
         enabled_check.connect("toggled", on_enabled_toggled)
 
         add_channel_button.connect("clicked", lambda *_: self._show_sync_channel_editor(None, state, dialog, rebuild))
-        edit_channel_button.connect("clicked", lambda *_: self._show_sync_channel_editor(selected_channel(), state, dialog, rebuild))
+        edit_channel_button.connect("clicked", lambda *_: self._edit_sync_channel(selected_channel(), state, dialog, rebuild))
         remove_channel_button.connect("clicked", lambda *_: self._remove_sync_channel(selected_channel(), state, dialog, rebuild))
         edit_device_button.connect("clicked", lambda *_: self._show_sync_device_editor(selected_device(), state, dialog, rebuild))
 
@@ -4557,6 +4561,10 @@ class ClipmanApplication(Gtk.Application):
             if editor is not None:
                 editor.destroy()
         self.backend.rules_set(doc, state.get("revision", ""), on_result)
+
+    def _edit_sync_channel(self, channel, state, parent, rebuild):
+        if not channel: return
+        self._show_sync_channel_editor(channel, state, parent, rebuild)
 
     def _show_sync_channel_editor(self, channel, state, parent, rebuild):
         if state.get("read_only"): return
