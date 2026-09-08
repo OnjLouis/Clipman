@@ -263,9 +263,13 @@ namespace Clipman
             foreach (var channel in channels)
             {
                 if (channel == null) continue;
-                var key = ChannelKey(channel.Name);
-                if (key.Length == 0) continue;
-                if (RouteMatches(channel.Route, entry)) return key;
+                if (!RouteMatches(channel.Route, entry)) continue;
+
+                // Evaluation stops at the first matching route even when that route's channel key
+                // is unresolvable, which only a future-version document can produce. The entry then
+                // routes to core rather than falling through to later rules this client only partly
+                // understands (sync-rules-spec.md section 4).
+                return ChannelKey(channel.Name);
             }
 
             return string.Empty;

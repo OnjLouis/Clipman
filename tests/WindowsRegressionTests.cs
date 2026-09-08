@@ -70,6 +70,8 @@ namespace Clipman.Tests
             Run("dirty hashes skip rewriting untouched channel files", DirtyHashSkipsRewritingUntouchedChannelFiles);
             Run("relocations write the target file before the source", RelocationWritesTargetFileBeforeSource);
             Run("sync rules round trip through the store", SyncRulesRoundTripThroughStore);
+            Run("routing stops at the first matching route even when unresolvable", RouteStopsAtUnresolvableFirstMatch);
+            Run("read-only rules never relocate resident entries", ReadOnlyRulesNeverRelocateResidentEntries);
             Run("channel conflict copies are merged into the channel file", ChannelConflictCopiesAreMergedIntoTheChannelFile);
             Run("a channel file is never consumed as another channel's conflict copy", ChannelFilesAreNeverConsumedAsConflictCopies);
             Run("removing a channel relocates its entries first", RemovingAChannelRelocatesItsEntries);
@@ -1032,6 +1034,103 @@ namespace Clipman.Tests
                     Assert(store.SyncRulesReadOnly(), "A future-version rules document must be treated as read-only.");
                     Assert(store.SetSyncRules(WorkChannelRules("Desktop")) != null,
                         "A read-only rules document must not be rewritten by this client.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void RouteStopsAtUnresolvableFirstMatch()
+        {
+            // Only a future-version document can carry a channel whose name yields no key, so the
+            // case is built at Version 2.
+            const string unresolvableName = "Café";
+            Assert(SyncRuleEngine.ChannelKey(unresolvableName) == string.Empty,
+                "The fixture channel name must be unresolvable or this test proves nothing.");
+
+            var doc = new SyncRulesDocument { Version = 2, Enabled = true };
+            doc.Channels.Add(new SyncChannel
+            {
+                Name = unresolvableName,
+                Route = new SyncRoute { Groups = new List<string> { "Work" } }
+            });
+            doc.Channels.Add(new SyncChannel
+            {
+                Name = "Work",
+                Route = new SyncRoute { Groups = new List<string> { "Work" } }
+            });
+
+            Assert(SyncRuleEngine.RouteEntry(doc, new ClipEntry { Group = "Work" }) == string.Empty,
+                "Routing must stop at the first matching route and fall to core when its key is unresolvable.");
+            Assert(SyncRuleEngine.RouteEntry(doc, new ClipEntry { Group = "Other" }) == string.Empty,
+                "An entry matching no route should still live in core.");
+
+            var resolvableFirst = new SyncRulesDocument { Version = 2, Enabled = true };
+            resolvableFirst.Channels.Add(new SyncChannel
+            {
+                Name = "Work",
+                Route = new SyncRoute { Groups = new List<string> { "Work" } }
+            });
+            resolvableFirst.Channels.Add(new SyncChannel
+            {
+                Name = unresolvableName,
+                Route = new SyncRoute { Groups = new List<string> { "Work" } }
+            });
+            Assert(SyncRuleEngine.RouteEntry(resolvableFirst, new ClipEntry { Group = "Work" }) == "work",
+                "A resolvable first match should still win normally.");
+        }
+
+        private static void ReadOnlyRulesNeverRelocateResidentEntries()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var workPath = Path.Combine(directory, "clipman-channel-work.clipdb");
+                var archivePath = Path.Combine(directory, "clipman-channel-archive.clipdb");
+                var rulesPath = Path.Combine(directory, "clipman-sync-rules.clipdb");
+
+                var doc = new SyncRulesDocument { Version = 2, Enabled = true };
+                doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+                doc.Channels.Add(new SyncChannel { Name = "Archive", Route = new SyncRoute { Groups = new List<string> { "Archive" } } });
+                doc.Devices.Add(new SyncDevice { Name = "Desktop", Channels = new List<string> { "*" } });
+                ClipDatabaseFile.SaveAtomic(rulesPath, doc, string.Empty);
+
+                // Resident in the work channel but grouped so the rules would route it to archive.
+                ClipDatabaseFile.SaveAtomic(
+                    workPath,
+                    SingleEntryDatabase("residentmisroutedid", "Resident note", "Archive"),
+                    string.Empty);
+
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.SyncRulesReadOnly(), "A version-2 document should be read-only.");
+                    Assert(store.GetEntries().Any(entry => entry.Id == "residentmisroutedid"),
+                        "The resident fixture entry was not loaded into the view.");
+
+                    var captured = store.AddText("New archive note", "MoveToTop", 100, 0, "Archive");
+                    Assert(captured != null, "The new capture was not created.");
+
+                    var work = ClipDatabaseFile.Load(workPath, string.Empty);
+                    Assert(work.Entries.Any(entry => entry.Id == "residentmisroutedid"),
+                        "A read-only document must leave a resident entry in the channel it already lives in.");
+                    Assert(!work.DeletedEntries.Any(marker => marker.Id == "residentmisroutedid"),
+                        "A read-only document must not write a relocation marker.");
+
+                    var archive = ClipDatabaseFile.Load(archivePath, string.Empty);
+                    Assert(!archive.Entries.Any(entry => entry.Id == "residentmisroutedid"),
+                        "A read-only document must not migrate a resident entry to its would-be target.");
+                    Assert(archive.Entries.Any(entry => entry.Id == captured.Id),
+                        "A new capture must still be routed under a read-only document.");
+
+                    Assert(store.GetEntries().Count(entry => entry.Id == "residentmisroutedid") == 1,
+                        "The view lost or duplicated the resident entry.");
+
+                    store.Reload();
+                    Assert(store.GetEntries().Count(entry => entry.Id == "residentmisroutedid") == 1,
+                        "Reloading under a read-only document lost or duplicated the resident entry.");
                 }
             }
             finally

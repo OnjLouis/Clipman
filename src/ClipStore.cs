@@ -2755,12 +2755,19 @@ namespace Clipman
             var pending = new Dictionary<string, List<ClipEntry>>(StringComparer.Ordinal);
             var pendingKeys = new List<string>();
 
+            // A future-version document is read-only: this client cannot fully evaluate its rules,
+            // so it must not fight better-informed clients over placement. Every entry that already
+            // lives somewhere stays there - no relocation markers, no migration - and only new
+            // captures are routed (spec section 4).
+            var readOnlyRules = SyncRuleEngine.ReadOnly(syncRules);
+
             foreach (var entry in database.Entries)
             {
                 if (entry == null) continue;
                 var target = SyncRuleEngine.RouteEntry(syncRules, entry);
                 string source;
                 var resident = residence.TryGetValue(entry.Id ?? string.Empty, out source);
+                if (readOnlyRules && resident) target = source;
                 if (resident && !string.Equals(source, target, StringComparison.Ordinal))
                 {
                     // Leaving a channel leaves a relocation marker behind: an empty TextHash
@@ -3570,6 +3577,9 @@ namespace Clipman
 
         private void UploadCachedSyncRulesLocked()
         {
+            // The caller checks this too; keeping it here makes "a read-only document is never
+            // written back" a property of the only method that writes the cache to the bucket.
+            if (syncRules == null || SyncRuleEngine.ReadOnly(syncRules)) return;
             try
             {
                 var path = SyncRulesPathLocked();
