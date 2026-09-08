@@ -48,6 +48,7 @@ struct HistoryView: View {
                         showingMoreActions = true
                     }
                     .accessibilityLabel("More")
+                    .accessibilityHint("Shows history sections and settings.")
                 }
             }
             .refreshable {
