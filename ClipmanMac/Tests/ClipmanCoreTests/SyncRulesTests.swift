@@ -356,6 +356,95 @@ final class SyncRulesTests: XCTestCase {
         XCTAssertEqual(SyncRuleEngine.channelName(document, key: ""), "the main history")
     }
 
+    func testTargetKeepsResidenceUnderAReadOnlyDocument() {
+        var future = exampleDocument()
+        future.Version = 2
+
+        // A resident entry never relocates under a document this version cannot
+        // fully evaluate, even when its visible rules say it belongs elsewhere.
+        XCTAssertEqual(
+            SyncRuleEngine.target(document: future, entry: entry(group: "Work"), residence: ""),
+            ""
+        )
+        XCTAssertEqual(
+            SyncRuleEngine.target(document: future, entry: entry(group: "Work"), residence: "images"),
+            "images"
+        )
+        // A new capture has no residence and is routed normally.
+        XCTAssertEqual(
+            SyncRuleEngine.target(document: future, entry: entry(group: "Work"), residence: nil),
+            "work"
+        )
+        // A current-version document relocates as usual.
+        XCTAssertEqual(
+            SyncRuleEngine.target(document: exampleDocument(), entry: entry(group: "Work"), residence: "images"),
+            "work"
+        )
+    }
+
+    // MARK: - Section 2, storage names
+
+    func testChannelFileNameDetection() {
+        XCTAssertTrue(SyncRuleEngine.isChannelFileName("clipman-channel-work.clipdb"))
+        XCTAssertTrue(SyncRuleEngine.isChannelFileName("clipman-channel-desktop-only.clipdb"))
+        XCTAssertTrue(SyncRuleEngine.isChannelFileName("Clipman-Channel-Work.ClipDB"))
+
+        // Sync services append markers that fail the key grammar.
+        XCTAssertFalse(SyncRuleEngine.isChannelFileName("clipman-channel-work (conflicted copy).clipdb"))
+        XCTAssertFalse(SyncRuleEngine.isChannelFileName("clipman-channel-.clipdb"))
+        XCTAssertFalse(SyncRuleEngine.isChannelFileName("clipman-channel-österreich.clipdb"))
+        XCTAssertFalse(SyncRuleEngine.isChannelFileName("clipman-history.clipdb"))
+        XCTAssertFalse(SyncRuleEngine.isChannelFileName("clipman-sync-rules.clipdb"))
+        XCTAssertFalse(SyncRuleEngine.isChannelFileName("clipman-channel-work.clipdb.bak"))
+    }
+
+    func testValidateRejectsFoldedStorageNameCollisionsAtEditTimeOnly() {
+        var document = exampleDocument()
+        document.Channels = [
+            SyncChannel(Name: "my work", Route: SyncRoute(Groups: ["Work"])),
+            SyncChannel(Name: "my-work", Route: SyncRoute(Groups: ["Other"]))
+        ]
+        document.Devices = []
+
+        // "my work" and "my-work" would share clipman-channel-my-work.clipdb.
+        XCTAssertNotNil(SyncRuleEngine.validate(document))
+        // A document another editor already saved with the collision must still
+        // load and route, so only editors enforce the check.
+        XCTAssertNil(SyncRuleEngine.validate(document, enforceStorageNameCollisions: false))
+        XCTAssertTrue(SyncRuleEngine.isUsable(document))
+        let data = SyncRuleEngine.serialize(document)
+        XCTAssertNotNil(SyncRuleEngine.parse(data ?? Data()))
+    }
+
+    func testUnknownTopLevelFieldsSurviveTheRoundTripDeterministically() throws {
+        let payload = """
+        {
+          "Clipman": "sync-rules",
+          "Version": 1,
+          "Enabled": true,
+          "UpdatedUnixMs": 42,
+          "UpdatedBy": "Desktop",
+          "Channels": [],
+          "Devices": [],
+          "Zebra": {"nested": [1, 2, 3]},
+          "Alpha": "kept"
+        }
+        """
+        let document = try XCTUnwrap(SyncRuleEngine.parse(Data(payload.utf8)))
+        XCTAssertEqual(document.unknownFields.count, 2)
+
+        let first = try XCTUnwrap(SyncRuleEngine.serialize(document))
+        let text = try XCTUnwrap(String(data: first, encoding: .utf8))
+        XCTAssertTrue(text.contains("\"Alpha\":\"kept\""))
+        XCTAssertTrue(text.contains("\"Zebra\""))
+
+        // Equal documents must produce equal bytes: the rules cache is only
+        // rewritten when the serialized hash changes.
+        let reparsed = try XCTUnwrap(SyncRuleEngine.parse(first))
+        XCTAssertEqual(reparsed, document)
+        XCTAssertEqual(SyncRuleEngine.serialize(reparsed), first)
+    }
+
     // MARK: - Fixtures
 
     private func exampleDocument() -> SyncRulesDocument {

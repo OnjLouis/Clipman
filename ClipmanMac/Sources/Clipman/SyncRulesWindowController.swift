@@ -11,6 +11,14 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
     private var document = SyncRulesDocument()
     private var readOnly = false
     private var deviceName = ""
+    /// Channel keys of the document in effect in the store, and the subset this
+    /// Mac downloads (nil means it downloads everything). Removal is gated on
+    /// these, not on the working copy: the re-route on save can only move
+    /// entries this Mac can actually see right now (spec section 5, Rules
+    /// edits), and a subscription added in this same edit does not change that.
+    private var storeChannelKeys: Set<String> = []
+    private var storeSubscribedKeys: Set<String>?
+    private var baselineStatusText = ""
 
     private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable sync rules", target: nil, action: nil)
     private let warningLabel = NSTextField(wrappingLabelWithString: syncRulesGuidanceText)
@@ -59,7 +67,10 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
     func reload() {
         deviceName = store.syncRulesDeviceName()
         readOnly = store.syncRulesReadOnly()
-        document = store.getSyncRules() ?? SyncRulesDocument(
+        let stored = store.getSyncRules()
+        storeChannelKeys = Set(SyncRuleEngine.allChannelKeys(stored))
+        storeSubscribedKeys = store.syncSubscribedChannelKeys().map { Set($0) }
+        document = stored ?? SyncRulesDocument(
             Clipman: SyncRuleEngine.documentKind,
             Version: SyncRuleEngine.currentVersion,
             Enabled: false,
@@ -76,9 +87,10 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
             document.Devices.append(SyncDevice(Name: deviceName, Channels: ["*"]))
         }
         enabledCheckbox.state = document.Enabled ? .on : .off
-        statusLabel.stringValue = readOnly
+        baselineStatusText = readOnly
             ? "These sync rules were written by a newer version of Clipman. They are shown here but cannot be changed on this Mac."
             : "This Mac is called \"\(deviceName)\" in these rules."
+        statusLabel.stringValue = baselineStatusText
         channelsTable.reloadData()
         devicesTable.reloadData()
         updateAvailability()
@@ -284,9 +296,41 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         enabledCheckbox.isEnabled = editable
         addChannelButton.isEnabled = editable
         editChannelButton.isEnabled = editable && channelsTable.selectedRow >= 0
-        removeChannelButton.isEnabled = editable && channelsTable.selectedRow >= 0
         editSubscriptionsButton.isEnabled = editable && devicesTable.selectedRow >= 0
         saveButton.isEnabled = editable
+
+        var canRemove = editable && channelsTable.selectedRow >= 0
+        var removeHelp = "Removes the selected channel. Its entries move to the next matching channel or to the main history."
+        var notice = ""
+        if canRemove, let name = selectedChannelName(), let reason = removalRefusal(channelName: name) {
+            canRemove = false
+            removeHelp = reason
+            notice = reason
+        }
+        removeChannelButton.isEnabled = canRemove
+        removeChannelButton.setAccessibilityHelp(removeHelp)
+        statusLabel.stringValue = notice.isEmpty ? baselineStatusText : notice
+    }
+
+    private func selectedChannelName() -> String? {
+        let row = channelsTable.selectedRow
+        guard row >= 0, row < document.Channels.count else { return nil }
+        return document.Channels[row].Name
+    }
+
+    /// Why the named channel cannot be removed from this Mac, or nil when it
+    /// can. Mirrors the store's own refusal: a channel that exists in the rules
+    /// in effect and is not downloaded here holds entries this Mac cannot
+    /// re-route. A channel added during this edit has no entries yet and can
+    /// always be removed again.
+    private func removalRefusal(channelName: String) -> String? {
+        let key = SyncRuleEngine.channelKey(channelName)
+        guard storeChannelKeys.contains(key),
+              let subscribed = storeSubscribedKeys,
+              !subscribed.contains(key) else {
+            return nil
+        }
+        return "Remove is unavailable: this Mac is not subscribed to the \(channelName) channel and cannot see its entries. Subscribe this Mac to the channel first."
     }
 
     // MARK: - Actions
@@ -340,6 +384,10 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         let row = channelsTable.selectedRow
         guard row >= 0, row < document.Channels.count else { return }
         let channel = document.Channels[row]
+        if let reason = removalRefusal(channelName: channel.Name) {
+            showError(reason)
+            return
+        }
 
         let alert = NSAlert()
         alert.messageText = "Remove the \(channel.Name) channel?"

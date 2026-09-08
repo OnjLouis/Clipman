@@ -13,6 +13,9 @@ public struct SyncRulesDocument: Codable, Equatable, Sendable {
     public var UpdatedBy: String
     public var Channels: [SyncChannel]
     public var Devices: [SyncDevice]
+    /// Top-level fields this version does not understand, kept verbatim so a
+    /// save from here never silently drops what a newer client wrote.
+    public var unknownFields: [String: JSONValue]
 
     public init(
         Clipman: String = SyncRuleEngine.documentKind,
@@ -21,7 +24,8 @@ public struct SyncRulesDocument: Codable, Equatable, Sendable {
         UpdatedUnixMs: Int64 = 0,
         UpdatedBy: String = "",
         Channels: [SyncChannel] = [],
-        Devices: [SyncDevice] = []
+        Devices: [SyncDevice] = [],
+        unknownFields: [String: JSONValue] = [:]
     ) {
         self.Clipman = Clipman
         self.Version = Version
@@ -30,9 +34,10 @@ public struct SyncRulesDocument: Codable, Equatable, Sendable {
         self.UpdatedBy = UpdatedBy
         self.Channels = Channels
         self.Devices = Devices
+        self.unknownFields = unknownFields
     }
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case Clipman, Version, Enabled, UpdatedUnixMs, UpdatedBy, Channels, Devices
     }
 
@@ -45,17 +50,31 @@ public struct SyncRulesDocument: Codable, Equatable, Sendable {
         UpdatedBy = try container.decodeIfPresent(String.self, forKey: .UpdatedBy) ?? ""
         Channels = try container.decodeIfPresent([SyncChannel].self, forKey: .Channels) ?? []
         Devices = try container.decodeIfPresent([SyncDevice].self, forKey: .Devices) ?? []
+
+        let dynamic = try decoder.container(keyedBy: DynamicCodingKey.self)
+        let knownNames = Set(CodingKeys.allCases.map(\.rawValue))
+        var extra: [String: JSONValue] = [:]
+        for key in dynamic.allKeys where !knownNames.contains(key.stringValue) {
+            extra[key.stringValue] = try dynamic.decode(JSONValue.self, forKey: key)
+        }
+        unknownFields = extra
     }
 
     public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(Clipman, forKey: .Clipman)
-        try container.encode(Version, forKey: .Version)
-        try container.encode(Enabled, forKey: .Enabled)
-        try container.encode(UpdatedUnixMs, forKey: .UpdatedUnixMs)
-        try container.encode(UpdatedBy, forKey: .UpdatedBy)
-        try container.encode(Channels, forKey: .Channels)
-        try container.encode(Devices, forKey: .Devices)
+        var dynamic = encoder.container(keyedBy: DynamicCodingKey.self)
+        // Sorted so serialization stays deterministic even under an encoder
+        // that preserves insertion order.
+        for key in unknownFields.keys.sorted() {
+            guard let value = unknownFields[key] else { continue }
+            try dynamic.encode(value, forKey: DynamicCodingKey(key))
+        }
+        try dynamic.encode(Clipman, forKey: DynamicCodingKey("Clipman"))
+        try dynamic.encode(Version, forKey: DynamicCodingKey("Version"))
+        try dynamic.encode(Enabled, forKey: DynamicCodingKey("Enabled"))
+        try dynamic.encode(UpdatedUnixMs, forKey: DynamicCodingKey("UpdatedUnixMs"))
+        try dynamic.encode(UpdatedBy, forKey: DynamicCodingKey("UpdatedBy"))
+        try dynamic.encode(Channels, forKey: DynamicCodingKey("Channels"))
+        try dynamic.encode(Devices, forKey: DynamicCodingKey("Devices"))
     }
 }
 
@@ -195,6 +214,8 @@ public enum SyncRuleEngine {
     public static let coreChannelKey = ""
     public static let syncRulesFileName = "clipman-sync-rules.clipdb"
     public static let pendingChannelWritesFileName = "clipman-pending-channels.clipdb"
+    public static let channelFilePrefix = "clipman-channel-"
+    public static let channelFileSuffix = ".clipdb"
 
     private static let dataImagePrefix = "data:image/"
     private static let reservedChannelKeys: Set<String> = ["core", "all", "pinned", "sync-rules"]
@@ -216,9 +237,34 @@ public enum SyncRuleEngine {
         return matchesChannelKeyGrammar(key) ? key : ""
     }
 
+    /// The channel key as it appears in shared-folder file names, where spaces
+    /// become dashes (spec section 2). Two distinct keys can fold to the same
+    /// storage name - "my work" and "my-work" - and would then share one file,
+    /// so `validate` rejects that at edit time.
+    public static func channelStorageName(_ key: String) -> String {
+        key.replacingOccurrences(of: " ", with: "-")
+    }
+
     /// The shared-folder sibling file name for a channel key (spec section 2).
     public static func channelFileName(_ key: String) -> String {
-        "clipman-channel-" + key.replacingOccurrences(of: " ", with: "-") + ".clipdb"
+        channelFilePrefix + channelStorageName(key) + channelFileSuffix
+    }
+
+    /// True when the name is some channel's storage file rather than a sync
+    /// service's conflict copy of one. Used to keep conflict-copy resolution
+    /// from ever merging one channel into another.
+    public static func isChannelFileName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        guard lower.hasPrefix(channelFilePrefix),
+              lower.hasSuffix(channelFileSuffix),
+              lower.count > channelFilePrefix.count + channelFileSuffix.count else {
+            return false
+        }
+        let storageName = String(lower.dropFirst(channelFilePrefix.count).dropLast(channelFileSuffix.count))
+        // The storage alphabet is a subset of the key alphabet - spaces fold to
+        // dashes, which keys already allow - so a valid key means a real channel
+        // file, and anything a sync service appended fails the grammar.
+        return !channelKey(storageName).isEmpty
     }
 
     /// A document written by a future format version is applied where it is
@@ -232,20 +278,31 @@ public enum SyncRuleEngine {
     /// document is accepted leniently - a client must never fail entirely on a
     /// document it only partly understands - while a current-version document
     /// must still pass strict validation, since editors validate before writing.
+    /// The folded-storage-name collision is an edit-time rule only: a document
+    /// already saved with such a collision must still load and route.
     public static func isUsable(_ document: SyncRulesDocument?) -> Bool {
         guard let document, document.Clipman == documentKind else { return false }
         if isReadOnly(document) { return true }
-        return validate(document) == nil
+        return validate(document, enforceStorageNameCollisions: false) == nil
     }
 
     /// Returns nil when the document is valid, or a display-ready reason.
     public static func validate(_ document: SyncRulesDocument?) -> String? {
+        validate(document, enforceStorageNameCollisions: true)
+    }
+
+    /// `enforceStorageNameCollisions` gates the folded-storage-name check of
+    /// spec section 2 (two channel keys that share one shared-folder file name).
+    /// Editors enforce it; the read path does not, so a document already saved
+    /// with such a collision keeps loading and routing.
+    public static func validate(_ document: SyncRulesDocument?, enforceStorageNameCollisions: Bool) -> String? {
         guard let document else { return "The sync rules document is missing." }
         guard document.Clipman == documentKind else {
             return "The sync rules document has an unrecognized format."
         }
 
         var knownKeys = Set<String>()
+        var storageNames = Set<String>()
         for channel in document.Channels {
             let key = channelKey(channel.Name)
             guard !key.isEmpty else {
@@ -256,6 +313,9 @@ public enum SyncRuleEngine {
             }
             guard knownKeys.insert(key).inserted else {
                 return "Channel name \"\(channel.Name)\" is not unique."
+            }
+            if !storageNames.insert(channelStorageName(key)).inserted, enforceStorageNameCollisions {
+                return "Channel name \"\(channel.Name)\" would share a storage file with another channel. Spaces and dashes are interchangeable in channel file names."
             }
 
             let route = channel.Route
@@ -299,6 +359,18 @@ public enum SyncRuleEngine {
             return channelKey(channel.Name)
         }
         return coreChannelKey
+    }
+
+    /// The channel an entry belongs in during a save, given where it currently
+    /// lives. Spec section 4: a read-only (future-version) document never
+    /// triggers relocation, because a client that cannot fully evaluate the
+    /// rules must not fight better-informed clients over placement - every
+    /// resident entry keeps its channel and only new captures are routed.
+    public static func target(document: SyncRulesDocument?, entry: ClipEntry, residence: String?) -> String {
+        if isReadOnly(document), let residence {
+            return residence
+        }
+        return route(document: document, entry: entry)
     }
 
     /// The channel keys the named device downloads besides core, in document
@@ -380,13 +452,18 @@ public enum SyncRuleEngine {
         }
         guard document.Clipman == documentKind else { return nil }
         if isReadOnly(document) { return document }
-        guard validate(document) == nil else { return nil }
+        // The read path tolerates a folded-storage-name collision, so a document
+        // some other editor already saved keeps loading.
+        guard validate(document, enforceStorageNameCollisions: false) == nil else { return nil }
         return document
     }
 
     public static func serialize(_ document: SyncRulesDocument) -> Data? {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.withoutEscapingSlashes]
+        // Sorted so equal documents always produce equal bytes, including inside
+        // preserved unknown fields: the cache-hash comparisons that decide
+        // whether the rules file must be rewritten depend on it.
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try? encoder.encode(document)
     }
 
