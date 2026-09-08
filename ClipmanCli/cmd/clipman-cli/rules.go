@@ -72,12 +72,32 @@ func cacheRulesDocument(ctx *appContext, doc *rules.Document) {
 	if doc == nil {
 		return
 	}
-	ctx.engine.CachedRules = doc
+	// A read-only (future-version) document must never arm the engine's 404
+	// fallback: readRules re-uploads Engine.CachedRules with If-None-Match
+	// when the bucket disappears, and this client is not allowed to rewrite a
+	// document it only partly understands. The on-disk copy is still written,
+	// beside it, purely for display on the next process start.
+	if rules.ReadOnly(doc) {
+		ctx.engine.CachedRules = nil
+	} else {
+		ctx.engine.CachedRules = doc
+	}
 	data, err := rules.Serialize(doc)
 	if err != nil {
 		return
 	}
 	_ = platform.SavePrivate(rulesCachePath(ctx.configPath), data)
+}
+
+// initialCachedRules loads the on-disk rules cache for seeding a fresh
+// Engine.CachedRules at startup, withholding a read-only document for the
+// same reason cacheRulesDocument does.
+func initialCachedRules(configPath string) *rules.Document {
+	doc := loadRulesCache(configPath)
+	if rules.ReadOnly(doc) {
+		return nil
+	}
+	return doc
 }
 
 // --- pending write-through store (spec section 6) ---------------------------
@@ -153,10 +173,15 @@ func mergeEntriesByID(existing, incoming []model.Entry) []model.Entry {
 }
 
 // absorbWriteThrough handles the *syncengine.WriteThroughError shape MutateView
-// can return alongside a committed ViewState: it parks the undelivered entries
-// and prints a one-line notice per affected channel, then reports success,
-// since everything else in the mutation already committed. Any other error is
-// returned unchanged so the caller reports it normally.
+// can return alongside a ViewState: the undelivered entries are always parked
+// (they are real, regardless of what else happened), and a one-line notice is
+// printed per affected channel. Whether the caller may treat this as success
+// depends entirely on Committed (see the WriteThroughError doc comment in
+// internal/syncengine/channels.go): only Committed == true means every
+// subscribed channel upload also succeeded, in which case this returns nil.
+// Committed == false means part of the mutation itself was not saved, and the
+// original error is returned unchanged so the caller reports a failure. Any
+// error that is not a *WriteThroughError is also returned unchanged.
 func absorbWriteThrough(ctx *appContext, err error) error {
 	if err == nil {
 		return nil
@@ -176,34 +201,93 @@ func absorbWriteThrough(ctx *appContext, err error) error {
 			fmt.Fprintf(os.Stderr, "Added entry could not reach channel %s yet; will retry on next sync.\n", key)
 		}
 	}
+	if !pending.Committed {
+		return err
+	}
 	return nil
 }
 
 // retryPendingWrites is called at the start of sync and list: any entry left
-// over from a failed write-through is retried with a fresh one-shot
-// fetch-merge-put, and cleared from the pending store on success. It is
-// entirely best effort; a channel that still cannot be reached simply stays
-// pending for the next attempt.
+// over from a failed write-through is retried, and cleared from the pending
+// store on success. It is entirely best effort; a channel that still cannot
+// be reached simply stays pending for the next attempt.
+//
+// Every parked entry is re-routed against the CURRENT rules document before
+// retrying, rather than resent to the channel key it was originally parked
+// under: that channel may since have been removed (spec section 5, channel
+// deletion), and delivering it there regardless would resurrect a bucket that
+// no longer belongs in the document. An entry that no longer routes anywhere
+// (core) is delivered through a normal mutation instead of a channel
+// write-through, so it lands in the local view like any other capture.
 func retryPendingWrites(ctx *appContext) {
 	pending := loadPendingWrites(ctx.configPath)
 	if len(pending) == 0 {
 		return
 	}
+	currentDoc, _, _, _, err := fetchRulesDocument(ctx)
+	if err != nil {
+		verbosef(ctx.globals, "could not check sync rules before retrying pending writes: %v", err)
+		return
+	}
+
+	regrouped := map[string][]model.Entry{}
+	for _, entries := range pending {
+		for _, entry := range entries {
+			target := rules.RouteEntry(currentDoc, &entry)
+			regrouped[target] = append(regrouped[target], entry)
+		}
+	}
+
 	remaining := map[string][]model.Entry{}
-	for key, entries := range pending {
+	for target, entries := range regrouped {
 		if len(entries) == 0 {
 			continue
 		}
-		if err := writeThroughToChannel(ctx, key, entries); err != nil {
-			remaining[key] = entries
-			verbosef(ctx.globals, "retrying pending writes for channel %s failed: %v", key, err)
+		if target == "" {
+			if failed := retryToCore(ctx, entries); len(failed) > 0 {
+				remaining[""] = append(remaining[""], failed...)
+			}
+			continue
+		}
+		if err := writeThroughToChannel(ctx, target, entries); err != nil {
+			remaining[target] = append(remaining[target], entries...)
+			verbosef(ctx.globals, "retrying pending writes for channel %s failed: %v", target, err)
 			continue
 		}
 		if !ctx.globals.quiet {
-			fmt.Fprintf(os.Stderr, "Delivered %d pending entr%s to channel %s.\n", len(entries), pluralIES(len(entries)), key)
+			fmt.Fprintf(os.Stderr, "Delivered %d pending entr%s to channel %s.\n", len(entries), pluralIES(len(entries)), target)
 		}
 	}
 	_ = savePendingWrites(ctx.configPath, remaining)
+}
+
+// retryToCore delivers pending entries that now route to core (their channel
+// was removed, or never routed anywhere in the first place) through a normal
+// mutation, so they land in the local view instead of a channel bucket. It
+// returns the entries that still could not be delivered.
+func retryToCore(ctx *appContext, entries []model.Entry) []model.Entry {
+	view, err := ctx.engine.MutateView(context.Background(), ctx.config.Machine, func(database *model.Database) error {
+		existing := make(map[string]bool, len(database.Entries))
+		for _, e := range database.Entries {
+			existing[strings.ToLower(strings.TrimSpace(e.ID))] = true
+		}
+		for _, entry := range entries {
+			if existing[strings.ToLower(strings.TrimSpace(entry.ID))] {
+				continue
+			}
+			database.Entries = append(database.Entries, entry)
+		}
+		return nil
+	})
+	if absorbed := absorbWriteThrough(ctx, err); absorbed != nil {
+		verbosef(ctx.globals, "retrying pending writes to core failed: %v", err)
+		return entries
+	}
+	cacheRulesFromView(ctx, view)
+	if !ctx.globals.quiet {
+		fmt.Fprintf(os.Stderr, "Delivered %d pending entr%s to core.\n", len(entries), pluralIES(len(entries)))
+	}
+	return nil
 }
 
 func pluralIES(n int) string {
@@ -307,36 +391,43 @@ func fetchCoreBlob(ctx *appContext) []byte {
 
 // fetchRulesDocument downloads and decodes the rules document directly,
 // without touching history at all, for the administrative commands that only
-// need to fetch-modify-put it.
-func fetchRulesDocument(ctx *appContext) (*rules.Document, string, bool, error) {
+// need to fetch-modify-put it. The raw blob is returned alongside the decoded
+// document purely so a subsequent putRulesDocument can reuse its PBKDF2 salt
+// instead of fetching core for one.
+func fetchRulesDocument(ctx *appContext) (doc *rules.Document, revision string, blob []byte, exists bool, err error) {
 	rulesID := identity.SyncRulesDatabaseID(ctx.token, ctx.password)
 	if rulesID == "" {
-		return nil, "", false, errors.New("cannot address the sync rules bucket without a server token and history password")
+		return nil, "", nil, false, errors.New("cannot address the sync rules bucket without a server token and history password")
 	}
 	client := bucketClientFor(ctx, rulesID)
 	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	download, err := client.Get(callCtx)
 	if errors.Is(err, server.ErrNotFound) {
-		return nil, "", false, nil
+		return nil, "", nil, false, nil
 	}
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", nil, false, err
 	}
 	payload, _, err := clipdb.DecodeRaw(download.Data, ctx.password)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", nil, false, err
 	}
-	doc, err := rules.Parse(payload)
+	parsed, err := rules.Parse(payload)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", nil, false, err
 	}
-	return doc, download.Revision, true, nil
+	return parsed, download.Revision, download.Data, true, nil
 }
 
-// putRulesDocument uploads doc to the rules bucket, sharing the core
-// database's PBKDF2 salt when one already exists.
-func putRulesDocument(ctx *appContext, doc *rules.Document, revision string, createOnly bool) error {
+// putRulesDocument uploads doc to the rules bucket. existingBlob is the raw
+// container the rules bucket was last fetched as (nil when creating it for
+// the first time); its PBKDF2 salt is reused when present, so a document
+// being edited never needs an extra request just to keep the salt stable.
+// Only a brand-new rules bucket falls back to the core database's salt, per
+// spec section 5 (a channel or rules blob created for the first time copies
+// core's salt so one PBKDF2 derivation serves everything).
+func putRulesDocument(ctx *appContext, doc *rules.Document, revision string, existingBlob []byte, createOnly bool) error {
 	rulesID := identity.SyncRulesDatabaseID(ctx.token, ctx.password)
 	if rulesID == "" {
 		return errors.New("cannot address the sync rules bucket without a server token and history password")
@@ -346,9 +437,16 @@ func putRulesDocument(ctx *appContext, doc *rules.Document, revision string, cre
 		return err
 	}
 	var salt []byte
-	if coreBlob := fetchCoreBlob(ctx); len(coreBlob) > 0 {
-		if _, coreSalt, decodeErr := clipdb.DecodeRaw(coreBlob, ctx.password); decodeErr == nil {
-			salt = coreSalt
+	if len(existingBlob) > 0 {
+		if _, existingSalt, decodeErr := clipdb.DecodeRaw(existingBlob, ctx.password); decodeErr == nil {
+			salt = existingSalt
+		}
+	}
+	if len(salt) == 0 {
+		if coreBlob := fetchCoreBlob(ctx); len(coreBlob) > 0 {
+			if _, coreSalt, decodeErr := clipdb.DecodeRaw(coreBlob, ctx.password); decodeErr == nil {
+				salt = coreSalt
+			}
 		}
 	}
 	blob, err := clipdb.EncodeRaw(payload, ctx.password, salt)
@@ -453,17 +551,17 @@ func refuseIfReadOnly(doc *rules.Document) error {
 // selfRegisterDevice runs after a successful sync: an updated client whose
 // device name is missing from Devices adds itself with Channels ["*"] via one
 // best-effort compare-and-swap. Failure here must never fail the sync.
+//
+// It re-fetches the rules document directly rather than reusing view.Rules:
+// that avoids the case where view.RulesRevision is blank (the local cache won
+// the last-writer-wins merge, so it is not what the server holds and an
+// If-Match against it would be meaningless), and it gets the rules bucket's
+// own raw blob for putRulesDocument to reuse its PBKDF2 salt from.
 func selfRegisterDevice(ctx *appContext, view *syncengine.ViewState) {
 	if view == nil || view.Rules == nil || !view.Rules.Enabled {
 		return
 	}
 	if rules.ReadOnly(view.Rules) {
-		return
-	}
-	// Without a known revision the document in effect is not what the server
-	// holds (the local cache won the last-writer-wins merge), and an If-Match
-	// compare-and-swap would claim to be based on a document it never saw.
-	if view.RulesRevision == "" {
 		return
 	}
 	machine := strings.TrimSpace(ctx.config.Machine)
@@ -472,11 +570,23 @@ func selfRegisterDevice(ctx *appContext, view *syncengine.ViewState) {
 			return
 		}
 	}
-	candidate := cloneDoc(view.Rules)
+	doc, revision, blob, exists, err := fetchRulesDocument(ctx)
+	if err != nil || !exists || doc == nil || !doc.Enabled || rules.ReadOnly(doc) {
+		if err != nil {
+			verbosef(ctx.globals, "could not self-register this device in sync rules: %v", err)
+		}
+		return
+	}
+	for _, device := range doc.Devices {
+		if strings.EqualFold(strings.TrimSpace(device.Name), machine) {
+			return // already registered by a racing writer
+		}
+	}
+	candidate := cloneDoc(doc)
 	candidate.Devices = append(candidate.Devices, rules.Device{Name: ctx.config.Machine, Channels: []string{"*"}})
-	candidate.UpdatedUnixMs = nextTimestamp(view.Rules.UpdatedUnixMs)
+	candidate.UpdatedUnixMs = nextTimestamp(doc.UpdatedUnixMs)
 	candidate.UpdatedBy = ctx.config.Machine
-	if err := putRulesDocument(ctx, candidate, view.RulesRevision, false); err != nil {
+	if err := putRulesDocument(ctx, candidate, revision, blob, false); err != nil {
 		verbosef(ctx.globals, "could not self-register this device in sync rules: %v", err)
 		return
 	}
@@ -578,7 +688,7 @@ func runRulesEnable(ctx *appContext, args []string) error {
 	if len(fs.Args()) > 0 {
 		return fail(2, "rules enable takes no positional arguments")
 	}
-	doc, revision, exists, err := fetchRulesDocument(ctx)
+	doc, revision, blob, exists, err := fetchRulesDocument(ctx)
 	if err != nil {
 		return mapRuntimeError("rules enable failed", err)
 	}
@@ -607,7 +717,7 @@ func runRulesEnable(ctx *appContext, args []string) error {
 	if err := rules.Validate(doc); err != nil {
 		return fail(2, "%v", err)
 	}
-	if err := putRulesDocument(ctx, doc, revision, createOnly); err != nil {
+	if err := putRulesDocument(ctx, doc, revision, blob, createOnly); err != nil {
 		return mapRuntimeError("rules enable failed", err)
 	}
 	cacheRulesDocument(ctx, doc)
@@ -629,7 +739,7 @@ func runRulesDisable(ctx *appContext, args []string) error {
 	if len(fs.Args()) > 0 {
 		return fail(2, "rules disable takes no positional arguments")
 	}
-	doc, revision, exists, err := fetchRulesDocument(ctx)
+	doc, revision, blob, exists, err := fetchRulesDocument(ctx)
 	if err != nil {
 		return mapRuntimeError("rules disable failed", err)
 	}
@@ -649,7 +759,7 @@ func runRulesDisable(ctx *appContext, args []string) error {
 		doc.Enabled = false
 		doc.UpdatedUnixMs = time.Now().UnixMilli()
 		doc.UpdatedBy = ctx.config.Machine
-		if err := putRulesDocument(ctx, doc, revision, false); err != nil {
+		if err := putRulesDocument(ctx, doc, revision, blob, false); err != nil {
 			return mapRuntimeError("rules disable failed", err)
 		}
 	}
@@ -690,7 +800,7 @@ func runRulesChannelAdd(ctx *appContext, args []string) error {
 		return fail(2, "at least one of --group, --source-device, or --kind is required")
 	}
 
-	doc, revision, exists, err := fetchRulesDocument(ctx)
+	doc, revision, blob, exists, err := fetchRulesDocument(ctx)
 	if err != nil {
 		return mapRuntimeError("rules channel add failed", err)
 	}
@@ -711,7 +821,7 @@ func runRulesChannelAdd(ctx *appContext, args []string) error {
 	}
 	candidate.UpdatedUnixMs = time.Now().UnixMilli()
 	candidate.UpdatedBy = ctx.config.Machine
-	if err := putRulesDocument(ctx, candidate, revision, false); err != nil {
+	if err := putRulesDocument(ctx, candidate, revision, blob, false); err != nil {
 		return mapRuntimeError("rules channel add failed", err)
 	}
 	cacheRulesDocument(ctx, candidate)
@@ -731,6 +841,19 @@ func runRulesChannelAdd(ctx *appContext, args []string) error {
 // core, and the ordinary two-phase upload uploads the affected channels
 // before emptying this one (gain-before-lose). Step 2 then removes the
 // channel from the rules document itself, once it is verifiably empty.
+//
+// Step 2 runs only when step 1 is verified to have actually committed the
+// reroute under the intended document: MutateView is not told which document
+// to route against directly (there is no such parameter), so step 1 drives it
+// by overriding Engine.CachedRules with a transitional document and relying
+// on rules.MergeDocuments's last-writer-wins comparison to prefer it over
+// whatever MutateView's own fetch returns. That can lose to a genuinely newer
+// remote edit made between the initial read and this call, in which case the
+// reroute silently never happened under the document this function built -
+// so step 1's result is checked two ways before step 2 is allowed to touch
+// the rules document at all: the document actually in effect during the
+// mutation must be the transitional one (by UpdatedUnixMs/UpdatedBy), and the
+// channel being removed must show no resident entries left in the result.
 func runRulesChannelRemove(ctx *appContext, args []string) error {
 	fs := newFlagSet("rules channel remove")
 	addOutputFlags(fs, &ctx.globals)
@@ -790,14 +913,30 @@ func runRulesChannelRemove(ctx *appContext, args []string) error {
 	ctx.engine.CachedRules = transitional
 
 	mutateCtx, mutateCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	_, mutateErr := ctx.engine.MutateView(mutateCtx, machine, func(*model.Database) error { return nil })
+	mutatedView, mutateErr := ctx.engine.MutateView(mutateCtx, machine, func(*model.Database) error { return nil })
 	mutateCancel()
 	if absorbed := absorbWriteThrough(ctx, mutateErr); absorbed != nil {
 		return mapRuntimeError("rules channel remove failed while relocating entries", mutateErr)
 	}
 
+	// Verify the reroute actually ran under the transitional document: a
+	// genuinely newer remote edit can win MergeDocuments's last-writer-wins
+	// comparison instead, in which case nothing was rerouted here at all.
+	effective := mutatedView.Rules
+	if effective == nil || effective.UpdatedUnixMs != transitional.UpdatedUnixMs || effective.UpdatedBy != transitional.UpdatedBy {
+		return fail(1, "Sync rules changed on another device. Run the command again.")
+	}
+	// Defense in depth: even under the right document, confirm no entry is
+	// still reported resident in the channel being removed before deleting it
+	// from the document.
+	for _, residentKey := range mutatedView.Residence {
+		if residentKey == key {
+			return fail(1, "channel %q still has entries after relocating them; run the command again", name)
+		}
+	}
+
 	// Step 2: remove the now-empty channel from the rules document itself.
-	doc, revision, exists, err := fetchRulesDocument(ctx)
+	doc, revision, blob, exists, err := fetchRulesDocument(ctx)
 	if err != nil {
 		return mapRuntimeError("rules channel remove failed", err)
 	}
@@ -817,7 +956,7 @@ func runRulesChannelRemove(ctx *appContext, args []string) error {
 	if err := rules.Validate(finalDoc); err != nil {
 		return fail(2, "%v", err)
 	}
-	if err := putRulesDocument(ctx, finalDoc, revision, false); err != nil {
+	if err := putRulesDocument(ctx, finalDoc, revision, blob, false); err != nil {
 		return mapRuntimeError("rules channel remove failed", err)
 	}
 	cacheRulesDocument(ctx, finalDoc)
@@ -847,7 +986,7 @@ func runRulesDeviceSet(ctx *appContext, args []string) error {
 		return fail(2, "--channels is required")
 	}
 
-	doc, revision, exists, err := fetchRulesDocument(ctx)
+	doc, revision, blob, exists, err := fetchRulesDocument(ctx)
 	if err != nil {
 		return mapRuntimeError("rules device set failed", err)
 	}
@@ -887,7 +1026,7 @@ func runRulesDeviceSet(ctx *appContext, args []string) error {
 	}
 	candidate.UpdatedUnixMs = time.Now().UnixMilli()
 	candidate.UpdatedBy = ctx.config.Machine
-	if err := putRulesDocument(ctx, candidate, revision, false); err != nil {
+	if err := putRulesDocument(ctx, candidate, revision, blob, false); err != nil {
 		return mapRuntimeError("rules device set failed", err)
 	}
 	cacheRulesDocument(ctx, candidate)

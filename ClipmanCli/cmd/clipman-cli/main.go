@@ -492,7 +492,7 @@ func loadContext(g globals) (*appContext, error) {
 	verbosef(g, "server %s", serverURL)
 	verbosef(g, "history bucket %s", fingerprint(databaseID))
 	limits := clipdb.Limits{MaxBlobBytes: cfg.Limits.MaxBlobBytes, MaxJSONBytes: cfg.Limits.MaxJSONBytes, MaxEntries: cfg.Limits.MaxEntries, MaxTextBytes: cfg.Limits.MaxTextBytes}
-	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3, Token: token, CachedRules: loadRulesCache(path)}
+	engine := &syncengine.Engine{Client: client, Password: password, Limits: limits, Retries: 3, Token: token, CachedRules: initialCachedRules(path)}
 	return &appContext{globals: g, configPath: path, config: cfg, token: token, password: password, databaseID: databaseID, client: client, engine: engine}, nil
 }
 

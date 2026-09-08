@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/config"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/identity"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/model"
+	"github.com/OnjLouis/Clipman/ClipmanCli/internal/platform"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/rules"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/server"
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/syncengine"
@@ -41,6 +44,15 @@ type fakeBucket struct {
 	revision string
 }
 
+// swapSpec is a one-shot content swap armed on a bucket: after `remaining`
+// more GETs are served from its current content, it is replaced with blob
+// under a fresh revision. This is how tests simulate another device
+// concurrently editing a document between two reads of it.
+type swapSpec struct {
+	remaining int
+	blob      []byte
+}
+
 // fakeMultiServer is a multi-bucket stand-in for Clipman Server: GET/PUT
 // /api/v1/database/{id} for any number of database ids, enforcing the
 // If-Match/If-None-Match preconditions the engine and the rules commands
@@ -51,6 +63,7 @@ type fakeMultiServer struct {
 	requests []string
 	created  map[string]bool
 	broken   map[string]bool
+	swaps    map[string]*swapSpec
 	sequence int
 }
 
@@ -59,7 +72,17 @@ func newFakeMultiServer() *fakeMultiServer {
 		buckets: map[string]*fakeBucket{},
 		created: map[string]bool{},
 		broken:  map[string]bool{},
+		swaps:   map[string]*swapSpec{},
 	}
+}
+
+// swapAfterGets arms a one-shot content swap on bucket id: the `count`-th GET
+// still returns whatever is currently stored, and the swap happens right
+// after, so the very next GET (and every one after) sees blob instead.
+func (s *fakeMultiServer) swapAfterGets(id string, count int, blob []byte) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.swaps[id] = &swapSpec{remaining: count, blob: blob}
 }
 
 func (s *fakeMultiServer) breakBucket(id string) {
@@ -92,6 +115,14 @@ func (s *fakeMultiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("X-Clipman-Revision", bucket.revision)
 		_, _ = w.Write(bucket.blob)
+		if spec, ok := s.swaps[id]; ok {
+			spec.remaining--
+			if spec.remaining <= 0 {
+				s.sequence++
+				s.buckets[id] = &fakeBucket{blob: spec.blob, revision: fmt.Sprintf("revision-%d", s.sequence)}
+				delete(s.swaps, id)
+			}
+		}
 	case http.MethodPut:
 		data, readErr := io.ReadAll(r.Body)
 		if readErr != nil {
@@ -256,6 +287,13 @@ func testHistoryEntry(id, text, group string, stamp int64) model.Entry {
 		CreatedUnixMs: stamp, LastUsedUnixMs: stamp, ModifiedUnixMs: stamp,
 		Extra: map[string]json.RawMessage{},
 	}
+}
+
+// imageEntryForTest carries the rich text the RichTextImages route matches.
+func imageEntryForTest(id, text string, stamp int64) model.Entry {
+	entry := testHistoryEntry(id, text, "", stamp)
+	entry.Extra["RichText"] = json.RawMessage(`{"HtmlFragment":"<img src=\"data:image/png;base64,AAAA\">"}`)
+	return entry
 }
 
 func historyDatabaseWith(entries ...model.Entry) model.Database {
@@ -560,5 +598,225 @@ func TestRulesCommandsRefuseReadOnlyFutureDocument(t *testing.T) {
 		if err := runRules(ctx, args); err == nil {
 			t.Fatalf("rules %v: expected a refusal for a read-only future document", args)
 		}
+	}
+}
+
+// --- fixes from code review ------------------------------------------------
+
+// CRITICAL 1: absorbWriteThrough must not report success when a subscribed
+// channel upload also failed (WriteThroughError.Committed == false) - it must
+// still park the pending entries (they are real), but return the error so the
+// caller reports a nonzero exit.
+func TestAbsorbWriteThroughReportsFailureWhenChannelUploadAlsoFails(t *testing.T) {
+	fake, ctx := newRulesTestContext(t)
+	fake.storeRules(t, &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 1000, UpdatedBy: "Desktop",
+		Channels: []rules.Channel{
+			{Name: "Work", Route: rules.Route{Groups: []string{"Work"}}},
+			{Name: "Images", Route: rules.Route{Kind: "RichTextImages"}},
+		},
+		// Subscribed to "work" (a normal uploaded channel) but not "images"
+		// (which only ever reaches the server through write-through).
+		Devices: []rules.Device{{Name: rulesCliMachine, Channels: []string{"work"}}},
+	})
+	fake.breakBucket(rulesChannelBucketID("work"))
+	fake.breakBucket(rulesChannelBucketID("images"))
+
+	_, mutateErr := ctx.engine.MutateView(context.Background(), rulesCliMachine, func(database *model.Database) error {
+		database.Entries = append(database.Entries, testHistoryEntry("w", "work entry", "Work", 1000))
+		database.Entries = append(database.Entries, imageEntryForTest("i", "image entry", 1000))
+		return nil
+	})
+	if mutateErr == nil {
+		t.Fatal("expected an error: a subscribed channel upload failed alongside a write-through failure")
+	}
+
+	if err := absorbWriteThrough(ctx, mutateErr); err == nil {
+		t.Fatal("absorbWriteThrough must report failure (nonzero exit) when Committed is false")
+	}
+	pending := loadPendingWrites(ctx.configPath)
+	if len(pending["images"]) != 1 {
+		t.Fatalf("pending = %#v, want the undelivered image entry parked despite the reported failure", pending)
+	}
+}
+
+// CRITICAL 2: rules channel remove must never touch the rules document when
+// step 1 (relocating the channel's entries) did not actually succeed.
+func TestRulesChannelRemoveAbortsWhenChannelUploadFails(t *testing.T) {
+	fake, ctx := newRulesTestContext(t)
+	fake.storeRules(t, &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 1000, UpdatedBy: "Desktop",
+		Channels: []rules.Channel{{Name: "Work", Route: rules.Route{Groups: []string{"Work"}}}},
+		Devices:  []rules.Device{{Name: rulesCliMachine, Channels: []string{"*"}}},
+	})
+	fake.storeDatabase(t, rulesChannelBucketID("work"), historyDatabaseWith(testHistoryEntry("w1", "hello", "Work", 1000)))
+	fake.breakBucket(rulesChannelBucketID("work"))
+
+	before := fake.rulesDoc(t)
+
+	if err := runRules(ctx, []string{"channel", "remove", "Work"}); err == nil {
+		t.Fatal("channel remove must fail when the channel's own bucket upload fails")
+	}
+
+	after := fake.rulesDoc(t)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("rules document changed despite the failed relocation:\n before %#v\n after  %#v", before, after)
+	}
+	if fake.count("PUT", rulesBucketIDForTest()) != 0 {
+		t.Fatal("the rules bucket must not be written when step 1 fails")
+	}
+	work := fake.database(t, rulesChannelBucketID("work"))
+	if !rulesHasEntry(work, "w1") {
+		t.Fatal("the entry must still be in the channel: it was never actually relocated")
+	}
+}
+
+// IMPORTANT 3: a genuinely newer remote rules edit, arriving between the
+// initial read and the mutation, must abort the command rather than silently
+// skip the reroute while still deleting the channel from the document.
+func TestRulesChannelRemoveAbortsOnConcurrentRulesEdit(t *testing.T) {
+	fake, ctx := newRulesTestContext(t)
+	original := &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 1000, UpdatedBy: "Desktop",
+		Channels: []rules.Channel{{Name: "Work", Route: rules.Route{Groups: []string{"Work"}}}},
+		Devices:  []rules.Device{{Name: rulesCliMachine, Channels: []string{"*"}}},
+	}
+	fake.storeRules(t, original)
+	fake.storeDatabase(t, rulesChannelBucketID("work"), historyDatabaseWith(testHistoryEntry("w1", "hello", "Work", 1000)))
+
+	// A concurrent edit from another device, timestamped far enough in the
+	// future to always win the last-writer-wins merge against this command's
+	// transitional document.
+	concurrent := &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 99999999999999, UpdatedBy: "Other-Device",
+		Channels: []rules.Channel{{Name: "Work", Route: rules.Route{Groups: []string{"Work"}}}},
+		Devices:  []rules.Device{{Name: rulesCliMachine, Channels: []string{"*"}}},
+	}
+	payload, err := rules.Serialize(concurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrentBlob, err := clipdb.EncodeRaw(payload, rulesCliPassword, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The 1st GET (this command's initial ReadView) still sees `original`;
+	// every GET after that (starting with MutateView's own internal read)
+	// sees the concurrent edit instead.
+	fake.swapAfterGets(rulesBucketIDForTest(), 1, concurrentBlob)
+
+	err = runRules(ctx, []string{"channel", "remove", "Work"})
+	if err == nil || !strings.Contains(err.Error(), "changed on another device") {
+		t.Fatalf("error = %v, want a concurrent-edit refusal", err)
+	}
+
+	work := fake.database(t, rulesChannelBucketID("work"))
+	if !rulesHasEntry(work, "w1") {
+		t.Fatal("the entry must not be relocated out of the channel under the wrong document")
+	}
+	after := fake.rulesDoc(t)
+	if after.UpdatedUnixMs != concurrent.UpdatedUnixMs || after.UpdatedBy != concurrent.UpdatedBy {
+		t.Fatalf("rules document changed unexpectedly: %#v", after)
+	}
+}
+
+// IMPORTANT 4: a read-only (future-version) cached document must never arm
+// the engine's 404 re-upload fallback, since this client is not allowed to
+// rewrite a document it only partly understands.
+func TestReadOnlyRulesCacheNeverArmsReupload(t *testing.T) {
+	fake, ctx := newRulesTestContext(t)
+	future := &rules.Document{
+		Clipman: "sync-rules", Version: 2, Enabled: true,
+		UpdatedUnixMs: 1000, UpdatedBy: "Desktop",
+		Channels: []rules.Channel{{Name: "Weird", Route: rules.Route{Kind: "SomeFutureKind"}}},
+	}
+	data, err := rules.Serialize(future)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := platform.SavePrivate(rulesCachePath(ctx.configPath), data); err != nil {
+		t.Fatal(err)
+	}
+	// Mirrors what loadContext does at process startup.
+	ctx.engine.CachedRules = initialCachedRules(ctx.configPath)
+	if ctx.engine.CachedRules != nil {
+		t.Fatal("a read-only cached document must not arm the engine's CachedRules")
+	}
+
+	// The rules bucket 404s (nothing stored server-side). A command that
+	// reads rules must not restore the cached document by PUTting it back.
+	captureStdout(t, func() {
+		if err := runRules(ctx, []string{"show"}); err != nil {
+			t.Fatalf("rules show: %v", err)
+		}
+	})
+	if fake.count("PUT", rulesBucketIDForTest()) != 0 {
+		t.Fatal("a read-only cached document must never be re-uploaded on a 404")
+	}
+}
+
+// MINOR 5: putRulesDocument must reuse the salt from the rules bucket's own
+// just-downloaded blob instead of fetching core, whenever that blob exists.
+func TestPutRulesDocumentReusesRulesBlobSaltWithoutFetchingCore(t *testing.T) {
+	fake, ctx := newRulesTestContext(t)
+	fake.storeRules(t, &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 1000, UpdatedBy: "Desktop",
+	})
+	// No core bucket exists at all; a fallback fetch for salt would be a GET
+	// against a bucket that has never been created.
+	if err := runRules(ctx, []string{"enable"}); err != nil {
+		t.Fatalf("rules enable: %v", err)
+	}
+	if fake.count("GET", rulesCoreBucketID()) != 0 {
+		t.Fatal("putRulesDocument fetched core for salt despite already holding the rules blob's own salt")
+	}
+}
+
+// MINOR 6: a pending write-through entry must be re-routed against the
+// CURRENT rules document at retry time, not resent to the channel key it was
+// originally parked under - that channel may have been removed since.
+func TestPendingRetryRegroupsToCurrentRulesAfterChannelRemoval(t *testing.T) {
+	fake, ctx := newRulesTestContext(t)
+	fake.storeRules(t, &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 1000, UpdatedBy: "Desktop",
+		Channels: []rules.Channel{{Name: "Work", Route: rules.Route{Groups: []string{"Work"}}}},
+		Devices:  []rules.Device{{Name: rulesCliMachine, Channels: []string{}}},
+	})
+	fake.breakBucket(rulesChannelBucketID("work"))
+
+	if err := runPut(ctx, []string{"--text", "hello", "--group", "Work"}); err != nil {
+		t.Fatalf("put must succeed locally even when write-through fails: %v", err)
+	}
+	pending := loadPendingWrites(ctx.configPath)
+	if len(pending["work"]) != 1 {
+		t.Fatalf("pending = %#v, want one entry parked for work", pending)
+	}
+
+	// Another device removes the "work" channel entirely while the entry is
+	// still parked for it.
+	fake.storeRules(t, &rules.Document{
+		Clipman: "sync-rules", Version: 1, Enabled: true,
+		UpdatedUnixMs: 2000, UpdatedBy: "Desktop",
+		Devices: []rules.Device{{Name: rulesCliMachine, Channels: []string{}}},
+	})
+
+	if err := runSync(ctx, []string{}); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if fake.exists(rulesChannelBucketID("work")) {
+		t.Fatal("the removed channel's bucket must not be recreated by the pending retry")
+	}
+	if pending := loadPendingWrites(ctx.configPath); len(pending) != 0 {
+		t.Fatalf("pending writes were not cleared: %#v", pending)
+	}
+	core := fake.database(t, rulesCoreBucketID())
+	if len(core.Entries) != 1 || core.Entries[0].Text != "hello" {
+		t.Fatalf("core entries = %#v, want the re-routed pending entry delivered to core", core.Entries)
 	}
 }
