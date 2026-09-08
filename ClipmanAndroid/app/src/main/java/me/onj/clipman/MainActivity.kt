@@ -527,6 +527,12 @@ private fun ClipmanApp(
     var isFetchingWebsiteTitle by remember { mutableStateOf(false) }
     var approvedPhotoSave by remember { mutableStateOf<Pair<ClipEntry, EmbeddedImageData>?>(null) }
     var pendingLegacyPhotoSave by remember { mutableStateOf<Pair<ClipEntry, EmbeddedImageData>?>(null) }
+    var showSyncRules by remember { mutableStateOf(false) }
+    var syncRules by remember { mutableStateOf<MobileSyncRulesSnapshot?>(null) }
+    var syncRulesSubscribeToAll by remember { mutableStateOf(true) }
+    var syncRulesSelection by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isSavingSyncRules by remember { mutableStateOf(false) }
+    var syncRulesStatus by remember { mutableStateOf("") }
 
     fun setTransientStatus(message: String) {
         statusSequence += 1
@@ -759,8 +765,24 @@ private fun ClipmanApp(
         showConnectionSettings = false
     }
 
-    BackHandler(enabled = showConnectionSettings && !isSavingSettings) {
+    BackHandler(enabled = showConnectionSettings && !showSyncRules && !isSavingSettings) {
         discardSettingsChanges()
+    }
+
+    BackHandler(enabled = showSyncRules && !isSavingSyncRules) {
+        showSyncRules = false
+    }
+
+    LaunchedEffect(showSyncRules) {
+        if (!showSyncRules) return@LaunchedEffect
+        val effectiveDeviceName = deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
+        val snapshot = withContext(Dispatchers.IO) {
+            runCatching { historyRepository.syncRulesSnapshot(effectiveDeviceName) }.getOrNull()
+        } ?: MobileSyncRulesSnapshot(null, false, true, emptyList(), false, emptyList())
+        syncRules = snapshot
+        syncRulesSubscribeToAll = snapshot.subscribesToAll
+        syncRulesSelection = snapshot.subscribedKeys.toSet()
+        syncRulesStatus = ""
     }
 
     fun saveSettings(snapshot: MobileSettingsSnapshot) {
@@ -807,6 +829,7 @@ private fun ClipmanApp(
         val requestedCaCertPem = serverCaCertPem
         val requestedCaHost = serverCaHost
         val requestedPassword = password
+        val requestedDeviceName = deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
         val databaseSnapshot = database
         val requestedRevision = currentRevision
         val requestedPendingChanges = hasPendingLocalChanges
@@ -823,7 +846,9 @@ private fun ClipmanApp(
             if (requestedMode == MobileStorageMode.Server && !hasLoadedHistory) {
                 val cachedPreview = withContext(Dispatchers.IO) {
                     storageMutex.withLock {
-                        runCatching { historyRepository.loadLocalOrNull(requestedPassword) }.getOrNull()
+                        runCatching {
+                            historyRepository.loadCachedView(requestedPassword, requestedDeviceName)
+                        }.getOrNull()
                     }
                 }
                 if (generation != loadGeneration) {
@@ -847,8 +872,18 @@ private fun ClipmanApp(
                         } else {
                             try {
                                 if (checkRevisionFirst && requestedRevision.isNotBlank() && !requestedPendingChanges) {
-                                    val metadata = ServerStorageClient(requestedServerUrl, requestedToken, requestedPassword, requestedCaCertPem, requestedCaHost).metadata()
-                                    if (metadata == requestedRevision) {
+                                    // The rules bucket and every subscribed channel are
+                                    // checked, not just the main history bucket.
+                                    val unchanged = historyRepository.serverUnchanged(
+                                        requestedServerUrl,
+                                        requestedToken,
+                                        requestedPassword,
+                                        requestedCaCertPem,
+                                        requestedCaHost,
+                                        requestedDeviceName,
+                                        requestedRevision
+                                    )
+                                    if (unchanged) {
                                         return@runCatching MobileSyncResult(databaseSnapshot, requestedRevision, false)
                                     }
                                 }
@@ -860,10 +895,12 @@ private fun ClipmanApp(
                                     requestedCaHost,
                                     currentForSync,
                                     requestedBackup,
-                                    localAlreadySaved = localCacheIsCurrent
+                                    localAlreadySaved = localCacheIsCurrent,
+                                    deviceName = requestedDeviceName
                                 )
                             } catch (error: Throwable) {
-                                val cached = historyRepository.loadLocalOrNull(requestedPassword) ?: throw error
+                                val cached = historyRepository.loadCachedView(requestedPassword, requestedDeviceName)
+                                    ?: throw error
                                 MobileSyncResult(
                                     database = cached,
                                     revision = requestedRevision,
@@ -914,6 +951,10 @@ private fun ClipmanApp(
                 if (sync.backupError != null) {
                     setSteadyStatus("History loaded, but cloud backup failed: ${sync.backupError}")
                 }
+                sync.writeThroughMessage?.let { message ->
+                    setTransientStatus(message)
+                    announce(view, message)
+                }
                 if (announceResult) announce(view, "History refreshed")
                 if (!launchClipboardHandled) {
                     launchClipboardHandled = true
@@ -947,6 +988,7 @@ private fun ClipmanApp(
         val requestedCaCertPem = serverCaCertPem
         val requestedCaHost = serverCaHost
         val requestedPassword = password
+        val requestedDeviceName = deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
         val requestedBackup = backupOptions()
         val requestedRevision = currentRevision
         val updatedLocal = mutation(database)
@@ -986,7 +1028,8 @@ private fun ClipmanApp(
                                 serverCaHost = requestedCaHost,
                                 current = updatedLocal,
                                 expectedRevision = requestedRevision,
-                                backupOptions = requestedBackup
+                                backupOptions = requestedBackup,
+                                deviceName = requestedDeviceName
                             )
                         }
                     }
@@ -1008,13 +1051,14 @@ private fun ClipmanApp(
                 if (sync.backupError != null) {
                     setSteadyStatus("${completed.trimEnd('.')} but cloud backup failed: ${sync.backupError}")
                 } else {
-                    setTransientStatus(completed)
+                    setTransientStatus(sync.writeThroughMessage?.let { "$completed $it" } ?: completed)
                     setSteadyStatus(
                         if (requestedMode == MobileStorageMode.Server) "Ready. Server sync connected."
                         else "Ready. Using local history.",
                         revealImmediately = false
                     )
                 }
+                sync.writeThroughMessage?.let { announce(view, it) }
             }.onFailure { error ->
                 if (error is LocalHistoryWriteException) {
                     val restored = recoverHistoryAfterLocalWriteFailure(previousDatabase, error.reloadedDatabase)
@@ -1025,7 +1069,9 @@ private fun ClipmanApp(
                     setSteadyStatus(localHistoryWriteFailureStatus(actionText, error.cause ?: error))
                 } else if (error is MobileMutationException && !error.localSaved) {
                     val reloaded = withContext(Dispatchers.IO) {
-                        runCatching { historyRepository.loadLocalOrNull(requestedPassword) }.getOrNull()
+                        runCatching {
+                            historyRepository.loadCachedView(requestedPassword, requestedDeviceName)
+                        }.getOrNull()
                     }
                     val restored = recoverHistoryAfterLocalWriteFailure(previousDatabase, reloaded)
                     database = restored
@@ -1569,6 +1615,72 @@ private fun ClipmanApp(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (showSyncRules) {
+            SyncRulesScreen(
+                deviceName = deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
+                snapshot = syncRules,
+                isSaving = isSavingSyncRules,
+                status = syncRulesStatus,
+                subscribeToAll = syncRulesSubscribeToAll,
+                selectedChannelKeys = syncRulesSelection,
+                onSubscribeToAllChanged = { syncRulesSubscribeToAll = it },
+                onChannelSubscriptionChanged = { key, subscribed ->
+                    syncRulesSelection = if (subscribed) {
+                        syncRulesSelection + key
+                    } else {
+                        syncRulesSelection - key
+                    }
+                },
+                onClose = { if (!isSavingSyncRules) showSyncRules = false },
+                onSave = saveSyncRules@{
+                    if (isSavingSyncRules) return@saveSyncRules
+                    val snapshot = syncRules ?: return@saveSyncRules
+                    if (snapshot.document == null || snapshot.readOnly) return@saveSyncRules
+                    val effectiveDeviceName = deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
+                    val requestedChannels = if (syncRulesSubscribeToAll) {
+                        null
+                    } else {
+                        SyncRuleEngine.allChannelKeys(snapshot.document)
+                            .filter { syncRulesSelection.contains(it) }
+                    }
+                    isSavingSyncRules = true
+                    syncRulesStatus = "Saving sync rules..."
+                    announce(view, syncRulesStatus)
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            storageMutex.withLock {
+                                runCatching {
+                                    historyRepository.saveDeviceSubscription(
+                                        serverUrl,
+                                        token,
+                                        password,
+                                        serverCaCertPem,
+                                        serverCaHost,
+                                        effectiveDeviceName,
+                                        requestedChannels
+                                    )
+                                }
+                            }
+                        }
+                        isSavingSyncRules = false
+                        result.onSuccess {
+                            syncRules = withContext(Dispatchers.IO) {
+                                runCatching { historyRepository.syncRulesSnapshot(effectiveDeviceName) }.getOrNull()
+                            } ?: syncRules
+                            syncRulesStatus = "Sync rules saved for $effectiveDeviceName."
+                            announce(view, syncRulesStatus)
+                            currentRevision = ""
+                            loadHistory(announceResult = false)
+                        }.onFailure { error ->
+                            syncRulesStatus =
+                                "Could not save sync rules: ${error.message ?: error::class.java.simpleName}"
+                            announce(view, syncRulesStatus)
+                        }
+                    }
+                }
+            )
+            return@Column
+        }
         if (showConnectionSettings) {
             ConnectionSettingsScreen(
                 isSaving = isSavingSettings,
@@ -1665,6 +1777,7 @@ private fun ClipmanApp(
                         restoreHistoryBackup.launch(arrayOf("application/octet-stream", "application/gzip", "*/*"))
                     }
                 },
+                onOpenSyncRules = { showSyncRules = true },
                 onOpenTipJar = {
                     runCatching {
                         launchTrustedExternalActivity {
@@ -1750,7 +1863,10 @@ private fun ClipmanApp(
                                     val toSave = if (historyWasLoaded) {
                                         databaseSnapshot
                                     } else {
-                                        historyRepository.loadLocalOrNull(oldPassword)
+                                        historyRepository.loadCachedView(
+                                            oldPassword,
+                                            savedSettings.deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
+                                        )
                                     }
                                     if (toSave != null) {
                                         historyRepository.saveLocal(
@@ -2267,6 +2383,7 @@ private fun ConnectionSettingsScreen(
     cloudBackupLocationName: String,
     onChooseBackupFolder: () -> Unit,
     onRestoreHistoryBackup: () -> Unit,
+    onOpenSyncRules: () -> Unit,
     onOpenTipJar: () -> Unit,
     onOpenManual: () -> Unit,
     onCancel: () -> Unit,
@@ -2319,6 +2436,33 @@ private fun ConnectionSettingsScreen(
             } else {
                 "History is cached on this phone and merged with Clipman Server. Offline changes retry automatically."
             },
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(
+            text = "Sync rules",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        TextButton(
+            onClick = onOpenSyncRules,
+            enabled = !isSaving && storageMode == MobileStorageMode.Server,
+            modifier = Modifier.clearAndSetSemantics {
+                contentDescription = "Open sync rules"
+                role = Role.Button
+                if (isSaving || storageMode != MobileStorageMode.Server) {
+                    disabled()
+                } else {
+                    onClick(label = "Open sync rules") {
+                        onOpenSyncRules()
+                        true
+                    }
+                }
+            }
+        ) {
+            Text("Sync rules and channels", modifier = Modifier.clearAndSetSemantics { })
+        }
+        Text(
+            text = "Sync rules split history into channels and decide which of them this device downloads.",
             style = MaterialTheme.typography.bodySmall
         )
         Text(
@@ -2576,12 +2720,16 @@ internal fun SettingCheckboxRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     label: String,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    accessibilityLabel: String = ""
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .semantics(mergeDescendants = true) {}
+            .semantics(mergeDescendants = true) {
+                if (accessibilityLabel.isNotBlank()) contentDescription = accessibilityLabel
+                if (!enabled) disabled()
+            }
             .toggleable(
                 value = checked,
                 enabled = enabled,
@@ -2598,7 +2746,12 @@ internal fun SettingCheckboxRow(
             enabled = enabled,
             modifier = Modifier.clearAndSetSemantics {}
         )
-        Text(label)
+        // With an explicit accessibility label the visible text is cleared, so
+        // TalkBack announces the label once instead of label plus description.
+        Text(
+            text = label,
+            modifier = if (accessibilityLabel.isBlank()) Modifier else Modifier.clearAndSetSemantics { }
+        )
     }
 }
 
@@ -2894,6 +3047,204 @@ private fun ClipEntry.isLinkEntry(): Boolean {
 
 private fun entryRowText(entry: ClipEntry): String {
     return historyRowPreview(entry).text
+}
+
+/**
+ * The read-mostly sync rules screen of sync-rules-spec.md sections 4 and 7.
+ * Channels, their routes and every device's subscription are shown; the only
+ * thing this device may change is its own subscription, and nothing at all can
+ * be changed in a document written by a newer Clipman version.
+ */
+@Composable
+private fun SyncRulesScreen(
+    deviceName: String,
+    snapshot: MobileSyncRulesSnapshot?,
+    isSaving: Boolean,
+    status: String,
+    subscribeToAll: Boolean,
+    selectedChannelKeys: Set<String>,
+    onSubscribeToAllChanged: (Boolean) -> Unit,
+    onChannelSubscriptionChanged: (String, Boolean) -> Unit,
+    onClose: () -> Unit,
+    onSave: () -> Unit
+) {
+    val document = snapshot?.document
+    val readOnly = snapshot?.readOnly ?: true
+    val editable = !isSaving && document != null && !readOnly
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = onClose,
+                enabled = !isSaving,
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = "Back to settings"
+                    role = Role.Button
+                    if (isSaving) {
+                        disabled()
+                    } else {
+                        onClick(label = "Back to settings") {
+                            onClose()
+                            true
+                        }
+                    }
+                }
+            ) {
+                Text("Back", modifier = Modifier.clearAndSetSemantics { })
+            }
+            Text(
+                text = "Sync Rules",
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { heading() }
+            )
+            val saveLabel = if (isSaving) "Saving sync rules" else "Save sync rules"
+            TextButton(
+                onClick = onSave,
+                enabled = editable,
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = saveLabel
+                    role = Role.Button
+                    if (!editable) {
+                        disabled()
+                    } else {
+                        onClick(label = "Save sync rules") {
+                            onSave()
+                            true
+                        }
+                    }
+                }
+            ) {
+                Text(if (isSaving) "Saving" else "Save", modifier = Modifier.clearAndSetSemantics { })
+            }
+        }
+
+        Text(
+            text = "Enable sync rules only after every device runs a Clipman version that supports " +
+                "them. Older devices will continue to sync the main history only.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
+        if (status.isNotBlank()) {
+            Text(
+                text = status,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.semantics {
+                    contentDescription = status
+                    liveRegion = LiveRegionMode.Polite
+                }
+            )
+        }
+
+        val summary = when {
+            snapshot == null -> "Reading sync rules..."
+            document == null -> "This Clipman Server has no sync rules yet. Create them on a desktop Clipman."
+            !document.Enabled -> "Sync rules exist but are turned off. Every device syncs the main history only."
+            readOnly -> "These sync rules were written by a newer version of Clipman. They are shown here but cannot be changed on this device."
+            else -> "Sync rules are on. This device is ${deviceName}."
+        }
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.semantics { contentDescription = summary }
+        )
+
+        if (document == null) return@Column
+
+        if (snapshot != null && !snapshot.registered) {
+            Text(
+                text = "$deviceName is not listed in the sync rules yet, so it downloads every channel. " +
+                    "Clipman adds it on the next successful sync.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        if (snapshot != null && snapshot.pendingChannelKeys.isNotEmpty()) {
+            val waiting = snapshot.pendingChannelKeys.joinToString(", ") {
+                SyncRuleEngine.channelDisplayName(document, it)
+            }
+            Text(
+                text = "Entries for $waiting are waiting to be delivered to Clipman Server.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        Text(
+            text = "This device downloads",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        Text(
+            text = "The main history is always downloaded. Choose which channels join it on $deviceName.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        SettingCheckboxRow(
+            checked = subscribeToAll,
+            onCheckedChange = onSubscribeToAllChanged,
+            label = "Download every channel",
+            enabled = editable,
+            accessibilityLabel = "Download every channel on $deviceName"
+        )
+        document.Channels.forEach { channel ->
+            val key = SyncRuleEngine.channelKey(channel.Name)
+            if (key.isEmpty()) {
+                Text(
+                    text = "${channel.Name}: this channel name is not supported by this version of Clipman.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                return@forEach
+            }
+            SettingCheckboxRow(
+                checked = subscribeToAll || selectedChannelKeys.contains(key),
+                onCheckedChange = { checked -> onChannelSubscriptionChanged(key, checked) },
+                label = channel.Name,
+                enabled = editable && !subscribeToAll,
+                accessibilityLabel = "Download the ${channel.Name} channel on $deviceName"
+            )
+            Text(
+                text = SyncRuleEngine.routeDescription(channel.Route),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        Text(
+            text = "Devices",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        if (document.Devices.isEmpty()) {
+            Text("No device has been registered yet.", style = MaterialTheme.typography.bodySmall)
+        }
+        document.Devices.forEach { device ->
+            val channels = when {
+                device.Channels.size == 1 && device.Channels[0].trim() == "*" -> "every channel"
+                device.Channels.isEmpty() -> "the main history only"
+                else -> device.Channels.joinToString(", ") {
+                    SyncRuleEngine.channelDisplayName(document, SyncRuleEngine.normalizedName(it))
+                }
+            }
+            val line = "${device.Name} downloads $channels."
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics { contentDescription = line }
+            )
+        }
+
+        Text(
+            text = "Channels, routes and the global on switch are edited on a desktop Clipman.",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
 }
 
 @Composable

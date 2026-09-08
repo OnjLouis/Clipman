@@ -107,6 +107,33 @@ class AndroidSettings(context: Context) {
         get() = preferences.getString("cloudBackupLocationName", "") ?: ""
         set(value) = preferences.edit().putString("cloudBackupLocationName", value.trim()).apply()
 
+    /**
+     * The last-seen sync rules document (sync-rules-spec.md section 4,
+     * Caching). It keeps the rules in effect when the rules bucket is
+     * unreachable and re-creates the bucket when it disappears.
+     */
+    var syncRulesDocument: String
+        get() = getString("syncRulesDocument")
+        set(value) = putString("syncRulesDocument", value)
+
+    /**
+     * Entries bound for channels this device does not subscribe to whose
+     * write-through failed (spec section 6). They hold real clipboard content,
+     * so they are encrypted like every other secret here.
+     */
+    var pendingChannelWrites: String
+        get() = getString("pendingChannelWrites")
+        set(value) = putString("pendingChannelWrites", value)
+
+    /**
+     * Per-channel revisions and durable plaintext hashes recorded with the
+     * local channel caches, so a poll can skip unchanged channels and a save
+     * can upload only the channels whose plaintext actually changed.
+     */
+    var channelSyncState: String
+        get() = preferences.getString("channelSyncState", "") ?: ""
+        set(value) = preferences.edit().putString("channelSyncState", value).apply()
+
     private fun getString(key: String): String {
         val value = preferences.getString(key, "") ?: ""
         if (value.isBlank()) return ""
