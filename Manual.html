@@ -1016,7 +1016,7 @@
   <h2 id="sync-rules-and-channels">Sync Rules and Channels</h2>
   <p>Sync rules are an optional way to split shared history into named <strong>sync channels</strong> so a device downloads and uploads only the channels it wants instead of the entire database. Sync rules are off by default. While they are off, and for any entry no channel claims, history works exactly as described in <a href="#database-and-sync">Database and Sync</a>: everything lives together in the <strong>core</strong> channel, which is the existing shared history database. Turning sync rules on does not move anything by itself; an entry only moves once a routing rule is set up to claim it.</p>
 
-  <p>Each channel has a routing rule made of one or more conditions: a group, one or more source devices, or rich-text entries that contain an embedded image. Channels are checked in the order they are listed, and an entry goes into the first channel whose rule matches it. An entry that matches no channel's rule stays in core.</p>
+  <p>Each channel has a routing rule made of one or more conditions: a group, one or more source devices, or rich-text entries that contain an embedded image. When a rule combines more than one kind of condition, an entry must match all of them to route to that channel. Channels are checked in the order they are listed, and an entry goes into the first channel whose rule matches it. An entry that matches no channel's rule stays in core.</p>
 
   <p>Every named device also has its own list of subscribed channels; core is always included and cannot be removed from a device's subscription. A device that sync rules do not mention subscribes to everything, so an unconfigured or older device behaves the same as it would with sync rules off entirely. Subscriptions only control what that one device downloads and displays; they do not affect what other devices see.</p>
 
@@ -1030,11 +1030,12 @@
 
   <p>With sync rules enabled, manual order is kept separately within each channel. The combined history list orders entries by their position within their own channel, then by creation time, so reordering entries in one channel does not reorder entries that live in a different channel.</p>
 
-  <p>Known limitations:</p>
+  <p><strong>Known limitations:</strong></p>
   <ul>
     <li>A Quick Paste hotkey that targets an entry in a channel this device no longer subscribes to behaves the same as a hotkey that targets a deleted entry.</li>
     <li>Duplicate detection at capture time only consults the channels a device subscribes to, so identical text captured on two devices with disjoint subscriptions can exist once in each of their channels.</li>
     <li>History Limits are evaluated against the entries a device is subscribed to, not the complete shared history. Pinned entries and named entries remain exempt from history limits as they are today.</li>
+    <li>Deleting an entry on one device while another device concurrently moves it to a different channel can bring the entry back instead of deleting it. This is rare and resolves the next time that entry is edited or deleted again.</li>
   </ul>
 
   <p>Sync rules exist mainly to reduce transfer size and processing cost. Each poll and each save touch only the channels a device subscribes to, plus core, instead of the whole database. A device that excludes an images channel or a large group's channel transfers noticeably less data on every sync than a device subscribed to everything.</p>
