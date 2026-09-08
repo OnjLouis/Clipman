@@ -87,6 +87,8 @@
     <li>If exposed insecurely, an attacker could try to replace or delete encrypted blobs even if they cannot read them.</li>
   </ul>
 
+  <p>Clients that use the Clipman sync rules feature create additional database buckets under the same server token: one bucket per sync channel, plus one small bucket for the rules document itself. The server sees each of these as an ordinary bucket, with its own size and connection timing, the same way it sees any other bucket; it cannot see the channel names, device names, or contents behind a bucket. Because these buckets share a token and tend to be polled together by the same client IP address, a server operator can still notice that a set of buckets likely belongs to one client, the same kind of connection metadata the server already sees today.</p>
+
   <p>Use one of these deployment patterns:</p>
 
   <table>
@@ -587,6 +589,8 @@ Logs:               ~/Library/Logs/Clipman Server/logs/clipman-server.log</code>
   <p>The server can serve multiple separate Clipman histories. Clients derive a server-side database ID from the server token and the Clipman history password.</p>
 
   <p>Clients using the same token and same history password use the same database bucket. Clients using a wrong or different history password use a different bucket and cannot overwrite the existing history.</p>
+
+  <p>Clients using Clipman's sync rules feature create further buckets under that same token and password: one additional bucket per sync channel, plus one small bucket holding the rules document. These behave like any other database bucket for maintenance purposes, including listing, backups, and stale-bucket pruning. Backups apply per bucket, so a channel bucket and the rules bucket each keep their own backup history alongside the core bucket. When a user deletes a channel from their sync rules, the client re-routes its entries elsewhere and then leaves that channel's bucket empty on the server; the server has no way to know the channel was deleted, so the emptied bucket is not removed automatically. An administrator can find and remove such orphaned buckets with the same <code>--delete-database</code> and stale-bucket tooling described below.</p>
 
   <h2 id="database-maintenance">Database Maintenance</h2>
   <p>The server records small metadata beside each database bucket, including when the bucket was first seen, last seen, and last written. This helps you spot old wrong-password buckets or test databases without opening the clipboard database itself. Last-seen metadata is throttled so routine polling does not write to disk every few seconds.</p>
