@@ -2057,6 +2057,9 @@ namespace Clipman
                     return "These sync rules were written by a newer version of Clipman, so this device can only apply them.";
                 }
 
+                var unsubscribedRemoval = RefusalForUnsubscribedRemovalLocked(doc);
+                if (unsubscribedRemoval != null) return unsubscribedRemoval;
+
                 var next = SyncRuleEngine.Copy(doc);
                 next.Clipman = SyncRuleEngine.DocumentKind;
                 if (next.Version < SyncRuleEngine.CurrentVersion) next.Version = SyncRuleEngine.CurrentVersion;
@@ -2090,6 +2093,44 @@ namespace Clipman
             }
 
             OnChanged();
+            return null;
+        }
+
+        /// <summary>
+        /// Refuses an edit that removes or unroutes a channel this device does not subscribe to
+        /// (spec section 5, "Rules edits": editors must be subscribed to every channel an edit
+        /// affects). Mirrors the CLI's refusal. Compares against the currently-active document, not
+        /// the candidate, since that is what this device can actually see right now. Returns null
+        /// when the edit does not remove any channel this device is unsubscribed from.
+        /// </summary>
+        private string RefusalForUnsubscribedRemovalLocked(SyncRulesDocument next)
+        {
+            if (syncRules == null) return null;
+
+            var currentKeys = AllChannelKeysLocked();
+            if (currentKeys.Count == 0) return null;
+
+            var survivingKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var channel in (next == null ? null : next.Channels) ?? new List<SyncChannel>())
+            {
+                if (channel == null) continue;
+                var key = SyncRuleEngine.ChannelKey(channel.Name);
+                if (key.Length > 0) survivingKeys.Add(key);
+            }
+
+            var subscribed = SyncRuleEngine.SubscribedChannels(syncRules, CurrentMachineName());
+            if (subscribed == null) return null;
+
+            foreach (var key in currentKeys)
+            {
+                if (survivingKeys.Contains(key)) continue;
+                if (!subscribed.Contains(key))
+                {
+                    return "This device is not subscribed to the " + ChannelDisplayNameLocked(key) +
+                        " channel and cannot see its entries. Subscribe to it before removing it.";
+                }
+            }
+
             return null;
         }
 

@@ -289,7 +289,7 @@ namespace Clipman
                 }
             }
 
-            preferencesForm = new PreferencesForm(settings, ApplyPreferences, CopySensitiveTextToClipboard);
+            preferencesForm = new PreferencesForm(settings, ApplyPreferences, CopySensitiveTextToClipboard, OpenSyncRulesEditor);
             preferencesForm.FormClosed += (s, e) => preferencesForm = null;
             if (historyForm != null && !historyForm.IsDisposed && historyForm.Visible)
             {
@@ -300,6 +300,28 @@ namespace Clipman
                 preferencesForm.ShowDialog();
             }
             preferencesForm = null;
+        }
+
+        /// <summary>
+        /// Opens the modal sync rules editor from Preferences. Returns whether it applied a change,
+        /// so Preferences can announce success the same way other preference changes do.
+        /// </summary>
+        private bool OpenSyncRulesEditor()
+        {
+            using (var form = new SyncRulesForm(store, CurrentDeviceName()))
+            {
+                if (preferencesForm != null && !preferencesForm.IsDisposed)
+                {
+                    form.ShowDialog(preferencesForm);
+                }
+                else
+                {
+                    form.ShowDialog();
+                }
+
+                if (form.Applied) UpdateTray();
+                return form.Applied;
+            }
         }
 
         private void FocusPreferencesForm()

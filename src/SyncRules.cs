@@ -133,14 +133,17 @@ namespace Clipman
         /// Whether a document read from storage may be applied. A future-version document is
         /// accepted leniently - a client must never fail entirely on a document it only partly
         /// understands - while a current-version document must still pass strict validation.
-        /// Channels whose name yields no valid key stay in the document but never route.
+        /// Channels whose name yields no valid key stay in the document but never route. The
+        /// folded-storage-name collision (two channel keys that share one shared-folder file name,
+        /// e.g. "My Work" and "My-Work") is an edit-time rule only: a document already saved with
+        /// such a collision must still load and route, so the read path tolerates it here.
         /// </summary>
         public static bool IsUsable(SyncRulesDocument doc)
         {
             if (doc == null) return false;
             if (doc.Clipman != DocumentKind) return false;
             if (ReadOnly(doc)) return true;
-            return Validate(doc) == null;
+            return Validate(doc, false) == null;
         }
 
         public static SyncRulesDocument Copy(SyncRulesDocument doc)
@@ -187,6 +190,17 @@ namespace Clipman
 
         public static string Validate(SyncRulesDocument doc)
         {
+            return Validate(doc, true);
+        }
+
+        /// <summary>
+        /// <paramref name="enforceStorageNameCollisions"/> gates the folded-storage-name check
+        /// (two channel keys that fold to the same shared-folder file name, spec section 2). It is
+        /// an edit-time rule: <see cref="IsUsable"/> calls this with it disabled so a document
+        /// already saved with such a collision keeps loading and routing.
+        /// </summary>
+        public static string Validate(SyncRulesDocument doc, bool enforceStorageNameCollisions)
+        {
             if (doc == null) return "The sync rules document is missing.";
             if (doc.Clipman != DocumentKind) return "The sync rules document has an unrecognized format.";
 
@@ -201,7 +215,7 @@ namespace Clipman
                 if (key.Length == 0) return "Channel name \"" + (channel.Name ?? string.Empty) + "\" is not valid.";
                 if (ReservedChannelKeys.Contains(key)) return "Channel name \"" + channel.Name + "\" is reserved.";
                 if (!knownKeys.Add(key)) return "Channel name \"" + channel.Name + "\" is not unique.";
-                if (!storageNames.Add(ChannelStorageName(key)))
+                if (!storageNames.Add(ChannelStorageName(key)) && enforceStorageNameCollisions)
                 {
                     return "Channel name \"" + channel.Name + "\" would share a storage file with another channel.";
                 }
@@ -289,6 +303,45 @@ namespace Clipman
                 if (allKeys.Contains(normalized) && !result.Contains(normalized)) result.Add(normalized);
             }
             return result;
+        }
+
+        /// <summary>
+        /// A compact one-line description of a channel's routing rule, used by the Windows sync
+        /// rules editor's Channels list (e.g. "Groups: Work, Standup", "Images", "From: Desktop").
+        /// Multiple ANDed conditions are joined with "; ". Pure and UI-independent so it is directly
+        /// testable.
+        /// </summary>
+        public static string RouteSummary(SyncRoute route)
+        {
+            if (route == null) return string.Empty;
+
+            var parts = new List<string>();
+            if (route.Groups != null && route.Groups.Count > 0)
+            {
+                parts.Add("Groups: " + string.Join(", ", route.Groups.ToArray()));
+            }
+            if (route.SourceDevices != null && route.SourceDevices.Count > 0)
+            {
+                parts.Add("From: " + string.Join(", ", route.SourceDevices.ToArray()));
+            }
+            if (!string.IsNullOrEmpty(route.Kind) && route.Kind == RichTextImagesKind)
+            {
+                parts.Add("Images");
+            }
+
+            return string.Join("; ", parts.ToArray());
+        }
+
+        /// <summary>
+        /// A compact one-line description of a device's subscription list, used by the Windows sync
+        /// rules editor's Devices list (e.g. "All channels" for the wildcard, otherwise a
+        /// comma-separated channel list). Pure and UI-independent so it is directly testable.
+        /// </summary>
+        public static string SubscriptionSummary(List<string> channels)
+        {
+            if (channels == null || channels.Count == 0) return string.Empty;
+            if (channels.Count == 1 && (channels[0] ?? string.Empty).Trim() == "*") return "All channels";
+            return string.Join(", ", channels.ToArray());
         }
 
         public static SyncRulesDocument MergeDocuments(SyncRulesDocument local, SyncRulesDocument remote)

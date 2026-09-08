@@ -73,6 +73,9 @@ namespace Clipman.Tests
             Run("channel conflict copies are merged into the channel file", ChannelConflictCopiesAreMergedIntoTheChannelFile);
             Run("a channel file is never consumed as another channel's conflict copy", ChannelFilesAreNeverConsumedAsConflictCopies);
             Run("removing a channel relocates its entries first", RemovingAChannelRelocatesItsEntries);
+            Run("removing a channel this device cannot see is refused", RemovingAChannelThisDeviceCannotSeeIsRefused);
+            Run("a folded-storage-name collision loads but cannot be saved", FoldedStorageNameCollisionLoadsButCannotBeSaved);
+            Run("sync rule summary text is stable", SyncRuleSummaryTextIsStable);
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
@@ -1157,6 +1160,99 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void RemovingAChannelThisDeviceCannotSeeIsRefused()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var doc = new SyncRulesDocument { Enabled = true };
+                doc.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+                doc.Channels.Add(new SyncChannel { Name = "Images", Route = new SyncRoute { Kind = "RichTextImages" } });
+                doc.Devices.Add(new SyncDevice { Name = "Limited-PC", Channels = new List<string> { "work" } });
+
+                using (var store = new ClipStore(databasePath, string.Empty, "Limited-PC"))
+                {
+                    Assert(store.SetSyncRules(doc) == null, "Enabling a restricted subscription should succeed.");
+
+                    var withoutImages = new SyncRulesDocument { Enabled = true };
+                    withoutImages.Channels.Add(new SyncChannel { Name = "Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+                    withoutImages.Devices.Add(new SyncDevice { Name = "Limited-PC", Channels = new List<string> { "work" } });
+
+                    var error = store.SetSyncRules(withoutImages);
+                    Assert(error != null, "Removing a channel this device cannot see should be refused.");
+                    Assert(error.IndexOf("Images", StringComparison.Ordinal) >= 0,
+                        "The refusal message should name the channel this device cannot see: " + error);
+                    Assert(error.IndexOf("not subscribed", StringComparison.Ordinal) >= 0,
+                        "The refusal message should explain the device is not subscribed: " + error);
+
+                    Assert(store.GetSyncChannelKeys().Count == 2, "The refused edit must not change the rules document.");
+                    var unchanged = store.GetSyncRules();
+                    Assert(unchanged.Channels.Any(channel => channel.Name == "Images"),
+                        "The refused edit removed the channel from the stored document.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void FoldedStorageNameCollisionLoadsButCannotBeSaved()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var databasePath = Path.Combine(directory, "clipman-history.clipdb");
+                var rulesPath = Path.Combine(directory, "clipman-sync-rules.clipdb");
+
+                var doc = new SyncRulesDocument { Enabled = true };
+                doc.Channels.Add(new SyncChannel { Name = "My Work", Route = new SyncRoute { Groups = new List<string> { "Work" } } });
+                doc.Channels.Add(new SyncChannel { Name = "My-Work", Route = new SyncRoute { Groups = new List<string> { "Personal" } } });
+                doc.Devices.Add(new SyncDevice { Name = "Desktop", Channels = new List<string> { "*" } });
+                ClipDatabaseFile.SaveAtomic(rulesPath, doc, string.Empty);
+
+                Assert(SyncRuleEngine.Validate(doc) != null,
+                    "Validate must still reject a folded-storage-name collision on edit.");
+                Assert(SyncRuleEngine.IsUsable(doc),
+                    "IsUsable must tolerate a folded-storage-name collision already saved to disk.");
+
+                using (var store = new ClipStore(databasePath, string.Empty, "Desktop"))
+                {
+                    Assert(store.GetSyncChannelKeys().Count == 2,
+                        "A previously-saved colliding document should still load with both channels active.");
+
+                    var error = store.SetSyncRules(SyncRuleEngine.Copy(doc));
+                    Assert(error != null,
+                        "SetSyncRules should refuse to save a new document with a folded-storage-name collision.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void SyncRuleSummaryTextIsStable()
+        {
+            var groups = new SyncRoute { Groups = new List<string> { "Work", "Standup" } };
+            Assert(SyncRuleEngine.RouteSummary(groups) == "Groups: Work, Standup",
+                "Groups routes should summarize as \"Groups: ...\".");
+
+            var images = new SyncRoute { Kind = "RichTextImages" };
+            Assert(SyncRuleEngine.RouteSummary(images) == "Images",
+                "Rich-text-image routes should summarize as \"Images\".");
+
+            var devices = new SyncRoute { SourceDevices = new List<string> { "Desktop" } };
+            Assert(SyncRuleEngine.RouteSummary(devices) == "From: Desktop",
+                "Source-device routes should summarize as \"From: ...\".");
+
+            Assert(SyncRuleEngine.SubscriptionSummary(new List<string> { "*" }) == "All channels",
+                "A wildcard subscription should summarize as \"All channels\".");
+            Assert(SyncRuleEngine.SubscriptionSummary(new List<string> { "work", "images" }) == "work, images",
+                "An explicit channel subscription should summarize as a joined list.");
         }
 
         private static void ServerPollSchedulingIsBounded()
