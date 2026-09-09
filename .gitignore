@@ -33,6 +33,20 @@ clipman-history.json
 clipman-settings.json
 clipman-server-connection.txt
 clipman-server-connection.clpconf
+*.clpconf
+*.p8
+*.p12
+*.pfx
+*.key
+*.jks
+*.keystore
+keystore.properties
+local.properties
+*.mobileprovision
+*.provisionprofile
+.env
+.env.*
+!.env.example
 
 # Private maintainer files
 ClipmanShared.md
