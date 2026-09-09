@@ -91,6 +91,11 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.0.1</h3>
+  <ul>
+    <li>Windows: Fixed importing a Ditto database using Ditto's shortened display description instead of its complete clipboard text. Clipman now imports the full Unicode or legacy text payload when available, while retaining the description as a compatibility fallback. Fixes issue #69.</li>
+  </ul>
+
   <h3>3.0.0</h3>
   <ul>
     <li>Added optional <strong>Sync rules</strong> so a shared history can be split into named channels routed by group, source device, or embedded images, with each device subscribing only to the channels it wants. Sync rules are off by default; with them off, or for any entry no channel claims, history behaves exactly as before. Windows exposes a Sync rules dialog from Preferences, Mac and Linux expose the same editing from their Preferences and settings dialogs, the Clipman CLI adds <code>rules show</code>, <code>rules enable</code>, <code>rules disable</code>, <code>rules channel add</code>, <code>rules channel remove</code>, and <code>rules device set</code>, and Android and iOS Settings can view the current channels and change this device's own subscription. See <a href="#sync-rules-and-channels">Sync Rules and Channels</a>.</li>

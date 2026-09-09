@@ -79,18 +79,35 @@ namespace Clipman
                 db.HasColumn("Main", "clipOrder") ? "clipOrder" :
                 db.HasColumn("Main", "CRC") ? "CRC" :
                 string.Empty;
-            var order = timeColumn.Length == 0 ? "rowid" : timeColumn;
-            var sql = timeColumn.Length == 0
-                ? "select mText from Main order by rowid asc"
-                : "select mText, " + timeColumn + " from Main order by " + order + " asc";
+            var hasFullTextData = db.HasTable("Data") &&
+                db.HasColumn("Main", "lID") &&
+                db.HasColumn("Data", "lID") &&
+                db.HasColumn("Data", "lParentID") &&
+                db.HasColumn("Data", "strClipBoardFormat") &&
+                db.HasColumn("Data", "ooData");
+            var timeExpression = timeColumn.Length == 0 ? "0" : "m." + QuoteIdentifier(timeColumn);
+            var order = timeColumn.Length == 0 ? "m.rowid" : "m." + QuoteIdentifier(timeColumn);
+            var sql = "select m.mText, " + timeExpression;
+            if (hasFullTextData)
+            {
+                sql +=
+                    ", (select d.ooData from Data d where d.lParentID = m.lID " +
+                    "and d.strClipBoardFormat = 'CF_UNICODETEXT' collate nocase order by d.lID desc limit 1)" +
+                    ", (select d.ooData from Data d where d.lParentID = m.lID " +
+                    "and d.strClipBoardFormat = 'CF_TEXT' collate nocase order by d.lID desc limit 1)";
+            }
+            sql += " from Main m order by " + order + " asc";
             db.Query(sql, reader =>
             {
-                var text = reader.String(0);
+                var description = reader.String(0);
+                var text = hasFullTextData
+                    ? DecodeDittoText(reader.Blob(2), reader.Blob(3), description)
+                    : description.TrimEnd('\0');
                 if (string.IsNullOrWhiteSpace(text)) return;
                 var created = timeColumn.Length == 0 ? TimeUtil.NowUnixMs() : NormalizePotentialUnixTime(reader.Int64(1));
                 entries.Add(new ClipEntry
                 {
-                    Text = text.TrimEnd('\0'),
+                    Text = text,
                     Group = "Imported from Ditto",
                     SourceMachine = CurrentMachineName(),
                     CreatedUnixMs = created,
@@ -98,6 +115,21 @@ namespace Clipman
                 });
             });
             return entries;
+        }
+
+        private static string DecodeDittoText(byte[] unicodeData, byte[] ansiData, string description)
+        {
+            var unicodeText = unicodeData != null && unicodeData.Length % 2 == 0
+                ? DecodeUnicodeText(unicodeData)
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(unicodeText)) return unicodeText;
+
+            var ansiText = ansiData == null || ansiData.Length == 0
+                ? string.Empty
+                : Encoding.Default.GetString(ansiData).TrimEnd('\0');
+            if (!string.IsNullOrWhiteSpace(ansiText)) return ansiText;
+
+            return (description ?? string.Empty).TrimEnd('\0');
         }
 
         private static long NormalizePotentialUnixTime(long value)
