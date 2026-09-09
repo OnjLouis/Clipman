@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/OnjLouis/Clipman/security/advisories/new
+    about: Do not publish credentials, clipboard data, private keys, or connection files in an issue.
