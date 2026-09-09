@@ -91,7 +91,7 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
-  <h3>3.0.0 development candidate</h3>
+  <h3>3.0.0</h3>
   <ul>
     <li>Added optional <strong>Sync rules</strong> so a shared history can be split into named channels routed by group, source device, or embedded images, with each device subscribing only to the channels it wants. Sync rules are off by default; with them off, or for any entry no channel claims, history behaves exactly as before. Windows exposes a Sync rules dialog from Preferences, Mac and Linux expose the same editing from their Preferences and settings dialogs, the Clipman CLI adds <code>rules show</code>, <code>rules enable</code>, <code>rules disable</code>, <code>rules channel add</code>, <code>rules channel remove</code>, and <code>rules device set</code>, and Android and iOS Settings can view the current channels and change this device's own subscription. See <a href="#sync-rules-and-channels">Sync Rules and Channels</a>.</li>
     <li>Added write-through delivery for sync rules: capturing an entry that routes to a channel this device does not subscribe to still delivers it to that channel for other devices, announced once as <code>Added to &lt;channel name&gt; for your other devices.</code>, and retried automatically if the device is offline at the time.</li>
@@ -99,6 +99,7 @@
     <li>Stopped unchanged Windows server polls from rebuilding the history lists, preserving NVDA focus instead of repeatedly announcing the selected entry.</li>
     <li>Made the iOS More screen stable during background synchronization. Its available actions remain in place until it closes, and unchanged server status no longer disrupts VoiceOver focus.</li>
     <li>Protected channel data when a device reconnects with an older local cache. Stale channel-move markers can no longer remove a newer restored entry, duplicate historical identities converge consistently across clients, and Android immediately reloads channels after its subscriptions change.</li>
+    <li>Implements the sync-channel work proposed in pull request #67, with additional cross-client conflict, recovery, accessibility, and real-device validation before release.</li>
   </ul>
 
   <h3>2.9.1 Windows and macOS</h3>
