@@ -7,6 +7,7 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 ## Get Clipman
 
 - [Browse current Windows, macOS, Linux, Android, and server downloads](https://github.com/OnjLouis/Clipman/releases).
+- [Download the latest Clipman Server package](https://onjlouis.github.io/Clipman/server/download.html).
 - [Download Clipman for iPhone and iPad from the App Store](https://apps.apple.com/app/clipman/id6793250105).
 - [Read the complete Clipman manual](https://onjlouis.github.io/Clipman/manual.html).
 - [Read the Clipman Server manual](https://onjlouis.github.io/Clipman/server/manual.html).
@@ -50,6 +51,7 @@ The [Clipman CLI](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.9.0) i
 
 - [Release history and downloads](https://github.com/OnjLouis/Clipman/releases)
 - [Code signing and privacy policy](CODE_SIGNING_POLICY.md)
+- [Security policy and private vulnerability reporting](SECURITY.md)
 - [Report a problem or suggest an improvement](https://github.com/OnjLouis/Clipman/issues)
 - [Contact Andre Louis](https://onj.me/contact)
 - [Support development](https://onj.me/donate)

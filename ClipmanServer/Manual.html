@@ -68,7 +68,7 @@
   <h2 id="downloads">Downloads and Client App</h2>
   <p>The normal Clipman app download is the client. It does not include the server. Download Clipman Server separately when you want to host shared history yourself.</p>
 
-  <p>Clipman releases are published at <a href="https://github.com/OnjLouis/Clipman/releases">https://github.com/OnjLouis/Clipman/releases</a>. The main project page is <a href="https://github.com/OnjLouis/Clipman">https://github.com/OnjLouis/Clipman</a>.</p>
+  <p><a href="https://onjlouis.github.io/Clipman/server/download.html">Download the latest Clipman Server package</a>, or browse the <a href="https://github.com/OnjLouis/Clipman/releases">complete release history</a>. The main project page is <a href="https://github.com/OnjLouis/Clipman">https://github.com/OnjLouis/Clipman</a>.</p>
 
   <h2 id="server-program">Server Program</h2>
   <p>The Clipman Server package runs:</p>
@@ -273,7 +273,7 @@ systemctl --user enable --now clipman-server.service</code></pre>
   <p>On runit, the service is supervised from <code>~/.config/service/clipman-server</code>. Use <code>clipmanserver status</code>, <code>clipmanserver restart</code>, and <code>clipmanserver stop</code> for everyday service control with either service manager.</p>
 
   <h2 id="updates">Updates</h2>
-  <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP on the Clipman releases page. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
+  <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP. The <a href="https://onjlouis.github.io/Clipman/server/download.html">stable latest-server download</a> always resolves to the newest published server package. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
 
   <p>Server 2.6.4 improves private HTTPS certificate creation. Interactive Linux setup detects active non-loopback IPv4 and IPv6 addresses, lists them and asks whether to include them; Windows presents an accessible checked address list; and Mac offers Include All, Skip or Cancel. Each platform also accepts additional comma-separated hostnames. Existing explicit <code>--cert-host</code> and <code>--cert-ip</code> commands remain non-interactive for scripts and containers.</p>
 
