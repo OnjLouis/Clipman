@@ -338,6 +338,7 @@ def read_health(config: Dict[str, Any], timeout: int = 3) -> Dict[str, Any]:
 
     ca_file = str(config.get("CaFile", "")).strip()
     context = ssl.create_default_context(cafile=ca_file or None)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     plain_socket = socket.create_connection((bind_host, port), timeout=timeout)
     try:
         with context.wrap_socket(plain_socket, server_hostname=certificate_host) as tls_socket:

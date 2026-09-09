@@ -283,3 +283,11 @@ func TestDecodeRejectsWrongKnownFieldType(t *testing.T) {
 		t.Fatal("expected known-field type failure")
 	}
 }
+
+func TestPKCS7PadRejectsInvalidBlockSize(t *testing.T) {
+	for _, size := range []int{-1, 0, 256} {
+		if _, err := pkcs7Pad([]byte("clipman"), size); err == nil {
+			t.Fatalf("expected block size %d to fail", size)
+		}
+	}
+}

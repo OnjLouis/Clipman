@@ -672,6 +672,40 @@ class CertificateTests(unittest.TestCase):
             thread.join(timeout=5)
 
 
+class DatabasePathTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.settings = {"DatabasePath": str(self.root / "clipman-history.clipdb")}
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_database_id_accepts_only_ascii_protocol_characters(self) -> None:
+        valid = "0123456789abcdef0123456789ABCDEF"
+        self.assertEqual(valid, clipman_server.database_id_from_path(f"/api/v1/database/{valid}"))
+        self.assertEqual("", clipman_server.database_id_from_path("/api/v1/database/" + "e" * 31))
+        self.assertEqual("", clipman_server.database_id_from_path("/api/v1/database/" + "é" * 32))
+        self.assertEqual("", clipman_server.database_id_from_path("/api/v1/database/" + "%2e%2e%2f" * 11))
+
+    def test_database_path_rejects_invalid_ids(self) -> None:
+        with self.assertRaises(ValueError):
+            clipman_server.database_path(self.settings, "../outside")
+
+    def test_database_path_rejects_symlink_escape(self) -> None:
+        database_id = "0123456789abcdef0123456789abcdef"
+        database_root = self.root / "Databases"
+        outside = self.root / "outside"
+        database_root.mkdir()
+        outside.mkdir()
+        try:
+            (database_root / database_id).symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"Directory symlinks are unavailable: {error}")
+        with self.assertRaisesRegex(ValueError, "escapes"):
+            clipman_server.database_path(self.settings, database_id)
+
+
 class ConditionalCreateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()

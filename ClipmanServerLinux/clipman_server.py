@@ -54,6 +54,7 @@ MAX_CA_CERTIFICATE_BYTES = 32 * 1024
 PEM_CERTIFICATE_PATTERN = re.compile(
     rb"\A\s*(-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----)\s*\Z"
 )
+DATABASE_ID_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{32,128}\Z", re.ASCII)
 
 
 def now_ms() -> int:
@@ -1203,8 +1204,24 @@ def status(settings: Dict[str, Any], server: Any | None = None) -> Dict[str, Any
     }
 
 
+def validated_database_id(database_id: str) -> str:
+    if not DATABASE_ID_PATTERN.fullmatch(database_id):
+        raise ValueError("Invalid Clipman database ID.")
+    return database_id
+
+
+def database_bucket_path(settings: Dict[str, Any], database_id: str) -> Path:
+    root = database_root(settings).expanduser().resolve(strict=False)
+    bucket = (root / validated_database_id(database_id)).resolve(strict=False)
+    try:
+        bucket.relative_to(root)
+    except ValueError as error:
+        raise ValueError("Clipman database path escapes the configured data root.") from error
+    return bucket
+
+
 def database_path(settings: Dict[str, Any], database_id: str) -> Path:
-    return database_root(settings) / database_id / "clipman-history.clipdb"
+    return database_bucket_path(settings, database_id) / "clipman-history.clipdb"
 
 
 def database_root(settings: Dict[str, Any]) -> Path:
@@ -1265,12 +1282,7 @@ def database_id_from_path(path: str) -> str:
     if not path.startswith(prefix):
         return ""
     database_id = unquote(path[len(prefix):]).strip()
-    if not (32 <= len(database_id) <= 128):
-        return ""
-    for char in database_id:
-        if not (char.isalnum() or char in "-_"):
-            return ""
-    return database_id
+    return database_id if DATABASE_ID_PATTERN.fullmatch(database_id) else ""
 
 
 def backup_dir_for_database(db: Path) -> Path:
@@ -1407,7 +1419,7 @@ def matching_stale_databases(settings: Dict[str, Any], older_than_days: int) -> 
 
 
 def move_database_bucket_to_deleted(settings: Dict[str, Any], database_id: str) -> Path:
-    source = database_root(settings) / database_id
+    source = database_bucket_path(settings, database_id)
     if not source.exists() or not source.is_dir():
         raise SystemExit(f"Database bucket not found: {database_id}")
     target_root = deleted_database_root(settings)

@@ -238,7 +238,10 @@ func encodeContainer(compressed []byte, password string, preferredSalt []byte, l
 	if err != nil {
 		return nil, err
 	}
-	padded := pkcs7Pad(compressed, aes.BlockSize)
+	padded, err := pkcs7Pad(compressed, aes.BlockSize)
+	if err != nil {
+		return nil, err
+	}
 	cipherText := make([]byte, len(padded))
 	cipher.NewCBCEncrypter(block, iv).CryptBlocks(cipherText, padded)
 	out := make([]byte, 0, len(encryptedMagic)+1+16+16+len(cipherText)+32)
@@ -406,14 +409,21 @@ func checkJSONDepth(value []byte, maximum int) error {
 		}
 	}
 }
-func pkcs7Pad(value []byte, size int) []byte {
+func pkcs7Pad(value []byte, size int) ([]byte, error) {
+	if size <= 0 || size > 255 {
+		return nil, fmt.Errorf("invalid PKCS#7 block size %d", size)
+	}
 	padding := size - len(value)%size
+	maxInt := int(^uint(0) >> 1)
+	if len(value) > maxInt-padding {
+		return nil, errors.New("data is too large to pad")
+	}
 	out := make([]byte, len(value)+padding)
 	copy(out, value)
 	for i := len(value); i < len(out); i++ {
 		out[i] = byte(padding)
 	}
-	return out
+	return out, nil
 }
 func pkcs7Unpad(value []byte, size int) ([]byte, error) {
 	if len(value) == 0 || len(value)%size != 0 {

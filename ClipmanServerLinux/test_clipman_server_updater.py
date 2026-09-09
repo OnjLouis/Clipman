@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import ssl
 import tempfile
 import unittest
 import zipfile
@@ -192,6 +193,7 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
 
         self.assertEqual({"Status": "ok"}, payload)
         create_context.assert_called_once_with(cafile="/tls/authority.pem")
+        self.assertEqual(ssl.TLSVersion.TLSv1_2, context.minimum_version)
         create_connection.assert_called_once_with(("127.0.0.1", 61234), timeout=3)
         context.wrap_socket.assert_called_once_with(plain_socket, server_hostname="server.example.test")
         request = tls_socket.__enter__.return_value.sendall.call_args.args[0].decode("ascii")
