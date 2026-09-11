@@ -65,7 +65,6 @@ namespace Clipman
         private HistoryForm historyForm;
         private PreferencesForm preferencesForm;
         private SecretsForm secretsForm;
-        private int ignoredClipboardChangeCount;
         private bool showHotkeyRegistered;
         private bool toggleHotkeyRegistered;
         private bool saveCurrentClipboardHotkeyRegistered;
@@ -648,8 +647,7 @@ namespace Clipman
         public void CopyEntryToClipboard(ClipEntry entry)
         {
             if (entry == null) return;
-            IgnoreClipboardChanges(1);
-            SetEntryClipboard(entry);
+            SetClipboardIgnoringNotification(() => SetEntryClipboard(entry));
             store.MarkUsed(entry.Id);
             sounds.Copy(settings.SoundsEnabled);
         }
@@ -733,8 +731,7 @@ namespace Clipman
                     entries.Select(ResolvedEntryText)),
                 TextDataFormat.UnicodeText);
             data.SetData(ClipmanClipboardData.EntriesFormat, ClipmanClipboardData.SerializeEntries(entries));
-            IgnoreClipboardChanges(1);
-            Clipboard.SetDataObject(data, true);
+            SetClipboardIgnoringNotification(() => Clipboard.SetDataObject(data, true));
             foreach (var entry in entries)
             {
                 store.MarkUsed(entry.Id);
@@ -746,8 +743,7 @@ namespace Clipman
         {
             try
             {
-                IgnoreClipboardChanges(1);
-                Clipboard.SetText(text ?? string.Empty, TextDataFormat.UnicodeText);
+                SetClipboardIgnoringNotification(() => Clipboard.SetText(text ?? string.Empty, TextDataFormat.UnicodeText));
                 foreach (var entry in entries ?? new List<ClipEntry>())
                 {
                     if (entry != null) store.MarkUsed(entry.Id);
@@ -757,7 +753,6 @@ namespace Clipman
             }
             catch (Exception ex)
             {
-                ClearIgnoredClipboardChanges();
                 sounds.Skip(settings.SoundsEnabled);
                 Program.WriteRuntimeLog("Clipman could not copy plain text to the clipboard.", ex);
                 return false;
@@ -766,8 +761,7 @@ namespace Clipman
 
         private void CopySensitiveTextToClipboard(string text)
         {
-            IgnoreClipboardChanges(1);
-            Clipboard.SetText(text ?? string.Empty, TextDataFormat.UnicodeText);
+            SetClipboardIgnoringNotification(() => Clipboard.SetText(text ?? string.Empty, TextDataFormat.UnicodeText));
         }
 
         internal void HandleHotkey(int id)
@@ -828,12 +822,6 @@ namespace Clipman
             {
                 return;
             }
-            if (!deliberate && ignoredClipboardChangeCount > 0)
-            {
-                ignoredClipboardChangeCount--;
-                return;
-            }
-
             var sourceProcessName = ClipboardOwnerProcessName();
             if (string.IsNullOrWhiteSpace(sourceProcessName))
             {
@@ -992,12 +980,10 @@ namespace Clipman
                     richText = null;
                     try
                     {
-                        IgnoreClipboardChanges(1);
-                        Clipboard.SetText(text, TextDataFormat.UnicodeText);
+                        SetClipboardIgnoringNotification(() => Clipboard.SetText(text, TextDataFormat.UnicodeText));
                     }
                     catch
                     {
-                        ClearIgnoredClipboardChanges();
                     }
                 }
             }
@@ -1037,12 +1023,10 @@ namespace Clipman
                 {
                     try
                     {
-                        IgnoreClipboardChanges(1);
-                        Clipboard.SetText(mergedText, TextDataFormat.UnicodeText);
+                        SetClipboardIgnoringNotification(() => Clipboard.SetText(mergedText, TextDataFormat.UnicodeText));
                     }
                     catch
                     {
-                        ClearIgnoredClipboardChanges();
                     }
                     textObservation.Signature = mergedText;
                     textObservation.Payload = mergedText;
@@ -1217,12 +1201,10 @@ namespace Clipman
             data.SetData("Preferred DropEffect", false, new MemoryStream(BitConverter.GetBytes(effect)));
             try
             {
-                IgnoreClipboardChanges(1);
-                Clipboard.SetDataObject(data, true);
+                SetClipboardIgnoringNotification(() => Clipboard.SetDataObject(data, true));
             }
             catch
             {
-                ClearIgnoredClipboardChanges();
             }
         }
 
@@ -1965,8 +1947,7 @@ namespace Clipman
                 var mode = QuickPasteModeForEntry(entryId);
                 if (mode == QuickPasteModes.CopyOnly)
                 {
-                    IgnoreClipboardChanges(1);
-                    SetEntryClipboard(entry);
+                    SetClipboardIgnoringNotification(() => SetEntryClipboard(entry));
                     store.MarkUsed(entry.Id);
                     sounds.Copy(settings.SoundsEnabled);
                     return;
@@ -1985,8 +1966,7 @@ namespace Clipman
                     }
                 }
 
-                IgnoreClipboardChanges(mode == QuickPasteModes.PasteKeep ? 1 : 2);
-                SetEntryClipboard(entry);
+                SetClipboardIgnoringNotification(() => SetEntryClipboard(entry));
                 store.MarkUsed(entry.Id);
                 sounds.Copy(settings.SoundsEnabled);
                 if (mode == QuickPasteModes.PasteKeep)
@@ -2000,7 +1980,6 @@ namespace Clipman
             }
             catch
             {
-                ClearIgnoredClipboardChanges();
                 sounds.Skip(settings.SoundsEnabled);
             }
         }
@@ -2033,14 +2012,12 @@ namespace Clipman
                     previousClipboard = null;
                 }
 
-                IgnoreClipboardChanges(2);
-                Clipboard.SetText(secret.Value, TextDataFormat.UnicodeText);
+                SetClipboardIgnoringNotification(() => Clipboard.SetText(secret.Value, TextDataFormat.UnicodeText));
                 sounds.Copy(settings.SoundsEnabled);
                 BeginPasteThenRestore(previousClipboard);
             }
             catch
             {
-                ClearIgnoredClipboardChanges();
                 sounds.Skip(settings.SoundsEnabled);
             }
         }
@@ -2279,7 +2256,6 @@ namespace Clipman
             }
             catch
             {
-                ClearIgnoredClipboardChanges();
             }
         }
 
@@ -2321,29 +2297,24 @@ namespace Clipman
             {
                 if (previousClipboard == null)
                 {
-                    Clipboard.Clear();
+                    SetClipboardIgnoringNotification(Clipboard.Clear);
                 }
                 else
                 {
-                    Clipboard.SetDataObject(previousClipboard, true);
+                    SetClipboardIgnoringNotification(() => Clipboard.SetDataObject(previousClipboard, true));
                 }
             }
             catch
             {
-                ClearIgnoredClipboardChanges();
             }
         }
 
-        private void IgnoreClipboardChanges(int count)
+        private void SetClipboardIgnoringNotification(Action setClipboard)
         {
-            if (count <= 0) return;
+            if (setClipboard == null) return;
             clipMergeDetector.Reset();
-            ignoredClipboardChangeCount += count;
-        }
-
-        private void ClearIgnoredClipboardChanges()
-        {
-            ignoredClipboardChangeCount = 0;
+            setClipboard();
+            clipboardNotifications.Ignore(NativeMethods.GetClipboardSequenceNumber());
         }
 
         private void ResetRemoteAutoCopyBaseline()
@@ -2380,8 +2351,7 @@ namespace Clipman
 
             lastAutoCopiedRemoteEntryId = entry.Id ?? string.Empty;
             lastAutoCopiedRemoteEntryStamp = stamp;
-            IgnoreClipboardChanges(1);
-            SetEntryClipboard(entry);
+            SetClipboardIgnoringNotification(() => SetEntryClipboard(entry));
             sounds.Remote(settings.SoundsEnabled);
         }
 
@@ -2394,13 +2364,11 @@ namespace Clipman
 
             try
             {
-                IgnoreClipboardChanges(1);
-                SetEntryClipboard(entry);
+                SetClipboardIgnoringNotification(() => SetEntryClipboard(entry));
                 sounds.Copy(settings.SoundsEnabled);
             }
             catch (Exception ex)
             {
-                ClearIgnoredClipboardChanges();
                 Program.WriteRuntimeLog("Could not put a command-line history addition on the clipboard.", ex);
                 sounds.Skip(settings.SoundsEnabled);
             }

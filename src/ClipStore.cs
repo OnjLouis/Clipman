@@ -3717,12 +3717,13 @@ namespace Clipman
                 if (!SyncRuleEngine.IsUsable(remote)) return false;
 
                 var merged = SyncRuleEngine.MergeDocuments(syncRules, remote);
-                // When the cache wins the merge the effective document is not the one the server
-                // holds, so no revision is recorded: an If-Match against it would claim an edit was
-                // based on a document it never saw.
-                syncRulesRevision = ReferenceEquals(merged, remote)
-                    ? (download.Metadata == null ? string.Empty : download.Metadata.Revision)
-                    : string.Empty;
+                // Equal cached and downloaded documents represent the same server state even when
+                // last-writer-wins returns the cached object. A genuinely newer cache must not claim
+                // a revision belonging to different server content.
+                syncRulesRevision = RevisionForMergedRules(
+                    merged,
+                    remote,
+                    download.Metadata == null ? string.Empty : download.Metadata.Revision);
                 var changed = !SameSyncRules(syncRules, merged);
                 syncRules = merged;
                 return changed;
@@ -3750,6 +3751,14 @@ namespace Clipman
             if (ReferenceEquals(left, right)) return true;
             if (left == null || right == null) return false;
             return string.Equals(JsonUtil.SerializePretty(left), JsonUtil.SerializePretty(right), StringComparison.Ordinal);
+        }
+
+        internal static string RevisionForMergedRules(
+            SyncRulesDocument merged,
+            SyncRulesDocument downloaded,
+            string downloadedRevision)
+        {
+            return SameSyncRules(merged, downloaded) ? (downloadedRevision ?? string.Empty) : string.Empty;
         }
 
         private void UploadCachedSyncRulesLocked()
@@ -3801,7 +3810,7 @@ namespace Clipman
                     TryDelete(tempPath);
                     syncRulesRevision = download.Metadata == null ? string.Empty : download.Metadata.Revision;
                     if (SyncRuleEngine.IsUsable(remote) &&
-                        ReferenceEquals(SyncRuleEngine.MergeDocuments(published, remote), remote))
+                        SameSyncRules(SyncRuleEngine.MergeDocuments(published, remote), remote))
                     {
                         // The concurrent edit is newer, so it wins the whole document.
                         published = remote;

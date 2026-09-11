@@ -50,6 +50,7 @@ namespace Clipman.Tests
             Run("multiple-entry separators are configurable", MultipleEntrySeparatorsAreConfigurable);
             Run("bursts of Windows clipboard notifications settle on the newest sequence", ClipboardNotificationsSettleOnNewestSequence);
             Run("duplicate Windows clipboard notifications are processed once", ClipboardNotificationStateRejectsDuplicateWindowsNotifications);
+            Run("internal clipboard suppression cannot swallow a later external copy", InternalClipboardSuppressionDoesNotLeak);
             Run("application-specific clipboard compatibility is centralised", ClipboardApplicationCompatibilityIsCentralised);
             Run("clipboard flood protection is source-specific and recovers", ClipboardFloodProtectionIsSourceSpecificAndRecovers);
             Run("ClipMerge requires a deliberate matching second clipboard event", ClipMergeRequiresMatchingSecondEvent);
@@ -71,6 +72,7 @@ namespace Clipman.Tests
             Run("sync rule subscriptions resolve per device", SyncRuleSubscriptions);
             Run("sync rules document round trips through JSON", SyncRulesDocumentJsonRoundTrip);
             Run("sync rules documents merge with last-writer-wins", SyncRulesMergeDocumentsLastWriterWins);
+            Run("equal sync rules retain the downloaded server revision", EqualSyncRulesRetainDownloadedRevision);
             Run("future sync rules documents are read-only and parsed leniently", SyncRulesLenientParsingAndReadOnlyDocuments);
             Run("sync rules route entries into channel files on save", RulesRouteEntriesIntoChannelFilesOnSave);
             Run("sync rules disabled keeps a single database file", RulesDisabledKeepsSingleDatabaseFile);
@@ -1577,6 +1579,22 @@ namespace Clipman.Tests
             }
         }
 
+        private static void EqualSyncRulesRetainDownloadedRevision()
+        {
+            var cached = new SyncRulesDocument { UpdatedUnixMs = 1000, UpdatedBy = "Desktop" };
+            var downloaded = new SyncRulesDocument { UpdatedUnixMs = 1000, UpdatedBy = "Desktop" };
+            var merged = SyncRuleEngine.MergeDocuments(cached, downloaded);
+
+            Assert(ReferenceEquals(merged, cached),
+                "The fixture must reproduce the equal-document merge choosing the cached instance.");
+            Assert(ClipStore.RevisionForMergedRules(merged, downloaded, "server-revision") == "server-revision",
+                "Semantically identical rules should retain the downloaded revision and avoid another GET on the next poll.");
+
+            downloaded.UpdatedUnixMs = 999;
+            Assert(ClipStore.RevisionForMergedRules(merged, downloaded, "stale-revision") == string.Empty,
+                "A locally newer rules document must not claim the downloaded revision.");
+        }
+
         private static void UpdaterSelectsWindowsPackageFromMixedReleaseAssets()
         {
             var serviceType = typeof(UpdateService);
@@ -2012,6 +2030,20 @@ namespace Clipman.Tests
                 "A burst of notifications did not settle on its newest clipboard sequence.");
             Assert(state.TakePending() == 0,
                 "A settled clipboard notification remained pending for a second capture.");
+        }
+
+        private static void InternalClipboardSuppressionDoesNotLeak()
+        {
+            var state = new ClipboardNotificationState();
+            state.Ignore(2100);
+            Assert(!state.ShouldProcess(2100, false),
+                "Clipman's own clipboard sequence was not suppressed.");
+
+            state.Ignore(2110);
+            Assert(state.ShouldProcess(2111, false),
+                "A later external clipboard sequence was swallowed by stale internal suppression.");
+            Assert(state.ShouldProcess(2112, false),
+                "Internal clipboard suppression remained active after an external copy.");
         }
 
         private static void ClipboardApplicationCompatibilityIsCentralised()
