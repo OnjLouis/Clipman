@@ -9,8 +9,6 @@ on:
       - ClipmanServer/Manual.html
       - .github/workflows/pages.yml
       - README.md
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
