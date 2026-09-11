@@ -388,11 +388,12 @@ namespace Clipman
         private static GitHubReleaseAsset FindPortableZipAsset(GitHubReleaseInfo release)
         {
             if (release == null || release.Assets == null) return null;
+            var version = ReleaseVersion(release);
+            if (version == null) return null;
+            var expectedName = "Clipman-" + version + ".zip";
             return release.Assets
                 .Where(a => a != null && !string.IsNullOrWhiteSpace(a.BrowserDownloadUrl) && !string.IsNullOrWhiteSpace(a.Name))
-                .Where(a => a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(a => a.Name.IndexOf("portable", StringComparison.OrdinalIgnoreCase) >= 0)
-                .ThenByDescending(a => a.Name.IndexOf("clipman", StringComparison.OrdinalIgnoreCase) >= 0)
+                .Where(a => string.Equals(a.Name, expectedName, StringComparison.OrdinalIgnoreCase))
                 .FirstOrDefault();
         }
 

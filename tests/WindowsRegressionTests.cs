@@ -33,6 +33,7 @@ namespace Clipman.Tests
             Run("download links provide a persistent fallback name", DownloadLinksProvidePersistentFallbackName);
             Run("link labels remove unsafe Unicode categories", LinkLabelsRemoveUnsafeUnicode);
             Run("runtime logs rotate with a bounded generation count", RuntimeLogsRotateWithBoundedGenerations);
+            Run("the updater selects the Windows package when a release has several ZIP assets", UpdaterSelectsWindowsPackageFromMixedReleaseAssets);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
@@ -1574,6 +1575,38 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void UpdaterSelectsWindowsPackageFromMixedReleaseAssets()
+        {
+            var serviceType = typeof(UpdateService);
+            var releaseType = serviceType.GetNestedType("GitHubReleaseInfo", BindingFlags.NonPublic);
+            var assetType = serviceType.GetNestedType("GitHubReleaseAsset", BindingFlags.NonPublic);
+            var selector = serviceType.GetMethod("FindPortableZipAsset", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(releaseType != null && assetType != null && selector != null,
+                "The updater release model or package selector could not be located.");
+
+            var release = Activator.CreateInstance(releaseType);
+            releaseType.GetProperty("TagName").SetValue(release, "v3.1.0", null);
+            var assets = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(assetType));
+            foreach (var name in new[]
+            {
+                "Clipman-3.1.0-Source.zip",
+                "Clipman-3.1.0.zip",
+                "Clipman-macOS-3.1.0.zip"
+            })
+            {
+                var asset = Activator.CreateInstance(assetType);
+                assetType.GetProperty("Name").SetValue(asset, name, null);
+                assetType.GetProperty("BrowserDownloadUrl").SetValue(asset, "https://example.invalid/" + name, null);
+                assets.Add(asset);
+            }
+            releaseType.GetProperty("Assets").SetValue(release, assets, null);
+
+            var selected = selector.Invoke(null, new[] { release });
+            var selectedName = selected == null ? string.Empty : (string)assetType.GetProperty("Name").GetValue(selected, null);
+            Assert(selectedName == "Clipman-3.1.0.zip",
+                "The updater selected '" + selectedName + "' instead of the Windows program ZIP.");
         }
 
         private static void SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips()
