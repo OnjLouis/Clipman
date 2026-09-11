@@ -74,6 +74,22 @@ func TestWebsiteTitleURLSafety(t *testing.T) {
 	}
 }
 
+func TestExplicitWebsiteTitleRequestsAllowSensitiveLookingPublicLinks(t *testing.T) {
+	allowed := "https://example.com/file.7z?utm_source=newsletter&session_token=opaque"
+	if _, err := validateExplicitWebsiteTitleURL(allowed); err != nil {
+		t.Fatalf("explicit request rejected an ordinary public link: %v", err)
+	}
+	for _, blocked := range []string{
+		"https://user:password@example.com/file.7z",
+		"https://127.0.0.1/file.7z",
+		"https://example.com:8443/file.7z",
+	} {
+		if _, err := validateExplicitWebsiteTitleURL(blocked); err == nil {
+			t.Fatalf("explicit request accepted unsafe destination %q", blocked)
+		}
+	}
+}
+
 func TestWebsiteTitleRedirectPolicy(t *testing.T) {
 	previous, _ := validateWebsiteTitleURL("https://example.com/previous")
 	request, err := resolveWebsiteTitleRedirect(previous, "/final", 2)

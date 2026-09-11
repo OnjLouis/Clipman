@@ -148,6 +148,13 @@ class LinkLabelTests(unittest.TestCase):
         self.assertEqual(label, "Accessible clipboard management")
         self.assertEqual(destination, "example.com/articles/accessible-clipboard-management.html")
 
+    def test_download_link_provides_persistent_fallback_name(self):
+        label, destination = clipman.link_display_parts(
+            "https://3.onj.me/bbcip/Inside%20No.%209.7z"
+        )
+        self.assertEqual(label, "Inside No. 9.7z")
+        self.assertEqual(destination, "3.onj.me/bbcip/Inside No. 9.7z")
+
     def test_numbered_resource_and_root_labels_are_concise(self):
         self.assertEqual(
             clipman.link_row_text("https://github.com/OnjLouis/Clipman/issues/50"),

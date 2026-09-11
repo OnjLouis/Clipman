@@ -3763,7 +3763,7 @@ class ClipmanApplication(Gtk.Application):
     def _request_website_title(self, entry):
         self.set_status("Requesting website title...", True)
         self.backend.call(
-            "fetch_website_title", {"url": entry.get("text", "")},
+            "fetch_website_title", {"url": entry.get("text", ""), "explicit": True},
             lambda message: self._website_title_received(message, entry.get("id", ""), entry.get("text", "")),
         )
 
@@ -3822,7 +3822,11 @@ class ClipmanApplication(Gtk.Application):
 
     def _website_title_received(self, message, entry_id, expected_text):
         if not message.get("ok"):
-            self.show_error(message.get("error", "The website title could not be requested."))
+            self._apply_website_title_fallback(
+                entry_id,
+                expected_text,
+                message.get("error", "The website title could not be requested."),
+            )
             return
         current = next((item for item in self.entries if item.get("id") == entry_id), None)
         if not current or current.get("text") != expected_text:
@@ -3833,21 +3837,43 @@ class ClipmanApplication(Gtk.Application):
             return
         title = _clean_link_text(message.get("result", {}).get("title", ""), 200)
         if not title:
-            self.show_error("The website did not provide a usable title.")
+            self._apply_website_title_fallback(entry_id, expected_text, "The website did not provide a usable title.")
             return
         self.backend.call(
             "set_name_if_blank",
             {"id": entry_id, "expected_text": expected_text, "name": title},
-            self._website_title_saved,
+            lambda result: self._website_title_saved(result, "Website title saved as the link name."),
         )
 
-    def _website_title_saved(self, message):
+    def _apply_website_title_fallback(self, entry_id, expected_text, failure_reason):
+        current = next((item for item in self.entries if item.get("id") == entry_id), None)
+        if not current or current.get("text") != expected_text:
+            self.sounds.play("skip"); self.set_status("The link changed or was deleted before its address label could be saved.", True)
+            return
+        if str(current.get("name", "")).strip():
+            self.sounds.play("skip"); self.set_status("The link already has a name, so its address label was not applied.", True)
+            return
+        fallback_name, _destination = link_display_parts(expected_text)
+        fallback_name = _clean_link_text(fallback_name, 200)
+        if not fallback_name or fallback_name == "Link":
+            self.show_error(failure_reason)
+            return
+        self.backend.call(
+            "set_name_if_blank",
+            {"id": entry_id, "expected_text": expected_text, "name": fallback_name},
+            lambda result: self._website_title_saved(
+                result,
+                "Website title unavailable; used " + fallback_name + " as the link name.",
+            ),
+        )
+
+    def _website_title_saved(self, message, success_status):
         if not message.get("ok"):
             self.show_error(message.get("error", "The website title could not be applied."))
             return
         self._history_response(message)
         self.sounds.play("copy")
-        self.set_status("Website title saved as the link name.", True)
+        self.set_status(success_status, True)
 
     def view_selected(self, *_args):
         entry = self.selected_entry()

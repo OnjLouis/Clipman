@@ -94,6 +94,14 @@ func mustPrefixes(values ...string) []*net.IPNet {
 }
 
 func validateWebsiteTitleURL(raw string) (*url.URL, error) {
+	return validateWebsiteTitleURLWithPolicy(raw, false)
+}
+
+func validateExplicitWebsiteTitleURL(raw string) (*url.URL, error) {
+	return validateWebsiteTitleURLWithPolicy(raw, true)
+}
+
+func validateWebsiteTitleURLWithPolicy(raw string, allowCapabilityURL bool) (*url.URL, error) {
 	if !utf8.ValidString(raw) {
 		return nil, errors.New("the selected entry does not contain a valid website URL")
 	}
@@ -124,16 +132,18 @@ func validateWebsiteTitleURL(raw string) (*url.URL, error) {
 			return nil, errors.New("website titles cannot be requested from local, private, or non-global addresses")
 		}
 	}
-	decodedPath := repeatedlyUnescapeURLComponent(parsed.EscapedPath())
-	for _, segment := range strings.Split(decodedPath, "/") {
-		if looksLikeCapabilityValue(segment) {
-			return nil, errors.New("this link appears to contain a private capability value")
+	if !allowCapabilityURL {
+		decodedPath := repeatedlyUnescapeURLComponent(parsed.EscapedPath())
+		for _, segment := range strings.Split(decodedPath, "/") {
+			if looksLikeCapabilityValue(segment) {
+				return nil, errors.New("this link appears to contain a private capability value")
+			}
 		}
-	}
-	for name := range parsed.Query() {
-		key := strings.ToLower(strings.TrimSpace(repeatedlyUnescapeURLComponent(name)))
-		if sensitiveQueryName(key) {
-			return nil, errors.New("this link appears to contain a token, signature, or other private capability")
+		for name := range parsed.Query() {
+			key := strings.ToLower(strings.TrimSpace(repeatedlyUnescapeURLComponent(name)))
+			if sensitiveQueryName(key) {
+				return nil, errors.New("this link appears to contain a token, signature, or other private capability")
+			}
 		}
 	}
 	parsed.Fragment = ""
@@ -278,7 +288,15 @@ func publicDialContext(ctx context.Context, network, address string) (net.Conn, 
 }
 
 func fetchWebsiteTitle(raw string) (string, error) {
-	current, err := validateWebsiteTitleURL(raw)
+	return fetchWebsiteTitleWithPolicy(raw, false)
+}
+
+func fetchExplicitWebsiteTitle(raw string) (string, error) {
+	return fetchWebsiteTitleWithPolicy(raw, true)
+}
+
+func fetchWebsiteTitleWithPolicy(raw string, allowCapabilityURL bool) (string, error) {
+	current, err := validateWebsiteTitleURLWithPolicy(raw, allowCapabilityURL)
 	if err != nil {
 		return "", err
 	}
@@ -311,7 +329,7 @@ func fetchWebsiteTitle(raw string) (string, error) {
 		if response.StatusCode >= 300 && response.StatusCode < 400 {
 			location := response.Header.Get("Location")
 			response.Body.Close()
-			current, err = resolveWebsiteTitleRedirect(current, location, redirectCount)
+			current, err = resolveWebsiteTitleRedirectWithPolicy(current, location, redirectCount, allowCapabilityURL)
 			if err != nil {
 				return "", err
 			}
@@ -343,6 +361,10 @@ func fetchWebsiteTitle(raw string) (string, error) {
 }
 
 func resolveWebsiteTitleRedirect(current *url.URL, rawLocation string, redirectCount int) (*url.URL, error) {
+	return resolveWebsiteTitleRedirectWithPolicy(current, rawLocation, redirectCount, false)
+}
+
+func resolveWebsiteTitleRedirectWithPolicy(current *url.URL, rawLocation string, redirectCount int, allowCapabilityURL bool) (*url.URL, error) {
 	if redirectCount >= 3 {
 		return nil, errors.New("the website redirected more than three times")
 	}
@@ -353,7 +375,7 @@ func resolveWebsiteTitleRedirect(current *url.URL, rawLocation string, redirectC
 	if err != nil {
 		return nil, errors.New("the website redirected to an invalid address")
 	}
-	validated, err := validateWebsiteTitleURL(destination.String())
+	validated, err := validateWebsiteTitleURLWithPolicy(destination.String(), allowCapabilityURL)
 	if err != nil {
 		return nil, err
 	}

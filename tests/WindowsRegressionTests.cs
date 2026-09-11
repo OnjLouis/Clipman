@@ -29,6 +29,8 @@ namespace Clipman.Tests
             Run("Open Link accepts only standalone web links", OpenLinkAcceptsOnlyStandaloneWebLinks);
             Run("URL labels accept characters that are illegal in Windows paths", UrlLabelsAcceptWindowsPathCharacters);
             Run("website title safety distinguishes readable slugs from capability tokens", WebsiteTitleSafetyDistinguishesReadableSlugs);
+            Run("explicit website title requests allow sensitive-looking public links", ExplicitWebsiteTitleRequestsAllowSensitiveLookingPublicLinks);
+            Run("download links provide a persistent fallback name", DownloadLinksProvidePersistentFallbackName);
             Run("link labels remove unsafe Unicode categories", LinkLabelsRemoveUnsafeUnicode);
             Run("runtime logs rotate with a bounded generation count", RuntimeLogsRotateWithBoundedGenerations);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
@@ -199,6 +201,26 @@ namespace Clipman.Tests
             Assert(LinkTitleFetcher.IsCapabilityUrl(opaque), "An uninterrupted opaque path token was accepted.");
             Assert(LinkTitleFetcher.IsCapabilityUrl(uuid), "A UUID-like path token was accepted.");
             Assert(LinkTitleFetcher.IsCapabilityUrl(reset), "A reset-token query was accepted.");
+        }
+
+        private static void ExplicitWebsiteTitleRequestsAllowSensitiveLookingPublicLinks()
+        {
+            string reason;
+            Assert(LinkTitleFetcher.CanOfferExplicit(new Uri("https://example.org/download/file.7z?utm_source=newsletter&session_token=opaque"), out reason),
+                "A deliberate request rejected an ordinary public link with tracking or sensitive-looking query data: " + reason);
+            Assert(!LinkTitleFetcher.CanOfferExplicit(new Uri("https://user:password@example.org/file.7z"), out reason),
+                "A deliberate request accepted embedded credentials.");
+            Assert(!LinkTitleFetcher.CanOfferExplicit(new Uri("https://example.org:8443/file.7z"), out reason),
+                "A deliberate request accepted a non-standard port.");
+            Assert(!LinkTitleFetcher.CanOfferExplicit(new Uri("https://127.0.0.1/file.7z"), out reason),
+                "A deliberate request accepted a loopback destination.");
+        }
+
+        private static void DownloadLinksProvidePersistentFallbackName()
+        {
+            var uri = new Uri("https://3.onj.me/bbcip/Inside%20No.%209.7z");
+            Assert(LinkPresentation.OfflineLabel(uri) == "Inside No. 9.7z",
+                "The filename-derived fallback name was not preserved exactly.");
         }
 
         private static void ImagePreviewIsKeyboardFocusable()

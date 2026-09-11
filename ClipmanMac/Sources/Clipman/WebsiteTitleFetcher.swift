@@ -76,7 +76,7 @@ private final class AddressResolutionResult: @unchecked Sendable {
 }
 
 enum LinkFetchSafety {
-    static func validatedURL(_ text: String, resolveHost: Bool) throws -> URL {
+    static func validatedURL(_ text: String, resolveHost: Bool, allowCapabilityURL: Bool = false) throws -> URL {
         guard LinkPresentation.isURLTextWithinLimit(text) else {
             throw WebsiteTitleFetchError.invalidURL
         }
@@ -97,7 +97,7 @@ enum LinkFetchSafety {
             }
         }
         guard !isLocalHostName(host) else { throw WebsiteTitleFetchError.localDestination }
-        guard !looksLikeCapabilityURL(components) else { throw WebsiteTitleFetchError.capabilityURL }
+        guard allowCapabilityURL || !looksLikeCapabilityURL(components) else { throw WebsiteTitleFetchError.capabilityURL }
         if let literal = WebsiteAddressSafety.parseLiteralAddress(host) {
             guard WebsiteAddressSafety.isGlobalAddress(literal) else { throw WebsiteTitleFetchError.localDestination }
         } else if resolveHost {
@@ -106,8 +106,8 @@ enum LinkFetchSafety {
         return url
     }
 
-    static func validatedTarget(_ text: String, deadline: MonotonicDeadline) throws -> ValidatedLinkTarget {
-        let url = try validatedURL(text, resolveHost: false)
+    static func validatedTarget(_ text: String, deadline: MonotonicDeadline, allowCapabilityURL: Bool = false) throws -> ValidatedLinkTarget {
+        let url = try validatedURL(text, resolveHost: false, allowCapabilityURL: allowCapabilityURL)
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let scheme = components.scheme?.lowercased(),
               let host = components.host?.trimmingCharacters(in: CharacterSet(charactersIn: ".")),
@@ -254,11 +254,11 @@ enum LinkFetchSafety {
 final class WebsiteTitleFetcher: @unchecked Sendable {
     private static let maxBodyBytes = 2 * 1024 * 1024
 
-    static func fetch(urlText: String, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
+    static func fetch(urlText: String, allowCapabilityURL: Bool = false, completion: @escaping @Sendable (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             let result: Result<String, Error>
             do {
-                result = .success(try fetchTitle(urlText: urlText))
+                result = .success(try fetchTitle(urlText: urlText, allowCapabilityURL: allowCapabilityURL))
             } catch {
                 result = .failure(error)
             }
@@ -266,9 +266,9 @@ final class WebsiteTitleFetcher: @unchecked Sendable {
         }
     }
 
-    private static func fetchTitle(urlText: String) throws -> String {
+    private static func fetchTitle(urlText: String, allowCapabilityURL: Bool) throws -> String {
         let deadline = MonotonicDeadline(timeoutSeconds: 8)
-        var target = try LinkFetchSafety.validatedTarget(urlText, deadline: deadline)
+        var target = try LinkFetchSafety.validatedTarget(urlText, deadline: deadline, allowCapabilityURL: allowCapabilityURL)
         var redirectCount = 0
         while true {
             guard !deadline.isExpired else { throw WebsiteTitleFetchError.timedOut }
@@ -290,7 +290,7 @@ final class WebsiteTitleFetcher: @unchecked Sendable {
                 if target.url.scheme?.lowercased() == "https", redirectURL.scheme?.lowercased() == "http" {
                     throw WebsiteTitleFetchError.insecureRedirect
                 }
-                target = try LinkFetchSafety.validatedTarget(redirectURL.absoluteString, deadline: deadline)
+                target = try LinkFetchSafety.validatedTarget(redirectURL.absoluteString, deadline: deadline, allowCapabilityURL: allowCapabilityURL)
                 continue
             }
             if status == 401 || status == 403 { throw WebsiteTitleFetchError.authenticationRequired }

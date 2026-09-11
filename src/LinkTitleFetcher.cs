@@ -102,15 +102,20 @@ namespace Clipman
 
         public static bool CanFetch(Uri uri, out string reason)
         {
-            return Validate(uri, true, out reason);
+            return Validate(uri, true, false, out reason);
         }
 
         public static bool CanOffer(Uri uri, out string reason)
         {
-            return Validate(uri, false, out reason);
+            return Validate(uri, false, false, out reason);
         }
 
-        private static bool Validate(Uri uri, bool resolveHost, out string reason)
+        public static bool CanOfferExplicit(Uri uri, out string reason)
+        {
+            return Validate(uri, false, true, out reason);
+        }
+
+        private static bool Validate(Uri uri, bool resolveHost, bool allowCapabilityUrl, out string reason)
         {
             reason = string.Empty;
             if (!LinkPresentation.IsUrlWithinLimit(uri))
@@ -134,7 +139,7 @@ namespace Clipman
                 reason = "Links using a non-standard port are not contacted.";
                 return false;
             }
-            if (IsCapabilityUrl(uri))
+            if (!allowCapabilityUrl && IsCapabilityUrl(uri))
             {
                 reason = "This link contains a token-like path or a credential-related parameter, so Clipman will not contact it.";
                 return false;
@@ -150,7 +155,7 @@ namespace Clipman
             return true;
         }
 
-        public static LinkTitleFetchResult Fetch(Uri original)
+        public static LinkTitleFetchResult Fetch(Uri original, bool allowCapabilityUrl = false)
         {
             var result = new LinkTitleFetchResult { Title = string.Empty, Error = string.Empty, Host = original == null ? string.Empty : original.Host };
             try
@@ -161,7 +166,7 @@ namespace Clipman
                 {
                     string reason;
                     IPAddress[] addresses;
-                    if (!Validate(current, false, out reason) || !TryResolvePublicAddresses(current.Host, deadline, out addresses, out reason)) return Failure(result, reason);
+                    if (!Validate(current, false, allowCapabilityUrl, out reason) || !TryResolvePublicAddresses(current.Host, deadline, out addresses, out reason)) return Failure(result, reason);
                     result.Host = current.Host;
                     var response = SendPinned(current, addresses, deadline);
                     var status = response.StatusCode;

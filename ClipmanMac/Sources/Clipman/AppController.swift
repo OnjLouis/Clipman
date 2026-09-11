@@ -1564,10 +1564,14 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         let validatedURL: URL
         do {
-            validatedURL = try LinkFetchSafety.validatedURL(current.Text, resolveHost: false)
+            validatedURL = try LinkFetchSafety.validatedURL(current.Text, resolveHost: false, allowCapabilityURL: true)
         } catch {
-            sounds.play(.skip)
-            showInformationalAlert(title: "Website Title Not Available", message: error.localizedDescription)
+            applyWebsiteTitleFallback(
+                controller: controller,
+                entryID: current.Id,
+                expectedText: current.Text,
+                failureReason: error.localizedDescription
+            )
             return
         }
         guard !websiteTitleFetches.contains(current.Id) else {
@@ -1596,14 +1600,18 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
 
         websiteTitleFetches.insert(current.Id)
-        WebsiteTitleFetcher.fetch(urlText: current.Text) { [weak self] result in
+        WebsiteTitleFetcher.fetch(urlText: current.Text, allowCapabilityURL: true) { [weak self] result in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.websiteTitleFetches.remove(current.Id)
                 switch result {
                 case .failure(let error):
-                    self.sounds.play(.skip)
-                    self.showInformationalAlert(title: "Website Title Not Available", message: error.localizedDescription)
+                    self.applyWebsiteTitleFallback(
+                        controller: controller,
+                        entryID: current.Id,
+                        expectedText: current.Text,
+                        failureReason: error.localizedDescription
+                    )
                 case .success(let title):
                     guard let latest = self.store.entry(id: current.Id),
                           latest.Text == current.Text,
@@ -1623,6 +1631,30 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private func applyWebsiteTitleFallback(
+        controller: HistoryWindowController,
+        entryID: String,
+        expectedText: String,
+        failureReason: String
+    ) {
+        guard let fallbackName = LinkPresentation.make(urlText: expectedText)?.label,
+              !fallbackName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            sounds.play(.skip)
+            controller.reportPasteStatus(failureReason)
+            return
+        }
+        store.setNameIfEmpty(id: entryID, expectedText: expectedText, name: fallbackName) { [weak self, weak controller] saved in
+            guard let self, let controller else { return }
+            if saved {
+                self.sounds.play(.copy)
+                controller.reportPasteStatus("Website title unavailable; used \(fallbackName) as the link name.")
+            } else {
+                self.sounds.play(.skip)
+                controller.reportPasteStatus("The link changed before its address label could be saved as the name.")
             }
         }
     }

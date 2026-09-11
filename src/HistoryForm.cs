@@ -3281,11 +3281,9 @@ namespace Clipman
                 return;
             }
             string reason;
-            if (!LinkTitleFetcher.CanOffer(uri, out reason))
+            if (!LinkTitleFetcher.CanOfferExplicit(uri, out reason))
             {
-                playSkipSound();
-                MessageBox.Show(reason, "Website title not retrieved", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                statusText.Text = reason;
+                ApplyWebsiteTitleFallback(entry.Id, entry.Text ?? string.Empty, uri, reason);
                 return;
             }
             if (settings.ConfirmWebsiteTitleRequests)
@@ -3312,7 +3310,7 @@ namespace Clipman
             var originalText = entry.Text ?? string.Empty;
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {
-                var result = LinkTitleFetcher.Fetch(uri);
+                var result = LinkTitleFetcher.Fetch(uri, true);
                 if (IsDisposed || !IsHandleCreated) return;
                 BeginInvoke(new Action(() =>
                 {
@@ -3338,8 +3336,7 @@ namespace Clipman
                     }
                     if (!result.Success)
                     {
-                        playSkipSound();
-                        statusText.Text = result.Error;
+                        ApplyWebsiteTitleFallback(entryId, originalText, uri, result.Error);
                         return;
                     }
                     if (!store.TrySetNameIfUnchanged(entryId, originalText, result.Title))
@@ -3352,6 +3349,25 @@ namespace Clipman
                     statusText.Text = "Used the website title as the link name.";
                 }));
             });
+        }
+
+        private void ApplyWebsiteTitleFallback(string entryId, string expectedText, Uri uri, string failureReason)
+        {
+            var fallbackName = LinkPresentation.OfflineLabel(uri).Trim();
+            if (fallbackName.Length == 0)
+            {
+                playSkipSound();
+                statusText.Text = failureReason;
+                return;
+            }
+            if (!store.TrySetNameIfUnchanged(entryId, expectedText, fallbackName))
+            {
+                playSkipSound();
+                statusText.Text = "The link changed before its address label could be saved as the name.";
+                return;
+            }
+            Reload(entryId, -1);
+            statusText.Text = "Website title unavailable; used " + fallbackName + " as the link name.";
         }
 
         private static List<KeyValuePair<string, string>> ClipboardEntryDetails(ClipEntry entry)

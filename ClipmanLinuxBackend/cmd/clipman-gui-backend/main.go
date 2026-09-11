@@ -172,12 +172,19 @@ func (s *session) handle(action string, raw json.RawMessage) (any, error) {
 	switch action {
 	case "fetch_website_title":
 		var p struct {
-			URL string `json:"url"`
+			URL      string `json:"url"`
+			Explicit bool   `json:"explicit"`
 		}
 		if err := decode(raw, &p); err != nil {
 			return nil, err
 		}
-		title, err := fetchWebsiteTitle(p.URL)
+		var title string
+		var err error
+		if p.Explicit {
+			title, err = fetchExplicitWebsiteTitle(p.URL)
+		} else {
+			title, err = fetchWebsiteTitle(p.URL)
+		}
 		if err != nil {
 			return nil, err
 		}

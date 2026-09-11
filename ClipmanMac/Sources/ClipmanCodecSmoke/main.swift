@@ -320,8 +320,13 @@ do {
         encoding: .utf8
     )
     expect(
-        appControllerSource.contains("LinkFetchSafety.validatedURL(current.Text, resolveHost: false)"),
-        "website-title validation before consent must not resolve the host"
+        appControllerSource.contains("LinkFetchSafety.validatedURL(current.Text, resolveHost: false, allowCapabilityURL: true)"),
+        "manual website-title validation must honor explicit sensitive-looking links without resolving before consent"
+    )
+    expect(
+        appControllerSource.contains("Website title unavailable; used \\(fallbackName) as the link name.")
+            && appControllerSource.contains("LinkPresentation.make(urlText: expectedText)?.label"),
+        "failed manual website-title requests must persist the generic offline label"
     )
     let serverStorageSource = try String(
         contentsOf: sourcesDirectory.appendingPathComponent("Clipman/ServerStorageClient.swift"),
@@ -362,8 +367,8 @@ do {
         encoding: .utf8
     )
     expect(
-        titleFetcherSource.contains("LinkFetchSafety.validatedTarget(urlText, deadline: deadline)"),
-        "confirmed website-title requests must resolve and validate a pinned target"
+        titleFetcherSource.contains("LinkFetchSafety.validatedTarget(urlText, deadline: deadline, allowCapabilityURL: allowCapabilityURL)"),
+        "website-title requests must preserve intent while resolving and validating a pinned target"
     )
     guard let fetchLengthGuard = titleFetcherSource.range(of: "guard LinkPresentation.isURLTextWithinLimit(text)"),
           let fetchURLParser = titleFetcherSource.range(of: "let trimmed = text.trimmingCharacters")
@@ -380,8 +385,8 @@ do {
     }
     expect(redirectLengthGuard.lowerBound < redirectURLParser.lowerBound, "redirect locations must be bounded before URL parsing")
     expect(
-        titleFetcherSource.contains("LinkFetchSafety.validatedTarget(redirectURL.absoluteString, deadline: deadline)"),
-        "website-title redirects must resolve and validate a new pinned target"
+        titleFetcherSource.contains("LinkFetchSafety.validatedTarget(redirectURL.absoluteString, deadline: deadline, allowCapabilityURL: allowCapabilityURL)"),
+        "website-title redirects must preserve intent while resolving and validating a new pinned target"
     )
     expect(
         titleFetcherSource.contains("let deadline = MonotonicDeadline(timeoutSeconds: 8)")
