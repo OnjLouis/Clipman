@@ -1000,7 +1000,7 @@ namespace ClipmanServerWrapper
             };
             var cancel = new Button
             {
-                Text = "&Cancel",
+                Text = "Ca&ncel",
                 DialogResult = DialogResult.Cancel,
                 Location = new Point(438, 342),
                 Size = new Size(110, 32)

@@ -145,7 +145,7 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
   <h2 id="docker">Docker and GHCR</h2>
   <p>Clipman Server can also run as a container. This is useful for NAS, VPS, homelab, or reverse-proxy setups where services are managed as containers instead of directly installed programs.</p>
 
-  <p>The published image is:</p>
+  <p>The published image supports 64-bit x86, 64-bit ARM and 32-bit ARMv7 hosts under the same tags:</p>
 
   <pre><code>ghcr.io/onjlouis/clipman-server:latest</code></pre>
 
@@ -274,6 +274,8 @@ systemctl --user enable --now clipman-server.service</code></pre>
 
   <h2 id="updates">Updates</h2>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP. The <a href="https://onjlouis.github.io/Clipman/server/download.html">stable latest-server download</a> always resolves to the newest published server package. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
+
+  <p>Server 2.6.5 publishes the official container as one multi-platform image for 64-bit x86, 64-bit ARM and 32-bit ARMv7 systems, including current and older Raspberry Pi installations. It also tightens database bucket path validation, requires TLS 1.2 or newer during Linux server updates, directs temporary iPhone and iPad setup pages to Clipman on the App Store, and restores distinct keyboard shortcuts to the Windows certificate dialog. This incorporates <a href="https://github.com/OnjLouis/Clipman/pull/72">pull request #72</a> from Kyle Borah.</p>
 
   <p>Server 2.6.4 improves private HTTPS certificate creation. Interactive Linux setup detects active non-loopback IPv4 and IPv6 addresses, lists them and asks whether to include them; Windows presents an accessible checked address list; and Mac offers Include All, Skip or Cancel. Each platform also accepts additional comma-separated hostnames. Existing explicit <code>--cert-host</code> and <code>--cert-ip</code> commands remain non-interactive for scripts and containers.</p>
 
