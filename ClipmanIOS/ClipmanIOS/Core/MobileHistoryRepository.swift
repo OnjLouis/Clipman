@@ -57,9 +57,9 @@ enum MobileSyncRulesError: Error, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            "Clipman Server is not configured."
+            "Synchronized history is not configured."
         case .notAvailable:
-            "Sync rules are not set up for this server yet. Use Clipman on a desktop to create them."
+            "Sync rules are not set up in synchronized storage yet. Use Clipman on a desktop to create them."
         case .readOnlyDocument:
             "These sync rules were written by a newer version of Clipman. Update Clipman on this device to change them."
         case .invalid(let reason):
@@ -182,7 +182,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
         current: ClipDatabase,
         expectedRevision: String
     ) async throws -> MobileSyncResult {
-        let client = ServerStorageClient(settings: settings)
+        let client = storageClient(settings: settings)
         let rules = await readRules(client: client, settings: settings)
         if let document = rules.document, document.Enabled {
             let backupError: String?
@@ -246,7 +246,11 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
 
         if !knownRevision.isEmpty {
             do {
-                let newRevision = try await client.upload(data: data, expectedRevision: knownRevision)
+                let newRevision = try await client.upload(
+                    data: data,
+                    expectedRevision: knownRevision,
+                    createOnly: false
+                )
                 saveSyncState(identity: client.syncCacheIdentity, revision: newRevision)
                 return MobileSyncResult(
                     database: current,
@@ -311,7 +315,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
         current: ClipDatabase,
         localAlreadySaved: Bool = false
     ) async throws -> MobileSyncResult {
-        let client = ServerStorageClient(settings: settings)
+        let client = storageClient(settings: settings)
         let rules = await readRules(client: client, settings: settings)
         guard let document = rules.document, document.Enabled else {
             clearChannelState()
@@ -365,7 +369,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
         } else {
             current
         }
-        let client = ServerStorageClient(settings: settings)
+        let client = storageClient(settings: settings)
         if localAlreadySaved,
            let state = loadSyncState(),
            state.identity == client.syncCacheIdentity,
@@ -390,7 +394,11 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
                 password: settings.historyPassword,
                 preferredSalt: localEncryptedSalt
             )
-            let revision = try await client.upload(data: data, expectedRevision: "")
+            let revision = try await client.upload(
+                data: data,
+                expectedRevision: "",
+                createOnly: client.createOnlyWhenMissing
+            )
             if cached.map({ !SyncConflictResolver.hasSameContent(local, $0) }) ?? true {
                 let backupError = try await saveLocal(
                     local,
@@ -425,7 +433,11 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
             password: settings.historyPassword,
             preferredSalt: localEncryptedSalt
         )
-        let revision = try await client.upload(data: data, expectedRevision: download.revision)
+        let revision = try await client.upload(
+            data: data,
+            expectedRevision: download.revision,
+            createOnly: false
+        )
         if cached.map({ !SyncConflictResolver.hasSameContent(merged, $0) }) ?? true {
             let backupError = try await saveLocal(
                 merged,
@@ -453,7 +465,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     private func commitChannels(
         settings: ClipmanSettings,
         current: ClipDatabase,
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         document: SyncRulesDocument,
         rulesRevisionInEffect: String
     ) async throws -> MobileSyncResult {
@@ -463,12 +475,12 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
 
         // Download: core first, then every subscribed channel in document order.
         var states: [MobileChannelState] = []
-        var clients: [ServerStorageClient] = []
+        var clients: [any HistoryStorageClient] = []
         states.append(try await readChannel(key: SyncRuleEngine.coreChannelKey, client: client, password: password))
         clients.append(client)
         var coreSalt = states[0].salt ?? localEncryptedSalt
         for key in SyncRuleEngine.subscribedKeys(document: document, deviceName: deviceName) {
-            guard let channelClient = client.addressingChannel(key, password: password) else { continue }
+            guard let channelClient = client.historyChannel(key, password: password) else { continue }
             states.append(try await readChannel(key: key, client: channelClient, password: password))
             clients.append(channelClient)
         }
@@ -716,7 +728,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     /// missing bucket is an empty database, not an error.
     private func readChannel(
         key: String,
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         password: String
     ) async throws -> MobileChannelState {
         let identity = client.syncCacheIdentity
@@ -743,7 +755,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
 
     private func downloadChannel(
         key: String,
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         password: String,
         identity: String
     ) async throws -> MobileChannelState {
@@ -780,7 +792,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     private func putChannel(
         _ state: inout MobileChannelState,
         database: ClipDatabase,
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         coreSalt: [UInt8]?,
         password: String
     ) async throws {
@@ -820,7 +832,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
         let name = state.key.isEmpty ? "main history" : state.key
         throw MobileMutationError(
             localSaved: true,
-            message: "The \(name) changed repeatedly on Clipman Server; the change was not committed. \((lastError ?? ServerStorageError.conflict).localizedDescription)"
+            message: "The \(name) changed repeatedly in \(client.storageName); the change was not committed. \((lastError ?? ServerStorageError.conflict).localizedDescription)"
         )
     }
 
@@ -830,14 +842,14 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     private func writeThrough(
         key: String,
         entries: [ClipEntry],
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         coreSalt: [UInt8]?,
         password: String
     ) async throws {
-        guard let channelClient = client.addressingChannel(key, password: password) else {
+        guard let channelClient = client.historyChannel(key, password: password) else {
             throw MobileMutationError(
                 localSaved: true,
-                message: "Clipman cannot address the \(key) channel without a server token and history password."
+                message: "Clipman cannot address the \(key) channel in \(client.storageName). Check the synchronized storage and history password."
             )
         }
         var state = try await downloadChannel(
@@ -866,11 +878,11 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     /// throws: a damaged, unreachable or missing rules bucket must not stop
     /// history from syncing, and a cached document keeps working offline.
     private func readRules(
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         settings: ClipmanSettings
     ) async -> (document: SyncRulesDocument?, revision: String) {
         guard client.isConfigured,
-              let rulesClient = client.addressingSyncRules(password: settings.historyPassword) else {
+              let rulesClient = client.historySyncRules(password: settings.historyPassword) else {
             return (nil, "")
         }
         let identity = rulesClient.syncCacheIdentity
@@ -916,13 +928,13 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
         return (merged, rulesRevision)
     }
 
-    /// Restores a rules bucket that disappeared from the server, from the local
+    /// Restores a rules bucket that disappeared from synchronized storage, from the local
     /// cache, with `If-None-Match` so a document another device wrote in the
     /// meantime always wins (spec section 4, Caching). A cached FUTURE-VERSION
     /// document is display only and must never be re-uploaded, so it does not
     /// arm this fallback.
     private func restoreRulesBucket(
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         settings: ClipmanSettings
     ) async -> SyncRulesDocument? {
         rulesRevision = ""
@@ -943,7 +955,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
 
     private static func uploadRules(
         _ document: SyncRulesDocument,
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         expectedRevision: String,
         createOnly: Bool,
         password: String,
@@ -964,7 +976,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     /// is missing from `Devices` adds itself with `Channels: ["*"]` on its next
     /// successful sync. Best effort; a failure is retried on the next sync.
     private func registerDeviceIfNeeded(
-        client: ServerStorageClient,
+        client: any HistoryStorageClient,
         document: SyncRulesDocument,
         revision: String,
         deviceName: String,
@@ -975,7 +987,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
               !deviceName.isEmpty,
               !SyncRuleEngine.isDeviceListed(document: document, deviceName: deviceName),
               !revision.isEmpty,
-              let rulesClient = client.addressingSyncRules(password: password) else {
+              let rulesClient = client.historySyncRules(password: password) else {
             return document
         }
         var updated = document
@@ -1000,7 +1012,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     }
 
     func syncRulesSnapshot(settings: ClipmanSettings) async -> MobileSyncRulesSnapshot {
-        let client = ServerStorageClient(settings: settings)
+        let client = storageClient(settings: settings)
         let rules = await readRules(client: client, settings: settings)
         return rulesSnapshot(
             document: rules.document,
@@ -1015,9 +1027,9 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
         settings: ClipmanSettings,
         channels: [String]?
     ) async throws -> MobileSyncRulesSnapshot {
-        let client = ServerStorageClient(settings: settings)
+        let client = storageClient(settings: settings)
         guard client.isConfigured else { throw MobileSyncRulesError.notConfigured }
-        guard let rulesClient = client.addressingSyncRules(password: settings.historyPassword) else {
+        guard let rulesClient = client.historySyncRules(password: settings.historyPassword) else {
             throw MobileSyncRulesError.notConfigured
         }
         let deviceName = resolvedDeviceName(settings)
@@ -1085,7 +1097,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     ) -> MobileSyncRulesSnapshot {
         let name = resolvedDeviceName(settings)
         let snapshot = MobileSyncRulesSnapshot(
-            available: available && settings.storageMode == .server,
+            available: available && settings.storageMode.isSynchronized,
             document: document,
             isReadOnly: SyncRuleEngine.isReadOnly(document),
             subscribedKeys: SyncRuleEngine.subscribedKeys(document: document, deviceName: name),
@@ -1110,7 +1122,7 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
         view: ClipDatabase,
         states: [MobileChannelState],
         settings: ClipmanSettings,
-        client: ServerStorageClient
+        client: any HistoryStorageClient
     ) async throws -> String? {
         let data = try await DatabaseWorker.save(
             view,
@@ -1311,5 +1323,17 @@ actor MobileHistoryRepository: MobileHistoryRepositoryProtocol {
     private func clearSyncState() {
         guard let url = try? syncStateURL(createDirectory: false) else { return }
         try? fileManager.removeItem(at: url)
+    }
+
+    private func storageClient(settings: ClipmanSettings) -> any HistoryStorageClient {
+        switch settings.storageMode {
+        case .sharedFolder:
+            SharedFolderStorageClient(
+                bookmark: settings.sharedFolderBookmark,
+                password: settings.historyPassword
+            )
+        case .local, .server:
+            ServerStorageClient(settings: settings)
+        }
     }
 }

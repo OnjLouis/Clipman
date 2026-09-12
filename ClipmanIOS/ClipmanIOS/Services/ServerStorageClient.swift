@@ -18,6 +18,19 @@ struct ServerDatabaseMetadata: Sendable {
     var revision: String
 }
 
+protocol HistoryStorageClient: Sendable {
+    var isConfigured: Bool { get }
+    var syncCacheIdentity: String { get }
+    var databaseID: String { get }
+    var storageName: String { get }
+    var createOnlyWhenMissing: Bool { get }
+    func historyChannel(_ channelKey: String, password: String) -> (any HistoryStorageClient)?
+    func historySyncRules(password: String) -> (any HistoryStorageClient)?
+    func metadata() async throws -> ServerDatabaseMetadata
+    func download() async throws -> ServerDatabaseDownload
+    func upload(data: Data, expectedRevision: String, createOnly: Bool) async throws -> String
+}
+
 enum ServerStorageError: Error, LocalizedError {
     case notConfigured
     case notFound
@@ -252,6 +265,19 @@ final class ServerStorageClient: @unchecked Sendable {
         default:
             return error.localizedDescription
         }
+    }
+}
+
+extension ServerStorageClient: HistoryStorageClient {
+    var storageName: String { "Clipman Server" }
+    var createOnlyWhenMissing: Bool { false }
+
+    func historyChannel(_ channelKey: String, password: String) -> (any HistoryStorageClient)? {
+        addressingChannel(channelKey, password: password)
+    }
+
+    func historySyncRules(password: String) -> (any HistoryStorageClient)? {
+        addressingSyncRules(password: password)
     }
 }
 

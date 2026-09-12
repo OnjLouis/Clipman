@@ -22,8 +22,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios
         PRODUCT_NAME: Clipman
-        MARKETING_VERSION: "3.0.0"
-        CURRENT_PROJECT_VERSION: "30003"
+        MARKETING_VERSION: "3.1.0"
+        CURRENT_PROJECT_VERSION: "31000"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanIOS/Support/Info.plist
         SDKROOT: iphoneos
@@ -56,12 +56,13 @@ targets:
       - path: ClipmanIOS/Core/SyncRules.swift
       - path: ClipmanIOS/Services/ServerSettingsSanitizer.swift
       - path: ClipmanIOS/Services/ServerStorageClient.swift
+      - path: ClipmanIOS/Services/SharedFolderStorageClient.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.onj.clipman.ios.share
         PRODUCT_NAME: Share to Clipman
-        MARKETING_VERSION: "3.0.0"
-        CURRENT_PROJECT_VERSION: "30003"
+        MARKETING_VERSION: "3.1.0"
+        CURRENT_PROJECT_VERSION: "31000"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: ClipmanShareExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: ClipmanShareExtension/ClipmanShareExtension.entitlements

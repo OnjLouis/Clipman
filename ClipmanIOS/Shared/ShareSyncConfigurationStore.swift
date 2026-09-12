@@ -9,9 +9,11 @@ struct ShareSyncConfiguration: Codable, Equatable, Sendable {
     var deviceName: String
     var richTextEnabled: Bool
     var includeImagesInRichText: Bool
+    var sharedFolderBookmark: Data? = nil
 }
 
 struct ShareSyncSettings: Equatable, Sendable, ServerStorageSettingsProviding {
+    var storageMode: String = "server"
     var serverURL: String
     var serverToken: String
     var serverCaCertPEM: String
@@ -20,6 +22,7 @@ struct ShareSyncSettings: Equatable, Sendable, ServerStorageSettingsProviding {
     var deviceName: String
     var richTextEnabled: Bool
     var includeImagesInRichText: Bool
+    var sharedFolderBookmark: Data = Data()
 }
 
 enum ShareSyncConfigurationError: Error, LocalizedError {
@@ -32,9 +35,9 @@ enum ShareSyncConfigurationError: Error, LocalizedError {
         case .appGroupUnavailable:
             "Clipman's shared app storage is unavailable."
         case .secureSettingsUnavailable:
-            "Clipman's protected server settings are unavailable. Open Clipman once and try again."
+            "Clipman's protected sync settings are unavailable. Open Clipman once and try again."
         case .invalidConfiguration:
-            "Clipman Server is not configured for sharing."
+            "Clipman's synchronized history is not configured for sharing."
         }
     }
 }
@@ -56,7 +59,8 @@ enum ShareSyncConfigurationStore {
         historyPassword: String,
         deviceName: String,
         richTextEnabled: Bool,
-        includeImagesInRichText: Bool
+        includeImagesInRichText: Bool,
+        sharedFolderBookmark: Data
     ) {
         let configuration = ShareSyncConfiguration(
             storageMode: storageMode,
@@ -65,7 +69,8 @@ enum ShareSyncConfigurationStore {
             serverCaHost: serverCaHost,
             deviceName: deviceName,
             richTextEnabled: richTextEnabled,
-            includeImagesInRichText: richTextEnabled && includeImagesInRichText
+            includeImagesInRichText: richTextEnabled && includeImagesInRichText,
+            sharedFolderBookmark: sharedFolderBookmark
         )
         guard SharedShareKeychain.set(serverToken, account: .serverToken),
               SharedShareKeychain.set(historyPassword, account: .historyPassword),
@@ -89,14 +94,18 @@ enum ShareSyncConfigurationStore {
             ShareSyncConfiguration.self,
             from: Data(contentsOf: url)
         )
-        guard configuration.storageMode == "server" else {
+        guard configuration.storageMode == "server" || configuration.storageMode == "sharedFolder" else {
             throw ShareSyncConfigurationError.invalidConfiguration
         }
-        guard let serverToken = SharedShareKeychain.string(account: .serverToken),
-              let historyPassword = SharedShareKeychain.string(account: .historyPassword) else {
+        guard let historyPassword = SharedShareKeychain.string(account: .historyPassword) else {
+            throw ShareSyncConfigurationError.secureSettingsUnavailable
+        }
+        let serverToken = SharedShareKeychain.string(account: .serverToken) ?? ""
+        if configuration.storageMode == "server" && serverToken.isEmpty {
             throw ShareSyncConfigurationError.secureSettingsUnavailable
         }
         let settings = ShareSyncSettings(
+            storageMode: configuration.storageMode,
             serverURL: configuration.serverURL,
             serverToken: serverToken,
             serverCaCertPEM: configuration.serverCaCertPEM,
@@ -104,9 +113,16 @@ enum ShareSyncConfigurationStore {
             historyPassword: historyPassword,
             deviceName: configuration.deviceName,
             richTextEnabled: configuration.richTextEnabled,
-            includeImagesInRichText: configuration.includeImagesInRichText
+            includeImagesInRichText: configuration.includeImagesInRichText,
+            sharedFolderBookmark: configuration.sharedFolderBookmark ?? Data()
         )
-        guard ServerStorageClient(settings: settings).isConfigured else {
+        let configured = settings.storageMode == "sharedFolder"
+            ? SharedFolderStorageClient(
+                bookmark: settings.sharedFolderBookmark,
+                password: settings.historyPassword
+            ).isConfigured
+            : ServerStorageClient(settings: settings).isConfigured
+        guard configured else {
             throw ShareSyncConfigurationError.invalidConfiguration
         }
         return settings

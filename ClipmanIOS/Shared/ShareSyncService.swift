@@ -25,16 +25,18 @@ enum ShareSyncError: Error, LocalizedError {
     }
 }
 
-/// One Clipman Server bucket the Share extension writes to. The core history and
+/// One synchronized-history bucket the Share extension writes to. Core history and
 /// every sync channel are ordinary buckets (`sync-rules-spec.md` section 2), so
 /// the extension needs nothing but this to route a shared item into a channel.
 protocol ShareSyncBucket {
     var databaseID: String { get }
+    var createOnlyWhenMissing: Bool { get }
     func download() async throws -> ServerDatabaseDownload
     func upload(data: Data, expectedRevision: String, createOnly: Bool) async throws -> String
 }
 
 extension ServerStorageClient: ShareSyncBucket {}
+extension SharedFolderStorageClient: ShareSyncBucket {}
 
 struct ShareSyncService {
     /// The Share extension has a much smaller memory budget than the app, so it
@@ -81,7 +83,7 @@ struct ShareSyncService {
             settings: settings,
             rules: ShareSyncConfigurationStore.loadRules()
         ) { channelKey in
-            try Self.serverBucket(channelKey: channelKey, settings: settings)
+            try Self.storageBucket(channelKey: channelKey, settings: settings)
         }
     }
 
@@ -143,7 +145,7 @@ struct ShareSyncService {
                 _ = try await bucket.upload(
                     data: encoded,
                     expectedRevision: revision,
-                    createOnly: createsChannel && revision.isEmpty
+                    createOnly: (createsChannel || bucket.createOnlyWhenMissing) && revision.isEmpty
                 )
                 return mutation.alreadyExists ? .alreadyExists : .added
             } catch ServerStorageError.conflict {
@@ -185,6 +187,26 @@ struct ShareSyncService {
         }
         return channel
     }
+
+    static func storageBucket(channelKey: String, settings: ShareSyncSettings) throws -> any ShareSyncBucket {
+        guard settings.storageMode == "sharedFolder" else {
+            return try serverBucket(channelKey: channelKey, settings: settings)
+        }
+        let client = SharedFolderStorageClient(
+            bookmark: settings.sharedFolderBookmark,
+            password: settings.historyPassword
+        )
+        guard client.isConfigured else { throw ShareSyncConfigurationError.invalidConfiguration }
+        guard !channelKey.isEmpty else { return client }
+        guard let channel = client.historyChannel(channelKey, password: settings.historyPassword) as? SharedFolderStorageClient else {
+            throw ShareSyncConfigurationError.invalidConfiguration
+        }
+        return channel
+    }
+}
+
+extension ShareSyncBucket {
+    var createOnlyWhenMissing: Bool { false }
 }
 
 enum ShareSyncDatabaseMutation {

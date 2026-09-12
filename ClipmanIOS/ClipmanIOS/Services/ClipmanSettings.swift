@@ -3,9 +3,26 @@ import Foundation
 enum MobileStorageMode: String, CaseIterable, Identifiable, Sendable {
     case local
     case server
+    case sharedFolder
 
     var id: String { rawValue }
-    var label: String { rawValue.capitalized }
+    var label: String {
+        switch self {
+        case .local: "Local"
+        case .server: "Server"
+        case .sharedFolder: "Shared folder"
+        }
+    }
+
+    var isSynchronized: Bool { self != .local }
+
+    var syncName: String {
+        switch self {
+        case .local: "local history"
+        case .server: "Clipman Server"
+        case .sharedFolder: "shared folder"
+        }
+    }
 }
 
 enum HistorySortMode: String, CaseIterable, Identifiable, Sendable {
@@ -115,6 +132,14 @@ struct ClipmanSettings: Equatable, Sendable {
     var cloudBackupEnabled: Bool
     var cloudBackupBookmark: Data
     var cloudBackupFolderName: String
+    var sharedFolderBookmark: Data
+    var sharedFolderName: String
+
+    mutating func reuseBackupFolderForSharedSyncIfNeeded() {
+        guard sharedFolderBookmark.isEmpty, !cloudBackupBookmark.isEmpty else { return }
+        sharedFolderBookmark = cloudBackupBookmark
+        sharedFolderName = cloudBackupFolderName
+    }
 
     @MainActor
     static var empty: ClipmanSettings {
@@ -138,7 +163,9 @@ struct ClipmanSettings: Equatable, Sendable {
             confirmDeletions: true,
             cloudBackupEnabled: false,
             cloudBackupBookmark: Data(),
-            cloudBackupFolderName: ""
+            cloudBackupFolderName: "",
+            sharedFolderBookmark: Data(),
+            sharedFolderName: ""
         )
     }
 }
@@ -167,6 +194,8 @@ enum SettingsStore {
         static let cloudBackupEnabled = "cloudBackupEnabled"
         static let cloudBackupBookmark = "cloudBackupBookmark"
         static let cloudBackupFolderName = "cloudBackupFolderName"
+        static let sharedFolderBookmark = "sharedFolderBookmark"
+        static let sharedFolderName = "sharedFolderName"
     }
 
     @MainActor
@@ -191,6 +220,13 @@ enum SettingsStore {
         if settings.cloudBackupBookmark.isEmpty {
             settings.cloudBackupEnabled = false
             settings.cloudBackupFolderName = ""
+        }
+        settings.sharedFolderBookmark = UserDefaults.standard.data(forKey: Keys.sharedFolderBookmark) ?? Data()
+        settings.sharedFolderName = UserDefaults.standard.string(forKey: Keys.sharedFolderName) ?? ""
+        settings.reuseBackupFolderForSharedSyncIfNeeded()
+        if settings.sharedFolderBookmark.isEmpty {
+            if settings.storageMode == .sharedFolder { settings.storageMode = .local }
+            settings.sharedFolderName = ""
         }
         settings.deviceName = UserDefaults.standard.string(forKey: Keys.deviceName) ?? UIDeviceMachine.name
         if settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -234,6 +270,8 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.cloudBackupEnabled, forKey: Keys.cloudBackupEnabled)
         UserDefaults.standard.set(settings.cloudBackupBookmark, forKey: Keys.cloudBackupBookmark)
         UserDefaults.standard.set(settings.cloudBackupFolderName, forKey: Keys.cloudBackupFolderName)
+        UserDefaults.standard.set(settings.sharedFolderBookmark, forKey: Keys.sharedFolderBookmark)
+        UserDefaults.standard.set(settings.sharedFolderName, forKey: Keys.sharedFolderName)
         UserDefaults.standard.set(settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Keys.deviceName)
         KeychainStore.set(settings.serverToken, for: Keys.serverToken)
         KeychainStore.set(settings.historyPassword, for: Keys.historyPassword)
@@ -258,7 +296,8 @@ enum SettingsStore {
             historyPassword: settings.historyPassword,
             deviceName: settings.deviceName,
             richTextEnabled: settings.richTextEnabled,
-            includeImagesInRichText: settings.includeImagesInRichText
+            includeImagesInRichText: settings.includeImagesInRichText,
+            sharedFolderBookmark: settings.sharedFolderBookmark
         )
     }
 }

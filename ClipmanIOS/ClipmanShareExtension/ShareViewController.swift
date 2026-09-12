@@ -110,7 +110,7 @@ final class ShareViewController: UIViewController {
                     let result = try await synchronize(queued)
                     try await remove(queued)
                     statusLabel.text = result == .alreadyExists
-                        ? "\(item.noun.capitalized) already exists. Server sync complete."
+                        ? "\(item.noun.capitalized) already exists. Sync complete."
                         : "\(item.noun.capitalized) added and synced."
                     logger.notice("Synced one shared \(item.noun, privacy: .public)")
                 } catch {

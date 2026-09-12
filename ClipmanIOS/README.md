@@ -1,6 +1,6 @@
 # Clipman for iOS
 
-Clipman for iOS is a foreground-only clipboard-history client. It can keep history privately on the iPhone or iPad, or read and write the same Clipman Server history used by Windows, Mac, and Android clients.
+Clipman for iOS is a foreground-only clipboard-history client. It can keep history privately on the iPhone or iPad, synchronize through an iCloud Drive or other shared folder, or read and write the same Clipman Server history used by Windows, Mac, and Android clients.
 
 [Download Clipman from the App Store](https://apps.apple.com/app/clipman/id6793250105). Testers can also [join the public TestFlight beta](https://testflight.apple.com/join/HYReZKAk) to try approved preview builds.
 
@@ -9,10 +9,12 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 ## Current Scope
 
 - Optionally require Face ID, Touch ID, or the device passcode whenever Clipman returns to the foreground. This is off by default.
-- Choose private Local storage or Clipman Server storage.
+- Choose private Local storage, Shared Folder sync, or Clipman Server storage.
+- Use Shared Folder sync with the same selected iCloud Drive or supported provider folder and history password on each device. Clipman keeps a private local cache, merges entries and deletion records while open, and never puts settings, credentials, or passwords in that folder.
+- If encrypted backup already has a selected folder, Clipman reuses that folder as the initial Shared Folder choice. Choosing a different shared folder later keeps the two locations independent.
 - Open the private `.clpconf` connection file from the Files app to send it to Clipman's review-and-save flow, use the importer in Clipman Settings, or enter the server address and token manually. Settings can also export the current address and token to a new private `.clpconf` credential file.
-- Retain the server address, token, and history password while Local mode is selected.
-- Show the private local cache immediately in Server mode, then refresh and merge with the server in the background.
+- Retain server and shared-folder details while another storage mode is selected.
+- Show the private local cache immediately in Shared Folder or Server mode, then refresh and merge with the selected storage in the background.
 - Browse Text, Links, and optional Rich Text history.
 - Add the current iOS clipboard text into Clipman while the app is open.
 - Use Quick Clip to type a new entry directly, including its optional Name, Group, pinned state, and template setting.
@@ -24,7 +26,7 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - View, edit, pin, unpin, delete, search, and filter entries.
 - Use VoiceOver-friendly rows and actions so one swipe moves between entries.
 - When authentication is enabled, lock whenever Clipman leaves the foreground and authenticate again when returning.
-- Check the server revision every five seconds while active, download history only when it changed, pause behind Settings or in the background, and back off connection failures.
+- Check the shared-folder or server revision every five seconds while active, load history only when it changed, pause behind Settings or in the background, and back off connection failures.
 - Preserve supported iOS clipboard content across the initial server refresh and add it only when it is not already in history, so launch capture cannot take ownership of an existing entry.
 - When startup clipboard import and automatic remote copying are both enabled, preserve and save supported clipboard content already on the device before allowing the initial server refresh to copy anything back.
 - Make an optional one-time tip through Apple's in-app purchase system. Tips do not unlock features or content.
@@ -57,7 +59,7 @@ Use a three-finger swipe up or down to move through history one page at a time. 
 
 In Settings, use the VoiceOver scrub gesture to cancel unsaved changes and return to history.
 
-The server address, server token, and history password fields have explicit VoiceOver labels and instructions. Secure field contents remain hidden. The server-file importer reads the address and token, presents the address for review, and waits for Save before applying it. Export warns that the resulting file contains the private server token and must be stored and shared securely. Server mode requires a nonblank, preferably unique history password.
+The server address, server token, shared-folder picker, and history password fields have explicit VoiceOver labels and instructions. Secure field contents remain hidden. The server-file importer reads the address and token, presents the address for review, and waits for Save before applying it. Export warns that the resulting file contains the private server token and must be stored and shared securely. Shared Folder and Server modes require a nonblank, preferably unique history password.
 
 Activate Clipman's status line to move to the bottom of the current history list. The standard iOS status-bar gesture remains available for returning to the top.
 

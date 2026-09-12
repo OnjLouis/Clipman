@@ -19,6 +19,24 @@ final class ShareSyncServiceTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ShareSyncConfiguration.self, from: data), configuration)
     }
 
+    func testOlderShareConfigurationWithoutFolderBookmarkStillDecodes() throws {
+        let data = Data("""
+        {
+          "storageMode": "server",
+          "serverURL": "clipman://example.test:12345/",
+          "serverCaCertPEM": "",
+          "serverCaHost": "",
+          "deviceName": "Test Phone",
+          "richTextEnabled": true,
+          "includeImagesInRichText": false
+        }
+        """.utf8)
+
+        let configuration = try JSONDecoder().decode(ShareSyncConfiguration.self, from: data)
+        XCTAssertNil(configuration.sharedFolderBookmark)
+        XCTAssertEqual(configuration.storageMode, "server")
+    }
+
     func testShareMutationAddsTextWithDeviceName() throws {
         let payload = MobileClipboardPayload(text: "Shared text", richText: nil, importError: nil)
         let result = try ShareSyncDatabaseMutation.applying(

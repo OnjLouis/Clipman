@@ -77,7 +77,7 @@ enum CloudHistoryBackup {
         return data
     }
 
-    private static func resolve(_ bookmark: Data) throws -> URL {
+    static func resolve(_ bookmark: Data) throws -> URL {
         guard !bookmark.isEmpty else { throw CloudHistoryBackupError.folderUnavailable }
         var stale = false
         let url = try URL(

@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var connectionImportError = ""
     @State private var connectionExportError = ""
     @State private var showBackupFolderPicker = false
+    @State private var showSharedFolderPicker = false
     @State private var backupError = ""
     @State private var backupMessage = ""
     @State private var settingsValidationError = ""
@@ -39,10 +40,12 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text(draft.storageMode == .local
-                        ? "History is stored privately on this iPhone. Your server details remain saved for later."
-                        : "History is cached on this iPhone and merged with Clipman Server. Offline changes retry automatically.")
+                    Text(storageModeDescription)
                         .font(.footnote)
+                }
+
+                if draft.storageMode == .sharedFolder {
+                    sharedFolderSection
                 }
 
                 historyBackupSection
@@ -121,6 +124,11 @@ struct SettingsView: View {
                             showServerConnection = true
                             return
                         }
+                        guard draft.storageMode != .sharedFolder
+                                || (!draft.historyPassword.isEmpty && !draft.sharedFolderBookmark.isEmpty) else {
+                            settingsValidationError = "Shared folder sync requires a nonblank history password and a selected folder."
+                            return
+                        }
                         guard !draft.cloudBackupEnabled || (!draft.historyPassword.isEmpty && !draft.cloudBackupBookmark.isEmpty) else {
                             settingsValidationError = "Encrypted history backup requires a nonblank history password and a selected backup folder."
                             showServerConnection = true
@@ -138,7 +146,7 @@ struct SettingsView: View {
         AnyView(baseForm)
             .onAppear {
                 draft = app.settings
-                showServerConnection = !serverIsConfigured
+                showServerConnection = draft.storageMode == .server && !serverIsConfigured
                 applyPendingConnectionImport()
             }
             .task {
@@ -168,6 +176,21 @@ struct SettingsView: View {
                         }
                     },
                     onCancel: { showBackupFolderPicker = false }
+                )
+                .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showSharedFolderPicker) {
+                BackupFolderPicker(
+                    onSelect: { url in
+                        showSharedFolderPicker = false
+                        do {
+                            draft.sharedFolderBookmark = try CloudHistoryBackup.bookmark(for: url)
+                            draft.sharedFolderName = url.lastPathComponent.isEmpty ? "Selected folder" : url.lastPathComponent
+                        } catch {
+                            backupError = error.localizedDescription
+                        }
+                    },
+                    onCancel: { showSharedFolderPicker = false }
                 )
                 .ignoresSafeArea()
             }
@@ -274,6 +297,34 @@ struct SettingsView: View {
     private var serverIsConfigured: Bool {
         !draft.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !draft.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var storageModeDescription: String {
+        switch draft.storageMode {
+        case .local:
+            "History is stored privately on this iPhone. Server and shared-folder details remain saved for later."
+        case .server:
+            "History is cached on this iPhone and merged with Clipman Server. Offline changes retry automatically."
+        case .sharedFolder:
+            "History is cached on this iPhone and merged through an iCloud Drive or other shared folder. Clipman syncs while the app is open."
+        }
+    }
+
+    private var sharedFolderSection: some View {
+        Section("Shared folder sync") {
+            SecureField("Shared history password", text: $draft.historyPassword)
+                .accessibilityLabel("Shared history password")
+                .accessibilityHint("Enter the same password used to encrypt this history on the other devices.")
+            Text(draft.sharedFolderName.isEmpty
+                ? "No shared folder selected."
+                : "Shared folder: \(draft.sharedFolderName)")
+                .font(.footnote)
+            Button(draft.sharedFolderBookmark.isEmpty ? "Choose shared folder" : "Change shared folder") {
+                showSharedFolderPicker = true
+            }
+            Text("Choose the same folder and history password on each device. Clipman merges encrypted entries, edits, pins, groups, and deletions; server credentials and settings are not shared.")
+                .font(.footnote)
+        }
     }
 
     private var historyBackupSection: some View {

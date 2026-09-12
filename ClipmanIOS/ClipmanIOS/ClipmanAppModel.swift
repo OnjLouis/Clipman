@@ -321,7 +321,7 @@ final class ClipmanAppModel: ObservableObject {
                     return
                 }
                 let hasQuickAction = ClipmanQuickActionCenter.shared.pendingAction != nil
-                var shouldRefreshServer = settings.storageMode == .server && !hasQuickAction
+                var shouldRefreshServer = settings.storageMode.isSynchronized && !hasQuickAction
                 var preserveClipboardDuringInitialRefresh = false
                 var launchClipboardPayload: MobileClipboardPayload?
                 if hasQuickAction {
@@ -373,8 +373,8 @@ final class ClipmanAppModel: ObservableObject {
                 if !SyncConflictResolver.hasSameContent(cached, database) {
                     database = cached
                 }
-                if settings.storageMode == .server {
-                    status = "Cached history loaded; refreshing Clipman Server."
+                if settings.storageMode.isSynchronized {
+                    status = "Cached history loaded; refreshing \(settings.storageMode.syncName)."
                 } else {
                     setSteadyStatus("Ready. Using local history.")
                 }
@@ -393,7 +393,7 @@ final class ClipmanAppModel: ObservableObject {
                     backupSettings: nil
                 )
                 guard generation == storageGeneration else { return false }
-                status = "Connecting to Clipman Server."
+                status = "Connecting to \(settings.storageMode.syncName)."
             }
             return true
         } catch {
@@ -501,7 +501,7 @@ final class ClipmanAppModel: ObservableObject {
             skipNextSettingsClosedRefresh = false
             return
         }
-        guard isSceneActive, isUnlocked, settings.storageMode == .server else { return }
+        guard isSceneActive, isUnlocked, settings.storageMode.isSynchronized else { return }
         Task { [weak self] in
             await self?.refresh(showStatus: false)
         }
@@ -522,7 +522,7 @@ final class ClipmanAppModel: ObservableObject {
         }
         SettingsStore.save(newSettings)
         revision = ""
-        hasPendingLocalChanges = newSettings.storageMode == .server
+        hasPendingLocalChanges = newSettings.storageMode.isSynchronized
         let generation = storageGeneration
         Task { [weak self] in
             guard let self else { return }
@@ -547,7 +547,7 @@ final class ClipmanAppModel: ObservableObject {
 
     func startPolling() {
         refreshTask?.cancel()
-        guard settings.storageMode == .server else { return }
+        guard settings.storageMode.isSynchronized else { return }
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { break }
@@ -617,14 +617,26 @@ final class ClipmanAppModel: ObservableObject {
                 return false
             }
         }
-        let client = ServerStorageClient(settings: settingsSnapshot)
+        let client: any HistoryStorageClient = settingsSnapshot.storageMode == .sharedFolder
+            ? SharedFolderStorageClient(
+                bookmark: settingsSnapshot.sharedFolderBookmark,
+                password: settingsSnapshot.historyPassword
+            )
+            : ServerStorageClient(settings: settingsSnapshot)
         guard client.isConfigured else {
-            if !settingsSnapshot.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               !settingsSnapshot.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               settingsSnapshot.historyPassword.isEmpty {
-                setSteadyStatus("Clipman Server requires a unique history password. Your local cached history is unchanged.")
+            if settingsSnapshot.storageMode == .sharedFolder {
+                let message = settingsSnapshot.historyPassword.isEmpty
+                    ? "Shared folder sync requires a history password. Your local cached history is unchanged."
+                    : "Open Settings to choose a shared folder."
+                setSteadyStatus(message)
             } else {
-                setSteadyStatus("Open Settings to configure Clipman Server.")
+                if !settingsSnapshot.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !settingsSnapshot.serverToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   settingsSnapshot.historyPassword.isEmpty {
+                    setSteadyStatus("Clipman Server requires a unique history password. Your local cached history is unchanged.")
+                } else {
+                    setSteadyStatus("Open Settings to configure Clipman Server.")
+                }
             }
             showingSettings = true
             return false
@@ -643,7 +655,7 @@ final class ClipmanAppModel: ObservableObject {
                 if !SyncConflictResolver.hasSameContent(cached, database) {
                     database = cached
                 }
-                status = "Cached history loaded; refreshing Clipman Server."
+                status = "Cached history loaded; refreshing \(settingsSnapshot.storageMode.syncName)."
             }
             // With sync rules in effect the core bucket's revision is only part of
             // the picture: a channel can change while core stands still, so the
@@ -652,7 +664,7 @@ final class ClipmanAppModel: ObservableObject {
                 let metadata = try await client.metadata()
                 if metadata.revision == revision {
                     pollingFailureCount = 0
-                    setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
+                    setSteadyStatus(syncReadyStatus(for: settingsSnapshot.storageMode), revealImmediately: false)
                     return true
                 }
             }
@@ -671,7 +683,7 @@ final class ClipmanAppModel: ObservableObject {
             revision = sync.revision
             hasPendingLocalChanges = false
             pollingFailureCount = 0
-            setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
+            setSteadyStatus(syncReadyStatus(for: settingsSnapshot.storageMode), revealImmediately: false)
             if !showStatus, previousNewest != nil, let newest = newestRemoteEntry(in: merged), newest.Id != previousNewest?.Id, newest.Id != lastRemoteEntryID {
                 if settings.autoCopyRemote && allowRemoteClipboardWrite {
                     MobileRichTextClipboard.write(newest, includeRichText: settings.richTextEnabled)
@@ -704,7 +716,7 @@ final class ClipmanAppModel: ObservableObject {
                     if !SyncConflictResolver.hasSameContent(cached, database) {
                         database = cached
                     }
-                    setSteadyStatus("Using local history; server sync is pending: \(error.localizedDescription)")
+                    setSteadyStatus("Using local history; \(syncPendingName(for: settingsSnapshot.storageMode)) sync is pending: \(error.localizedDescription)")
                     return true
                 }
             } catch {
@@ -740,7 +752,7 @@ final class ClipmanAppModel: ObservableObject {
     /// Re-reads the sync-rules document for the settings screen, without
     /// disturbing history sync.
     func refreshSyncRules() async {
-        guard settings.storageMode == .server else {
+        guard settings.storageMode.isSynchronized else {
             syncRules = MobileSyncRulesSnapshot()
             return
         }
@@ -988,15 +1000,18 @@ final class ClipmanAppModel: ObservableObject {
         databaseMutationGeneration += 1
         let mutationGeneration = databaseMutationGeneration
         mutationSyncInProgress = true
-        if settings.storageMode == .server {
-            setSteadyStatus("Deleting entry; server sync in progress.")
+        if settings.storageMode.isSynchronized {
+            let progress = settings.storageMode == .server
+                ? "Deleting entry; server sync in progress."
+                : "Deleting entry; shared folder sync in progress."
+            setSteadyStatus(progress)
         } else {
             setSteadyStatus("Deleting entry.")
         }
         let generation = storageGeneration
         let settingsSnapshot = settings
         let expectedRevision = revision
-        hasPendingLocalChanges = settings.storageMode == .server
+        hasPendingLocalChanges = settings.storageMode.isSynchronized
         let task = Task { [weak self] in
             guard let self else { return }
             let backgroundIdentifier = beginBackgroundSyncIfNeeded(for: settingsSnapshot)
@@ -1073,13 +1088,16 @@ final class ClipmanAppModel: ObservableObject {
         let mutationGeneration = databaseMutationGeneration
         mutationSyncInProgress = true
         if successMessage != nil {
-            setSteadyStatus(settings.storageMode == .server ? progressMessage : "Saving change.")
+            let synchronizedProgress = settings.storageMode == .server
+                ? progressMessage
+                : "Saving change; shared folder sync in progress."
+            setSteadyStatus(settings.storageMode.isSynchronized ? synchronizedProgress : "Saving change.")
         }
         let snapshot = database
         let generation = storageGeneration
         let settingsSnapshot = settings
         let expectedRevision = revision
-        hasPendingLocalChanges = settings.storageMode == .server
+        hasPendingLocalChanges = settings.storageMode.isSynchronized
         uploadTask = Task { [weak self] in
             guard let self else { return }
             let backgroundIdentifier = beginBackgroundSyncIfNeeded(for: settingsSnapshot)
@@ -1137,9 +1155,9 @@ final class ClipmanAppModel: ObservableObject {
             revision = sync.revision
             hasPendingLocalChanges = false
             if let successMessage {
-                setTransientStatus("\(successMessage.trimmingCharacters(in: CharacterSet(charactersIn: "."))) and synced with Clipman Server.")
+                setTransientStatus("\(successMessage.trimmingCharacters(in: CharacterSet(charactersIn: "."))) and synced with \(settingsSnapshot.storageMode.syncName).")
             }
-            setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
+            setSteadyStatus(syncReadyStatus(for: settingsSnapshot.storageMode), revealImmediately: false)
             if !SyncConflictResolver.hasSameContent(sync.database, database) {
                 database = sync.database
             }
@@ -1153,9 +1171,9 @@ final class ClipmanAppModel: ObservableObject {
             guard generation == storageGeneration,
                   mutationGeneration == databaseMutationGeneration else { return }
             let mutationError = error as? MobileMutationError
-            hasPendingLocalChanges = settingsSnapshot.storageMode == .server && (mutationError?.localSaved ?? false)
+            hasPendingLocalChanges = settingsSnapshot.storageMode.isSynchronized && (mutationError?.localSaved ?? false)
             let failure = hasPendingLocalChanges
-                ? "Saved locally; server sync is pending: \(error.localizedDescription)"
+                ? "Saved locally; \(syncPendingName(for: settingsSnapshot.storageMode)) sync is pending: \(error.localizedDescription)"
                 : "Could not save local history: \(error.localizedDescription)"
             setSteadyStatus(failure)
             soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
@@ -1201,8 +1219,8 @@ final class ClipmanAppModel: ObservableObject {
 
             revision = sync.revision
             hasPendingLocalChanges = false
-            setTransientStatus("Entry deleted and synced with Clipman Server.")
-            setSteadyStatus("Ready. Server sync connected.", revealImmediately: false)
+            setTransientStatus("Entry deleted and synced with \(settingsSnapshot.storageMode.syncName).")
+            setSteadyStatus(syncReadyStatus(for: settingsSnapshot.storageMode), revealImmediately: false)
             if !SyncConflictResolver.hasSameContent(sync.database, database) {
                 database = sync.database
             }
@@ -1219,8 +1237,11 @@ final class ClipmanAppModel: ObservableObject {
                 savedLocally = mutationError.localSaved
             }
             if savedLocally {
-                hasPendingLocalChanges = settingsSnapshot.storageMode == .server
-                setTransientStatus("Entry deleted locally. Server sync will retry.")
+                hasPendingLocalChanges = settingsSnapshot.storageMode.isSynchronized
+                let retry = settingsSnapshot.storageMode == .server
+                    ? "Entry deleted locally. Server sync will retry."
+                    : "Entry deleted locally. Shared folder sync will retry."
+                setTransientStatus(retry)
             } else {
                 hasPendingLocalChanges = false
                 var restored = false
@@ -1240,9 +1261,9 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     private func beginBackgroundSyncIfNeeded(for settingsSnapshot: ClipmanSettings) -> UIBackgroundTaskIdentifier {
-        guard settingsSnapshot.storageMode == .server else { return .invalid }
+        guard settingsSnapshot.storageMode.isSynchronized else { return .invalid }
         endBackgroundSync(backgroundSyncIdentifier)
-        let identifier = UIApplication.shared.beginBackgroundTask(withName: "Finish Clipman server sync") { [weak self] in
+        let identifier = UIApplication.shared.beginBackgroundTask(withName: "Finish Clipman history sync") { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 uploadTask?.cancel()
@@ -1304,5 +1325,20 @@ final class ClipmanAppModel: ObservableObject {
         let text = max(0, remaining.count - links)
         let richPart = settings.richTextEnabled ? ", \(richText) rich text" : ""
         return "Loaded \(total) clipboard entries: \(text) text\(richPart), \(links) links."
+    }
+
+    private func syncReadyStatus(for mode: MobileStorageMode) -> String {
+        switch mode {
+        case .local:
+            "Ready. Using local history."
+        case .server:
+            "Ready. Server sync connected."
+        case .sharedFolder:
+            "Ready. Shared folder sync connected."
+        }
+    }
+
+    private func syncPendingName(for mode: MobileStorageMode) -> String {
+        mode == .server ? "server" : "shared folder"
     }
 }
