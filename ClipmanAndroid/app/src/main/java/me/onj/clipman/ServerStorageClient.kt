@@ -3,9 +3,23 @@ package me.onj.clipman
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.KeyStore
+import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
+
+internal interface HistoryStorageClient {
+    val isConfigured: Boolean
+    val storageName: String
+    val syncCacheIdentity: String
+    val createOnlyWhenMissing: Boolean
+
+    fun forChannel(channelKey: String): HistoryStorageClient?
+    fun forSyncRules(): HistoryStorageClient?
+    fun download(): ServerDatabaseDownload
+    fun metadata(): String
+    fun upload(data: ByteArray, expectedRevision: String, createOnly: Boolean = false): ServerDatabaseDownload
+}
 
 class ServerStorageClient(
     serverUrl: String,
@@ -14,7 +28,7 @@ class ServerStorageClient(
     caCertPem: String = "",
     caHost: String = "",
     databaseIdOverride: String = ""
-) {
+) : HistoryStorageClient {
     private val configuredServerUrl = serverUrl
     private val configuredToken = token
     private val configuredPassword = databasePassword
@@ -29,8 +43,13 @@ class ServerStorageClient(
     private val privateAuthority = runCatching { ServerConnectionConfig.parseAuthority(caCertPem, serverUrl) }.getOrNull()
     private val authorityValid = caCertPem.isBlank() || (privateAuthority != null && (caHost.isBlank() || privateAuthority.host.equals(caHost.trim(), ignoreCase = true)))
 
-    val isConfigured: Boolean
+    override val isConfigured: Boolean
         get() = baseUrl.isNotBlank() && token.trim().isNotBlank() && hasDatabasePassword && databaseId.isNotBlank() && authorityValid
+
+    override val storageName = "Clipman Server"
+    override val syncCacheIdentity: String
+        get() = sha256Hex("$baseUrl|$databaseId")
+    override val createOnlyWhenMissing = false
 
     /**
      * The same server, credentials and transport addressing one sync channel's
@@ -38,11 +57,11 @@ class ServerStorageClient(
      * addresses no bucket, which is the case without a server token or history
      * password.
      */
-    fun forChannel(channelKey: String): ServerStorageClient? =
+    override fun forChannel(channelKey: String): ServerStorageClient? =
         forDatabase(ServerDatabaseIdentity.channelId(configuredToken, configuredPassword, channelKey))
 
     /** The same server addressing the sync rules bucket. */
-    fun forSyncRules(): ServerStorageClient? =
+    override fun forSyncRules(): ServerStorageClient? =
         forDatabase(ServerDatabaseIdentity.syncRulesId(configuredToken, configuredPassword))
 
     private fun forDatabase(id: String): ServerStorageClient? {
@@ -57,7 +76,7 @@ class ServerStorageClient(
         )
     }
 
-    fun download(): ServerDatabaseDownload {
+    override fun download(): ServerDatabaseDownload {
         val connection = openConnection("GET")
         val code = connection.responseCode
         if (code == HttpURLConnection.HTTP_NOT_FOUND) {
@@ -75,7 +94,7 @@ class ServerStorageClient(
         }
     }
 
-    fun metadata(): String {
+    override fun metadata(): String {
         val connection = openConnection("HEAD")
         val code = connection.responseCode
         if (code == HttpURLConnection.HTTP_NOT_FOUND) return ""
@@ -85,9 +104,11 @@ class ServerStorageClient(
         return cleanRevision(connection.getHeaderField("X-Clipman-Revision") ?: connection.getHeaderField("ETag"))
     }
 
-    fun upload(data: ByteArray, expectedRevision: String): ServerDatabaseDownload {
+    override fun upload(data: ByteArray, expectedRevision: String, createOnly: Boolean): ServerDatabaseDownload {
         val connection = openConnection("PUT")
-        if (expectedRevision.isNotBlank()) {
+        if (createOnly) {
+            connection.setRequestProperty("If-None-Match", "*")
+        } else if (expectedRevision.isNotBlank()) {
             connection.setRequestProperty("If-Match", "\"${expectedRevision.trim('"')}\"")
         }
         connection.doOutput = true
@@ -169,6 +190,11 @@ class ServerStorageClient(
 
     private fun cleanRevision(value: String?): String =
         (value ?: "").trim().trim('"')
+
+    private fun sha256Hex(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 }
 
 data class ServerDatabaseDownload(

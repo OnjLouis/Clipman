@@ -184,8 +184,8 @@ internal interface MobileChannelTransport {
     ): MobileChannelWriteResult
 }
 
-internal class ServerChannelTransport(
-    private val client: ServerStorageClient,
+internal class StorageChannelTransport(
+    private val client: HistoryStorageClient,
     private val password: String
 ) : MobileChannelTransport {
     private val salts = HashMap<String, ByteArray?>()
@@ -194,15 +194,18 @@ internal class ServerChannelTransport(
     val coreSalt: ByteArray?
         get() = coreSaltValue
 
+    val storageName: String
+        get() = client.storageName
+
     fun seedCoreSalt(value: ByteArray?) {
         if (coreSaltValue == null && value != null && value.size == 16) coreSaltValue = value.copyOf()
     }
 
-    private fun clientFor(channelKey: String): ServerStorageClient {
+    private fun clientFor(channelKey: String): HistoryStorageClient {
         if (channelKey.isEmpty()) return client
         return client.forChannel(channelKey)
             ?: throw IllegalStateException(
-                "The \"$channelKey\" channel needs a Clipman Server token and a history password."
+                "The \"$channelKey\" channel cannot be addressed in ${client.storageName}."
             )
     }
 
@@ -227,7 +230,12 @@ internal class ServerChannelTransport(
         exists: Boolean
     ): MobileChannelWriteResult {
         val encoded = ClipDatabaseFile.save(database, password, preferredSalt = salts[channelKey] ?: coreSaltValue)
-        val uploaded = clientFor(channelKey).upload(encoded, if (exists) expectedRevision else "")
+        val bucket = clientFor(channelKey)
+        val uploaded = bucket.upload(
+            encoded,
+            if (exists) expectedRevision else "",
+            createOnly = !exists && bucket.createOnlyWhenMissing
+        )
         val salt = ClipDatabaseFile.encryptedSalt(encoded)
         salts[channelKey] = salt
         if (channelKey.isEmpty()) seedCoreSalt(salt)
@@ -919,8 +927,18 @@ class MobileHistoryRepository(context: Context) {
         serverCaHost: String,
         deviceName: String,
         expectedRevision: String
+    ): Boolean = storageUnchanged(
+        ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost),
+        deviceName,
+        expectedRevision
+    )
+
+    internal fun storageUnchanged(
+        client: HistoryStorageClient,
+        deviceName: String,
+        expectedRevision: String
     ): Boolean {
-        val client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost)
+        prepareStorage(client)
         if (client.metadata() != expectedRevision) return false
 
         val persisted = loadChannelSyncState()
@@ -950,24 +968,39 @@ class MobileHistoryRepository(context: Context) {
         expectedRevision: String,
         backupOptions: CloudBackupOptions = CloudBackupOptions(false, ""),
         deviceName: String = ""
+    ): MobileSyncResult = persistMutation(
+        client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost),
+        password = password,
+        current = current,
+        expectedRevision = expectedRevision,
+        backupOptions = backupOptions,
+        deviceName = deviceName
+    )
+
+    internal fun persistMutation(
+        client: HistoryStorageClient,
+        password: String,
+        current: ClipDatabase,
+        expectedRevision: String,
+        backupOptions: CloudBackupOptions = CloudBackupOptions(false, ""),
+        deviceName: String = ""
     ): MobileSyncResult {
+        prepareStorage(client)
         val document = cachedSyncRules()
         if (document == null || !document.Enabled) {
             return persistSingleBucketMutation(
-                serverUrl, token, password, serverCaCertPem, serverCaHost,
-                current, expectedRevision, backupOptions, deviceName
+                client, password, current, expectedRevision, backupOptions, deviceName
             )
         }
 
         val persisted = loadChannelSyncState()
         val base = fastPathBase(document, deviceName, password, persisted, expectedRevision)
             ?: return synchronize(
-                serverUrl, token, password, serverCaCertPem, serverCaHost,
-                current, backupOptions, localAlreadySaved = false, deviceName = deviceName
+                client, password, current, backupOptions,
+                localAlreadySaved = false, deviceName = deviceName
             )
 
-        val client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost)
-        val transport = ServerChannelTransport(client, password)
+        val transport = StorageChannelTransport(client, password)
         transport.seedCoreSalt(localStore.salt)
         return commitChannels(
             transport = transport,
@@ -994,10 +1027,26 @@ class MobileHistoryRepository(context: Context) {
         backupOptions: CloudBackupOptions = CloudBackupOptions(false, ""),
         localAlreadySaved: Boolean = false,
         deviceName: String = ""
+    ): MobileSyncResult = synchronize(
+        client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost),
+        password = password,
+        current = current,
+        backupOptions = backupOptions,
+        localAlreadySaved = localAlreadySaved,
+        deviceName = deviceName
+    )
+
+    internal fun synchronize(
+        client: HistoryStorageClient,
+        password: String,
+        current: ClipDatabase,
+        backupOptions: CloudBackupOptions = CloudBackupOptions(false, ""),
+        localAlreadySaved: Boolean = false,
+        deviceName: String = ""
     ): MobileSyncResult {
-        val client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost)
+        prepareStorage(client)
         val persisted = loadChannelSyncState()
-        val transport = ServerChannelTransport(client, password)
+        val transport = StorageChannelTransport(client, password)
         // The cached core container supplies the salt every other bucket copies,
         // so the rules bucket can be restored before core is downloaded.
         transport.seedCoreSalt(runCatching { localStore.peekSalt() }.getOrNull())
@@ -1078,17 +1127,29 @@ class MobileHistoryRepository(context: Context) {
         serverCaHost: String,
         deviceName: String,
         channels: List<String>?
+    ): SyncRulesDocument = saveDeviceSubscription(
+        client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost),
+        password = password,
+        deviceName = deviceName,
+        channels = channels
+    )
+
+    internal fun saveDeviceSubscription(
+        client: HistoryStorageClient,
+        password: String,
+        deviceName: String,
+        channels: List<String>?
     ): SyncRulesDocument {
         require(deviceName.isNotBlank()) { "Set a device name before changing sync rules." }
-        val client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost)
+        prepareStorage(client)
         client.forSyncRules() ?: throw IllegalStateException(
-            "Sync rules need a Clipman Server token and a history password."
+            "Sync rules need configured synchronized storage and a history password."
         )
         val coreSalt = runCatching { localStore.peekSalt() }.getOrNull()
         val persisted = loadChannelSyncState()
         val current = readRules(client, password, persisted, coreSalt)
         val document = current.document
-            ?: throw IllegalStateException("This Clipman Server has no sync rules document yet.")
+            ?: throw IllegalStateException("This ${client.storageName} has no sync rules document yet.")
         if (SyncRuleEngine.isReadOnly(document)) {
             throw IllegalStateException(
                 "These sync rules were written by a newer version of Clipman and cannot be changed here."
@@ -1101,6 +1162,23 @@ class MobileHistoryRepository(context: Context) {
         storeSyncRules(updated)
         storeChannelSyncState(channelStateAfterSubscriptionChange(persisted, revision))
         return updated
+    }
+
+    internal fun prepareStorage(client: HistoryStorageClient) {
+        val identity = client.syncCacheIdentity
+        if (identity.isBlank()) return
+        val previousIdentity = settings.syncStorageIdentity
+        if (previousIdentity.isBlank()) {
+            // Existing installations predate storage identities. Adopt their
+            // current storage without discarding queued offline channel writes.
+            settings.syncStorageIdentity = identity
+            return
+        }
+        if (previousIdentity == identity) return
+        settings.syncStorageIdentity = identity
+        settings.syncRulesDocument = ""
+        settings.pendingChannelWrites = ""
+        settings.channelSyncState = ""
     }
 
     // -- Channel plumbing -------------------------------------------------
@@ -1152,7 +1230,7 @@ class MobileHistoryRepository(context: Context) {
     }
 
     private fun readChannelState(
-        transport: ServerChannelTransport,
+        transport: StorageChannelTransport,
         key: String,
         password: String,
         persisted: ChannelSyncState
@@ -1203,7 +1281,7 @@ class MobileHistoryRepository(context: Context) {
     private class RulesRead(val document: SyncRulesDocument?, val revision: String)
 
     private fun readRules(
-        client: ServerStorageClient,
+        client: HistoryStorageClient,
         password: String,
         persisted: ChannelSyncState,
         coreSalt: ByteArray?
@@ -1239,7 +1317,7 @@ class MobileHistoryRepository(context: Context) {
     }
 
     private fun restoreRulesFromCache(
-        client: ServerStorageClient,
+        client: HistoryStorageClient,
         document: SyncRulesDocument,
         password: String,
         coreSalt: ByteArray?
@@ -1251,23 +1329,27 @@ class MobileHistoryRepository(context: Context) {
     }.getOrElse { "" }
 
     private fun uploadRules(
-        client: ServerStorageClient,
+        client: HistoryStorageClient,
         document: SyncRulesDocument,
         password: String,
         expectedRevision: String,
         coreSalt: ByteArray?
     ): String {
         val rulesClient = client.forSyncRules()
-            ?: throw IllegalStateException("Sync rules need a Clipman Server token and a history password.")
+            ?: throw IllegalStateException("Sync rules need configured synchronized storage and a history password.")
         val encoded = ClipDatabaseFile.saveRawText(
             SyncRuleEngine.serialize(document),
             password,
             preferredSalt = coreSalt
         )
-        return rulesClient.upload(encoded, expectedRevision).revision
+        return rulesClient.upload(
+            encoded,
+            expectedRevision,
+            createOnly = expectedRevision.isBlank() && rulesClient.createOnlyWhenMissing
+        ).revision
     }
 
-    private fun retryPendingWrites(transport: ServerChannelTransport) {
+    private fun retryPendingWrites(transport: StorageChannelTransport) {
         val pending = loadPendingWrites()
         if (pending.Channels.isEmpty()) return
         val remaining = mutableListOf<PendingChannelWrite>()
@@ -1284,7 +1366,7 @@ class MobileHistoryRepository(context: Context) {
     }
 
     private fun commitChannels(
-        transport: ServerChannelTransport,
+        transport: StorageChannelTransport,
         document: SyncRulesDocument,
         channels: List<MobileChannelState>,
         residence: Map<String, String>,
@@ -1379,7 +1461,7 @@ class MobileHistoryRepository(context: Context) {
         }
         if (commit.pending.isNotEmpty()) {
             val names = commit.pending.keys.joinToString(", ") { SyncRuleEngine.channelDisplayName(document, it) }
-            notices.add("Entries for $names will be delivered when Clipman Server is reachable.")
+            notices.add("Entries for $names will be delivered when ${transport.storageName} is reachable.")
         }
         return MobileSyncResult(
             database = commit.view,
@@ -1405,11 +1487,8 @@ class MobileHistoryRepository(context: Context) {
     // -- Single bucket paths ----------------------------------------------
 
     private fun persistSingleBucketMutation(
-        serverUrl: String,
-        token: String,
+        client: HistoryStorageClient,
         password: String,
-        serverCaCertPem: String,
-        serverCaHost: String,
         current: ClipDatabase,
         expectedRevision: String,
         backupOptions: CloudBackupOptions,
@@ -1424,12 +1503,15 @@ class MobileHistoryRepository(context: Context) {
             throw MobileMutationException(error, localSaved = false)
         }
 
-        val client = ServerStorageClient(serverUrl, token, password, serverCaCertPem, serverCaHost)
         return try {
             runMutationUpload(
                 expectedRevision = expectedRevision,
                 directUpload = {
-                    val uploaded = client.upload(encoded, expectedRevision)
+                    val uploaded = client.upload(
+                        encoded,
+                        expectedRevision,
+                        createOnly = expectedRevision.isBlank() && client.createOnlyWhenMissing
+                    )
                     MobileSyncResult(
                         database = current,
                         revision = uploaded.revision,
@@ -1439,11 +1521,8 @@ class MobileHistoryRepository(context: Context) {
                 },
                 conflictFallback = {
                     val sync = synchronize(
-                        serverUrl = serverUrl,
-                        token = token,
+                        client = client,
                         password = password,
-                        serverCaCertPem = serverCaCertPem,
-                        serverCaHost = serverCaHost,
                         current = current,
                         backupOptions = backupOptions,
                         localAlreadySaved = true,
@@ -1462,7 +1541,7 @@ class MobileHistoryRepository(context: Context) {
     }
 
     private fun synchronizeSingleBucket(
-        client: ServerStorageClient,
+        client: HistoryStorageClient,
         password: String,
         current: ClipDatabase,
         backupOptions: CloudBackupOptions,
@@ -1478,7 +1557,7 @@ class MobileHistoryRepository(context: Context) {
             client.download()
         } catch (_: ServerDatabaseNotFoundException) {
             val encoded = localStore.encode(local, password)
-            val uploaded = client.upload(encoded, "")
+            val uploaded = client.upload(encoded, "", createOnly = client.createOnlyWhenMissing)
             val backupError = if (cached == null || !SyncConflictResolver.hasSameContent(local, cached)) {
                 saveLocal(local, password, backupOptions)
             } else null

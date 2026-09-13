@@ -107,6 +107,18 @@ class AndroidSettings(context: Context) {
         get() = preferences.getString("cloudBackupLocationName", "") ?: ""
         set(value) = preferences.edit().putString("cloudBackupLocationName", value.trim()).apply()
 
+    var sharedFolderTreeUri: String
+        get() = getString("sharedFolderTreeUri")
+        set(value) = putString("sharedFolderTreeUri", value)
+
+    var sharedFolderLocationName: String
+        get() = preferences.getString("sharedFolderLocationName", "") ?: ""
+        set(value) = preferences.edit().putString("sharedFolderLocationName", value.trim()).apply()
+
+    var syncStorageIdentity: String
+        get() = getString("syncStorageIdentity")
+        set(value) = putString("syncStorageIdentity", value)
+
     /**
      * The last-seen sync rules document (sync-rules-spec.md section 4,
      * Caching). It keeps the rules in effect when the rules bucket is
@@ -179,12 +191,29 @@ internal fun historySortAccessibilityActionLabels(): List<String> =
 
 enum class MobileStorageMode(val storedValue: String, val label: String) {
     Local("local", "Local"),
-    Server("server", "Server");
+    Server("server", "Server"),
+    SharedFolder("sharedFolder", "Shared Folder");
 
     companion object {
         fun fromStoredValue(value: String?): MobileStorageMode =
             entries.firstOrNull { it.storedValue.equals(value, ignoreCase = true) } ?: Server
     }
+}
+
+internal data class SharedFolderSelection(
+    val treeUri: String,
+    val locationName: String
+)
+
+internal fun initialSharedFolderSelection(
+    sharedTreeUri: String,
+    sharedLocationName: String,
+    backupTreeUri: String,
+    backupLocationName: String
+): SharedFolderSelection = if (sharedTreeUri.isNotBlank()) {
+    SharedFolderSelection(sharedTreeUri, sharedLocationName)
+} else {
+    SharedFolderSelection(backupTreeUri, backupLocationName)
 }
 
 private class SettingsCrypto {

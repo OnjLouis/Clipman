@@ -1,6 +1,6 @@
 # Clipman Android
 
-Clipman Android is a foreground-only clipboard-history client. It can keep history privately on the Android device or use the same Clipman Server history as the desktop and iOS clients. While the app is open, users can browse, search, copy, add, edit, pin, delete, and open links.
+Clipman Android is a foreground-only clipboard-history client. It can keep history privately on the Android device, synchronize through a folder chosen with Android's system picker, or use the same Clipman Server history as the other clients. While the app is open, users can browse, search, copy, add, edit, pin, delete, and open links.
 
 Quick Clip lets users type a new entry directly, including an optional Name and Group, without first replacing the Android clipboard. It is available beside Paste and from the launcher icon's long-press menu. If startup clipboard import and automatic remote copying are both enabled, Clipman preserves supported device clipboard content across the initial server refresh and adds it only when it is not already in history, without reassigning an existing entry's metadata to Android.
 
@@ -14,6 +14,8 @@ Clipman can check official GitHub client releases for updates automatically whil
 
 Settings can optionally preserve copied HTML formatting and add a separate Rich Text history section. Android copies HTML and the plain-text fallback together, preserves synchronized RTF fields, and uses plain text for RTF-only entries because Android's standard text clipboard does not publish RTF.
 
-Settings can optionally back up encrypted history to a folder selected through Android's system picker, including providers such as Google Drive when installed. A nonblank history password is required. The backup contains history only, and restoring merges it with current history instead of replacing newer entries or deletions.
+Settings can optionally synchronize encrypted history through a folder selected with Android's system picker. The folder may be on-device or supplied by an installed storage provider that grants persistent read and write access. Clipman keeps a private cache, rereads the shared revision before writing, merges concurrent changes and recognised provider conflict copies, and retries failures while open. It never receives the provider account. An existing backup-folder selection is reused as the initial shared-folder choice.
+
+The separate encrypted history backup remains available through the same picker. A nonblank history password is required. The backup contains history only, and restoring merges it with current history instead of replacing newer entries or deletions; it is not live synchronization.
 
 Server mode displays the encrypted local cache before contacting the server. Foreground refresh then uses a fixed five-second revision check, downloads history only when it changed, pauses while Settings is open or the app is in the background, and backs off connection failures. Settings also includes an optional Tip Jar link; tips do not unlock features.

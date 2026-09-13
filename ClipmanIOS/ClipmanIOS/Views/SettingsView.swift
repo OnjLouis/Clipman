@@ -306,7 +306,7 @@ struct SettingsView: View {
         case .server:
             "History is cached on this iPhone and merged with Clipman Server. Offline changes retry automatically."
         case .sharedFolder:
-            "History is cached on this iPhone and merged through an iCloud Drive or other shared folder. Clipman syncs while the app is open."
+            "History is cached on this iPhone and merged through a folder selected in Files. This may be in iCloud Drive, a supported storage provider, or a configured network location. Clipman syncs while the app is open."
         }
     }
 
@@ -322,7 +322,7 @@ struct SettingsView: View {
             Button(draft.sharedFolderBookmark.isEmpty ? "Choose shared folder" : "Change shared folder") {
                 showSharedFolderPicker = true
             }
-            Text("Choose the same folder and history password on each device. Clipman merges encrypted entries, edits, pins, groups, and deletions; server credentials and settings are not shared.")
+            Text("Choose the same folder and history password on each device. The location must remain available through Files and allow reading and writing. Clipman receives access only to the folder you choose, and merges encrypted entries, edits, pins, groups, and deletions; server credentials and settings are not shared.")
                 .font(.footnote)
         }
     }

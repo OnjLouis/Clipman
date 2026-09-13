@@ -433,7 +433,9 @@ private data class MobileSettingsSnapshot(
     val useHaptics: Boolean,
     val cloudBackupEnabled: Boolean,
     val cloudBackupTreeUri: String,
-    val cloudBackupLocationName: String
+    val cloudBackupLocationName: String,
+    val sharedFolderTreeUri: String,
+    val sharedFolderLocationName: String
 )
 
 private data class ExternalServerConnectionImport(
@@ -455,8 +457,51 @@ internal fun recoverHistoryAfterLocalWriteFailure(
 internal fun localHistoryWriteFailureStatus(actionText: String, error: Throwable): String =
     "$actionText could not be saved. History was restored: ${error.message ?: error::class.java.simpleName}"
 
-internal fun remoteHistoryWriteFailureStatus(actionText: String, error: Throwable): String =
-    "$actionText saved locally; server sync is pending: ${error.message ?: error::class.java.simpleName}"
+internal fun remoteHistoryWriteFailureStatus(
+    actionText: String,
+    error: Throwable,
+    storageName: String = "server"
+): String =
+    "$actionText saved locally; $storageName sync is pending: ${error.message ?: error::class.java.simpleName}"
+
+private fun MobileStorageMode.isSynchronized(): Boolean = this != MobileStorageMode.Local
+
+private fun MobileStorageMode.storageDisplayName(): String = when (this) {
+    MobileStorageMode.Local -> "local history"
+    MobileStorageMode.Server -> "Clipman Server"
+    MobileStorageMode.SharedFolder -> "the shared folder"
+}
+
+private fun MobileStorageMode.syncStatusName(): String = when (this) {
+    MobileStorageMode.Local -> "Local"
+    MobileStorageMode.Server -> "Server"
+    MobileStorageMode.SharedFolder -> "Shared-folder"
+}
+
+private fun createHistoryStorageClient(
+    context: Context,
+    mode: MobileStorageMode,
+    serverUrl: String,
+    token: String,
+    password: String,
+    serverCaCertPem: String,
+    serverCaHost: String,
+    sharedFolderTreeUri: String
+): HistoryStorageClient = when (mode) {
+    MobileStorageMode.Server -> ServerStorageClient(
+        serverUrl,
+        token,
+        password,
+        serverCaCertPem,
+        serverCaHost
+    )
+    MobileStorageMode.SharedFolder -> SharedFolderStorageClient(
+        context,
+        sharedFolderTreeUri,
+        password
+    )
+    MobileStorageMode.Local -> error("Local history does not use a synchronized storage client.")
+}
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
@@ -490,7 +535,14 @@ private fun ClipmanApp(
     var deviceName by remember { mutableStateOf(settings.deviceName) }
     var showPassword by remember { mutableStateOf(false) }
     var showConnectionSettings by remember {
-        mutableStateOf(storageMode == MobileStorageMode.Server && (serverUrl.isBlank() || token.isBlank()))
+        mutableStateOf(
+            when (storageMode) {
+                MobileStorageMode.Local -> false
+                MobileStorageMode.Server -> serverUrl.isBlank() || token.isBlank()
+                MobileStorageMode.SharedFolder ->
+                    settings.sharedFolderTreeUri.isBlank() && settings.cloudBackupTreeUri.isBlank()
+            }
+        )
     }
     var copyRemoteToClipboard by remember { mutableStateOf(settings.copyRemoteToClipboard) }
     var addClipboardOnLaunch by remember { mutableStateOf(settings.addClipboardOnLaunch) }
@@ -504,6 +556,16 @@ private fun ClipmanApp(
     var cloudBackupEnabled by remember { mutableStateOf(settings.cloudBackupEnabled) }
     var cloudBackupTreeUri by remember { mutableStateOf(settings.cloudBackupTreeUri) }
     var cloudBackupLocationName by remember { mutableStateOf(settings.cloudBackupLocationName) }
+    val initialSharedFolder = remember {
+        initialSharedFolderSelection(
+            settings.sharedFolderTreeUri,
+            settings.sharedFolderLocationName,
+            settings.cloudBackupTreeUri,
+            settings.cloudBackupLocationName
+        )
+    }
+    var sharedFolderTreeUri by remember { mutableStateOf(initialSharedFolder.treeUri) }
+    var sharedFolderLocationName by remember { mutableStateOf(initialSharedFolder.locationName) }
     var status by remember { mutableStateOf("Not loaded.") }
     var steadyStatus by remember { mutableStateOf("Ready.") }
     var transientStatusActive by remember { mutableStateOf(false) }
@@ -735,6 +797,23 @@ private fun ClipmanApp(
             }
         }
     }
+    val chooseSharedFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                sharedFolderTreeUri = uri.toString()
+                sharedFolderLocationName = CloudHistoryBackup.locationName(context, uri)
+                status = "Shared folder selected. Choose Save to apply it."
+                announce(view, status)
+            }.onFailure { error ->
+                status = "Could not use the selected shared folder: ${error.message ?: error::class.java.simpleName}"
+                announce(view, status)
+            }
+        }
+    }
     LaunchedEffect(externalConnectionImport?.id) {
         val request = externalConnectionImport ?: return@LaunchedEffect
         val details = request.details
@@ -758,7 +837,7 @@ private fun ClipmanApp(
         onExternalConnectionImportConsumed(request.id)
     }
 
-    fun releaseBackupFolderPermission(uriValue: String) {
+    fun releaseFolderPermission(uriValue: String) {
         if (uriValue.isBlank()) return
         runCatching {
             context.contentResolver.releasePersistableUriPermission(
@@ -768,9 +847,22 @@ private fun ClipmanApp(
         }
     }
 
+    fun releaseFolderPermissionIfUnused(uriValue: String, retainedUris: Set<String>) {
+        if (uriValue.isNotBlank() && uriValue !in retainedUris) releaseFolderPermission(uriValue)
+    }
+
     fun discardSettingsChanges() {
         if (cloudBackupTreeUri.isNotBlank() && cloudBackupTreeUri != settings.cloudBackupTreeUri) {
-            releaseBackupFolderPermission(cloudBackupTreeUri)
+            releaseFolderPermissionIfUnused(
+                cloudBackupTreeUri,
+                setOf(settings.cloudBackupTreeUri, settings.sharedFolderTreeUri)
+            )
+        }
+        if (sharedFolderTreeUri.isNotBlank() && sharedFolderTreeUri != settings.sharedFolderTreeUri) {
+            releaseFolderPermissionIfUnused(
+                sharedFolderTreeUri,
+                setOf(settings.cloudBackupTreeUri, settings.sharedFolderTreeUri)
+            )
         }
         serverUrl = settings.serverUrl
         storageMode = settings.storageMode
@@ -792,6 +884,14 @@ private fun ClipmanApp(
         cloudBackupEnabled = settings.cloudBackupEnabled
         cloudBackupTreeUri = settings.cloudBackupTreeUri
         cloudBackupLocationName = settings.cloudBackupLocationName
+        val shared = initialSharedFolderSelection(
+            settings.sharedFolderTreeUri,
+            settings.sharedFolderLocationName,
+            settings.cloudBackupTreeUri,
+            settings.cloudBackupLocationName
+        )
+        sharedFolderTreeUri = shared.treeUri
+        sharedFolderLocationName = shared.locationName
         showConnectionSettings = false
     }
 
@@ -836,6 +936,8 @@ private fun ClipmanApp(
         settings.cloudBackupEnabled = snapshot.cloudBackupEnabled
         settings.cloudBackupTreeUri = snapshot.cloudBackupTreeUri
         settings.cloudBackupLocationName = snapshot.cloudBackupLocationName
+        settings.sharedFolderTreeUri = snapshot.sharedFolderTreeUri
+        settings.sharedFolderLocationName = snapshot.sharedFolderLocationName
     }
 
     fun backupOptions(enabled: Boolean = cloudBackupEnabled, treeUri: String = cloudBackupTreeUri) =
@@ -850,6 +952,16 @@ private fun ClipmanApp(
             showConnectionSettings = true
             return
         }
+        if (storageMode == MobileStorageMode.SharedFolder && sharedFolderTreeUri.isBlank()) {
+            status = "Choose a shared folder before loading history."
+            showConnectionSettings = true
+            return
+        }
+        if (storageMode.isSynchronized() && password.isBlank()) {
+            status = "Synchronized history requires a nonblank history password."
+            showConnectionSettings = true
+            return
+        }
         if (isLoadingHistory || isSavingHistory) return
         val generation = loadGeneration + 1
         loadGeneration = generation
@@ -860,6 +972,7 @@ private fun ClipmanApp(
         val requestedCaHost = serverCaHost
         val requestedPassword = password
         val requestedDeviceName = deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
+        val requestedSharedFolderTreeUri = sharedFolderTreeUri
         val databaseSnapshot = database
         val requestedRevision = currentRevision
         val requestedPendingChanges = hasPendingLocalChanges
@@ -874,10 +987,23 @@ private fun ClipmanApp(
             val oldEntries = entries
             var currentForSync = databaseSnapshot
             var localCacheIsCurrent = false
-            if (requestedMode == MobileStorageMode.Server && !hasLoadedHistory) {
+            val storageClient = if (requestedMode.isSynchronized()) {
+                createHistoryStorageClient(
+                    context.applicationContext,
+                    requestedMode,
+                    requestedServerUrl,
+                    requestedToken,
+                    requestedPassword,
+                    requestedCaCertPem,
+                    requestedCaHost,
+                    requestedSharedFolderTreeUri
+                )
+            } else null
+            if (requestedMode.isSynchronized() && !hasLoadedHistory) {
                 val cachedPreview = withContext(Dispatchers.IO) {
                     storageMutex.withLock {
                         runCatching {
+                            historyRepository.prepareStorage(requireNotNull(storageClient))
                             historyRepository.loadCachedView(requestedPassword, requestedDeviceName)
                         }.getOrNull()
                     }
@@ -892,7 +1018,7 @@ private fun ClipmanApp(
                     database = cachedPreview
                     entries = cachedPreview.Entries
                     hasLoadedHistory = true
-                    status = "Cached history loaded; refreshing Clipman Server."
+                    status = "Cached history loaded; refreshing ${requestedMode.storageDisplayName()}."
                 }
             }
             val result = withContext(Dispatchers.IO) {
@@ -902,15 +1028,12 @@ private fun ClipmanApp(
                             MobileSyncResult(historyRepository.loadLocal(requestedPassword), "", false)
                         } else {
                             try {
+                                val client = requireNotNull(storageClient)
                                 if (checkRevisionFirst && requestedRevision.isNotBlank() && !requestedPendingChanges) {
                                     // The rules bucket and every subscribed channel are
                                     // checked, not just the main history bucket.
-                                    val unchanged = historyRepository.serverUnchanged(
-                                        requestedServerUrl,
-                                        requestedToken,
-                                        requestedPassword,
-                                        requestedCaCertPem,
-                                        requestedCaHost,
+                                    val unchanged = historyRepository.storageUnchanged(
+                                        client,
                                         requestedDeviceName,
                                         requestedRevision
                                     )
@@ -919,13 +1042,10 @@ private fun ClipmanApp(
                                     }
                                 }
                                 historyRepository.synchronize(
-                                    requestedServerUrl,
-                                    requestedToken,
-                                    requestedPassword,
-                                    requestedCaCertPem,
-                                    requestedCaHost,
-                                    currentForSync,
-                                    requestedBackup,
+                                    client = client,
+                                    password = requestedPassword,
+                                    current = currentForSync,
+                                    backupOptions = requestedBackup,
                                     localAlreadySaved = localCacheIsCurrent,
                                     deviceName = requestedDeviceName
                                 )
@@ -951,12 +1071,14 @@ private fun ClipmanApp(
                     hasPendingLocalChanges = false
                     setSteadyStatus(
                         if (storageMode == MobileStorageMode.Local) "Ready. Using local history."
-                        else "Ready. Server sync connected.",
+                        else "Ready. ${storageMode.syncStatusName()} sync connected.",
                         revealImmediately = false
                     )
                 } else {
                     pollingFailureCount = minOf(pollingFailureCount + 1, 4)
-                    setSteadyStatus("Using local history; server sync is pending: ${sync.pendingError}")
+                    setSteadyStatus(
+                        "Using local history; ${storageMode.syncStatusName()} sync is pending: ${sync.pendingError}"
+                    )
                 }
                 val loadedDatabase = sync.database
                 if (storageMode == MobileStorageMode.Local || sync.revision != currentRevision || entries.isEmpty() || !SyncConflictResolver.hasSameContent(database, loadedDatabase)) {
@@ -968,7 +1090,7 @@ private fun ClipmanApp(
                         context = context,
                         oldEntries = oldEntries,
                         newEntries = loadedDatabase.Entries,
-                        enabled = storageMode == MobileStorageMode.Server && !announceResult,
+                        enabled = storageMode.isSynchronized() && !announceResult,
                         localMachine = deviceName.ifBlank { AndroidSettings.defaultDeviceName() },
                         shouldCopyToClipboard = copyRemoteToClipboard && !preserveClipboardDuringInitialLoad,
                         richTextEnabled = richTextEnabled,
@@ -996,7 +1118,7 @@ private fun ClipmanApp(
             }.onFailure { error ->
                 pollingFailureCount = minOf(pollingFailureCount + 1, 4)
                 setSteadyStatus("Could not load history: ${error.message ?: error::class.java.simpleName}")
-                if (announceResult && storageMode == MobileStorageMode.Server && !hasLoadedHistory) showConnectionSettings = true
+                if (announceResult && storageMode.isSynchronized() && !hasLoadedHistory) showConnectionSettings = true
                 if (announceResult) announce(view, "Could not load history")
             }
         }
@@ -1022,15 +1144,18 @@ private fun ClipmanApp(
         val requestedCaHost = serverCaHost
         val requestedPassword = password
         val requestedDeviceName = deviceName.ifBlank { AndroidSettings.defaultDeviceName() }
+        val requestedSharedFolderTreeUri = sharedFolderTreeUri
         val requestedBackup = backupOptions()
         val requestedRevision = currentRevision
         val updatedLocal = mutation(database)
         database = updatedLocal
         entries = updatedLocal.Entries
         hasLoadedHistory = true
-        if (requestedMode == MobileStorageMode.Server) hasPendingLocalChanges = true
+        if (requestedMode.isSynchronized()) hasPendingLocalChanges = true
         setSteadyStatus(
-            if (requestedMode == MobileStorageMode.Server) "$actionText; server sync in progress."
+            if (requestedMode.isSynchronized()) {
+                "$actionText; ${requestedMode.syncStatusName()} sync in progress."
+            }
             else "Saving change."
         )
         if (playCopyFeedback) {
@@ -1053,12 +1178,19 @@ private fun ClipmanApp(
                             }
                             MobileSyncResult(updatedLocal, "", false, backupError = backupError)
                         } else {
+                            val storageClient = createHistoryStorageClient(
+                                context.applicationContext,
+                                requestedMode,
+                                requestedServerUrl,
+                                requestedToken,
+                                requestedPassword,
+                                requestedCaCertPem,
+                                requestedCaHost,
+                                requestedSharedFolderTreeUri
+                            )
                             historyRepository.persistMutation(
-                                serverUrl = requestedServerUrl,
-                                token = requestedToken,
+                                client = storageClient,
                                 password = requestedPassword,
-                                serverCaCertPem = requestedCaCertPem,
-                                serverCaHost = requestedCaHost,
                                 current = updatedLocal,
                                 expectedRevision = requestedRevision,
                                 backupOptions = requestedBackup,
@@ -1076,8 +1208,8 @@ private fun ClipmanApp(
                 currentRevision = sync.revision
                 hasPendingLocalChanges = false
                 pollingFailureCount = 0
-                val completed = if (requestedMode == MobileStorageMode.Server) {
-                    "${completionStatus.trim().trimEnd('.')} and synced with Clipman Server."
+                val completed = if (requestedMode.isSynchronized()) {
+                    "${completionStatus.trim().trimEnd('.')} and synced with ${requestedMode.storageDisplayName()}."
                 } else {
                     completionStatus
                 }
@@ -1086,7 +1218,9 @@ private fun ClipmanApp(
                 } else {
                     setTransientStatus(sync.writeThroughMessage?.let { "$completed $it" } ?: completed)
                     setSteadyStatus(
-                        if (requestedMode == MobileStorageMode.Server) "Ready. Server sync connected."
+                        if (requestedMode.isSynchronized()) {
+                            "Ready. ${requestedMode.syncStatusName()} sync connected."
+                        }
                         else "Ready. Using local history.",
                         revealImmediately = false
                     )
@@ -1114,8 +1248,12 @@ private fun ClipmanApp(
                     setSteadyStatus(localHistoryWriteFailureStatus(actionText, error.cause ?: error))
                 } else {
                     pollingFailureCount = minOf(pollingFailureCount + 1, 4)
-                    val failure = if (requestedMode == MobileStorageMode.Server) {
-                        remoteHistoryWriteFailureStatus(actionText, error)
+                    val failure = if (requestedMode.isSynchronized()) {
+                        remoteHistoryWriteFailureStatus(
+                            actionText,
+                            error,
+                            requestedMode.syncStatusName()
+                        )
                     } else {
                         "$actionText failed: ${error.message ?: error::class.java.simpleName}"
                     }
@@ -1400,8 +1538,12 @@ private fun ClipmanApp(
         status = "Server details loaded. Enter the history password, then choose Load History."
     }
 
-    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings, appIsForeground) {
-        val ready = storageMode == MobileStorageMode.Local || (serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank())
+    LaunchedEffect(storageMode, serverUrl, token, password, sharedFolderTreeUri, showConnectionSettings, appIsForeground) {
+        val ready = when (storageMode) {
+            MobileStorageMode.Local -> true
+            MobileStorageMode.Server -> serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank()
+            MobileStorageMode.SharedFolder -> sharedFolderTreeUri.isNotBlank() && password.isNotBlank()
+        }
         if (appIsForeground && !showConnectionSettings && ready) {
             if (!attemptedInitialLoad) {
                 attemptedInitialLoad = true
@@ -1412,8 +1554,13 @@ private fun ClipmanApp(
         }
     }
 
-    LaunchedEffect(storageMode, serverUrl, token, password, showConnectionSettings, appIsForeground, pollingFailureCount) {
-        while (appIsForeground && storageMode == MobileStorageMode.Server && serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank() && !showConnectionSettings) {
+    LaunchedEffect(storageMode, serverUrl, token, password, sharedFolderTreeUri, showConnectionSettings, appIsForeground, pollingFailureCount) {
+        fun synchronizedStorageReady(): Boolean = when (storageMode) {
+            MobileStorageMode.Local -> false
+            MobileStorageMode.Server -> serverUrl.isNotBlank() && token.isNotBlank() && password.isNotBlank()
+            MobileStorageMode.SharedFolder -> sharedFolderTreeUri.isNotBlank() && password.isNotBlank()
+        }
+        while (appIsForeground && synchronizedStorageReady() && !showConnectionSettings) {
             val delaySeconds = minOf(60L, 5L * (1L shl pollingFailureCount.coerceIn(0, 3)))
             delay(delaySeconds * 1_000L)
             loadHistory(announceResult = false, checkRevisionFirst = true)
@@ -1705,14 +1852,21 @@ private fun ClipmanApp(
                         val result = withContext(Dispatchers.IO) {
                             storageMutex.withLock {
                                 runCatching {
-                                    historyRepository.saveDeviceSubscription(
+                                    val storageClient = createHistoryStorageClient(
+                                        context.applicationContext,
+                                        storageMode,
                                         serverUrl,
                                         token,
                                         password,
                                         serverCaCertPem,
                                         serverCaHost,
-                                        effectiveDeviceName,
-                                        requestedChannels
+                                        sharedFolderTreeUri
+                                    )
+                                    historyRepository.saveDeviceSubscription(
+                                        client = storageClient,
+                                        password = password,
+                                        deviceName = effectiveDeviceName,
+                                        channels = requestedChannels
                                     )
                                 }
                             }
@@ -1832,6 +1986,12 @@ private fun ClipmanApp(
                         restoreHistoryBackup.launch(arrayOf("application/octet-stream", "application/gzip", "*/*"))
                     }
                 },
+                sharedFolderLocationName = sharedFolderLocationName,
+                onChooseSharedFolder = {
+                    launchTrustedExternalActivity {
+                        chooseSharedFolder.launch(null)
+                    }
+                },
                 onOpenSyncRules = { showSyncRules = true },
                 onOpenTipJar = {
                     runCatching {
@@ -1856,8 +2016,13 @@ private fun ClipmanApp(
                 onCancel = { if (!isSavingSettings) discardSettingsChanges() },
                 onSave = saveSettings@{
                     if (isSavingSettings) return@saveSettings
-                    if (storageMode == MobileStorageMode.Server && password.isBlank()) {
-                        status = "Clipman Server requires a unique history password. Enter one before saving this connection."
+                    if (storageMode.isSynchronized() && password.isBlank()) {
+                        status = "Synchronized history requires a unique history password. Enter one before saving."
+                        announce(view, status)
+                        return@saveSettings
+                    }
+                    if (storageMode == MobileStorageMode.SharedFolder && sharedFolderTreeUri.isBlank()) {
+                        status = "Choose a shared folder before saving."
                         announce(view, status)
                         return@saveSettings
                     }
@@ -1900,7 +2065,9 @@ private fun ClipmanApp(
                         useHaptics = useHaptics,
                         cloudBackupEnabled = cloudBackupEnabled,
                         cloudBackupTreeUri = cloudBackupTreeUri,
-                        cloudBackupLocationName = cloudBackupLocationName
+                        cloudBackupLocationName = cloudBackupLocationName,
+                        sharedFolderTreeUri = sharedFolderTreeUri,
+                        sharedFolderLocationName = sharedFolderLocationName
                     )
                     isSavingSettings = true
                     loadGeneration += 1
@@ -1908,6 +2075,7 @@ private fun ClipmanApp(
                     isLoadingHistory = false
                     val oldPassword = settings.historyPassword
                     val oldBackupTreeUri = settings.cloudBackupTreeUri
+                    val oldSharedFolderTreeUri = settings.sharedFolderTreeUri
                     val newPassword = savedSettings.password
                     val databaseSnapshot = database
                     val historyWasLoaded = hasLoadedHistory
@@ -1953,10 +2121,15 @@ private fun ClipmanApp(
                             cloudBackupEnabled = savedSettings.cloudBackupEnabled
                             cloudBackupTreeUri = savedSettings.cloudBackupTreeUri
                             cloudBackupLocationName = savedSettings.cloudBackupLocationName
+                            sharedFolderTreeUri = savedSettings.sharedFolderTreeUri
+                            sharedFolderLocationName = savedSettings.sharedFolderLocationName
                             saveSettings(savedSettings)
-                            if (oldBackupTreeUri.isNotBlank() && oldBackupTreeUri != savedSettings.cloudBackupTreeUri) {
-                                releaseBackupFolderPermission(oldBackupTreeUri)
-                            }
+                            val retainedUris = setOf(
+                                savedSettings.cloudBackupTreeUri,
+                                savedSettings.sharedFolderTreeUri
+                            )
+                            releaseFolderPermissionIfUnused(oldBackupTreeUri, retainedUris)
+                            releaseFolderPermissionIfUnused(oldSharedFolderTreeUri, retainedUris)
                             isSavingSettings = false
                             showConnectionSettings = false
                             currentRevision = ""
@@ -2446,6 +2619,8 @@ private fun ConnectionSettingsScreen(
     cloudBackupLocationName: String,
     onChooseBackupFolder: () -> Unit,
     onRestoreHistoryBackup: () -> Unit,
+    sharedFolderLocationName: String,
+    onChooseSharedFolder: () -> Unit,
     onOpenSyncRules: () -> Unit,
     onOpenTipJar: () -> Unit,
     onOpenManual: () -> Unit,
@@ -2494,12 +2669,57 @@ private fun ConnectionSettingsScreen(
             onStorageModeChanged = onStorageModeChanged,
         )
         Text(
-            text = if (storageMode == MobileStorageMode.Local) {
-                "History is stored privately on this phone. Your server details remain saved for later."
-            } else {
-                "History is cached on this phone and merged with Clipman Server. Offline changes retry automatically."
+            text = when (storageMode) {
+                MobileStorageMode.Local ->
+                    "History is stored privately on this phone. Your synchronized-storage details remain saved for later."
+                MobileStorageMode.Server ->
+                    "History is cached on this phone and merged with Clipman Server. Offline changes retry automatically."
+                MobileStorageMode.SharedFolder ->
+                    "History is cached on this phone and merged through a folder provided by Android. Offline changes retry automatically."
             },
             style = MaterialTheme.typography.bodySmall
+        )
+        if (storageMode == MobileStorageMode.SharedFolder) {
+            Text(
+                text = "Shared folder",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            Text(
+                text = if (sharedFolderLocationName.isBlank()) {
+                    "Shared folder: Not selected"
+                } else {
+                    "Shared folder: $sharedFolderLocationName"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(onClick = onChooseSharedFolder, enabled = !isSaving) {
+                Text(if (sharedFolderLocationName.isBlank()) "Choose shared folder" else "Change shared folder")
+            }
+            Text(
+                text = "Clipman uses Android's folder picker. A location can be on this device or in a storage provider that offers persistent read and write access. Use the same folder and history password on each device.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        Text(
+            text = "History password",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() }
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPasswordChanged,
+            label = { Text("History password") },
+            singleLine = true,
+            enabled = !isSaving,
+            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        SettingCheckboxRow(
+            checked = showPassword,
+            onCheckedChange = onShowPasswordChanged,
+            label = "Show password",
+            enabled = !isSaving
         )
         Text(
             text = "Sync rules",
@@ -2508,11 +2728,11 @@ private fun ConnectionSettingsScreen(
         )
         TextButton(
             onClick = onOpenSyncRules,
-            enabled = !isSaving && storageMode == MobileStorageMode.Server,
+            enabled = !isSaving && storageMode.isSynchronized(),
             modifier = Modifier.clearAndSetSemantics {
                 contentDescription = "Open sync rules"
                 role = Role.Button
-                if (isSaving || storageMode != MobileStorageMode.Server) {
+                if (isSaving || !storageMode.isSynchronized()) {
                     disabled()
                 } else {
                     onClick(label = "Open sync rules") {
@@ -2696,21 +2916,6 @@ private fun ConnectionSettingsScreen(
                     ) {
                         Text("Paste token from clipboard")
                     }
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = onPasswordChanged,
-                        label = { Text("History password") },
-                        singleLine = true,
-                        enabled = !isSaving,
-                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    SettingCheckboxRow(
-                        checked = showPassword,
-                        onCheckedChange = onShowPasswordChanged,
-                        label = "Show password",
-                        enabled = !isSaving
-                    )
                 }
             }
         }
@@ -2744,20 +2949,22 @@ internal fun StorageModeSelector(
     enabled: Boolean,
     onStorageModeChanged: (MobileStorageMode) -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .selectableGroup(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         MobileStorageMode.entries.forEach { mode ->
             Row(
-                modifier = Modifier.selectable(
-                    selected = storageMode == mode,
-                    enabled = enabled,
-                    role = Role.RadioButton,
-                    onClick = { onStorageModeChanged(mode) },
-                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(
+                        selected = storageMode == mode,
+                        enabled = enabled,
+                        role = Role.RadioButton,
+                        onClick = { onStorageModeChanged(mode) },
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 RadioButton(

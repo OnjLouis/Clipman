@@ -82,13 +82,14 @@
   <p>The first time you configure it:</p>
   <ol>
     <li>Open Settings if it is not already shown.</li>
-    <li>Choose <strong>Local</strong> to keep history on this phone, or <strong>Server</strong> to share history through Clipman Server.</li>
+    <li>Choose <strong>Local</strong> to keep history on this phone, <strong>Shared Folder</strong> to synchronize through Android's system folder picker, or <strong>Server</strong> to use Clipman Server.</li>
+    <li>For Shared Folder mode, choose a folder offered by Android and enter the same nonblank history password on every participating device. If encrypted backup already has a folder, Clipman reuses it as the initial choice.</li>
     <li>For Server mode, open the private <code>.clpconf</code> file from Android's file browser, or choose <strong>Import server connection file</strong> in Clipman Settings. You can also enter the server address and token manually.</li>
     <li>Enter a nonblank, preferably unique history password. Clipman Server does not allow passwordless history.</li>
     <li>Choose <strong>Save</strong> at the top of Settings.</li>
   </ol>
 
-  <p>Local mode stores <code>clipman-history.clipdb</code> in Android's private app storage. Server mode keeps that local copy as an offline cache and merges it with the server. If the connection is unavailable, changes remain local and retry while Clipman is open. Switching back to Server mode merges both histories, including deletion records, instead of replacing either side.</p>
+  <p>Local mode stores <code>clipman-history.clipdb</code> in Android's private app storage. Shared Folder and Server modes keep that local copy as an offline cache and merge it with the selected storage. If storage is unavailable, changes remain local and retry while Clipman is open. Switching back to a synchronized mode merges both histories, including deletion records, instead of replacing either side.</p>
 
   <p>Enable <strong>Preserve copied formatting and show Rich Text history</strong> in Settings before using Paste when you want Clipman to retain HTML supplied by browsers, messaging apps, email clients, and editors. Formatted entries appear in a separate Rich Text section and are copied back with HTML plus the normal plain-text fallback. Android preserves RTF received from Windows, Mac, or iOS, but Android's standard text clipboard does not publish RTF, so RTF-only entries copy as plain text on Android.</p>
 
@@ -125,7 +126,8 @@
   <h2 id="settings">Settings</h2>
   <p>Settings includes:</p>
   <ul>
-    <li><strong>History storage</strong>: switches between private Local history and Clipman Server. Each labelled radio choice is one TalkBack focus target. Switching modes keeps the other mode's settings and merges local changes when Server mode resumes.</li>
+    <li><strong>History storage</strong>: switches among private Local history, Shared Folder, and Clipman Server. Each labelled radio choice is one TalkBack focus target. Switching modes keeps the other modes' settings and merges local changes when synchronization resumes.</li>
+    <li><strong>Shared Folder</strong>: synchronizes encrypted history through a folder selected with Android's system picker. Android may offer on-device folders or installed providers such as Google Drive, OneDrive, or Dropbox. A provider must grant persistent read and write access; Clipman does not receive the provider account. Use the same folder and nonblank history password on each device.</li>
     <li><strong>Encrypted history backup</strong>: optionally writes <code>Clipman History.clipdb</code> to a folder selected through Android's system picker. A nonblank history password is required. Use <strong>Restore and merge history backup</strong> to combine its entries and deletions with current history. Server details, tokens, settings, and passwords are not included.</li>
     <li><strong>Copy remote additions to Android clipboard</strong>: when another device adds new text to the shared history, Clipman can place that new text on the Android clipboard while the app is open.</li>
     <li><strong>Add current clipboard to history on launch</strong>: after a successful unlock and initial history load, Clipman adds the current Android clipboard text to the selected history. This is off by default.</li>
@@ -139,7 +141,8 @@
     <li><strong>Require biometric or device authentication</strong>: when enabled, locks Clipman whenever it leaves the foreground and requires Android authentication when you return. This is off by default.</li>
     <li><strong>Check for updates automatically</strong>: checks the Clipman GitHub release at most once per day while the app is open. Disable it to use only manual checks.</li>
     <li><strong>Check Now</strong>: checks immediately and reports whether this Android build is current.</li>
-    <li><strong>Server connection</strong>: imports or exports a private <code>.clpconf</code> server file, or shows server address, server token, history password, and show-password controls for manual setup.</li>
+    <li><strong>History password</strong>: encrypts local, shared-folder, server-cache, and backup history. Shared Folder and Server modes require a nonblank password.</li>
+    <li><strong>Server connection</strong>: imports or exports a private <code>.clpconf</code> server file, or shows server address and server token controls for manual setup.</li>
     <li><strong>Support Clipman</strong>: opens the optional Tip Jar. Tips do not unlock features or change Clipman's free functionality.</li>
     <li><strong>Help</strong>: <strong>Open Manual</strong> opens the rendered Clipman manual in the default browser without saving or discarding Settings changes.</li>
     <li><strong>Build information</strong>: shows the app version, readable UTC build time, and exact build stamp so a tester can identify the installed build unambiguously.</li>
@@ -149,7 +152,7 @@
 
   <p>Opening a <code>.clpconf</code> file starts Clipman and requires the normal device unlock. An imported connection is shown for review and is not applied until you choose <strong>Save</strong>. If a private-CA HTTPS server generated the file, it can also contain the public authority. Clipman validates that certificate and trusts it only for this server profile and reviewed HTTPS host; it does not install a device-wide Android CA. If a particular Android file provider does not offer Clipman when you open the file, use the import button in Clipman Settings instead. Export offers <strong>Save to Files</strong> and <strong>Share</strong> for the address, token, and matching private authority currently shown in Settings. Share opens Android's native share chooser with temporary read-only access to the file. Every <code>.clpconf</code> file contains the private server token; store and share it securely, never keep it beside an exported clipboard history, and delete it or move it to a password manager after configuring your devices.</p>
 
-  <p>When Clipman starts in Server mode, it displays the encrypted local cache before contacting the server. While Clipman is in the foreground and Settings is closed, it then checks the server revision every fifteen seconds. It downloads history only when the revision changes, pauses checks in the background, and progressively slows retries during an outage. Returning to Clipman or closing Settings triggers an immediate refresh.</p>
+  <p>When Clipman starts in Shared Folder or Server mode, it displays the encrypted local cache before contacting synchronized storage. While Clipman is in the foreground and Settings is closed, it checks revisions every five seconds. It reads full history only when a revision changes, pauses checks in the background, and progressively slows retries during an outage. Returning to Clipman or closing Settings triggers an immediate refresh.</p>
 
   <p>After a normal addition, edit, pin, title change, or deletion, Clipman saves and encrypts the local database once and uploads it against the known server revision. It downloads, decrypts, merges, and retries the complete history only when another client changed the server first. The status area reports server sync in progress and does not report the change as synced until Clipman Server accepts it.</p>
 
@@ -175,6 +178,7 @@ https://host:port</code></pre>
     <li>Current private-CA HTTPS connection files can carry the public authority. Clipman uses it only for the matching server profile and still verifies the server host and certificate. Existing user-installed authorities remain a legacy option when a connection file does not contain one.</li>
     <li>Server address, server token, and history password are stored using Android protected app storage.</li>
     <li>Local history is stored in Android's private app data. It uses the configured history password when one is present.</li>
+    <li>Shared Folder mode grants Clipman access only to the folder selected through Android. Clipman stores encrypted history there but does not receive the storage provider's account credentials.</li>
     <li>Clipman Android only syncs while the app is open.</li>
     <li>The Android clipboard itself is controlled by Android. Once an entry is copied to the clipboard, other apps may be able to paste it according to Android's normal clipboard rules.</li>
   </ul>
