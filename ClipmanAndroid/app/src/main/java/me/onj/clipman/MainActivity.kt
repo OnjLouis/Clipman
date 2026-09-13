@@ -5,15 +5,18 @@ import android.content.Context
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.View
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -21,12 +24,14 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -113,35 +118,45 @@ class MainActivity : FragmentActivity() {
     private var externalQuickClipRequestId by mutableStateOf(0L)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Android 15 forces edge-to-edge for targetSdk 35; opt in on older versions too so insets
+        // behave the same everywhere. Light bars because the app theme is always light.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+        )
         super.onCreate(savedInstanceState)
         handleIncomingIntent(intent)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    if (isUnlocked) {
-                        ClipmanApp(
-                            appIsForeground = appIsForeground,
-                            externalConnectionImport = externalConnectionImport,
-                            onExternalConnectionImportConsumed = { id ->
-                                if (externalConnectionImport?.id == id) externalConnectionImport = null
-                            },
-                            externalImageImport = externalImageImports.firstOrNull(),
-                            onExternalImageImportConsumed = { id ->
-                                externalImageImports = externalImageImports.filterNot { it.id == id }
-                            },
-                            externalTextImport = externalTextImports.firstOrNull(),
-                            onExternalTextImportConsumed = { id ->
-                                externalTextImports = externalTextImports.filterNot { it.id == id }
-                            },
-                            externalQuickClipRequestId = externalQuickClipRequestId,
-                            onExternalQuickClipConsumed = { id ->
-                                if (externalQuickClipRequestId == id) externalQuickClipRequestId = 0
-                            }
-                        )
-                    } else {
-                        LockedScreen(
-                            message = unlockMessage
-                        )
+                    // Without this, the settings header drew under the status bar, where TalkBack
+                    // touch exploration reaches System UI instead of the Save button.
+                    Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+                        if (isUnlocked) {
+                            ClipmanApp(
+                                appIsForeground = appIsForeground,
+                                externalConnectionImport = externalConnectionImport,
+                                onExternalConnectionImportConsumed = { id ->
+                                    if (externalConnectionImport?.id == id) externalConnectionImport = null
+                                },
+                                externalImageImport = externalImageImports.firstOrNull(),
+                                onExternalImageImportConsumed = { id ->
+                                    externalImageImports = externalImageImports.filterNot { it.id == id }
+                                },
+                                externalTextImport = externalTextImports.firstOrNull(),
+                                onExternalTextImportConsumed = { id ->
+                                    externalTextImports = externalTextImports.filterNot { it.id == id }
+                                },
+                                externalQuickClipRequestId = externalQuickClipRequestId,
+                                onExternalQuickClipConsumed = { id ->
+                                    if (externalQuickClipRequestId == id) externalQuickClipRequestId = 0
+                                }
+                            )
+                        } else {
+                            LockedScreen(
+                                message = unlockMessage
+                            )
+                        }
                     }
                 }
             }
@@ -2632,314 +2647,321 @@ private fun ConnectionSettingsScreen(
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Kept outside the scrolling content so Save stays on screen and reachable while editing.
         SettingsHeader(isSaving = isSaving, onCancel = onCancel, onSave = onSave)
-        Text(
-            text = "Device",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        OutlinedTextField(
-            value = deviceName,
-            onValueChange = onDeviceNameChanged,
-            label = { Text("Device name") },
-            singleLine = true,
-            enabled = !isSaving,
-            modifier = Modifier.fillMaxWidth()
-        )
-        TextButton(
-            onClick = { onHistorySortChanged(nextSortMode(historySort)) },
-            enabled = !isSaving,
-            modifier = Modifier.fillMaxWidth()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("History sort order: ${historySort.label}")
-        }
-        Text(
-            text = "History storage",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        StorageModeSelector(
-            storageMode = storageMode,
-            enabled = !isSaving,
-            onStorageModeChanged = onStorageModeChanged,
-        )
-        Text(
-            text = when (storageMode) {
-                MobileStorageMode.Local ->
-                    "History is stored privately on this phone. Your synchronized-storage details remain saved for later."
-                MobileStorageMode.Server ->
-                    "History is cached on this phone and merged with Clipman Server. Offline changes retry automatically."
-                MobileStorageMode.SharedFolder ->
-                    "History is cached on this phone and merged through a folder provided by Android. Offline changes retry automatically."
-            },
-            style = MaterialTheme.typography.bodySmall
-        )
-        if (storageMode == MobileStorageMode.SharedFolder) {
             Text(
-                text = "Shared folder",
+                text = "Device",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.semantics { heading() }
             )
+            OutlinedTextField(
+                value = deviceName,
+                onValueChange = onDeviceNameChanged,
+                label = { Text("Device name") },
+                singleLine = true,
+                enabled = !isSaving,
+                modifier = Modifier.fillMaxWidth()
+            )
+            TextButton(
+                onClick = { onHistorySortChanged(nextSortMode(historySort)) },
+                enabled = !isSaving,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("History sort order: ${historySort.label}")
+            }
             Text(
-                text = if (sharedFolderLocationName.isBlank()) {
-                    "Shared folder: Not selected"
-                } else {
-                    "Shared folder: $sharedFolderLocationName"
+                text = "History storage",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            StorageModeSelector(
+                storageMode = storageMode,
+                enabled = !isSaving,
+                onStorageModeChanged = onStorageModeChanged,
+            )
+            Text(
+                text = when (storageMode) {
+                    MobileStorageMode.Local ->
+                        "History is stored privately on this phone. Your synchronized-storage details remain saved for later."
+                    MobileStorageMode.Server ->
+                        "History is cached on this phone and merged with Clipman Server. Offline changes retry automatically."
+                    MobileStorageMode.SharedFolder ->
+                        "History is cached on this phone and merged through a folder provided by Android. Offline changes retry automatically."
                 },
                 style = MaterialTheme.typography.bodySmall
             )
-            TextButton(onClick = onChooseSharedFolder, enabled = !isSaving) {
-                Text(if (sharedFolderLocationName.isBlank()) "Choose shared folder" else "Change shared folder")
-            }
-            Text(
-                text = "Clipman uses Android's folder picker. A location can be on this device or in a storage provider that offers persistent read and write access. Use the same folder and history password on each device.",
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        Text(
-            text = "History password",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        OutlinedTextField(
-            value = password,
-            onValueChange = onPasswordChanged,
-            label = { Text("History password") },
-            singleLine = true,
-            enabled = !isSaving,
-            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-        SettingCheckboxRow(
-            checked = showPassword,
-            onCheckedChange = onShowPasswordChanged,
-            label = "Show password",
-            enabled = !isSaving
-        )
-        Text(
-            text = "Sync rules",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        TextButton(
-            onClick = onOpenSyncRules,
-            enabled = !isSaving && storageMode.isSynchronized(),
-            modifier = Modifier.clearAndSetSemantics {
-                contentDescription = "Open sync rules"
-                role = Role.Button
-                if (isSaving || !storageMode.isSynchronized()) {
-                    disabled()
-                } else {
-                    onClick(label = "Open sync rules") {
-                        onOpenSyncRules()
-                        true
-                    }
-                }
-            }
-        ) {
-            Text("Sync rules and channels", modifier = Modifier.clearAndSetSemantics { })
-        }
-        Text(
-            text = "Sync rules split history into channels and decide which of them this device downloads.",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Text(
-            text = "History backup",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        SettingCheckboxRow(
-            checked = cloudBackupEnabled,
-            onCheckedChange = onCloudBackupEnabledChanged,
-            label = "Back up encrypted history automatically",
-            enabled = !isSaving
-        )
-        Text(
-            text = if (cloudBackupLocationName.isBlank()) {
-                "Backup folder: Not selected"
-            } else {
-                "Backup folder: $cloudBackupLocationName"
-            },
-            style = MaterialTheme.typography.bodySmall
-        )
-        TextButton(onClick = onChooseBackupFolder, enabled = !isSaving) {
-            Text(if (cloudBackupLocationName.isBlank()) "Choose backup folder" else "Change backup folder")
-        }
-        TextButton(onClick = onRestoreHistoryBackup, enabled = !isSaving) {
-            Text("Restore and merge history backup")
-        }
-        Text(
-            text = "Clipman writes Clipman History.clipdb through Android's folder picker. A nonblank history password is required, and restore merges entries instead of replacing your current history. Server tokens and passwords are never included.",
-            style = MaterialTheme.typography.bodySmall
-        )
-        SettingCheckboxRow(
-            checked = playSounds,
-            onCheckedChange = onPlaySoundsChanged,
-            label = "Play sounds",
-            enabled = !isSaving
-        )
-        SettingCheckboxRow(
-            checked = useHaptics,
-            onCheckedChange = onUseHapticsChanged,
-            label = "Use haptic feedback",
-            enabled = !isSaving
-        )
-        SettingCheckboxRow(
-            checked = copyRemoteToClipboard,
-            onCheckedChange = onCopyRemoteToClipboardChanged,
-            label = "Copy remote additions to Android clipboard",
-            enabled = !isSaving
-        )
-        SettingCheckboxRow(
-            checked = addClipboardOnLaunch,
-            onCheckedChange = onAddClipboardOnLaunchChanged,
-            label = "Add current clipboard to history on launch",
-            enabled = !isSaving
-        )
-        SettingCheckboxRow(
-            checked = richTextEnabled,
-            onCheckedChange = onRichTextEnabledChanged,
-            label = "Preserve copied formatting and show Rich Text history",
-            enabled = !isSaving
-        )
-        SettingCheckboxRow(
-            checked = richTextImagesEnabled,
-            onCheckedChange = onRichTextImagesEnabledChanged,
-            label = "Include images in Rich Text history",
-            enabled = !isSaving && richTextEnabled
-        )
-        Text(
-            text = "Retained image metadata may contain camera or location information and follows " +
-                "your clipboard history encryption and sync choices.",
-            style = MaterialTheme.typography.bodySmall
-        )
-        SettingCheckboxRow(
-            checked = confirmDeletions,
-            onCheckedChange = onConfirmDeletionsChanged,
-            label = "Confirm before deleting entries",
-            enabled = !isSaving
-        )
-        SettingCheckboxRow(
-            checked = requireAuthentication,
-            onCheckedChange = onRequireAuthenticationChanged,
-            label = "Require biometric or device authentication",
-            enabled = !isSaving
-        )
-        Text(
-            text = "Updates",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        SettingCheckboxRow(
-            checked = checkForUpdatesAutomatically,
-            onCheckedChange = onCheckForUpdatesAutomaticallyChanged,
-            label = "Check for updates automatically",
-            enabled = !isSaving
-        )
-        TextButton(onClick = onCheckForUpdates, enabled = !isSaving && !isCheckingForUpdate) {
-            Text(if (isCheckingForUpdate) "Checking" else "Check Now")
-        }
-        if (updateStatus.isNotBlank()) {
-            Text(updateStatus, style = MaterialTheme.typography.bodySmall)
-        }
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            if (storageMode == MobileStorageMode.SharedFolder) {
                 Text(
-                    text = "Server connection",
+                    text = "Shared folder",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.semantics { heading() }
                 )
                 Text(
-                    text = if (serverUrl.isBlank() || token.isBlank()) {
-                        "Server connection needs setup."
+                    text = if (sharedFolderLocationName.isBlank()) {
+                        "Shared folder: Not selected"
                     } else {
-                        "Server connection is configured."
+                        "Shared folder: $sharedFolderLocationName"
                     },
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodySmall
                 )
-                TextButton(onClick = { showServerConnection = !showServerConnection }, enabled = !isSaving) {
-                    Text(if (showServerConnection) "Hide server connection" else "Show server connection")
+                TextButton(onClick = onChooseSharedFolder, enabled = !isSaving) {
+                    Text(if (sharedFolderLocationName.isBlank()) "Choose shared folder" else "Change shared folder")
                 }
-                TextButton(onClick = onImportServerFile, enabled = !isSaving) {
-                    Text("Import server connection file")
-                }
-                TextButton(onClick = onExportServerFile, enabled = !isSaving) {
-                    Text("Export server connection file")
-                }
-                TextButton(onClick = onImportServerAuthority, enabled = !isSaving) {
-                    Text("Import private authority")
-                }
-                val authority = remember(serverCaCertPem, serverUrl) {
-                    runCatching { ServerConnectionConfig.parseAuthority(serverCaCertPem, serverUrl) }.getOrNull()
-                }
-                if (authority == null) {
-                    Text("Private certificate authority: Not configured", style = MaterialTheme.typography.bodySmall)
-                } else {
-                    Text(
-                        "Private certificate authority for ${authority.host}. Subject: ${authority.subject}. Expires: ${java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG).format(java.util.Date(authority.expiresUnixMs))}.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text("Authority SHA-256 fingerprint: ${authority.fingerprint}", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = onRemoveServerAuthority, enabled = !isSaving) {
-                        Text("Remove private authority")
+                Text(
+                    text = "Clipman uses Android's folder picker. A location can be on this device or in a storage provider that offers persistent read and write access. Use the same folder and history password on each device.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Text(
+                text = "History password",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            OutlinedTextField(
+                value = password,
+                onValueChange = onPasswordChanged,
+                label = { Text("History password") },
+                singleLine = true,
+                enabled = !isSaving,
+                visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            SettingCheckboxRow(
+                checked = showPassword,
+                onCheckedChange = onShowPasswordChanged,
+                label = "Show password",
+                enabled = !isSaving
+            )
+            Text(
+                text = "Sync rules",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            TextButton(
+                onClick = onOpenSyncRules,
+                enabled = !isSaving && storageMode.isSynchronized(),
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = "Open sync rules"
+                    role = Role.Button
+                    if (isSaving || !storageMode.isSynchronized()) {
+                        disabled()
+                    } else {
+                        onClick(label = "Open sync rules") {
+                            onOpenSyncRules()
+                            true
+                        }
                     }
                 }
-                if (showServerConnection) {
-                    OutlinedTextField(
-                        value = serverUrl,
-                        onValueChange = onServerUrlChanged,
-                        label = { Text("Server address") },
-                        singleLine = true,
-                        enabled = !isSaving,
-                        modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Sync rules and channels", modifier = Modifier.clearAndSetSemantics { })
+            }
+            Text(
+                text = "Sync rules split history into channels and decide which of them this device downloads.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = "History backup",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            SettingCheckboxRow(
+                checked = cloudBackupEnabled,
+                onCheckedChange = onCloudBackupEnabledChanged,
+                label = "Back up encrypted history automatically",
+                enabled = !isSaving
+            )
+            Text(
+                text = if (cloudBackupLocationName.isBlank()) {
+                    "Backup folder: Not selected"
+                } else {
+                    "Backup folder: $cloudBackupLocationName"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(onClick = onChooseBackupFolder, enabled = !isSaving) {
+                Text(if (cloudBackupLocationName.isBlank()) "Choose backup folder" else "Change backup folder")
+            }
+            TextButton(onClick = onRestoreHistoryBackup, enabled = !isSaving) {
+                Text("Restore and merge history backup")
+            }
+            Text(
+                text = "Clipman writes Clipman History.clipdb through Android's folder picker. A nonblank history password is required, and restore merges entries instead of replacing your current history. Server tokens and passwords are never included.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            SettingCheckboxRow(
+                checked = playSounds,
+                onCheckedChange = onPlaySoundsChanged,
+                label = "Play sounds",
+                enabled = !isSaving
+            )
+            SettingCheckboxRow(
+                checked = useHaptics,
+                onCheckedChange = onUseHapticsChanged,
+                label = "Use haptic feedback",
+                enabled = !isSaving
+            )
+            SettingCheckboxRow(
+                checked = copyRemoteToClipboard,
+                onCheckedChange = onCopyRemoteToClipboardChanged,
+                label = "Copy remote additions to Android clipboard",
+                enabled = !isSaving
+            )
+            SettingCheckboxRow(
+                checked = addClipboardOnLaunch,
+                onCheckedChange = onAddClipboardOnLaunchChanged,
+                label = "Add current clipboard to history on launch",
+                enabled = !isSaving
+            )
+            SettingCheckboxRow(
+                checked = richTextEnabled,
+                onCheckedChange = onRichTextEnabledChanged,
+                label = "Preserve copied formatting and show Rich Text history",
+                enabled = !isSaving
+            )
+            SettingCheckboxRow(
+                checked = richTextImagesEnabled,
+                onCheckedChange = onRichTextImagesEnabledChanged,
+                label = "Include images in Rich Text history",
+                enabled = !isSaving && richTextEnabled
+            )
+            Text(
+                text = "Retained image metadata may contain camera or location information and follows " +
+                    "your clipboard history encryption and sync choices.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            SettingCheckboxRow(
+                checked = confirmDeletions,
+                onCheckedChange = onConfirmDeletionsChanged,
+                label = "Confirm before deleting entries",
+                enabled = !isSaving
+            )
+            SettingCheckboxRow(
+                checked = requireAuthentication,
+                onCheckedChange = onRequireAuthenticationChanged,
+                label = "Require biometric or device authentication",
+                enabled = !isSaving
+            )
+            Text(
+                text = "Updates",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            SettingCheckboxRow(
+                checked = checkForUpdatesAutomatically,
+                onCheckedChange = onCheckForUpdatesAutomaticallyChanged,
+                label = "Check for updates automatically",
+                enabled = !isSaving
+            )
+            TextButton(onClick = onCheckForUpdates, enabled = !isSaving && !isCheckingForUpdate) {
+                Text(if (isCheckingForUpdate) "Checking" else "Check Now")
+            }
+            if (updateStatus.isNotBlank()) {
+                Text(updateStatus, style = MaterialTheme.typography.bodySmall)
+            }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Server connection",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.semantics { heading() }
                     )
-                    OutlinedTextField(
-                        value = token,
-                        onValueChange = onTokenChanged,
-                        label = { Text("Server token") },
-                        singleLine = true,
-                        enabled = !isSaving && storageMode == MobileStorageMode.Server,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
+                    Text(
+                        text = if (serverUrl.isBlank() || token.isBlank()) {
+                            "Server connection needs setup."
+                        } else {
+                            "Server connection is configured."
+                        },
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                    TextButton(
-                        onClick = onPasteToken,
-                        enabled = !isSaving && storageMode == MobileStorageMode.Server
-                    ) {
-                        Text("Paste token from clipboard")
+                    TextButton(onClick = { showServerConnection = !showServerConnection }, enabled = !isSaving) {
+                        Text(if (showServerConnection) "Hide server connection" else "Show server connection")
+                    }
+                    TextButton(onClick = onImportServerFile, enabled = !isSaving) {
+                        Text("Import server connection file")
+                    }
+                    TextButton(onClick = onExportServerFile, enabled = !isSaving) {
+                        Text("Export server connection file")
+                    }
+                    TextButton(onClick = onImportServerAuthority, enabled = !isSaving) {
+                        Text("Import private authority")
+                    }
+                    val authority = remember(serverCaCertPem, serverUrl) {
+                        runCatching { ServerConnectionConfig.parseAuthority(serverCaCertPem, serverUrl) }.getOrNull()
+                    }
+                    if (authority == null) {
+                        Text("Private certificate authority: Not configured", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text(
+                            "Private certificate authority for ${authority.host}. Subject: ${authority.subject}. Expires: ${java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG).format(java.util.Date(authority.expiresUnixMs))}.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text("Authority SHA-256 fingerprint: ${authority.fingerprint}", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onRemoveServerAuthority, enabled = !isSaving) {
+                            Text("Remove private authority")
+                        }
+                    }
+                    if (showServerConnection) {
+                        OutlinedTextField(
+                            value = serverUrl,
+                            onValueChange = onServerUrlChanged,
+                            label = { Text("Server address") },
+                            singleLine = true,
+                            enabled = !isSaving,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = token,
+                            onValueChange = onTokenChanged,
+                            label = { Text("Server token") },
+                            singleLine = true,
+                            enabled = !isSaving && storageMode == MobileStorageMode.Server,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        TextButton(
+                            onClick = onPasteToken,
+                            enabled = !isSaving && storageMode == MobileStorageMode.Server
+                        ) {
+                            Text("Paste token from clipboard")
+                        }
                     }
                 }
             }
+            Text(
+                text = "Help",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            TextButton(onClick = onOpenManual, enabled = !isSaving) { Text("Open Manual") }
+            Text(
+                text = "Build information",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            Text("Version: ${BuildConfig.VERSION_NAME}")
+            Text("Build: ${BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS}")
+            Text("Built: ${formatBuildStamp(BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS)}")
+            Text(
+                text = "Support Clipman",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+            TextButton(onClick = onOpenTipJar, enabled = !isSaving) { Text("Open Tip Jar") }
+            Text("Tips are optional and do not unlock features.", style = MaterialTheme.typography.bodySmall)
         }
-        Text(
-            text = "Help",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        TextButton(onClick = onOpenManual, enabled = !isSaving) { Text("Open Manual") }
-        Text(
-            text = "Build information",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        Text("Version: ${BuildConfig.VERSION_NAME}")
-        Text("Build: ${BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS}")
-        Text("Built: ${formatBuildStamp(BuildConfig.CLIPMAN_BUILD_STAMP_UTC_MS)}")
-        Text(
-            text = "Support Clipman",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.semantics { heading() }
-        )
-        TextButton(onClick = onOpenTipJar, enabled = !isSaving) { Text("Open Tip Jar") }
-        Text("Tips are optional and do not unlock features.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
