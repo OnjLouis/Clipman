@@ -91,6 +91,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.2 Android</h3>
+  <ul>
+    <li>Kept Android Settings clear of the system status and navigation bars on Android 15 and later, so TalkBack touch exploration reaches Clipman's controls instead of System UI. The Settings header now remains visible while the form scrolls, and keyboard insets keep focused fields accessible. Thanks to Glenn Dausch for diagnosis, real-device TalkBack testing, and pull request <a href="https://github.com/OnjLouis/Clipman/pull/73">#73</a>.</li>
+  </ul>
   <h3>3.1.1 Windows and Android</h3>
   <ul>
     <li>Android adds optional <strong>Shared Folder</strong> synchronization through Android's system folder picker. Clipman keeps an encrypted private cache, checks the selected folder before writing, merges concurrent and offline changes plus recognised provider conflict copies, and retries interrupted writes while Clipman is open. An existing encrypted-backup folder is reused as the initial choice. The provider must offer persistent read and write access; provider availability and synchronization remain controlled by Android and the installed storage app.</li>
