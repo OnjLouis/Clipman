@@ -20,7 +20,7 @@ namespace Clipman
             try
             {
                 var releases = FetchReleases();
-                var release = LatestVersionedRelease(releases) ?? FetchLatestRelease();
+                var release = LatestWindowsRelease(releases);
                 var latestVersionText = release == null ? string.Empty : (release.TagName ?? string.Empty).Trim().TrimStart('v', 'V');
                 Version current;
                 Version remote;
@@ -55,7 +55,7 @@ namespace Clipman
             try
             {
                 var releases = FetchReleases();
-                var release = LatestVersionedRelease(releases) ?? FetchLatestRelease();
+                var release = LatestWindowsRelease(releases);
                 var latestVersionText = release == null ? string.Empty : (release.TagName ?? string.Empty).Trim().TrimStart('v', 'V');
                 Version current;
                 Version remote;
@@ -87,7 +87,7 @@ namespace Clipman
             try
             {
                 var releases = FetchReleases();
-                var release = LatestVersionedRelease(releases) ?? FetchLatestRelease();
+                var release = LatestWindowsRelease(releases);
                 var version = release == null ? currentVersion : (release.TagName ?? currentVersion).Trim().TrimStart('v', 'V');
                 var releaseUrl = release == null || string.IsNullOrWhiteSpace(release.HtmlUrl) ? ProjectUrl + "/releases" : release.HtmlUrl;
                 var notesText = FormatReleaseNotesForDialog(release == null ? string.Empty : release.Body, "No release notes were provided for this update.");
@@ -306,15 +306,6 @@ namespace Clipman
             }
         }
 
-        private static GitHubReleaseInfo FetchLatestRelease()
-        {
-            using (var client = CreateGitHubClient())
-            {
-                var json = client.DownloadString(ApiBaseUrl() + "/releases/latest");
-                return ParseRelease(json);
-            }
-        }
-
         private static List<GitHubReleaseInfo> FetchReleases()
         {
             using (var client = CreateGitHubClient())
@@ -337,11 +328,11 @@ namespace Clipman
             return ProjectUrl.Replace("https://github.com/", "https://api.github.com/repos/");
         }
 
-        private static GitHubReleaseInfo LatestVersionedRelease(IEnumerable<GitHubReleaseInfo> releases)
+        private static GitHubReleaseInfo LatestWindowsRelease(IEnumerable<GitHubReleaseInfo> releases)
         {
             return (releases ?? new List<GitHubReleaseInfo>())
                 .Select(r => new { Release = r, Version = ReleaseVersion(r) })
-                .Where(i => i.Version != null)
+                .Where(i => i.Version != null && FindPortableZipAsset(i.Release) != null)
                 .OrderByDescending(i => i.Version)
                 .Select(i => i.Release)
                 .FirstOrDefault();

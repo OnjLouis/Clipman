@@ -34,6 +34,7 @@ namespace Clipman.Tests
             Run("link labels remove unsafe Unicode categories", LinkLabelsRemoveUnsafeUnicode);
             Run("runtime logs rotate with a bounded generation count", RuntimeLogsRotateWithBoundedGenerations);
             Run("the updater selects the Windows package when a release has several ZIP assets", UpdaterSelectsWindowsPackageFromMixedReleaseAssets);
+            Run("the updater skips newer releases without a Windows package", UpdaterSkipsReleasesWithoutWindowsPackage);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
@@ -1625,6 +1626,43 @@ namespace Clipman.Tests
             var selectedName = selected == null ? string.Empty : (string)assetType.GetProperty("Name").GetValue(selected, null);
             Assert(selectedName == "Clipman-3.1.0.zip",
                 "The updater selected '" + selectedName + "' instead of the Windows program ZIP.");
+        }
+
+        private static void UpdaterSkipsReleasesWithoutWindowsPackage()
+        {
+            var serviceType = typeof(UpdateService);
+            var releaseType = serviceType.GetNestedType("GitHubReleaseInfo", BindingFlags.NonPublic);
+            var assetType = serviceType.GetNestedType("GitHubReleaseAsset", BindingFlags.NonPublic);
+            var selector = serviceType.GetMethod("LatestWindowsRelease", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert(releaseType != null && assetType != null && selector != null,
+                "The compatible Windows release selector could not be located.");
+
+            var releases = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(releaseType));
+            foreach (var fixture in new[]
+            {
+                new { Tag = "v3.1.2", Assets = new[] { "Clipman-Android-3.1.2.apk", "Source-Clipman-3.1.2.zip" } },
+                new { Tag = "v3.1.1", Assets = new[] { "Clipman-3.1.1.zip", "Clipman-Android-3.1.1.apk" } },
+                new { Tag = "v3.0.0", Assets = new[] { "Clipman-3.0.0.zip" } }
+            })
+            {
+                var release = Activator.CreateInstance(releaseType);
+                releaseType.GetProperty("TagName").SetValue(release, fixture.Tag, null);
+                var assets = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(assetType));
+                foreach (var name in fixture.Assets)
+                {
+                    var asset = Activator.CreateInstance(assetType);
+                    assetType.GetProperty("Name").SetValue(asset, name, null);
+                    assetType.GetProperty("BrowserDownloadUrl").SetValue(asset, "https://example.invalid/" + name, null);
+                    assets.Add(asset);
+                }
+                releaseType.GetProperty("Assets").SetValue(release, assets, null);
+                releases.Add(release);
+            }
+
+            var selected = selector.Invoke(null, new object[] { releases });
+            var selectedTag = selected == null ? string.Empty : (string)releaseType.GetProperty("TagName").GetValue(selected, null);
+            Assert(selectedTag == "v3.1.1",
+                "The updater selected '" + selectedTag + "' instead of the newest release with a Windows package.");
         }
 
         private static void SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips()

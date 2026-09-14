@@ -91,6 +91,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.3 Windows</h3>
+  <ul>
+    <li>Fixed update checks when a newer release is available only for another platform. Windows now selects the newest release containing the matching Windows package instead of stopping at an Android-only release. Thanks to Simon for reporting <a href="https://github.com/OnjLouis/Clipman/issues/74">issue #74</a>.</li>
+  </ul>
   <h3>3.1.2 Android</h3>
   <ul>
     <li>Kept Android Settings clear of the system status and navigation bars on Android 15 and later, so TalkBack touch exploration reaches Clipman's controls instead of System UI. The Settings header now remains visible while the form scrolls, and keyboard insets keep focused fields accessible. Thanks to Glenn Dausch for diagnosis, real-device TalkBack testing, and pull request <a href="https://github.com/OnjLouis/Clipman/pull/73">#73</a>.</li>
