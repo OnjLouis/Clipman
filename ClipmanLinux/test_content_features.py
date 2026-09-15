@@ -53,6 +53,22 @@ def image_rich_text_with_filename(filename, data=None, mime_type="image/png"):
 
 
 class LinkLabelTests(unittest.TestCase):
+    def test_image_entry_edit_preserves_payload_identity_and_template_state(self):
+        entry = {
+            "text": "Image: Photo.png (stable-id)",
+            "is_template": False,
+            "rich_text": image_rich_text(),
+        }
+
+        text, is_template = clipman.protect_image_entry_edit(
+            entry,
+            "Image: Photo.png altered",
+            True,
+        )
+
+        self.assertEqual(text, entry["text"])
+        self.assertFalse(is_template)
+
     def test_entry_editor_save_shortcut_requires_exact_control_enter(self):
         self.assertTrue(clipman.dialog_save_shortcut(clipman.Gdk.KEY_Return, clipman.Gdk.ModifierType.CONTROL_MASK))
         self.assertTrue(clipman.dialog_save_shortcut(clipman.Gdk.KEY_KP_Enter, clipman.Gdk.ModifierType.CONTROL_MASK))
@@ -350,6 +366,15 @@ class EmbeddedImageTests(unittest.TestCase):
         self.assertEqual(payloads["x-special/mate-copied-files"], b"copy\nfile://" + path.replace(" ", "%20").encode("utf-8"))
         self.assertEqual(payloads["text/uri-list"], b"file://" + path.replace(" ", "%20").encode("utf-8") + b"\r\n")
 
+    def test_file_clipboard_date_rejects_missing_invalid_and_future_values(self):
+        self.assertIsNone(clipman._image_clipboard_timestamp(None, now=1_700_000_000))
+        self.assertIsNone(clipman._image_clipboard_timestamp({"created_unix_ms": "bad"}, now=1_700_000_000))
+        self.assertIsNone(clipman._image_clipboard_timestamp({"created_unix_ms": 1_700_172_800_000}, now=1_700_000_000))
+        self.assertEqual(
+            clipman._image_clipboard_timestamp({"created_unix_ms": 1_700_000_000_000}, now=1_700_000_000),
+            1_700_000_000,
+        )
+
     def test_clipboard_image_cache_preserves_bytes_and_removes_previous_file(self):
         with tempfile.TemporaryDirectory() as folder:
             stale_directory = pathlib.Path(folder) / "clipman-linux" / "clipboard-images"
@@ -359,9 +384,10 @@ class EmbeddedImageTests(unittest.TestCase):
             cache = clipman.ClipboardImageFileCache(folder)
             self.assertFalse(stale_file.exists())
             first = {"filename": "Photo.png", "mime": "image/png", "data": small_png()}
-            first_path = cache.materialize(first, {"created_unix_ms": 1_000, "device": "Phone"})
+            first_path = cache.materialize(first, {"created_unix_ms": 1_700_000_000_000, "device": "Phone"})
             self.assertEqual(first_path.read_bytes(), small_png())
             self.assertEqual(first_path.stat().st_mode & 0o777, 0o600)
+            self.assertAlmostEqual(first_path.stat().st_mtime, 1_700_000_000, delta=1)
             second_data = small_jpeg_header()
             second = {"filename": "Photo.jpg", "mime": "image/jpeg", "data": second_data}
             second_path = cache.materialize(second, {"created_unix_ms": 2_000, "device": "Tablet"})

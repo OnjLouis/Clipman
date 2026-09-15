@@ -105,7 +105,8 @@ final class ClipboardMonitor: @unchecked Sendable {
     func writeInternalText(
         _ text: String,
         richText: RichTextPayload? = nil,
-        imageFilename: String? = nil
+        imageFilename: String? = nil,
+        imageCapturedUnixMs: Int64? = nil
     ) -> Bool {
         delegate?.clipboardMonitorDidWriteInternalClipboard(self)
         let pasteboard = NSPasteboard.general
@@ -120,7 +121,8 @@ final class ClipboardMonitor: @unchecked Sendable {
         embeddedImagePasteboardFile = RichTextData.write(
             richText,
             to: pasteboard,
-            imageFilename: imageFilename
+            imageFilename: imageFilename,
+            imageCapturedUnixMs: imageCapturedUnixMs
         )
         ignoredChangeCount = pasteboard.changeCount
         lastChangeCount = pasteboard.changeCount
@@ -131,6 +133,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         _ text: String,
         richText: RichTextPayload? = nil,
         imageFilename: String? = nil,
+        imageCapturedUnixMs: Int64? = nil,
         restoreAfter delay: TimeInterval,
         action: () -> Void
     ) {
@@ -143,7 +146,8 @@ final class ClipboardMonitor: @unchecked Sendable {
         let promise = RichTextData.write(
             richText,
             to: pasteboard,
-            imageFilename: imageFilename
+            imageFilename: imageFilename,
+            imageCapturedUnixMs: imageCapturedUnixMs
         )
         embeddedImagePasteboardFile = promise
         ignoredChangeCount = pasteboard.changeCount

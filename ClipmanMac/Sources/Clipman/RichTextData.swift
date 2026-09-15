@@ -70,7 +70,8 @@ enum RichTextData {
     static func write(
         _ payload: RichTextPayload?,
         to pasteboard: NSPasteboard,
-        imageFilename: String? = nil
+        imageFilename: String? = nil,
+        imageCapturedUnixMs: Int64? = nil
     ) -> EmbeddedImagePasteboardFile? {
         guard let payload = normalize(payload) else { return nil }
         if let html = payload.HtmlFragment.data(using: .utf8), !html.isEmpty {
@@ -90,7 +91,8 @@ enum RichTextData {
             if let imageFilename {
                 guard let temporaryFile = try? EmbeddedImagePasteboardFile(
                     data: image.data,
-                    filename: imageFilename
+                    filename: imageFilename,
+                    capturedUnixMs: imageCapturedUnixMs
                 ), pasteboard.setString(temporaryFile.fileURL.absoluteString, forType: .fileURL)
                 else {
                     return nil

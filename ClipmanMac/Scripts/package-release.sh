@@ -58,6 +58,7 @@ swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration relea
 swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release ClipmanSyncSmoke
 swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release ClipmanFileHistorySmoke
 zsh "$ROOT/Scripts/test-startup-service.sh" "$SCRATCH/startup-service-smoke"
+zsh "$ROOT/Scripts/test-debug-logger.sh" "$SCRATCH/debug-logger-smoke"
 
 BIN_DIR="$(swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --show-bin-path)"
 

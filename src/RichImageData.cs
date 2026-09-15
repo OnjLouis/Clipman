@@ -310,8 +310,8 @@ namespace Clipman
                 if (entry != null)
                 {
                     var fileName = BuildExplorerFileName(entry, info.MimeType);
-                    if (string.IsNullOrWhiteSpace(fileDropRoot)) RichImageFileDropData.Add(target, info.Data, fileName);
-                    else RichImageFileDropData.Add(target, info.Data, fileName, fileDropRoot, nowUtc);
+                    if (string.IsNullOrWhiteSpace(fileDropRoot)) RichImageFileDropData.Add(target, info.Data, fileName, entry.CreatedUnixMs);
+                    else RichImageFileDropData.Add(target, info.Data, fileName, fileDropRoot, nowUtc, entry.CreatedUnixMs);
                 }
             }
             return true;

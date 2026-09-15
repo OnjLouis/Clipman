@@ -19,11 +19,13 @@ final class StartupService {
     private let fileManager: FileManager
     private let launchAgentsDirectory: URL
     private let launchctlRunner: LaunchctlRunner
+    private let debugLogger: (String) -> Void
 
     init(
         fileManager: FileManager = .default,
         launchAgentsDirectory: URL? = nil,
-        launchctlRunner: LaunchctlRunner? = nil
+        launchctlRunner: LaunchctlRunner? = nil,
+        debugLogger: @escaping (String) -> Void = { _ in }
     ) {
         self.fileManager = fileManager
         self.launchAgentsDirectory = launchAgentsDirectory
@@ -31,6 +33,7 @@ final class StartupService {
                 .appendingPathComponent("Library", isDirectory: true)
                 .appendingPathComponent("LaunchAgents", isDirectory: true)
         self.launchctlRunner = launchctlRunner ?? Self.runLaunchctl
+        self.debugLogger = debugLogger
     }
 
     private var plistURL: URL {
@@ -42,6 +45,7 @@ final class StartupService {
     }
 
     func setEnabled(_ enabled: Bool, appBundleURL: URL) throws {
+        debugLogger("Login registration requested. enabled=\(enabled) registrationFileExists=\(isEnabled())")
         if enabled {
             try enable(appBundleURL: appBundleURL)
         } else {
@@ -63,17 +67,32 @@ final class StartupService {
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: plistURL, options: [.atomic])
         if registrationExists {
-            _ = launchctlRunner(["bootout", "gui/\(getuid())", plistURL.path])
+            _ = invokeLaunchctl(["bootout", "gui/\(getuid())", plistURL.path])
         }
-        guard launchctlRunner(["bootstrap", "gui/\(getuid())", plistURL.path]) else {
+        guard invokeLaunchctl(["bootstrap", "gui/\(getuid())", plistURL.path]) else {
             throw RegistrationError.bootstrapFailed
         }
+        debugLogger("Login registration enabled successfully.")
     }
 
     private func disable() throws {
-        guard fileManager.fileExists(atPath: plistURL.path) else { return }
-        _ = launchctlRunner(["bootout", "gui/\(getuid())", plistURL.path])
+        guard fileManager.fileExists(atPath: plistURL.path) else {
+            debugLogger("Login registration is already absent; no system command was needed.")
+            return
+        }
+        _ = invokeLaunchctl(["bootout", "gui/\(getuid())", plistURL.path])
         try fileManager.removeItem(at: plistURL)
+        debugLogger("Login registration disabled and its property list was removed.")
+    }
+
+    private func invokeLaunchctl(_ arguments: [String]) -> Bool {
+        let action = arguments.first ?? "unknown"
+        let started = ProcessInfo.processInfo.systemUptime
+        debugLogger("launchctl \(action) started.")
+        let succeeded = launchctlRunner(arguments)
+        let elapsed = max(0, ProcessInfo.processInfo.systemUptime - started)
+        debugLogger("launchctl \(action) finished. success=\(succeeded) elapsed=\(String(format: "%.3f", elapsed))s")
+        return succeeded
     }
 
     private static func runLaunchctl(arguments: [String]) -> Bool {

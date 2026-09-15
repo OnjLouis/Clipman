@@ -533,8 +533,10 @@ final class ClipStore: @unchecked Sendable {
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
             let now = TimeUtil.nowUnixMs()
             self.database.Entries[index].Name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let textChanged = self.database.Entries[index].Text != text
-            self.database.Entries[index].Text = text
+            let hasEmbeddedImage = EmbeddedImageHTML.imageInfo(from: self.database.Entries[index].RichText) != nil
+            let nextText = hasEmbeddedImage ? self.database.Entries[index].Text : text
+            let textChanged = self.database.Entries[index].Text != nextText
+            self.database.Entries[index].Text = nextText
             self.database.Entries[index].LastUsedUnixMs = now
             self.database.Entries[index].ModifiedUnixMs = now
             if textChanged {
@@ -575,6 +577,7 @@ final class ClipStore: @unchecked Sendable {
         queue.async {
             guard self.mergeLatestBeforeWriteLocked() else { return }
             guard let index = self.database.Entries.firstIndex(where: { $0.Id == id }) else { return }
+            guard EmbeddedImageHTML.imageInfo(from: self.database.Entries[index].RichText) == nil else { return }
             self.database.Entries[index].IsTemplate = isTemplate
             self.database.Entries[index].ModifiedUnixMs = TimeUtil.nowUnixMs()
             self.saveLocked()

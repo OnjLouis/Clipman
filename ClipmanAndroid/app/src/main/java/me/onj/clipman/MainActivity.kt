@@ -3055,6 +3055,7 @@ private fun EntryPropertiesDialog(
     onSave: (ClipEntry) -> Unit,
     onDelete: (() -> Unit)?
 ) {
+    val hasEmbeddedImage = remember(entry.RichText) { EmbeddedImageRichText.parse(entry.RichText) != null }
     var name by remember(entry.Id) { mutableStateOf(entry.Name) }
     var group by remember(entry.Id) { mutableStateOf(entry.Group) }
     var text by remember(entry.Id) { mutableStateOf(entry.Text) }
@@ -3097,18 +3098,30 @@ private fun EntryPropertiesDialog(
                 SettingCheckboxRow(
                     checked = isTemplate,
                     onCheckedChange = { isTemplate = it },
-                    label = "Template"
+                    label = "Template",
+                    enabled = !hasEmbeddedImage,
+                    accessibilityLabel = if (hasEmbeddedImage) "Template, unavailable for image content" else "Template"
                 )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    label = { Text("Clipboard text") },
+                    label = { Text(if (hasEmbeddedImage) "Image content" else "Clipboard text") },
+                    readOnly = hasEmbeddedImage,
+                    supportingText = if (hasEmbeddedImage) {
+                        { Text("Image content cannot be edited. Use Name to rename how this image appears.") }
+                    } else null,
                     minLines = 4,
                     maxLines = 8,
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(textFocusRequester)
-                        .semantics { contentDescription = "Clipboard text" }
+                        .semantics {
+                            contentDescription = if (hasEmbeddedImage) {
+                                "Image content. This image content cannot be edited. Use Name to rename how the image appears."
+                            } else {
+                                "Clipboard text"
+                            }
+                        }
                 )
             }
         },

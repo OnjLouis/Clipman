@@ -121,18 +121,21 @@ object SyncConflictResolver {
 
     fun updateEntry(database: ClipDatabase, entry: ClipEntry): ClipDatabase {
         if (entry.Id.isBlank()) return database
+        val existing = database.Entries.firstOrNull { it.Id == entry.Id } ?: return database
+        val hasEmbeddedImage = EmbeddedImageRichText.parse(existing.RichText) != null
         val now = TimeUtil.nowUnixMs()
         val requestedGroup = entry.Group.trim()
         val normalizedGroup = canonicalGroup(database.Entries, requestedGroup)
         val updated = entry.copy(
-            Text = entry.Text.trim(),
+            Text = if (hasEmbeddedImage) existing.Text else entry.Text.trim(),
             Name = entry.Name.trim(),
             Group = normalizedGroup,
             SourceMachine = entry.SourceMachine.trim(),
             LastUsedUnixMs = now,
             ModifiedUnixMs = now,
-            RichText = if (entry.Text.trim() == database.Entries.firstOrNull { it.Id == entry.Id }?.Text) entry.RichText else null,
-            RichTextUpdatedUnixMs = if (entry.Text.trim() == database.Entries.firstOrNull { it.Id == entry.Id }?.Text) entry.RichTextUpdatedUnixMs else now
+            IsTemplate = if (hasEmbeddedImage) existing.IsTemplate else entry.IsTemplate,
+            RichText = if (hasEmbeddedImage || entry.Text.trim() == existing.Text) existing.RichText else null,
+            RichTextUpdatedUnixMs = if (hasEmbeddedImage || entry.Text.trim() == existing.Text) existing.RichTextUpdatedUnixMs else now
         )
         if (updated.Text.isBlank()) return deleteEntry(database, entry.Id)
         return normalize(database.copy(

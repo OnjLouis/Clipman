@@ -46,6 +46,7 @@ namespace Clipman
         public EntryPropertiesForm(ClipEntry entry, bool isQuickCopyTarget, string quickCopyHotkey, string quickPasteMode, bool focusQuickCopy, bool isNewEntry)
         {
             this.isNewEntry = isNewEntry;
+            var hasEmbeddedImage = entry != null && RichImageData.StoredByteCount(entry.RichText) > 0;
             Text = isNewEntry ? "Quick Clip" : "Clipboard Entry Properties";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -95,7 +96,10 @@ namespace Clipman
                 Width = 160,
                 Checked = entry != null && entry.IsTemplate,
                 AccessibleName = "Template entry",
-                AccessibleDescription = "When checked, variables such as year full in double braces are resolved when this entry is copied or pasted. Stored text is not changed."
+                AccessibleDescription = hasEmbeddedImage
+                    ? "Image content cannot be used as a template."
+                    : "When checked, variables such as year full in double braces are resolved when this entry is copied or pasted. Stored text is not changed.",
+                Enabled = !hasEmbeddedImage
             };
             Controls.Add(templateBox);
 
@@ -169,7 +173,7 @@ namespace Clipman
             }
 
             var textTop = isNewEntry ? 112 : 238;
-            var textLabel = new Label { Text = "&Clipboard text:", Location = new Point(12, textTop), AutoSize = true };
+            var textLabel = new Label { Text = hasEmbeddedImage ? "&Image content:" : "&Clipboard text:", Location = new Point(12, textTop), AutoSize = true };
             Controls.Add(textLabel);
             textBox = new TextBox
             {
@@ -181,8 +185,11 @@ namespace Clipman
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
                 Text = entry == null ? string.Empty : entry.Text ?? string.Empty,
-                AccessibleName = "Clipboard text",
-                AccessibleDescription = "Clipboard text stored for this entry. Editing this field changes what Clipman copies for this entry."
+                ReadOnly = hasEmbeddedImage,
+                AccessibleName = hasEmbeddedImage ? "Image content" : "Clipboard text",
+                AccessibleDescription = hasEmbeddedImage
+                    ? "This image content cannot be edited. Use the Name field to rename how the image appears."
+                    : "Clipboard text stored for this entry. Editing this field changes what Clipman copies for this entry."
             };
             TextBoundaryNavigator.Attach(textBox);
             Controls.Add(textBox);
@@ -196,6 +203,7 @@ namespace Clipman
                 AccessibleDescription = "Opens a menu of sample templates. The chosen sample is inserted at the cursor in the clipboard text field."
             };
             insertPreset.Click += (s, e) => ShowTemplateMenu(insertPreset, TemplateResolver.Presets);
+            insertPreset.Enabled = !hasEmbeddedImage;
             Controls.Add(insertPreset);
 
             var insertVariable = new Button
@@ -207,6 +215,7 @@ namespace Clipman
                 AccessibleDescription = "Opens a menu of template fields. The chosen field is inserted at the cursor in the clipboard text field."
             };
             insertVariable.Click += (s, e) => ShowTemplateMenu(insertVariable, TemplateResolver.Variables);
+            insertVariable.Enabled = !hasEmbeddedImage;
             Controls.Add(insertVariable);
 
             var copy = new Button { Text = "Copy te&xt", Location = new Point(15, 546), Width = 95 };
@@ -228,6 +237,7 @@ namespace Clipman
                     viewer.ShowDialog(this);
                 }
             };
+            preview.Enabled = !hasEmbeddedImage;
             Controls.Add(preview);
 
             var variables = new Button
@@ -245,6 +255,7 @@ namespace Clipman
                     viewer.ShowDialog(this);
                 }
             };
+            variables.Enabled = !hasEmbeddedImage;
             Controls.Add(variables);
 
             var delete = new Button { Text = "&Delete", Location = new Point(400, 546), Width = 85 };

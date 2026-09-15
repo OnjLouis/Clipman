@@ -1,5 +1,6 @@
 package me.onj.clipman
 
+import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -36,6 +37,42 @@ class SyncConflictResolverTest {
         val updated = SyncConflictResolver.updateEntry(history, target.copy(Group = "kObO"))
 
         assertEquals("Kobo", updated.Entries.first { it.Id == "target" }.Group)
+    }
+
+    @Test
+    fun editingImagePropertiesPreservesImagePayloadAndIdentity() {
+        val png = Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        val richText = RichTextPayload(
+            HtmlFragment = EmbeddedImageRichText.wrap("photo.png", "Image: photo.png", "image/png", png),
+            PreferredFormat = "Html"
+        )
+        val originalText = EmbeddedImageRichText.fallbackText("photo.png", png)
+        val original = entry("image-entry", originalText, 1).copy(
+            Group = "Photos",
+            RichText = richText,
+            RichTextUpdatedUnixMs = 123
+        )
+
+        val updated = SyncConflictResolver.updateEntry(
+            database(original),
+            original.copy(
+                Text = "$originalText altered",
+                Name = "Renamed image",
+                Group = "Shared",
+                Pinned = true,
+                IsTemplate = true
+            )
+        ).Entries.single()
+
+        assertEquals("Renamed image", updated.Name)
+        assertEquals("Shared", updated.Group)
+        assertTrue(updated.Pinned)
+        assertEquals(original.Text, updated.Text)
+        assertEquals(original.RichText, updated.RichText)
+        assertEquals(original.RichTextUpdatedUnixMs, updated.RichTextUpdatedUnixMs)
+        assertFalse(updated.IsTemplate)
     }
 
     @Test

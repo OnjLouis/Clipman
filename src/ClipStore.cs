@@ -673,7 +673,8 @@ namespace Clipman
                 if (entry == null) return;
                 var now = TimeUtil.NowUnixMs();
                 entry.Name = (name ?? string.Empty).Trim();
-                var nextText = text ?? string.Empty;
+                var hasEmbeddedImage = RichImageData.StoredByteCount(entry.RichText) > 0;
+                var nextText = hasEmbeddedImage ? entry.Text ?? string.Empty : text ?? string.Empty;
                 if (!string.Equals(entry.Text ?? string.Empty, nextText, StringComparison.Ordinal))
                 {
                     entry.RichText = null;
@@ -694,6 +695,7 @@ namespace Clipman
             {
                 var entry = database.Entries.FirstOrDefault(e => e.Id == id);
                 if (entry == null) return;
+                if (RichImageData.StoredByteCount(entry.RichText) > 0) return;
                 entry.IsTemplate = isTemplate;
                 entry.ModifiedUnixMs = TimeUtil.NowUnixMs();
                 SaveLocked();

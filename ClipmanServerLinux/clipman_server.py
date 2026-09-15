@@ -34,8 +34,9 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.6.5"
+APP_VERSION = "2.6.6"
 DEFAULT_CONFIG = "clipman-server-settings.json"
+BACKUP_PRUNE_INTERVAL_SECONDS = 60 * 60
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 SETUP_LOG_PATTERN = re.compile(r"(/setup/)[A-Za-z0-9_-]+")
 SETUP_PATH_PATTERN = re.compile(r"\A/setup/([A-Za-z0-9_-]{32,128})(?:/(connection\.clpconf))?\Z")
@@ -1303,7 +1304,7 @@ def create_backup(settings: Dict[str, Any], db: Path, force: bool) -> Dict[str, 
         interval = int(settings["BackupIntervalMinutes"])
         if newest is not None and interval > 0 and time.time() - newest.stat().st_mtime < interval * 60:
             return backup_info(newest)
-    shutil.copy2(db, target)
+    shutil.copyfile(db, target)
     make_private_file(target)
     prune_backup_directory(settings, out_dir)
     return backup_info(target)
@@ -1329,7 +1330,7 @@ def prune_backup_directory(
     *,
     cutoff: float | None = None,
     max_backups: int | None = None,
-) -> None:
+) -> int:
     if cutoff is None:
         retention = int(settings["BackupRetentionHours"])
         cutoff = time.time() - retention * 3600
@@ -1337,12 +1338,51 @@ def prune_backup_directory(
         max_backups = int(settings["MaxBackups"])
 
     backups = sorted(out_dir.glob("*.clipdb"), key=lambda p: p.stat().st_mtime, reverse=True)
+    original_count = len(backups)
     for path in backups:
         if path.stat().st_mtime < cutoff:
             path.unlink(missing_ok=True)
     backups = sorted(out_dir.glob("*.clipdb"), key=lambda p: p.stat().st_mtime, reverse=True)
     for path in backups[max_backups:]:
         path.unlink(missing_ok=True)
+    return original_count - len(list(out_dir.glob("*.clipdb")))
+
+
+def prune_all_backup_directories(
+    settings: Dict[str, Any],
+    lock_for_database: Callable[[str], Any] | None = None,
+) -> int:
+    root = database_root(settings)
+    if not root.exists():
+        return 0
+
+    removed = 0
+    for bucket in root.iterdir():
+        if bucket.is_symlink() or not bucket.is_dir() or not DATABASE_ID_PATTERN.fullmatch(bucket.name):
+            continue
+        out_dir = bucket / "ServerBackups"
+        if out_dir.is_symlink() or not out_dir.is_dir():
+            continue
+        if lock_for_database is None:
+            removed += prune_backup_directory(settings, out_dir)
+            continue
+        with lock_for_database(bucket.name):
+            removed += prune_backup_directory(settings, out_dir)
+    return removed
+
+
+def start_backup_prune_thread(settings: Dict[str, Any], server: Any) -> None:
+    def worker() -> None:
+        while True:
+            try:
+                removed = prune_all_backup_directories(settings, server.database_lock)
+                if removed:
+                    logging.info("Removed %s expired Clipman Server backup(s).", removed)
+            except Exception:
+                logging.exception("Backup retention pass failed.")
+            time.sleep(BACKUP_PRUNE_INTERVAL_SECONDS)
+
+    Thread(target=worker, daemon=True).start()
 
 
 def list_database_infos(settings: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -2014,6 +2054,7 @@ def run_server(
     logging.info("Clipman Server %s listening on %s", APP_VERSION, listen_prefix(settings))
     logging.info("Settings: %s", config_path)
     logging.info("Data root: %s", database_root(settings))
+    start_backup_prune_thread(settings, server)
     start_database_prune_thread(settings)
     print(f"Clipman Server {APP_VERSION} listening on {listen_prefix(settings)}")
     print("Use --show-token to print the bearer token for client setup.")

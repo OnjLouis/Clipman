@@ -23,10 +23,20 @@ namespace Clipman
             return Add(target, contents, fileName, DefaultRoot(), DateTime.UtcNow);
         }
 
+        public static string Add(DataObject target, byte[] contents, string fileName, long capturedUnixMs)
+        {
+            return Add(target, contents, fileName, DefaultRoot(), DateTime.UtcNow, capturedUnixMs);
+        }
+
         internal static string Add(DataObject target, byte[] contents, string fileName, string root, DateTime nowUtc)
         {
+            return Add(target, contents, fileName, root, nowUtc, 0);
+        }
+
+        internal static string Add(DataObject target, byte[] contents, string fileName, string root, DateTime nowUtc, long capturedUnixMs)
+        {
             if (target == null) throw new ArgumentNullException("target");
-            var path = CreateManagedFile(contents, fileName, root, nowUtc);
+            var path = CreateManagedFile(contents, fileName, root, nowUtc, capturedUnixMs);
             var files = new StringCollection { path };
             target.SetFileDropList(files);
             target.SetData(PreferredDropEffectFormat, false, UInt32Stream(DropEffectCopy));
@@ -40,6 +50,11 @@ namespace Clipman
         }
 
         internal static string CreateManagedFile(byte[] contents, string fileName, string root, DateTime nowUtc)
+        {
+            return CreateManagedFile(contents, fileName, root, nowUtc, 0);
+        }
+
+        internal static string CreateManagedFile(byte[] contents, string fileName, string root, DateTime nowUtc, long capturedUnixMs)
         {
             if (contents == null || contents.Length == 0 || contents.Length > RichImageData.MaximumStoredImageBytes)
             {
@@ -62,6 +77,7 @@ namespace Clipman
                         stream.Write(contents, 0, contents.Length);
                         stream.Flush();
                     }
+                    ApplyCapturedTime(path, capturedUnixMs, nowUtc);
                     Cleanup(root, nowUtc, directory);
                     return path;
                 }
@@ -70,6 +86,22 @@ namespace Clipman
                     TryDeleteDirectory(directory);
                     throw;
                 }
+            }
+        }
+
+        private static void ApplyCapturedTime(string path, long capturedUnixMs, DateTime nowUtc)
+        {
+            if (capturedUnixMs <= 0) return;
+            try
+            {
+                var capturedUtc = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(capturedUnixMs);
+                if (capturedUtc > nowUtc.ToUniversalTime().AddDays(1)) return;
+                File.SetCreationTimeUtc(path, capturedUtc);
+                File.SetLastWriteTimeUtc(path, capturedUtc);
+            }
+            catch
+            {
+                // File timestamps are archival metadata; a filesystem limitation must not break copying.
             }
         }
 

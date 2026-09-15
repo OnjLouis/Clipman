@@ -2229,6 +2229,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func showEntryProperties(entry: ClipEntry, quickCopyOnly: Bool, isNew: Bool = false) {
+        let hasEmbeddedImage = !isNew && EmbeddedImageHTML.imageInfo(from: entry.RichText) != nil
         let alert = NSAlert()
         alert.messageText = isNew ? "Quick Clip" : (quickCopyOnly ? "Set Quick Paste Target" : "Clipboard Entry Properties")
         alert.informativeText = isNew
@@ -2248,8 +2249,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let textView = DialogTabTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 180))
         textView.string = entry.Text
         textView.isRichText = false
+        textView.isEditable = !hasEmbeddedImage
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
-        textView.setAccessibilityLabel("Clipboard text")
+        textView.setAccessibilityLabel(hasEmbeddedImage ? "Image content" : "Clipboard text")
+        if hasEmbeddedImage {
+            textView.setAccessibilityHelp("This image content cannot be edited. Use the Name field to rename how the image appears.")
+        }
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 180))
         scroll.borderType = .bezelBorder
         scroll.hasVerticalScroller = true
@@ -2261,6 +2266,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let templateCheckbox = NSButton(checkboxWithTitle: "Template entry", target: nil, action: nil)
         templateCheckbox.state = entry.IsTemplate ? .on : .off
         templateCheckbox.setAccessibilityLabel("Template entry")
+        templateCheckbox.isEnabled = !hasEmbeddedImage
+        if hasEmbeddedImage {
+            templateCheckbox.setAccessibilityHelp("Image content cannot be used as a template.")
+        }
         let existingHotkey = quickCopyHotkeys[entry.Id]
         let existingMode = QuickPasteMode.normalize(quickPasteModes[entry.Id])
         quickCopyCheckbox.state = quickCopyOnly || existingHotkey != nil ? .on : .off
@@ -2315,16 +2324,25 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         let templateButtonRow = NSStackView(views: [insertPresetButton, insertVariableButton, previewTemplateButton, templateVariablesButton])
         templateButtonRow.orientation = .horizontal
         templateButtonRow.spacing = 8
+        for case let control as NSControl in templateButtonRow.arrangedSubviews {
+            control.isEnabled = !hasEmbeddedImage
+        }
+
+        let imageEditExplanation = NSTextField(labelWithString: "Image content cannot be edited. Use Name to rename how this image appears.")
+        imageEditExplanation.maximumNumberOfLines = 0
+        imageEditExplanation.setAccessibilityLabel("Image content cannot be edited. Use Name to rename how this image appears.")
 
         let views = isNew
             ? [nameField, groupField, scroll, pinnedCheckbox, templateCheckbox, templateButtonRow]
             : quickCopyOnly
             ? [quickCopyCheckbox, hotkeyRow, modeStack]
+            : hasEmbeddedImage
+            ? [nameField, groupField, imageEditExplanation, scroll, templateCheckbox, templateButtonRow, quickCopyCheckbox, hotkeyRow, modeStack]
             : [nameField, groupField, scroll, templateCheckbox, templateButtonRow, quickCopyCheckbox, hotkeyRow, modeStack]
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 520, height: quickCopyOnly ? 162 : 438)
+        stack.frame = NSRect(x: 0, y: 0, width: 520, height: quickCopyOnly ? 162 : (hasEmbeddedImage ? 472 : 438))
         alert.accessoryView = stack
         if isNew { alert.window.initialFirstResponder = textView }
 

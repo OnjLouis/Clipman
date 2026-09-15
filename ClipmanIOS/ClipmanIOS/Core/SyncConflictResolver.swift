@@ -173,14 +173,22 @@ enum SyncConflictResolver {
     static func updateEntry(database: ClipDatabase, entry: ClipEntry, machineName: String) -> ClipDatabase {
         var result = database
         guard let index = result.Entries.firstIndex(where: { $0.Id == entry.Id }) else { return result }
+        let existing = result.Entries[index]
+        let hasEmbeddedImage = EmbeddedImageCodec.recognize(existing.RichText) != nil
         var updated = entry
-        updated.Text = updated.Text.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.Text = hasEmbeddedImage
+            ? existing.Text
+            : updated.Text.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.Name = updated.Name.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.Group = updated.Group.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.SourceMachine = machineName
         updated.LastUsedUnixMs = TimeUtil.nowUnixMs()
         updated.ModifiedUnixMs = updated.LastUsedUnixMs
-        if updated.Text != result.Entries[index].Text {
+        if hasEmbeddedImage {
+            updated.RichText = existing.RichText
+            updated.RichTextUpdatedUnixMs = existing.RichTextUpdatedUnixMs
+            updated.IsTemplate = existing.IsTemplate
+        } else if updated.Text != existing.Text {
             updated.RichText = nil
             updated.RichTextUpdatedUnixMs = updated.LastUsedUnixMs
         }

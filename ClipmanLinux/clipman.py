@@ -4,6 +4,7 @@ import html
 import base64
 import binascii
 import hashlib
+import math
 import os
 import pathlib
 import re
@@ -503,6 +504,12 @@ def parse_clipman_image(rich_text):
     }
 
 
+def protect_image_entry_edit(entry, requested_text, requested_template):
+    if entry and parse_clipman_image(entry.get("rich_text")):
+        return entry.get("text", ""), bool(entry.get("is_template", False))
+    return requested_text, requested_template
+
+
 def clipboard_payloads(text, rich_text=None):
     encoded = str(text or "").encode("utf-8")
     payloads = [
@@ -560,6 +567,20 @@ def image_file_clipboard_payloads(path):
     ]
 
 
+def _image_clipboard_timestamp(entry, now=None):
+    milliseconds = entry.get("created_unix_ms", 0) if isinstance(entry, dict) else 0
+    if isinstance(milliseconds, bool):
+        return None
+    try:
+        seconds = float(milliseconds) / 1000
+    except (TypeError, ValueError, OverflowError):
+        return None
+    current = time.time() if now is None else float(now)
+    if not math.isfinite(seconds) or seconds <= 0 or seconds > current + 24 * 60 * 60:
+        return None
+    return seconds
+
+
 class ClipboardImageFileCache:
     def __init__(self, root=None):
         runtime_root = pathlib.Path(root) if root is not None else pathlib.Path(GLib.get_user_runtime_dir() or GLib.get_user_cache_dir())
@@ -600,6 +621,12 @@ class ClipboardImageFileCache:
                 os.fsync(stream.fileno())
             os.replace(temporary, target)
             os.chmod(target, 0o600)
+            captured = _image_clipboard_timestamp(entry)
+            if captured is not None:
+                try:
+                    os.utime(target, (captured, captured), follow_symlinks=False)
+                except OSError:
+                    pass
         except BaseException:
             try:
                 temporary.unlink()
@@ -3882,6 +3909,7 @@ class ClipmanApplication(Gtk.Application):
         else: self.show_details(entry)
 
     def show_entry_dialog(self, entry, focus_quick_paste=False):
+        embedded_image = parse_clipman_image(entry.get("rich_text")) if entry else None
         dialog = Gtk.Dialog(title="Quick Clip" if entry is None else "Clipboard Entry Properties", transient_for=self.window, modal=True)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.OK)
         save_shortcut = Gtk.EventControllerKey()
@@ -3898,6 +3926,12 @@ class ClipmanApplication(Gtk.Application):
         group = Gtk.Entry(text=entry.get("group", "") if entry else "", placeholder_text="Optional group")
         pinned = Gtk.CheckButton(label="Pinned", active=bool(entry and entry.get("pinned")))
         template = Gtk.CheckButton(label="Resolve template fields when copied", active=bool(entry and entry.get("is_template")))
+        template.set_sensitive(not bool(embedded_image))
+        if embedded_image:
+            template.update_property(
+                [Gtk.AccessibleProperty.DESCRIPTION],
+                ["Image content cannot be used as a template."],
+            )
         existing_binding = self.preferences.values["quick_paste_bindings"].get(entry.get("id"), {}) if entry else {}
         quick_paste = Gtk.CheckButton(label="Use as a Quick Paste target", active=bool(existing_binding))
         quick_paste.set_sensitive(entry is not None)
@@ -3913,7 +3947,14 @@ class ClipmanApplication(Gtk.Application):
         quick_mode.update_property([Gtk.AccessibleProperty.LABEL], ["Quick Paste mode"])
         quick_paste.connect("toggled", lambda control: (quick_hotkey.set_sensitive(entry is not None and control.get_active()), quick_mode.set_sensitive(entry is not None and control.get_active())))
         text_view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR); text_view.set_accepts_tab(False); text_view.set_vexpand(True); text_view.get_buffer().set_text(entry.get("text", "") if entry else "")
-        for label_text, widget in (("Name", name), ("Group", group), ("Clipboard text", text_view)):
+        text_view.set_editable(not bool(embedded_image))
+        text_label = "Image content" if embedded_image else "Clipboard text"
+        if embedded_image:
+            text_view.update_property(
+                [Gtk.AccessibleProperty.DESCRIPTION],
+                ["This image content cannot be edited. Use Name to rename how the image appears."],
+            )
+        for label_text, widget in (("Name", name), ("Group", group), (text_label, text_view)):
             label = Gtk.Label(label=label_text, xalign=0); label.set_mnemonic_widget(widget); content.append(label); content.append(widget)
             widget.update_property([Gtk.AccessibleProperty.LABEL], [label_text])
         content.append(pinned); content.append(template)
@@ -3939,7 +3980,14 @@ class ClipmanApplication(Gtk.Application):
         variable_row.append(variable); variable_row.append(insert_variable); template_tools.append(variable_row)
         preview = Gtk.Button(label="Preview Template")
         preview.connect("clicked", lambda *_: self._preview_template(text_view)); template_tools.append(preview)
+        template_tools.set_sensitive(not bool(embedded_image))
         content.append(template_tools)
+        if embedded_image:
+            content.append(Gtk.Label(
+                label="Image content cannot be edited. Use Name to rename how this image appears.",
+                wrap=True,
+                xalign=0,
+            ))
         dialog.set_default_size(620, 470)
         def response(_dialog, code):
             if code == Gtk.ResponseType.OK:
@@ -3956,7 +4004,14 @@ class ClipmanApplication(Gtk.Application):
                     self.set_status("Enter some text before saving the Quick Clip.", True)
                     text_view.grab_focus()
                     return
-                params = {"text": text, "name": name.get_text(), "group": group.get_text(), "pinned": pinned.get_active(), "is_template": template.get_active()}
+                text, is_template = protect_image_entry_edit(entry, text, template.get_active())
+                params = {
+                    "text": text,
+                    "name": name.get_text(),
+                    "group": group.get_text(),
+                    "pinned": pinned.get_active(),
+                    "is_template": is_template,
+                }
                 action = "update" if entry else "put"
                 if entry: params["id"] = entry["id"]
                 else: params["duplicate"] = "move"

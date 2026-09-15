@@ -37,6 +37,7 @@ namespace Clipman.Tests
             Run("the updater skips newer releases without a Windows package", UpdaterSkipsReleasesWithoutWindowsPackage);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
+            Run("embedded image properties preserve image content", EmbeddedImagePropertiesPreserveImageContent);
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
             Run("copied image files use the bounded Rich Text image path", CopiedImageFilesUseBoundedRichTextPath);
             Run("Quick Paste snapshots avoid opaque OLE clipboard formats", QuickPasteSnapshotAvoidsOpaqueOleFormats);
@@ -254,6 +255,7 @@ namespace Clipman.Tests
         {
             var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
+            var capturedUtc = new DateTime(2026, 8, 2, 13, 5, 6, DateTimeKind.Utc);
             byte[] png;
             using (var image = new Bitmap(2, 3))
             using (var stream = new MemoryStream())
@@ -271,7 +273,7 @@ namespace Clipman.Tests
             {
                 Text = RichImageData.FallbackText("Clipboard image.png", png),
                 SourceMachine = "Studio/PC:*?",
-                CreatedUnixMs = TimeUtil.ToUnixMs(new DateTime(2026, 8, 2, 14, 5, 6, DateTimeKind.Local)),
+                CreatedUnixMs = TimeUtil.ToUnixMs(capturedUtc),
                 RichText = payload
             };
             var data = new DataObject();
@@ -288,6 +290,8 @@ namespace Clipman.Tests
                 Assert(File.ReadAllBytes(path).SequenceEqual(png), "The Explorer file representation did not preserve the stored PNG bytes.");
                 Assert(Path.GetFileName(path) == "Clipman image 2026-08-02 14-05-06 - StudioPC.png",
                     "The Explorer filename was not stable and sanitized: " + Path.GetFileName(path));
+                Assert(Math.Abs((File.GetLastWriteTimeUtc(path) - capturedUtc).TotalSeconds) < 2,
+                    "The Explorer file representation did not preserve the clip's original date.");
             }
             finally
             {
@@ -1573,6 +1577,63 @@ namespace Clipman.Tests
                     "The first retained log generation was not advanced.");
                 Assert(File.ReadAllText(Path.Combine(directory, "Runtime.3.log")) == "second",
                     "The oldest retained generation was not bounded correctly.");
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void EmbeddedImagePropertiesPreserveImageContent()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                byte[] png;
+                using (var image = new Bitmap(2, 3))
+                using (var stream = new MemoryStream())
+                {
+                    image.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+                    png = stream.ToArray();
+                }
+                var originalText = RichImageData.FallbackText("Clipboard image.png", png);
+                var payload = new RichTextPayload
+                {
+                    Version = 1,
+                    HtmlFragment = RichImageData.BuildHtml(png, "image/png", "Clipboard image.png", "Image: Clipboard image.png"),
+                    PreferredFormat = "Html"
+                };
+                var databasePath = Path.Combine(directory, "history.clipdb");
+                var database = new ClipDatabase();
+                database.Entries.Add(new ClipEntry
+                {
+                    Id = "image-entry",
+                    Text = originalText,
+                    RichText = payload,
+                    RichTextUpdatedUnixMs = 123
+                });
+                ClipDatabaseFile.SaveAtomic(databasePath, database, string.Empty);
+
+                using (var form = new EntryPropertiesForm(database.Entries[0], false, string.Empty, string.Empty, false))
+                {
+                    var content = form.Controls.OfType<TextBox>().First(control => control.AccessibleName == "Image content");
+                    Assert(content.ReadOnly, "The image identity field remained editable.");
+                    Assert((content.AccessibleDescription ?? string.Empty).IndexOf("cannot be edited", StringComparison.OrdinalIgnoreCase) >= 0,
+                        "The image editor does not explain why image content is read-only.");
+                }
+
+                using (var store = new ClipStore(databasePath, string.Empty))
+                {
+                    store.SetNameAndText("image-entry", "Renamed image", originalText + " altered");
+                    store.SetTemplate("image-entry", true);
+                    var updated = store.GetEntries().Single(entry => entry.Id == "image-entry");
+                    Assert(updated.Name == "Renamed image", "Renaming an image entry was blocked.");
+                    Assert(updated.Text == originalText, "Editing image properties changed its stable identity text.");
+                    Assert(updated.RichText != null && updated.RichText.HtmlFragment == payload.HtmlFragment,
+                        "Editing image properties discarded its embedded image payload.");
+                    Assert(!updated.IsTemplate, "An image entry was converted into a template.");
+                }
             }
             finally
             {

@@ -977,9 +977,10 @@ func (s *session) update(raw json.RawMessage) (any, error) {
 		for i := range db.Entries {
 			if strings.EqualFold(db.Entries[i].ID, p.ID) {
 				e := &db.Entries[i]
-				textChanged := e.Text != p.Text
-				changed := textChanged || e.Name != strings.TrimSpace(p.Name) || e.Group != group || e.Pinned != p.Pinned || e.IsTemplate != p.IsTemplate
-				e.Text, e.Name, e.Group, e.Pinned, e.IsTemplate = p.Text, strings.TrimSpace(p.Name), group, p.Pinned, p.IsTemplate
+				requested := protectEmbeddedImageUpdate(*e, entryUpdate{ID: p.ID, Text: p.Text, Name: p.Name, Group: group, Pinned: p.Pinned, IsTemplate: p.IsTemplate})
+				textChanged := e.Text != requested.Text
+				changed := textChanged || e.Name != strings.TrimSpace(requested.Name) || e.Group != requested.Group || e.Pinned != requested.Pinned || e.IsTemplate != requested.IsTemplate
+				e.Text, e.Name, e.Group, e.Pinned, e.IsTemplate = requested.Text, strings.TrimSpace(requested.Name), requested.Group, requested.Pinned, requested.IsTemplate
 				if changed {
 					e.LastUsedUnixMs, e.ModifiedUnixMs, e.SourceMachine, db.UpdatedUnixMs = now, now, s.cfg.Machine, now
 				}
@@ -1000,6 +1001,19 @@ type entryUpdate struct {
 	Group      string `json:"group"`
 	Pinned     bool   `json:"pinned"`
 	IsTemplate bool   `json:"is_template"`
+}
+
+func protectEmbeddedImageUpdate(existing model.Entry, requested entryUpdate) entryUpdate {
+	richText, _ := richTextFromEntry(existing)
+	if richText == nil {
+		return requested
+	}
+	if _, err := parseEmbeddedImageWrapper(richText.HTMLFragment); err != nil {
+		return requested
+	}
+	requested.Text = existing.Text
+	requested.IsTemplate = existing.IsTemplate
+	return requested
 }
 
 func (s *session) updateMany(raw json.RawMessage) (any, error) {
@@ -1028,6 +1042,7 @@ func (s *session) updateMany(raw json.RawMessage) (any, error) {
 			}
 			found++
 			entry := &db.Entries[index]
+			item = protectEmbeddedImageUpdate(*entry, item)
 			name := strings.TrimSpace(item.Name)
 			group := canonicalLabelFor(db.Entries, func(entry model.Entry) string { return entry.Group }, item.Group)
 			textChanged := entry.Text != item.Text

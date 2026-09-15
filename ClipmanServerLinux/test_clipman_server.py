@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from concurrent.futures import ThreadPoolExecutor
@@ -789,6 +790,80 @@ class ConditionalCreateTests(unittest.TestCase):
         self.assertIn(('"Version": "' + clipman_server.APP_VERSION + '"').encode("utf-8"), data)
         database = clipman_server.database_path(self.settings, database_id)
         self.assertEqual(b"expect-continue", database.read_bytes())
+
+
+class BackupRetentionTests(unittest.TestCase):
+    def settings(self, root: Path) -> dict[str, object]:
+        return {
+            "DatabasePath": str(root / "clipman-history.clipdb"),
+            "BackupIntervalMinutes": 60,
+            "BackupRetentionHours": 1,
+            "MaxBackups": 2,
+        }
+
+    def write_backup(self, path: Path, data: bytes, age_seconds: int) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        timestamp = time.time() - age_seconds
+        os.utime(path, (timestamp, timestamp))
+
+    def test_new_backup_uses_creation_time_for_retention(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            settings = self.settings(root)
+            database_id = "a" * 32
+            database = clipman_server.database_path(settings, database_id)
+            database.parent.mkdir(parents=True)
+            database.write_bytes(b"history before a delayed upload")
+            old_timestamp = time.time() - 3 * 60 * 60
+            os.utime(database, (old_timestamp, old_timestamp))
+
+            info = clipman_server.create_backup(settings, database, True)
+            backup = database.parent / "ServerBackups" / str(info["Name"])
+
+            self.assertTrue(backup.is_file())
+            self.assertEqual(database.read_bytes(), backup.read_bytes())
+            self.assertLess(time.time() - backup.stat().st_mtime, 10)
+
+    def test_global_prune_cleans_inactive_valid_buckets_only(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            settings = self.settings(root)
+            valid_id = "b" * 32
+            valid_backups = clipman_server.database_bucket_path(settings, valid_id) / "ServerBackups"
+            expired = valid_backups / "clipman-history-expired.clipdb"
+            current = valid_backups / "clipman-history-current.clipdb"
+            self.write_backup(expired, b"expired", 2 * 60 * 60)
+            self.write_backup(current, b"current", 10 * 60)
+
+            unrelated = clipman_server.database_root(settings) / "not-a-database" / "ServerBackups" / "keep.clipdb"
+            self.write_backup(unrelated, b"unrelated", 2 * 60 * 60)
+
+            removed = clipman_server.prune_all_backup_directories(settings)
+
+            self.assertEqual(1, removed)
+            self.assertFalse(expired.exists())
+            self.assertTrue(current.exists())
+            self.assertTrue(unrelated.exists())
+
+    def test_backup_prune_thread_runs_immediately_then_hourly(self) -> None:
+        settings: dict[str, object] = {}
+        server = mock.Mock()
+        thread = mock.Mock()
+        with mock.patch.object(clipman_server, "Thread", return_value=thread) as thread_type:
+            clipman_server.start_backup_prune_thread(settings, server)
+
+        thread_type.assert_called_once()
+        self.assertTrue(thread_type.call_args.kwargs["daemon"])
+        thread.start.assert_called_once_with()
+        worker = thread_type.call_args.kwargs["target"]
+        with mock.patch.object(clipman_server, "prune_all_backup_directories") as prune, \
+             mock.patch.object(clipman_server.time, "sleep", side_effect=StopIteration) as sleep:
+            with self.assertRaises(StopIteration):
+                worker()
+
+        prune.assert_called_once_with(settings, server.database_lock)
+        sleep.assert_called_once_with(clipman_server.BACKUP_PRUNE_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":

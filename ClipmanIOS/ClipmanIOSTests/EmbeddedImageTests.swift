@@ -367,6 +367,44 @@ final class EmbeddedImageTests: XCTestCase {
         XCTAssertEqual(EmbeddedImageCodec.totalStoredBytes(in: database), bytes * 2)
     }
 
+    func testEditingImagePropertiesPreservesImagePayloadAndIdentity() throws {
+        let payload = try EmbeddedImageCodec.makePayload(data: try makePNG(width: 12, height: 12), suggestedFilename: "photo.png")
+        let original = ClipEntry(
+            Id: "image-entry",
+            Text: payload.text,
+            Group: "Photos",
+            SourceMachine: "iPhone",
+            IsTemplate: false,
+            RichText: payload.richText,
+            RichTextUpdatedUnixMs: 123
+        )
+        let requested = ClipEntry(
+            Id: original.Id,
+            Text: payload.text + " altered",
+            Name: "Renamed image",
+            Group: "Shared",
+            SourceMachine: original.SourceMachine,
+            Pinned: true,
+            IsTemplate: true,
+            RichText: original.RichText,
+            RichTextUpdatedUnixMs: original.RichTextUpdatedUnixMs
+        )
+
+        let updated = SyncConflictResolver.updateEntry(
+            database: ClipDatabase(Entries: [original]),
+            entry: requested,
+            machineName: "iPhone"
+        ).Entries.first!
+
+        XCTAssertEqual(updated.Name, "Renamed image")
+        XCTAssertEqual(updated.Group, "Shared")
+        XCTAssertTrue(updated.Pinned)
+        XCTAssertEqual(updated.Text, original.Text)
+        XCTAssertEqual(updated.RichText, original.RichText)
+        XCTAssertEqual(updated.RichTextUpdatedUnixMs, original.RichTextUpdatedUnixMs)
+        XCTAssertFalse(updated.IsTemplate)
+    }
+
     private func makePNG(width: Int, height: Int) throws -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

@@ -18,7 +18,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private let monitor = ClipboardMonitor()
     private var clipMergeDetector = ClipMergeDetector()
     private let hotkeys = HotkeyManager()
-    private let startup = StartupService()
+    private let startup = StartupService(debugLogger: { RuntimeLogger.debug($0) })
     private let updates = UpdateService()
     private lazy var sounds = SoundService(applicationSupportURL: settingsStore.applicationSupportURL)
     private var settings: ClipmanSettings!
@@ -49,6 +49,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var websiteTitleFetches = Set<String>()
     private var automaticWebsiteTitleQueue: [(id: String, text: String, host: String)] = []
     private var automaticWebsiteTitleFetchRunning = false
+    private var initialTextHistoryResultLogged = false
+    private var initialFileHistoryResultLogged = false
 
     private var storageUnavailableReason: String {
         storageUnavailableReasons.values.sorted().joined(separator: "; ")
@@ -59,14 +61,18 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        RuntimeLogger.debug("Application launch callback entered.")
         guard enforceSingleRunningInstance() else {
+            RuntimeLogger.debug("Application launch stopped because another Clipman instance remained active.")
             NSApp.terminate(nil)
             return
         }
+        RuntimeLogger.debug("Single-instance check passed.")
 
         do {
             settings = try settingsStore.load()
         } catch {
+            RuntimeLogger.debug("Settings load failed.", details: "errorType=\(String(describing: type(of: error)))")
             let alert = NSAlert()
             alert.messageText = "Clipman could not open its data folder"
             alert.informativeText = error.localizedDescription
@@ -76,12 +82,18 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             NSApp.terminate(nil)
             return
         }
+        RuntimeLogger.debug(
+            "Settings loaded.",
+            details: "storageMode=\(settings.storageMode) monitoring=\(settings.monitoringEnabled) runAtLogin=\(settings.runAtStartup) rememberPassword=\(settings.rememberDatabasePassword)"
+        )
         migrateServerTokenToKeychainIfNeeded()
         settings.serverToken = currentServerToken(for: settings)
         sounds.useDataFolder(settingsStore.dataFolder(for: settings))
         migrateLegacyKeychainPasswordIfNeeded()
         let initialPassword = initialDatabasePassword()
+        RuntimeLogger.debug("Initial password lookup completed.", details: "passwordAvailable=\(!initialPassword.isEmpty)")
         seedServerCacheFromConfiguredDatabase()
+        RuntimeLogger.debug("Creating history stores.")
         store = ClipStore(databaseURL: textHistoryURL(for: settings), machineName: settings.deviceName)
         store.delegate = self
         store.setDatabaseURL(textHistoryURL(for: settings), password: initialPassword)
@@ -89,11 +101,13 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         fileStore = FileHistoryStore(databaseURL: fileHistoryURL(for: settings), machineName: settings.deviceName, password: initialPassword)
         fileStore.delegate = self
         fileStore.load()
+        RuntimeLogger.debug("Text and file history loads were scheduled.")
         secretStore = SecretStore(databaseURL: secretsURL(for: settings), passwordProvider: { [weak self] in
             self?.currentDatabasePassword(for: self?.settings.databasePath ?? "") ?? ""
         })
 
         historyWindow = HistoryWindowController()
+        RuntimeLogger.debug("History window controller created.")
         historyWindow.historyDelegate = self
         historyWindow.configureSteadyStatusProvider { [weak self] in
             self?.historySteadyStatusText() ?? "Ready."
@@ -126,12 +140,19 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             alsoAddCopiedImageFilesEnabled: settings.alsoAddCopiedImageFilesToRichTextHistory
         )
         monitor.start()
+        RuntimeLogger.debug("Clipboard monitor started.", details: "enabled=\(monitor.isEnabled)")
         if settings.captureClipboardOnStartup {
             monitor.captureCurrentContents()
         }
         sounds.play(settings.monitoringEnabled ? .on : .off)
+        RuntimeLogger.debug("Creating menu-extra status item.")
         buildStatusItem()
+        RuntimeLogger.debug(
+            "Menu-extra status item created.",
+            details: "buttonAvailable=\(statusItem.button != nil) visible=\(statusItem.isVisible)"
+        )
         applyStartupRegistration(showErrors: false)
+        RuntimeLogger.debug("Startup login-registration maintenance completed.")
 
         hotkeys.handler = { [weak self] action in
             switch action {
@@ -144,16 +165,21 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             }
         }
         registerHotkeys()
+        RuntimeLogger.debug("Global hotkeys registered.")
         NSApp.setActivationPolicy(.accessory)
+        RuntimeLogger.debug("Application activation policy set.", details: "policy=accessory")
         buildMainMenu()
+        RuntimeLogger.debug("Main menu created.")
         scheduleUpdateChecks()
         scheduleServerRecoveryChecks()
+        RuntimeLogger.debug("Update and server-recovery schedules configured.")
         if settings.pasteAfterEnter, !CGPreflightPostEventAccess() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
                 _ = CGRequestPostEventAccess()
             }
         }
         warnAboutPasswordlessServerConfiguration(initialPassword: initialPassword)
+        RuntimeLogger.debug("Application launch callback completed.")
     }
 
     private func warnAboutPasswordlessServerConfiguration(initialPassword: String) {
@@ -173,33 +199,40 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     private func enforceSingleRunningInstance() -> Bool {
+        RuntimeLogger.debug("Checking for another running Clipman instance.")
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.andrelouis.clipman"
         let otherInstances = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
             .filter { $0.processIdentifier != currentPID && !$0.isTerminated }
+        RuntimeLogger.debug("Single-instance query completed.", details: "otherInstanceCount=\(otherInstances.count)")
         guard let existing = otherInstances.first else {
             return true
         }
 
+        RuntimeLogger.debug("Presenting the existing-instance confirmation.")
         let alert = NSAlert()
         alert.messageText = "Clipman is already running"
         alert.informativeText = "Another copy of Clipman is already running. Running two copies at the same time can cause duplicate clipboard monitoring and database conflicts. Quit the existing copy and continue with this one?"
         alert.addButton(withTitle: "Quit Existing and Continue")
         alert.addButton(withTitle: "Cancel")
         let response = alert.runModal()
+        RuntimeLogger.debug("Existing-instance confirmation completed.", details: "continueRequested=\(response == .alertFirstButtonReturn)")
         guard response == .alertFirstButtonReturn else {
             return false
         }
 
+        RuntimeLogger.debug("Requesting termination of the existing Clipman instance.")
         existing.terminate()
         let deadline = Date().addingTimeInterval(5)
         while !existing.isTerminated && Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
         }
         if existing.isTerminated {
+            RuntimeLogger.debug("The existing Clipman instance terminated.")
             return true
         }
 
+        RuntimeLogger.debug("The existing Clipman instance did not terminate within five seconds.")
         let failedAlert = NSAlert()
         failedAlert.messageText = "Could Not Quit Existing Clipman"
         failedAlert.informativeText = "The existing Clipman copy did not close. This copy will quit so two clipboard monitors do not run at the same time."
@@ -209,10 +242,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        RuntimeLogger.debug("Application termination started.")
         monitor.stop()
         hotkeys.unregisterAll()
         updateTimer?.invalidate()
         serverRecoveryTimer?.invalidate()
+        RuntimeLogger.debug("Application termination cleanup completed.")
     }
 
     private func buildStatusItem() {
@@ -431,6 +466,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 text,
                 richText: resolvedRichText(entry),
                 imageFilename: embeddedImageFilename(for: entry),
+                imageCapturedUnixMs: entry.CreatedUnixMs,
                 restoreAfter: 0.35
             ) {
                 self.sendPasteKeystroke()
@@ -439,14 +475,16 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             monitor.writeInternalText(
                 text,
                 richText: resolvedRichText(entry),
-                imageFilename: embeddedImageFilename(for: entry)
+                imageFilename: embeddedImageFilename(for: entry),
+                imageCapturedUnixMs: entry.CreatedUnixMs
             )
             sendPasteKeystroke()
         case .copyOnly:
             monitor.writeInternalText(
                 text,
                 richText: resolvedRichText(entry),
-                imageFilename: embeddedImageFilename(for: entry)
+                imageFilename: embeddedImageFilename(for: entry),
+                imageCapturedUnixMs: entry.CreatedUnixMs
             )
         }
         sounds.play(.copy)
@@ -923,6 +961,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipStoreDidChange() {
+        if !initialTextHistoryResultLogged {
+            initialTextHistoryResultLogged = true
+            RuntimeLogger.debug("Initial text history result reached the main thread.", details: "entryCount=\(store.entryCount())")
+        }
         databaseErrorAlertShown = false
         clearStorageFailureIfNeeded(area: "text history")
         historyWindow.update(entries: sortedTextEntries())
@@ -950,11 +992,16 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func fileHistoryStoreDidChange() {
+        if !initialFileHistoryResultLogged {
+            initialFileHistoryResultLogged = true
+            RuntimeLogger.debug("Initial file history result reached the main thread.", details: "eventCount=\(fileStore.events().count)")
+        }
         clearStorageFailureIfNeeded(area: "file history")
         historyWindow.update(fileEvents: sortedFileEvents())
     }
 
     func fileHistoryStoreDidFail(error: Error) {
+        RuntimeLogger.debug("File history load or save failed.", details: "errorType=\(String(describing: type(of: error)))")
         RuntimeLogger.write("File history store failed.", error: error, details: "Area: file history")
         if isDatabasePasswordError(error) {
             recoverHistoryPassword(after: error, area: "file history")
@@ -964,20 +1011,28 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func clipStoreNeedsPassword(for path: String) -> String? {
+        RuntimeLogger.debug("Text history requested a password.")
         let identityPath = databasePasswordIdentityPath(for: path)
         if let password = sessionPassword(for: identityPath), !password.isEmpty {
+            RuntimeLogger.debug("A session password was available for text history.")
             return password
         }
-        guard !cancelledPasswordPaths.contains(identityPath) else { return nil }
-        guard let password = promptForDatabasePassword(path: identityPath) else {
-            cancelledPasswordPaths.insert(identityPath)
+        guard !cancelledPasswordPaths.contains(identityPath) else {
+            RuntimeLogger.debug("Password prompting was skipped because it was already cancelled for this history.")
             return nil
         }
+        guard let password = promptForDatabasePassword(path: identityPath) else {
+            cancelledPasswordPaths.insert(identityPath)
+            RuntimeLogger.debug("History password prompt was cancelled or left empty.")
+            return nil
+        }
+        RuntimeLogger.debug("History password prompt returned a non-empty value.")
         applyDatabasePassword(password, for: identityPath)
         return password
     }
 
     private func promptForDatabasePassword(path: String) -> String? {
+        RuntimeLogger.debug("Presenting history password prompt.")
         let alert = NSAlert()
         alert.messageText = "History Password Required"
         alert.informativeText = "Enter the password for \(path)."
@@ -987,12 +1042,17 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         field.setAccessibilityLabel("History password")
         alert.accessoryView = field
         let result = alert.runModal()
-        guard result == .alertFirstButtonReturn else { return nil }
+        guard result == .alertFirstButtonReturn else {
+            RuntimeLogger.debug("History password prompt was dismissed without Unlock.")
+            return nil
+        }
         let password = field.stringValue
+        RuntimeLogger.debug("Unlock was pressed in the history password prompt.", details: "valueIsEmpty=\(password.isEmpty)")
         return password.isEmpty ? nil : password
     }
 
     func clipStoreDidFail(error: Error) {
+        RuntimeLogger.debug("Text history load or save failed.", details: "errorType=\(String(describing: type(of: error)))")
         RuntimeLogger.write("Text history store failed.", error: error, details: "Area: text history")
         if isDatabasePasswordError(error) {
             recoverHistoryPassword(after: error, area: "text history")
@@ -1187,7 +1247,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.writeInternalText(
             TemplateResolver.resolveEntryText(entry),
             richText: resolvedRichText(entry),
-            imageFilename: embeddedImageFilename(for: entry)
+            imageFilename: embeddedImageFilename(for: entry),
+            imageCapturedUnixMs: entry.CreatedUnixMs
         )
         sounds.play(.copy)
         store.markUsed(entry.Id)
@@ -1230,7 +1291,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.writeInternalText(
             text,
             richText: entries.count == 1 ? resolvedRichText(entries[0]) : nil,
-            imageFilename: entries.count == 1 ? embeddedImageFilename(for: entries[0]) : nil
+            imageFilename: entries.count == 1 ? embeddedImageFilename(for: entries[0]) : nil,
+            imageCapturedUnixMs: entries.count == 1 ? entries[0].CreatedUnixMs : nil
         )
         sounds.play(.copy)
     }
@@ -2166,7 +2228,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         monitor.writeInternalText(
             TemplateResolver.resolveEntryText(entry),
             richText: resolvedRichText(entry),
-            imageFilename: embeddedImageFilename(for: entry)
+            imageFilename: embeddedImageFilename(for: entry),
+            imageCapturedUnixMs: entry.CreatedUnixMs
         )
         sounds.play(.remote)
     }
@@ -2526,9 +2589,12 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     private func applyStartupRegistration(showErrors: Bool) {
+        RuntimeLogger.debug("Applying login-registration preference.", details: "enabled=\(settings.runAtStartup) showErrors=\(showErrors)")
         do {
             try startup.setEnabled(settings.runAtStartup, appBundleURL: Bundle.main.bundleURL)
+            RuntimeLogger.debug("Login-registration preference applied.")
         } catch {
+            RuntimeLogger.debug("Login-registration preference failed.", details: "errorType=\(String(describing: type(of: error)))")
             RuntimeLogger.write("Clipman could not update its login item.", error: error)
             guard showErrors else { return }
             let alert = NSAlert(error: error)

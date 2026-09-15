@@ -7,6 +7,10 @@ struct EntryEditView: View {
     @FocusState private var focusedField: Field?
     private let isNew: Bool
 
+    private var hasEmbeddedImage: Bool {
+        !isNew && EmbeddedImageCodec.recognize(draft.RichText) != nil
+    }
+
     private enum Field {
         case text
     }
@@ -33,13 +37,27 @@ struct EntryEditView: View {
                         .accessibilityHint("Edits the group assigned to this entry.")
                     Toggle("Pinned", isOn: $draft.Pinned)
                     Toggle("Template", isOn: $draft.IsTemplate)
+                        .disabled(hasEmbeddedImage)
+                        .accessibilityHint(hasEmbeddedImage ? "Image content cannot be used as a template." : "Uses template fields when this entry is copied or pasted.")
                 }
-                Section("Clipboard text") {
-                    TextEditor(text: $draft.Text)
-                        .frame(minHeight: 180)
-                        .focused($focusedField, equals: .text)
-                        .accessibilityLabel("Clipboard text")
-                        .accessibilityHint(isNew ? "Enter the text for the new clip." : "Edits the clipboard text stored in this entry.")
+                if hasEmbeddedImage {
+                    Section("Image content") {
+                        Text(draft.Text)
+                            .accessibilityLabel("Image content, \(draft.Text)")
+                            .accessibilityHint("This image content cannot be edited. Use Name to rename how the image appears.")
+                        Text("Image content cannot be edited. Use Name to rename how this image appears.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                } else {
+                    Section("Clipboard text") {
+                        TextEditor(text: $draft.Text)
+                            .frame(minHeight: 180)
+                            .focused($focusedField, equals: .text)
+                            .accessibilityLabel("Clipboard text")
+                            .accessibilityHint(isNew ? "Enter the text for the new clip." : "Edits the clipboard text stored in this entry.")
+                    }
                 }
             }
             .navigationTitle(isNew ? "Quick Clip" : "Edit Entry")

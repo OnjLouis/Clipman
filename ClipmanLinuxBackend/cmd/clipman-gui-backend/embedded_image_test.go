@@ -61,6 +61,33 @@ func TestEmbeddedImagePreservesCompliantOriginalAndRoundTrips(t *testing.T) {
 	}
 }
 
+func TestEmbeddedImageUpdatePreservesPayloadIdentityAndTemplateState(t *testing.T) {
+	raw := testPNG(t, 8, 6)
+	prepared, err := prepareEmbeddedImage("image/png", "Photo.png", base64.StdEncoding.EncodeToString(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := model.Entry{ID: "image-entry", Text: prepared.Text, Group: "Photos"}
+	setRichText(&entry, prepared.RichText, 123)
+	requested := entryUpdate{
+		ID: entry.ID, Text: entry.Text + " altered", Name: "Renamed image",
+		Group: "Shared", Pinned: true, IsTemplate: true,
+	}
+
+	protected := protectEmbeddedImageUpdate(entry, requested)
+
+	if protected.Text != entry.Text || protected.IsTemplate != entry.IsTemplate {
+		t.Fatalf("protected update changed image identity: %#v", protected)
+	}
+	if protected.Name != "Renamed image" || protected.Group != "Shared" || !protected.Pinned {
+		t.Fatalf("protected update blocked editable properties: %#v", protected)
+	}
+	rich, updated := richTextFromEntry(entry)
+	if rich == nil || rich.HTMLFragment != prepared.RichText.HTMLFragment || updated != 123 {
+		t.Fatalf("test image payload was not retained: rich=%#v updated=%d", rich, updated)
+	}
+}
+
 func TestCompliantImageFastPathDoesNotRequireFullDecode(t *testing.T) {
 	headerOnly := testPNG(t, 1, 1)[:33]
 	if _, _, err := image.Decode(bytes.NewReader(headerOnly)); err == nil {

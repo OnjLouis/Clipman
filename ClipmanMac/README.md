@@ -130,3 +130,11 @@ dist/Clipman-macOS-<version>.zip
 Testers should unzip it, move or drag `Clipman.app` into `/Applications`, and open it normally. The package is Developer ID signed, notarized by Apple, stapled, and verified with Gatekeeper before release.
 
 In Preferences, enable `Run Clipman at login` after the app is in `/Applications`. This writes a per-user LaunchAgent pointing at the current app bundle path, so if the app is moved later, save Preferences again to refresh the login item.
+
+For a startup problem that prevents the menu extra from appearing, quit or force-quit every existing Clipman process and run:
+
+```bash
+CLIPMAN_DEBUG_LOG=1 /Applications/Clipman.app/Contents/MacOS/Clipman 2>&1 | tee ~/Desktop/clipman-debug.log
+```
+
+The opt-in console trace records startup phases, result states, timings, and error types. It does not record passwords, server tokens, clipboard contents, or history data. Normal launches remain silent.
