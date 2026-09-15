@@ -113,15 +113,15 @@
   <ul>
     <li>Kept Android Settings clear of the system status and navigation bars on Android 15 and later, so TalkBack touch exploration reaches Clipman's controls instead of System UI. The Settings header now remains visible while the form scrolls, and keyboard insets keep focused fields accessible. Thanks to Glenn Dausch for diagnosis, real-device TalkBack testing, and pull request <a href="https://github.com/OnjLouis/Clipman/pull/73">#73</a>.</li>
   </ul>
-  <h3>3.1.1 Windows and Android</h3>
+  <h3>3.1.1 Windows, Android and iOS</h3>
   <ul>
+    <li>iOS protects stored images when editing their properties. Image content is now clearly read-only while Name, Group, and pinning remain editable, preventing an accidental text edit from discarding the embedded image.</li>
     <li>Android adds optional <strong>Shared Folder</strong> synchronization through Android's system folder picker. Clipman keeps an encrypted private cache, checks the selected folder before writing, merges concurrent and offline changes plus recognised provider conflict copies, and retries interrupted writes while Clipman is open. An existing encrypted-backup folder is reused as the initial choice. The provider must offer persistent read and write access; provider availability and synchronization remain controlled by Android and the installed storage app.</li>
     <li>Fixed repeated sync-rules downloads that could delay Quick Paste, clipboard capture and history changes while using Clipman Server.</li>
     <li>Fixed rapid Quick Paste operations leaving clipboard monitoring suppressed, which could prevent later copies from other applications from reaching history.</li>
   </ul>
   <h3>3.1.0 Windows, macOS, Linux and iOS</h3>
   <ul>
-    <li>iOS protects stored images when editing their properties. Image content is now clearly read-only while Name, Group, and pinning remain editable, preventing an accidental text edit from discarding the embedded image.</li>
     <li>iOS adds optional <strong>Shared Folder</strong> sync. Choose an iCloud Drive or supported document-provider folder and use the same nonblank history password on each device to share encrypted history without running Clipman Server. Clipman loads its private cache first, synchronizes while open, retries interrupted changes, and merges entries, edits, pins, groups, deletions, channels, and provider conflict copies. Share to Clipman uses the same path with a durable queued fallback. If encrypted backup already has a selected folder, Clipman reuses it as the initial Shared Folder choice so access is not requested twice; a separately chosen shared folder remains independent. The existing one-way encrypted history backup remains a separate feature.</li>
     <li>Improved the deliberate <strong>Use website title as name</strong> command. When a public link returns no usable web-page title, is a direct file download, or cannot be reached, Clipman now saves the same useful offline URL label shown in history into the ordinary Name field. The complete URL remains unchanged.</li>
     <li>A deliberate website-title request is no longer refused solely because a public URL contains tracking data or a token-like path or query. Automatic title naming remains conservative, and both modes continue to reject embedded credentials, local or private destinations, non-standard ports, unsafe redirects and overlong addresses.</li>
