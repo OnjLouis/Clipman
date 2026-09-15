@@ -75,6 +75,7 @@
     <li><a href="#clipboard-privacy-signals">Clipboard Privacy Signals</a></li>
     <li><a href="#ignored-applications">Ignored Applications</a></li>
     <li><a href="#database-and-sync">Database and Sync</a></li>
+    <li><a href="#iphone-ipad-setup">iPhone and iPad Setup</a></li>
     <li><a href="#sync-rules-and-channels">Sync Rules and Channels</a></li>
     <li><a href="#secrets">Secrets</a></li>
     <li><a href="#clipman-server">Clipman Server</a></li>
@@ -1081,6 +1082,35 @@
   <p>When Windows uses the install-local <code>Settings</code> folder beside <code>clipman.exe</code>, Clipman writes a small shared update-state file there. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance from that same shared installation sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy. A custom data folder elsewhere may still share history and settings, but it does not coordinate executable replacement; each separately installed Clipman updates normally without being stopped by another machine's build marker.</p>
 
   <p>During an online or automatic update, Clipman downloads the release ZIP to a temporary folder, asks other instances running from the same install-local shared folder to close briefly, replaces the app files while preserving <code>Settings</code>, then starts the updated copy. When the new copy starts it publishes the new shared update state, so other computers using that same shared installation can restart after their cloud service or network share exposes the updated executable. Separately installed clients that share only a custom data folder remain running and use their own updater.</p>
+
+  <h2 id="iphone-ipad-setup">iPhone and iPad Setup</h2>
+
+  <h3>Allow clipboard access without repeated prompts</h3>
+  <p>Apple controls access to content copied in another app. To let Clipman read it without asking each time, open the iOS <strong>Settings</strong> app, choose <strong>Apps</strong>, <strong>Clipman</strong>, <strong>Paste from Other Apps</strong>, then <strong>Allow</strong>. Choose <strong>Ask</strong> if you prefer an iOS confirmation each time, or <strong>Deny</strong> to block access. Clipman follows this system choice and does not add a second paste-confirmation dialog.</p>
+
+  <h3>Share history through iCloud Drive or Files</h3>
+  <ol>
+    <li>Create a dedicated folder such as <strong>Clipman Shared</strong> in iCloud Drive, or in another location that the Files app exposes with persistent read and write access. If iCloud Drive is not available in Files, enable <strong>Sync this iPhone</strong> or <strong>Sync this iPad</strong> under your Apple Account's iCloud Drive settings first.</li>
+    <li>In Clipman, open <strong>Settings</strong>. Under <strong>History storage</strong>, set <strong>Storage mode</strong> to <strong>Shared Folder</strong>.</li>
+    <li>Enter a nonblank <strong>Shared history password</strong>, choose <strong>Choose shared folder</strong>, and select the dedicated folder itself.</li>
+    <li>Choose <strong>Save</strong>. Configure every participating device with the same folder and exactly the same history password.</li>
+    <li>Keep Clipman in the foreground until its status confirms synchronization. iOS controls when a document provider transfers files, so the first synchronization can take longer than Clipman Server or a local network share.</li>
+  </ol>
+
+  <p><strong>Shared Folder</strong> is live two-way synchronization. <strong>Encrypted history backup</strong> is a separate one-way recovery file and does not keep devices synchronized. Export a backup before joining an existing history, keep the history password in a password manager outside the shared folder, and do not manually edit, rename, or delete Clipman's <code>.clipdb</code>, revision, channel, or conflict files. Clipman cannot recover an encrypted history if its password is lost.</p>
+
+  <p>iCloud Drive is the simplest choice between iPhone, iPad, Mac, and Windows. Other providers and configured network locations can work when they appear in Files and grant persistent folder access, but their availability and transfer timing are controlled by the provider. Use Clipman Server when you need more predictable cross-platform synchronization or do not want to depend on a document provider.</p>
+
+  <h3>Use the same iCloud folder on Windows</h3>
+  <ol>
+    <li>Follow <a href="https://support.apple.com/en-gb/118443">Apple's iCloud Drive setup guide</a> to install iCloud for Windows from the Microsoft Store, sign in to the same Apple Account, and enable iCloud Drive.</li>
+    <li>In File Explorer, open iCloud Drive and locate the same dedicated folder selected on the iPhone or iPad. Use iCloud's <strong>Always keep on this device</strong> command for that folder so Clipman's database remains locally available.</li>
+    <li>In Clipman for Windows, open <strong>Preferences</strong>. Set <strong>Storage type</strong> to <strong>Local or shared folder</strong>, then set <strong>Data folder</strong> to that folder. Select the folder, not an individual <code>.clipdb</code> file.</li>
+    <li>Enter and confirm the same history password, save Preferences, and allow iCloud Drive to finish transferring changes before expecting another client to show them.</li>
+  </ol>
+
+  <h3>If a server works on desktop but not on iPhone</h3>
+  <p>A public Clipman Server must use HTTPS with a complete, currently valid certificate chain. Enter the host name covered by the certificate; replacing that host name with its numeric IP address fails certificate-name validation. A normal public certificate such as Let's Encrypt does not need a custom authority in Clipman. For a private certificate authority, import the current <code>.clpconf</code> connection file so Clipman can trust that authority only for its configured server host. Confirm that the saved address uses <code>https://</code>, the certificate covers that exact host, and any reverse proxy supplies the intermediate certificates before investigating the history password or token.</p>
 
   <h2 id="sync-rules-and-channels">Sync Rules and Channels</h2>
   <p>Sync rules are an optional way to split shared history into named <strong>sync channels</strong> so a device downloads and uploads only the channels it wants instead of the entire database. Sync rules are off by default. While they are off, and for any entry no channel claims, history works exactly as described in <a href="#database-and-sync">Database and Sync</a>: everything lives together in the <strong>core</strong> channel, which is the existing shared history database. Turning sync rules on does not move anything by itself; an entry only moves once a routing rule is set up to claim it.</p>
