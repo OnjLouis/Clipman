@@ -91,6 +91,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.3 macOS</h3>
+  <ul>
+    <li>Fixed a startup freeze that could occur after unlocking an encrypted history when <strong>Run Clipman at login</strong> was off and no login registration existed. Login-item maintenance no longer runs an unnecessary removal command, system command output stays silent, and every registration command has a short timeout. The menu extra is now created before this maintenance, so a macOS registration failure cannot leave Clipman running without its menu. Thanks to Chi Kim for reporting the failure and its Terminal diagnostic.</li>
+  </ul>
   <h3>3.1.3 Windows</h3>
   <ul>
     <li>Fixed update checks when a newer release is available only for another platform. Windows now selects the newest release containing the matching Windows package instead of stopping at an Android-only release. Thanks to Simon for reporting <a href="https://github.com/OnjLouis/Clipman/issues/74">issue #74</a>.</li>

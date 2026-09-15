@@ -130,9 +130,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             monitor.captureCurrentContents()
         }
         sounds.play(settings.monitoringEnabled ? .on : .off)
+        buildStatusItem()
         applyStartupRegistration(showErrors: false)
 
-        buildStatusItem()
         hotkeys.handler = { [weak self] action in
             switch action {
             case .showHistory: self?.toggleHistoryFromHotkey()
@@ -2529,6 +2529,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         do {
             try startup.setEnabled(settings.runAtStartup, appBundleURL: Bundle.main.bundleURL)
         } catch {
+            RuntimeLogger.write("Clipman could not update its login item.", error: error)
             guard showErrors else { return }
             let alert = NSAlert(error: error)
             alert.messageText = "Could Not Update Login Setting"
