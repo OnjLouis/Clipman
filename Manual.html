@@ -120,11 +120,14 @@
   <ul>
     <li>Kept Android Settings clear of the system status and navigation bars on Android 15 and later, so TalkBack touch exploration reaches Clipman's controls instead of System UI. The Settings header now remains visible while the form scrolls, and keyboard insets keep focused fields accessible. Thanks to Glenn Dausch for diagnosis, real-device TalkBack testing, and pull request <a href="https://github.com/OnjLouis/Clipman/pull/73">#73</a>.</li>
   </ul>
-  <h3>3.1.1 Windows, Android and iOS</h3>
+  <h3>3.1.2 iOS</h3>
   <ul>
     <li>iOS Quick Clip now retains an unfinished draft when you switch apps or iOS suspends Clipman. Save adds it to history, while Cancel deliberately discards it.</li>
     <li>iOS named links can be copied as either the unchanged link or the saved Name followed by the link. The off-by-default <strong>Copy link names by default</strong> setting controls ordinary activation, while the entry menu and VoiceOver actions expose only the opposite format instead of repeating the default.</li>
     <li>iOS Settings now keeps the optional Tip Jar inside a collapsed <strong>Support Clipman</strong> disclosure and loads locally priced tip choices only when it is opened.</li>
+  </ul>
+  <h3>3.1.1 Windows, Android and iOS</h3>
+  <ul>
     <li>iOS protects stored images when editing their properties. Image content is now clearly read-only while Name, Group, and pinning remain editable, preventing an accidental text edit from discarding the embedded image.</li>
     <li>Android adds optional <strong>Shared Folder</strong> synchronization through Android's system folder picker. Clipman keeps an encrypted private cache, checks the selected folder before writing, merges concurrent and offline changes plus recognised provider conflict copies, and retries interrupted writes while Clipman is open. An existing encrypted-backup folder is reused as the initial choice. The provider must offer persistent read and write access; provider availability and synchronization remain controlled by Android and the installed storage app.</li>
     <li>Fixed repeated sync-rules downloads that could delay Quick Paste, clipboard capture and history changes while using Clipman Server.</li>
