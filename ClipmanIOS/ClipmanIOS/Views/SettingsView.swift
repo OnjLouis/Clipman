@@ -77,6 +77,8 @@ struct SettingsView: View {
                     Toggle("Confirm before deleting entries", isOn: $draft.confirmDeletions)
                     Toggle("Copy latest remote item to iOS clipboard", isOn: $draft.autoCopyRemote)
                     Toggle("Add current clipboard on launch", isOn: $draft.addClipboardOnLaunch)
+                    Toggle("Copy link names by default", isOn: $draft.copyLinkNamesByDefault)
+                        .accessibilityHint("When a link has a name, ordinary copy puts the name on the first line and the link on the second. The opposite copy format remains available as a separate action.")
                     Toggle("Require biometric or device authentication", isOn: $draft.requireAuthentication)
                         .accessibilityHint("When enabled, Clipman asks for Face ID, Touch ID, or the device passcode whenever the app returns to the foreground.")
                 }
@@ -148,9 +150,6 @@ struct SettingsView: View {
                 draft = app.settings
                 showServerConnection = draft.storageMode == .server && !serverIsConfigured
                 applyPendingConnectionImport()
-            }
-            .task {
-                await tipJar.loadProducts()
             }
             .onChange(of: app.serverConnectionImportSequence) { _ in
                 applyPendingConnectionImport()
@@ -724,31 +723,38 @@ private struct SyncRulesSettingsSection: View {
 
 private struct TipJarSettingsSection: View {
     @ObservedObject var tipJar: TipJarStore
+    @State private var isExpanded = false
 
     var body: some View {
-        Section("Support Clipman") {
-            Text("Tips are optional in-app purchases and do not unlock features or content.")
-                .font(.footnote)
-            if tipJar.isLoading || !tipJar.hasLoaded {
-                ProgressView("Loading Tip Options")
-            } else if tipJar.products.isEmpty {
-                Text("Tip options are currently unavailable. No features are affected.")
+        Section {
+            DisclosureGroup("Support Clipman", isExpanded: $isExpanded) {
+                Text("Tips are optional in-app purchases and do not unlock features or content.")
                     .font(.footnote)
-                Button("Retry Loading Tip Options") {
-                    Task { await tipJar.loadProducts() }
-                }
-            } else {
-                ForEach(tipJar.products, id: \.id) { product in
-                    Button(tipJar.buttonTitle(for: product)) {
-                        Task { await tipJar.purchase(product) }
+                if tipJar.isLoading || !tipJar.hasLoaded {
+                    ProgressView("Loading Tip Options")
+                } else if tipJar.products.isEmpty {
+                    Text("Tip options are currently unavailable. No features are affected.")
+                        .font(.footnote)
+                    Button("Retry Loading Tip Options") {
+                        Task { await tipJar.loadProducts() }
                     }
-                    .disabled(tipJar.isPurchasing)
-                    .accessibilityHint("Make an optional one-time tip through Apple. This unlocks nothing.")
+                } else {
+                    ForEach(tipJar.products, id: \.id) { product in
+                        Button(tipJar.buttonTitle(for: product)) {
+                            Task { await tipJar.purchase(product) }
+                        }
+                        .disabled(tipJar.isPurchasing)
+                        .accessibilityHint("Make an optional one-time tip through Apple. This unlocks nothing.")
+                    }
+                }
+                if !tipJar.message.isEmpty {
+                    Text(tipJar.message)
+                        .font(.footnote)
                 }
             }
-            if !tipJar.message.isEmpty {
-                Text(tipJar.message)
-                    .font(.footnote)
+            .onChange(of: isExpanded) { expanded in
+                guard expanded else { return }
+                Task { await tipJar.loadProducts() }
             }
         }
     }

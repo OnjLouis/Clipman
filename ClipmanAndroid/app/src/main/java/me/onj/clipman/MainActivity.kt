@@ -116,6 +116,7 @@ class MainActivity : FragmentActivity() {
     private var externalTextImports by mutableStateOf<List<ExternalSharedTextImport>>(emptyList())
     private var nextExternalTextImportId = 0L
     private var externalQuickClipRequestId by mutableStateOf(0L)
+    private var quickClipDraft: ClipEntry? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Android 15 forces edge-to-edge for targetSdk 35; opt in on older versions too so insets
@@ -125,6 +126,8 @@ class MainActivity : FragmentActivity() {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
         )
         super.onCreate(savedInstanceState)
+        val settings = AndroidSettings(this)
+        quickClipDraft = QuickClipDraftCodec.decode(settings.quickClipDraftPayload)
         handleIncomingIntent(intent)
         setContent {
             MaterialTheme {
@@ -150,6 +153,12 @@ class MainActivity : FragmentActivity() {
                                 externalQuickClipRequestId = externalQuickClipRequestId,
                                 onExternalQuickClipConsumed = { id ->
                                     if (externalQuickClipRequestId == id) externalQuickClipRequestId = 0
+                                },
+                                quickClipDraft = quickClipDraft,
+                                onQuickClipDraftChanged = { quickClipDraft = it },
+                                onQuickClipDraftDiscarded = {
+                                    quickClipDraft = null
+                                    AndroidSettings(this@MainActivity).quickClipDraftPayload = ""
                                 }
                             )
                         } else {
@@ -184,6 +193,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         appIsForeground = false
+        quickClipDraft?.let { draft ->
+            AndroidSettings(this).quickClipDraftPayload = QuickClipDraftCodec.encode(draft)
+        }
         super.onStop()
         if (!trustedExternalActivityPending && !isChangingConfigurations && AndroidSettings(this).requireAuthentication) {
             isUnlocked = false
@@ -438,6 +450,7 @@ private data class MobileSettingsSnapshot(
     val deviceName: String,
     val copyRemoteToClipboard: Boolean,
     val addClipboardOnLaunch: Boolean,
+    val copyLinkNamesByDefault: Boolean,
     val historySort: HistorySort,
     val richTextEnabled: Boolean,
     val richTextImagesEnabled: Boolean,
@@ -529,7 +542,10 @@ private fun ClipmanApp(
     externalTextImport: ExternalSharedTextImport?,
     onExternalTextImportConsumed: (Long) -> Unit,
     externalQuickClipRequestId: Long,
-    onExternalQuickClipConsumed: (Long) -> Unit
+    onExternalQuickClipConsumed: (Long) -> Unit,
+    quickClipDraft: ClipEntry?,
+    onQuickClipDraftChanged: (ClipEntry) -> Unit,
+    onQuickClipDraftDiscarded: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? MainActivity
@@ -561,6 +577,7 @@ private fun ClipmanApp(
     }
     var copyRemoteToClipboard by remember { mutableStateOf(settings.copyRemoteToClipboard) }
     var addClipboardOnLaunch by remember { mutableStateOf(settings.addClipboardOnLaunch) }
+    var copyLinkNamesByDefault by remember { mutableStateOf(settings.copyLinkNamesByDefault) }
     var richTextEnabled by remember { mutableStateOf(settings.richTextEnabled) }
     var richTextImagesEnabled by remember { mutableStateOf(settings.richTextImagesEnabled) }
     var confirmDeletions by remember { mutableStateOf(settings.confirmDeletions) }
@@ -597,7 +614,10 @@ private fun ClipmanApp(
     var database by remember { mutableStateOf(ClipDatabase()) }
     var viewingEntry by remember { mutableStateOf<ClipEntry?>(null) }
     var editingEntry by remember { mutableStateOf<ClipEntry?>(null) }
-    var showingQuickClip by remember { mutableStateOf(false) }
+    var showingQuickClip by remember { mutableStateOf(quickClipDraft != null) }
+    var activeQuickClipDraft by remember { mutableStateOf(quickClipDraft) }
+    var showingHistoryMoreActions by remember { mutableStateOf(false) }
+    var historyMoreSections by remember { mutableStateOf<List<HistorySection>>(emptyList()) }
     var deleteCandidate by remember { mutableStateOf<ClipEntry?>(null) }
     var showGroupPicker by remember { mutableStateOf(false) }
     var attemptedInitialLoad by remember { mutableStateOf(false) }
@@ -633,11 +653,24 @@ private fun ClipmanApp(
     var isSavingSyncRules by remember { mutableStateOf(false) }
     var syncRulesStatus by remember { mutableStateOf("") }
 
+    fun beginQuickClip() {
+        val draft = activeQuickClipDraft ?: ClipEntry()
+        activeQuickClipDraft = draft
+        onQuickClipDraftChanged(draft)
+        showingQuickClip = true
+    }
+
+    fun discardQuickClip() {
+        showingQuickClip = false
+        activeQuickClipDraft = null
+        onQuickClipDraftDiscarded()
+    }
+
     LaunchedEffect(externalQuickClipRequestId, hasLoadedHistory, isLoadingHistory, showConnectionSettings) {
         if (externalQuickClipRequestId == 0L || !hasLoadedHistory || isLoadingHistory || showConnectionSettings) {
             return@LaunchedEffect
         }
-        showingQuickClip = true
+        beginQuickClip()
         onExternalQuickClipConsumed(externalQuickClipRequestId)
     }
 
@@ -662,6 +695,24 @@ private fun ClipmanApp(
             transientStatusActive = false
             status = message
         }
+    }
+
+    fun copyEntryToClipboard(entry: ClipEntry, includeLinkName: Boolean? = null) {
+        val isStandaloneLink = LinkPresentation.standaloneUrlText(entry.Text) != null
+        if (isStandaloneLink) {
+            val includeName = includeLinkName ?: copyLinkNamesByDefault
+            RichTextClipboard.writePlainText(context, LinkClipboardText.make(entry, includeName))
+        } else {
+            RichTextClipboard.write(context, entry, richTextEnabled)
+        }
+        playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
+        val copiedName = isStandaloneLink
+            && (includeLinkName ?: copyLinkNamesByDefault)
+            && entry.Name.isNotBlank()
+        setTransientStatus(
+            if (copiedName) "Copied name and link to Android clipboard."
+            else "Copied selected entry to Android clipboard."
+        )
     }
 
     fun reportImageAction(message: String, succeeded: Boolean) {
@@ -888,6 +939,7 @@ private fun ClipmanApp(
         deviceName = settings.deviceName
         copyRemoteToClipboard = settings.copyRemoteToClipboard
         addClipboardOnLaunch = settings.addClipboardOnLaunch
+        copyLinkNamesByDefault = settings.copyLinkNamesByDefault
         sortMode = settings.historySort
         richTextEnabled = settings.richTextEnabled
         richTextImagesEnabled = settings.richTextImagesEnabled
@@ -940,6 +992,7 @@ private fun ClipmanApp(
         settings.deviceName = snapshot.deviceName
         settings.copyRemoteToClipboard = snapshot.copyRemoteToClipboard
         settings.addClipboardOnLaunch = snapshot.addClipboardOnLaunch
+        settings.copyLinkNamesByDefault = snapshot.copyLinkNamesByDefault
         settings.historySort = snapshot.historySort
         settings.richTextEnabled = snapshot.richTextEnabled
         settings.richTextImagesEnabled = snapshot.richTextImagesEnabled
@@ -1677,11 +1730,10 @@ private fun ClipmanApp(
             entry = entry,
             links = links,
             onDismiss = { viewingEntry = null },
-            onCopy = {
-                RichTextClipboard.write(context, entry, richTextEnabled)
-                playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
-                setTransientStatus("Copied selected entry to Android clipboard.")
-            },
+            onCopy = { copyEntryToClipboard(entry) },
+            onCopyLink = { copyEntryToClipboard(entry, includeLinkName = false) },
+            onCopyNameAndLink = { copyEntryToClipboard(entry, includeLinkName = true) },
+            copyLinkNamesByDefault = copyLinkNamesByDefault,
             onOpenLink = { link ->
                 openLink(context, link)
             },
@@ -1707,13 +1759,31 @@ private fun ClipmanApp(
             }
         )
     }
+    if (showingHistoryMoreActions) {
+        HistoryMoreActionsDialog(
+            sections = historyMoreSections,
+            onSectionChanged = { selected ->
+                section = selected
+                showingHistoryMoreActions = false
+            },
+            onOpenSettings = {
+                showingHistoryMoreActions = false
+                showConnectionSettings = true
+            },
+            onDismiss = { showingHistoryMoreActions = false }
+        )
+    }
     if (showingQuickClip) {
         EntryPropertiesDialog(
-            entry = ClipEntry(),
+            entry = activeQuickClipDraft ?: ClipEntry(),
             isNew = true,
-            onDismiss = { showingQuickClip = false },
+            onDraftChanged = { updated ->
+                activeQuickClipDraft = updated
+                onQuickClipDraftChanged(updated)
+            },
+            onDismiss = { discardQuickClip() },
             onSave = { entry ->
-                showingQuickClip = false
+                discardQuickClip()
                 saveDatabaseChange("Saving Quick Clip", "Quick Clip saved.") { current ->
                     SyncConflictResolver.addManualEntry(
                         current,
@@ -1950,6 +2020,8 @@ private fun ClipmanApp(
                 onCopyRemoteToClipboardChanged = { copyRemoteToClipboard = it },
                 addClipboardOnLaunch = addClipboardOnLaunch,
                 onAddClipboardOnLaunchChanged = { addClipboardOnLaunch = it },
+                copyLinkNamesByDefault = copyLinkNamesByDefault,
+                onCopyLinkNamesByDefaultChanged = { copyLinkNamesByDefault = it },
                 historySort = sortMode,
                 onHistorySortChanged = { sortMode = it },
                 richTextEnabled = richTextEnabled,
@@ -2070,6 +2142,7 @@ private fun ClipmanApp(
                         deviceName = deviceName,
                         copyRemoteToClipboard = copyRemoteToClipboard,
                         addClipboardOnLaunch = addClipboardOnLaunch,
+                        copyLinkNamesByDefault = copyLinkNamesByDefault,
                         historySort = sortMode,
                         richTextEnabled = richTextEnabled,
                         richTextImagesEnabled = richTextEnabled && richTextImagesEnabled,
@@ -2126,6 +2199,7 @@ private fun ClipmanApp(
                             deviceName = savedSettings.deviceName
                             copyRemoteToClipboard = savedSettings.copyRemoteToClipboard
                             addClipboardOnLaunch = savedSettings.addClipboardOnLaunch
+                            copyLinkNamesByDefault = savedSettings.copyLinkNamesByDefault
                             sortMode = savedSettings.historySort
                             richTextEnabled = savedSettings.richTextEnabled
                             richTextImagesEnabled = savedSettings.richTextImagesEnabled
@@ -2170,21 +2244,18 @@ private fun ClipmanApp(
             modifier = Modifier.semantics { heading() }
         )
         HistoryToolbar(
-            section = section,
-            sections = visibleSections,
             entriesShown = visibleEntries.size,
             filterLabel = if (historyFilterKind == HistoryFilterKind.Device) {
                 "Device ${deviceFilter.ifBlank { "All" }}"
             } else {
                 groupFilter.ifBlank { "All" }
             },
-            onSectionChanged = {
-                section = it
-                groupFilter = ""
-            },
             onAddClipboard = { addCurrentClipboardText() },
-            onQuickClip = { showingQuickClip = true },
-            onOpenSettings = { showConnectionSettings = true },
+            onQuickClip = { beginQuickClip() },
+            onMore = {
+                historyMoreSections = visibleSections.filter { it != section }
+                showingHistoryMoreActions = true
+            },
             onGroup = { showGroupPicker = true },
             onTop = { scope.launch { selectedListState.animateScrollToItem(0) } }
         )
@@ -2230,11 +2301,12 @@ private fun ClipmanApp(
                         entry = entry,
                         index = index,
                         total = pageEntries.size,
+                        copyLinkNamesByDefault = copyLinkNamesByDefault,
                         onCopy = {
-                            RichTextClipboard.write(context, entry, richTextEnabled)
-                            playFeedback(context, ClipmanSound.Copy, playSounds, useHaptics)
-                            setTransientStatus("Copied selected entry to Android clipboard.")
+                            copyEntryToClipboard(entry)
                         },
+                        onCopyLink = { copyEntryToClipboard(entry, includeLinkName = false) },
+                        onCopyNameAndLink = { copyEntryToClipboard(entry, includeLinkName = true) },
                         onView = { viewingEntry = entry },
                         onOpenLink = { link -> openLink(context, link) },
                         onEdit = { editingEntry = entry },
@@ -2349,6 +2421,9 @@ private fun ViewEntryDialog(
     links: List<String>,
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
+    onCopyLink: () -> Unit,
+    onCopyNameAndLink: () -> Unit,
+    copyLinkNamesByDefault: Boolean,
     onOpenLink: (String) -> Unit,
     onEdit: () -> Unit,
     onUseWebsiteTitle: () -> Unit
@@ -2424,8 +2499,18 @@ private fun ViewEntryDialog(
             }
         },
         confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onCopy) { Text("Copy") }
+            Column(horizontalAlignment = Alignment.End) {
+                val isStandaloneLink = LinkPresentation.isStandaloneLink(entry.Text)
+                val hasNamedLink = isStandaloneLink && entry.Name.isNotBlank()
+                if (!isStandaloneLink) {
+                    TextButton(onClick = onCopy) { Text("Copy") }
+                }
+                if (hasNamedLink && copyLinkNamesByDefault) {
+                    TextButton(onClick = onCopyLink) { Text("Copy Link") }
+                }
+                if (hasNamedLink && !copyLinkNamesByDefault) {
+                    TextButton(onClick = onCopyNameAndLink) { Text("Copy Name and Link") }
+                }
                 TextButton(onClick = onEdit) { Text("Edit") }
                 if (entry.Name.isBlank() && LinkPresentation.isFetchableHttpUrl(entry.Text)) {
                     TextButton(onClick = onUseWebsiteTitle) { Text("Use Website Title as Name") }
@@ -2513,14 +2598,11 @@ private fun GroupPickerDialog(
 
 @Composable
 private fun HistoryToolbar(
-    section: HistorySection,
-    sections: List<HistorySection>,
     entriesShown: Int,
     filterLabel: String,
-    onSectionChanged: (HistorySection) -> Unit,
     onAddClipboard: () -> Unit,
     onQuickClip: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onMore: () -> Unit,
     onGroup: () -> Unit,
     onTop: () -> Unit
 ) {
@@ -2540,13 +2622,9 @@ private fun HistoryToolbar(
             }
             TextButton(
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val current = sections.indexOf(section).coerceAtLeast(0)
-                    onSectionChanged(sections[(current + 1) % sections.size])
-                }
+                onClick = onMore
             ) {
-                val current = sections.indexOf(section).coerceAtLeast(0)
-                Text("Switch to ${sections[(current + 1) % sections.size].label}")
+                Text("More")
             }
         }
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -2556,10 +2634,7 @@ private fun HistoryToolbar(
                     .semantics { contentDescription = "Filter history, current filter $filterLabel" },
                 onClick = onGroup
             ) {
-                Text("Filter")
-            }
-            TextButton(modifier = Modifier.weight(1f), onClick = onOpenSettings) {
-                Text("Settings")
+                Text("Filter: $filterLabel")
             }
             TextButton(
                 modifier = Modifier.weight(1f),
@@ -2610,6 +2685,8 @@ private fun ConnectionSettingsScreen(
     onCopyRemoteToClipboardChanged: (Boolean) -> Unit,
     addClipboardOnLaunch: Boolean,
     onAddClipboardOnLaunchChanged: (Boolean) -> Unit,
+    copyLinkNamesByDefault: Boolean,
+    onCopyLinkNamesByDefaultChanged: (Boolean) -> Unit,
     historySort: HistorySort,
     onHistorySortChanged: (HistorySort) -> Unit,
     richTextEnabled: Boolean,
@@ -2821,6 +2898,16 @@ private fun ConnectionSettingsScreen(
                 onCheckedChange = onAddClipboardOnLaunchChanged,
                 label = "Add current clipboard to history on launch",
                 enabled = !isSaving
+            )
+            SettingCheckboxRow(
+                checked = copyLinkNamesByDefault,
+                onCheckedChange = onCopyLinkNamesByDefaultChanged,
+                label = "Copy link names by default",
+                enabled = !isSaving
+            )
+            Text(
+                "When a link has a name, ordinary copy puts the name on the first line and the link on the second. The opposite copy format remains available as a separate action.",
+                style = MaterialTheme.typography.bodySmall
             )
             SettingCheckboxRow(
                 checked = richTextEnabled,
@@ -3051,6 +3138,7 @@ internal fun SettingCheckboxRow(
 private fun EntryPropertiesDialog(
     entry: ClipEntry,
     isNew: Boolean = false,
+    onDraftChanged: ((ClipEntry) -> Unit)? = null,
     onDismiss: () -> Unit,
     onSave: (ClipEntry) -> Unit,
     onDelete: (() -> Unit)?
@@ -3065,6 +3153,20 @@ private fun EntryPropertiesDialog(
 
     LaunchedEffect(isNew) {
         if (isNew) textFocusRequester.requestFocus()
+    }
+
+    LaunchedEffect(name, group, text, pinned, isTemplate) {
+        if (isNew) {
+            onDraftChanged?.invoke(
+                entry.copy(
+                    Name = name,
+                    Group = group,
+                    Text = text,
+                    Pinned = pinned,
+                    IsTemplate = isTemplate
+                )
+            )
+        }
     }
 
     AlertDialog(
@@ -3160,7 +3262,10 @@ private fun ClipEntryCard(
     entry: ClipEntry,
     index: Int,
     total: Int,
+    copyLinkNamesByDefault: Boolean,
     onCopy: () -> Unit,
+    onCopyLink: () -> Unit,
+    onCopyNameAndLink: () -> Unit,
     onView: () -> Unit,
     onOpenLink: (String) -> Unit,
     onEdit: () -> Unit,
@@ -3184,18 +3289,23 @@ private fun ClipEntryCard(
     }
     val links = remember(entry.Text) { extractLinksForHistoryRow(entry.Text) }
     val canOpen = links.size == 1
+    val hasNamedLink = entry.Name.isNotBlank() && LinkPresentation.isStandaloneLink(entry.Text)
     val canUseWebsiteTitle = entry.Name.isBlank() && LinkPresentation.isFetchableHttpUrl(entry.Text)
     val actions = clipEntryActionSpecs(
         canOpen,
         canUseWebsiteTitle,
         entry.Pinned,
-        hasEmbeddedImage = embeddedImage != null
+        hasEmbeddedImage = embeddedImage != null,
+        hasNamedLink = hasNamedLink,
+        copyLinkNamesByDefault = copyLinkNamesByDefault
     ).map { spec ->
         CustomAccessibilityAction(spec.label) {
             when (spec.kind) {
                 ClipEntryActionKind.Open -> onOpenLink(links.single())
                 ClipEntryActionKind.View -> onView()
                 ClipEntryActionKind.Edit -> onEdit()
+                ClipEntryActionKind.CopyLink -> onCopyLink()
+                ClipEntryActionKind.CopyNameAndLink -> onCopyNameAndLink()
                 ClipEntryActionKind.UseWebsiteTitle -> onUseWebsiteTitle()
                 ClipEntryActionKind.Pin -> onTogglePinned()
                 ClipEntryActionKind.Delete -> onDelete()
@@ -3269,6 +3379,8 @@ internal enum class ClipEntryActionKind {
     Open,
     View,
     Edit,
+    CopyLink,
+    CopyNameAndLink,
     UseWebsiteTitle,
     Pin,
     Delete,
@@ -3282,20 +3394,65 @@ internal fun clipEntryActionSpecs(
     canOpen: Boolean,
     canUseWebsiteTitle: Boolean,
     pinned: Boolean,
-    hasEmbeddedImage: Boolean = false
+    hasEmbeddedImage: Boolean = false,
+    hasNamedLink: Boolean = false,
+    copyLinkNamesByDefault: Boolean = false
 ): List<ClipEntryActionSpec> = buildList {
-    if (canOpen) add(ClipEntryActionSpec(ClipEntryActionKind.Open, "Open"))
-    add(ClipEntryActionSpec(ClipEntryActionKind.View, "View"))
-    add(ClipEntryActionSpec(ClipEntryActionKind.Edit, "Edit"))
+    // VoiceOver presents the explicit alternate copy action before the row's swipe
+    // actions. TalkBack presents this list directly, so keep that encountered order.
+    if (hasNamedLink && copyLinkNamesByDefault) {
+        add(ClipEntryActionSpec(ClipEntryActionKind.CopyLink, "Copy Link"))
+    }
+    if (hasNamedLink && !copyLinkNamesByDefault) {
+        add(ClipEntryActionSpec(ClipEntryActionKind.CopyNameAndLink, "Copy Name and Link"))
+    }
     if (canUseWebsiteTitle) {
         add(ClipEntryActionSpec(ClipEntryActionKind.UseWebsiteTitle, "Use Website Title as Name"))
     }
-    add(ClipEntryActionSpec(ClipEntryActionKind.Pin, if (pinned) "Unpin" else "Pin"))
-    add(ClipEntryActionSpec(ClipEntryActionKind.Delete, "Delete"))
+    if (canOpen) add(ClipEntryActionSpec(ClipEntryActionKind.Open, "Open Link"))
+    add(ClipEntryActionSpec(ClipEntryActionKind.View, "View Entry"))
+    add(ClipEntryActionSpec(ClipEntryActionKind.Edit, "Edit Entry"))
+    add(ClipEntryActionSpec(ClipEntryActionKind.Pin, if (pinned) "Unpin Entry" else "Pin Entry"))
+    add(ClipEntryActionSpec(ClipEntryActionKind.Delete, "Delete Entry"))
     if (hasEmbeddedImage) {
         add(ClipEntryActionSpec(ClipEntryActionKind.SaveToPhotos, AndroidImageEntryActionPolicy.saveToPhotosLabel))
         add(ClipEntryActionSpec(ClipEntryActionKind.Share, AndroidImageEntryActionPolicy.shareLabel))
     }
+}
+
+@Composable
+private fun HistoryMoreActionsDialog(
+    sections: List<HistorySection>,
+    onSectionChanged: (HistorySection) -> Unit,
+    onOpenSettings: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("More") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                sections.forEach { section ->
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onSectionChanged(section) }
+                    ) {
+                        Text("Switch to ${section.label}")
+                    }
+                }
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOpenSettings
+                ) {
+                    Text("Settings")
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }
 
 private fun filteredAndSortedEntries(

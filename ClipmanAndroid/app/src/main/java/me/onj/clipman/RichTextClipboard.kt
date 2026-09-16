@@ -71,6 +71,11 @@ object RichTextClipboard {
         clipboard.setPrimaryClip(clip)
     }
 
+    fun writePlainText(context: Context, text: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Clipman entry", text))
+    }
+
     internal fun planWrite(entry: ClipEntry, includeRichText: Boolean): ClipboardWritePlan {
         val storedRichText = normalize(entry.RichText)
         val embeddedImage = EmbeddedImageRichText.parse(storedRichText)

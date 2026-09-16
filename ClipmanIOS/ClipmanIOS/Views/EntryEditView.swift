@@ -20,8 +20,8 @@ struct EntryEditView: View {
         isNew = false
     }
 
-    init() {
-        _draft = State(initialValue: ClipEntry())
+    init(quickClipDraft: ClipEntry) {
+        _draft = State(initialValue: quickClipDraft)
         isNew = true
     }
 
@@ -29,14 +29,14 @@ struct EntryEditView: View {
         NavigationStack {
             Form {
                 Section("Details") {
-                    TextField("Name", text: $draft.Name)
+                    TextField("Name", text: draftBinding(\.Name))
                         .accessibilityLabel("Name")
                         .accessibilityHint("Edits the optional name shown for this entry.")
-                    TextField("Group", text: $draft.Group)
+                    TextField("Group", text: draftBinding(\.Group))
                         .accessibilityLabel("Group")
                         .accessibilityHint("Edits the group assigned to this entry.")
-                    Toggle("Pinned", isOn: $draft.Pinned)
-                    Toggle("Template", isOn: $draft.IsTemplate)
+                    Toggle("Pinned", isOn: draftBinding(\.Pinned))
+                    Toggle("Template", isOn: draftBinding(\.IsTemplate))
                         .disabled(hasEmbeddedImage)
                         .accessibilityHint(hasEmbeddedImage ? "Image content cannot be used as a template." : "Uses template fields when this entry is copied or pasted.")
                 }
@@ -52,7 +52,7 @@ struct EntryEditView: View {
                     }
                 } else {
                     Section("Clipboard text") {
-                        TextEditor(text: $draft.Text)
+                        TextEditor(text: draftBinding(\.Text))
                             .frame(minHeight: 180)
                             .focused($focusedField, equals: .text)
                             .accessibilityLabel("Clipboard text")
@@ -63,12 +63,15 @@ struct EntryEditView: View {
             .navigationTitle(isNew ? "Quick Clip" : "Edit Entry")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        if isNew { app.discardQuickClipDraft() }
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         if isNew {
-                            app.addQuickClip(draft)
+                            app.saveQuickClipDraft(draft)
                         } else {
                             app.update(draft)
                         }
@@ -81,5 +84,15 @@ struct EntryEditView: View {
                 if isNew { focusedField = .text }
             }
         }
+    }
+
+    private func draftBinding<Value>(_ keyPath: WritableKeyPath<ClipEntry, Value>) -> Binding<Value> {
+        Binding(
+            get: { draft[keyPath: keyPath] },
+            set: { value in
+                draft[keyPath: keyPath] = value
+                if isNew { app.updateQuickClipDraft(draft) }
+            }
+        )
     }
 }

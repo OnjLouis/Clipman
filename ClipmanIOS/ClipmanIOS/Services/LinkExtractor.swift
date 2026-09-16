@@ -48,10 +48,14 @@ enum LinkExtractor {
     }
 
     static func exactHTTPURL(in entry: ClipEntry) -> URL? {
-        guard let url = pureHTTPURL(in: entry.Text),
+        guard let url = exactURL(in: entry),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else { return nil }
         return url
+    }
+
+    static func exactURL(in entry: ClipEntry) -> URL? {
+        pureHTTPURL(in: entry.Text)
     }
 
     static func isLinkEntry(_ entry: ClipEntry) -> Bool {

@@ -123,6 +123,7 @@ struct ClipmanSettings: Equatable, Sendable {
     var hapticsEnabled: Bool
     var autoCopyRemote: Bool
     var addClipboardOnLaunch: Bool
+    var copyLinkNamesByDefault: Bool
     var requireAuthentication: Bool
     var linksEnabled: Bool
     var richTextEnabled: Bool
@@ -155,6 +156,7 @@ struct ClipmanSettings: Equatable, Sendable {
             hapticsEnabled: true,
             autoCopyRemote: false,
             addClipboardOnLaunch: false,
+            copyLinkNamesByDefault: false,
             requireAuthentication: false,
             linksEnabled: true,
             richTextEnabled: false,
@@ -180,6 +182,7 @@ enum SettingsStore {
         static let hapticsEnabled = "hapticsEnabled"
         static let autoCopyRemote = "autoCopyRemote"
         static let addClipboardOnLaunch = "addClipboardOnLaunch"
+        static let copyLinkNamesByDefault = "copyLinkNamesByDefault"
         static let requireAuthentication = "requireAuthentication"
         static let linksEnabled = "linksEnabled"
         static let richTextEnabled = "richTextEnabled"
@@ -207,6 +210,7 @@ enum SettingsStore {
         settings.hapticsEnabled = UserDefaults.standard.object(forKey: Keys.hapticsEnabled) as? Bool ?? true
         settings.autoCopyRemote = UserDefaults.standard.object(forKey: Keys.autoCopyRemote) as? Bool ?? false
         settings.addClipboardOnLaunch = UserDefaults.standard.object(forKey: Keys.addClipboardOnLaunch) as? Bool ?? false
+        settings.copyLinkNamesByDefault = UserDefaults.standard.object(forKey: Keys.copyLinkNamesByDefault) as? Bool ?? false
         settings.requireAuthentication = UserDefaults.standard.object(forKey: Keys.requireAuthentication) as? Bool ?? false
         settings.linksEnabled = UserDefaults.standard.object(forKey: Keys.linksEnabled) as? Bool ?? true
         settings.richTextEnabled = UserDefaults.standard.object(forKey: Keys.richTextEnabled) as? Bool ?? false
@@ -261,6 +265,7 @@ enum SettingsStore {
         UserDefaults.standard.set(settings.hapticsEnabled, forKey: Keys.hapticsEnabled)
         UserDefaults.standard.set(settings.autoCopyRemote, forKey: Keys.autoCopyRemote)
         UserDefaults.standard.set(settings.addClipboardOnLaunch, forKey: Keys.addClipboardOnLaunch)
+        UserDefaults.standard.set(settings.copyLinkNamesByDefault, forKey: Keys.copyLinkNamesByDefault)
         UserDefaults.standard.set(settings.requireAuthentication, forKey: Keys.requireAuthentication)
         UserDefaults.standard.set(settings.linksEnabled, forKey: Keys.linksEnabled)
         UserDefaults.standard.set(settings.richTextEnabled, forKey: Keys.richTextEnabled)

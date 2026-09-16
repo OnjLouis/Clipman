@@ -74,6 +74,38 @@ final class LinkDisplayTests: XCTestCase {
         XCTAssertFalse(LinkExtractor.isPureLinkEntry(ClipEntry(Text: "Read \(stored)")))
     }
 
+    func testNamedLinkClipboardTextKeepsTheStoredURLAndUsesOneLineForTheName() throws {
+        let entry = ClipEntry(
+            Text: "https://example.org/articles/screen-reader-access  link",
+            Name: "  Screen reader access  "
+        )
+        let url = try XCTUnwrap(LinkExtractor.exactHTTPURL(in: entry))
+
+        XCTAssertEqual(
+            LinkClipboardText.make(entry: entry, url: url, includeName: true),
+            "Screen reader access\nhttps://example.org/articles/screen-reader-access"
+        )
+        XCTAssertEqual(
+            LinkClipboardText.make(entry: entry, url: url, includeName: false),
+            "https://example.org/articles/screen-reader-access"
+        )
+        XCTAssertEqual(
+            LinkClipboardText.make(entry: ClipEntry(Text: entry.Text), url: url, includeName: true),
+            "https://example.org/articles/screen-reader-access"
+        )
+    }
+
+    func testNamedPrivateConfigurationLinkCanUseTheSameCopyChoices() throws {
+        let entry = ClipEntry(Text: "clipman://server.example/setup", Name: "Home server")
+        let url = try XCTUnwrap(LinkExtractor.exactURL(in: entry))
+
+        XCTAssertEqual(
+            LinkClipboardText.make(entry: entry, url: url, includeName: true),
+            "Home server\nclipman://server.example/setup"
+        )
+        XCTAssertNil(LinkExtractor.exactHTTPURL(in: entry))
+    }
+
     func testLinksHistoryContainsOnlyStandaloneLinkEntries() throws {
         let standalone = ClipEntry(Id: "standalone", Text: "https://example.com/one", Pinned: true)
         let prose = ClipEntry(

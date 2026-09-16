@@ -17,9 +17,9 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - Show the private local cache immediately in Shared Folder or Server mode, then refresh and merge with the selected storage in the background.
 - Browse Text, Links, and optional Rich Text history.
 - Add the current iOS clipboard text into Clipman while the app is open.
-- Use Quick Clip to type a new entry directly, including its optional Name, Group, pinned state, and template setting.
+- Use Quick Clip to type a new entry directly, including its optional Name, Group, pinned state, and template setting. An unfinished draft survives leaving or suspending the app until it is saved or explicitly cancelled.
 - Optionally offer to add the current iOS clipboard text after each successful unlock and initial history refresh. Clipman only presents the choice when the pasteboard advertises text. The full-screen choice uses Apple's paste control, so Paste is explicit and Cancel or a VoiceOver scrub leaves history unchanged.
-- Copy an entry back to the iOS clipboard.
+- Copy an entry back to the iOS clipboard. Named links provide one context-aware alternative action: name plus link when ordinary copy uses the bare link, or bare link when the off-by-default name setting is enabled.
 - Optionally back up encrypted history to a folder selected through Files, including iCloud Drive and supported third-party providers. Restore merges entries and deletion records with current history; the backup never includes server tokens, settings, or passwords.
 - Use the built-in **Quick Clip**, **Add Clipboard to Clipman**, and **Copy Latest Clip** actions from Shortcuts, Siri, or the iPhone Action Button. The actions honour Clipman's authentication setting and continue safely from the encrypted local cache if the server is unavailable.
 - Long-press the Clipman Home Screen icon for the same Quick Clip, Add Clipboard, and Copy Latest Clip commands.
@@ -29,7 +29,7 @@ The iOS app is built with SwiftUI. It intentionally does not poll the clipboard 
 - Check the shared-folder or server revision every five seconds while active, load history only when it changed, pause behind Settings or in the background, and back off connection failures.
 - Preserve supported iOS clipboard content across the initial server refresh and add it only when it is not already in history, so launch capture cannot take ownership of an existing entry.
 - When startup clipboard import and automatic remote copying are both enabled, preserve and save supported clipboard content already on the device before allowing the initial server refresh to copy anything back.
-- Make an optional one-time tip through Apple's in-app purchase system. Tips do not unlock features or content.
+- Expand **Support Clipman** in Settings to load optional one-time tips through Apple's in-app purchase system. Tips do not unlock features or content.
 
 ## Build Notes
 

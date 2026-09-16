@@ -39,15 +39,50 @@ class ClipEntryActionOrderTest {
     @Test
     fun allAvailableActionsMatchTheCrossPlatformOrder() {
         assertEquals(
-            listOf("Open", "View", "Edit", "Use Website Title as Name", "Pin", "Delete"),
+            listOf(
+                "Use Website Title as Name",
+                "Open Link",
+                "View Entry",
+                "Edit Entry",
+                "Pin Entry",
+                "Delete Entry"
+            ),
             clipEntryActionSpecs(canOpen = true, canUseWebsiteTitle = true, pinned = false).map { it.label }
+        )
+    }
+
+    @Test
+    fun namedLinkOffersNameAndLinkWhenOrdinaryCopyUsesTheBareLink() {
+        assertEquals(
+            listOf("Copy Name and Link", "Open Link", "View Entry", "Edit Entry", "Pin Entry", "Delete Entry"),
+            clipEntryActionSpecs(
+                canOpen = true,
+                canUseWebsiteTitle = false,
+                pinned = false,
+                hasNamedLink = true,
+                copyLinkNamesByDefault = false
+            ).map { it.label }
+        )
+    }
+
+    @Test
+    fun namedLinkOffersBareLinkWhenOrdinaryCopyIncludesTheName() {
+        assertEquals(
+            listOf("Copy Link", "Open Link", "View Entry", "Edit Entry", "Pin Entry", "Delete Entry"),
+            clipEntryActionSpecs(
+                canOpen = true,
+                canUseWebsiteTitle = false,
+                pinned = false,
+                hasNamedLink = true,
+                copyLinkNamesByDefault = true
+            ).map { it.label }
         )
     }
 
     @Test
     fun optionalActionsDisappearWithoutChangingTheRemainingOrder() {
         assertEquals(
-            listOf("View", "Edit", "Unpin", "Delete"),
+            listOf("View Entry", "Edit Entry", "Unpin Entry", "Delete Entry"),
             clipEntryActionSpecs(canOpen = false, canUseWebsiteTitle = false, pinned = true).map { it.label }
         )
     }
@@ -55,7 +90,7 @@ class ClipEntryActionOrderTest {
     @Test
     fun embeddedImageActionsFollowTheCoreEntryActions() {
         assertEquals(
-            listOf("View", "Edit", "Pin", "Delete", "Save to Photos", "Share"),
+            listOf("View Entry", "Edit Entry", "Pin Entry", "Delete Entry", "Save to Photos", "Share"),
             clipEntryActionSpecs(
                 canOpen = false,
                 canUseWebsiteTitle = false,
@@ -68,7 +103,7 @@ class ClipEntryActionOrderTest {
     @Test
     fun nonImageEntriesDoNotExposeImageActions() {
         assertEquals(
-            listOf("View", "Edit", "Pin", "Delete"),
+            listOf("View Entry", "Edit Entry", "Pin Entry", "Delete Entry"),
             clipEntryActionSpecs(
                 canOpen = false,
                 canUseWebsiteTitle = false,

@@ -40,7 +40,7 @@ struct HistoryView: View {
                     }
                         .accessibilityHint("Adds the current iOS clipboard text and available formatting to Clipman.")
                     Button("Quick Clip", systemImage: "square.and.pencil") {
-                        app.showingQuickClip = true
+                        app.beginQuickClip()
                     }
                     .accessibilityHint("Creates a clipboard entry without changing the iOS clipboard.")
                     Button("More", systemImage: "ellipsis.circle") {
@@ -67,7 +67,7 @@ struct HistoryView: View {
                 EntryEditView(entry: entry)
             }
             .sheet(isPresented: $app.showingQuickClip) {
-                EntryEditView()
+                EntryEditView(quickClipDraft: app.quickClipDraft ?? ClipEntry())
             }
             .sheet(item: $imageShareFile) { file in
                 EmbeddedImageShareSheet(file: file) { completed, error in
@@ -175,7 +175,10 @@ struct HistoryView: View {
                 ForEach(app.visibleLinkItems(in: section)) { item in
                     LinkHistoryRow(
                         item: item,
-                        copy: { app.copyText(item.url.absoluteString) },
+                        copyLinkNamesByDefault: app.settings.copyLinkNamesByDefault,
+                        copy: { app.copyLink(item) },
+                        copyLinkOnly: { app.copyLink(item, includeName: false) },
+                        copyNameAndLink: { app.copyLink(item, includeName: true) },
                         open: { UIApplication.shared.open(item.url) },
                         view: { viewingEntry = item.entry },
                         edit: { editingEntry = item.entry },
@@ -194,7 +197,16 @@ struct HistoryView: View {
                 ForEach(app.visibleEntries(in: section)) { entry in
                     HistoryEntryRow(
                         entry: entry,
+                        copyLinkNamesByDefault: app.settings.copyLinkNamesByDefault,
                         copy: { app.copy(entry) },
+                        copyLinkOnly: {
+                            guard let url = LinkExtractor.exactURL(in: entry) else { return }
+                            app.copyLink(entry, url: url, includeName: false)
+                        },
+                        copyNameAndLink: {
+                            guard let url = LinkExtractor.exactURL(in: entry) else { return }
+                            app.copyLink(entry, url: url, includeName: true)
+                        },
                         view: { viewingEntry = entry },
                         edit: { editingEntry = entry },
                         togglePinned: { app.togglePinned(entry) },
@@ -361,7 +373,10 @@ enum HistoryDeletionFocusResolver {
 
 private struct HistoryEntryRow: View {
     let entry: ClipEntry
+    let copyLinkNamesByDefault: Bool
     let copy: () -> Void
+    let copyLinkOnly: () -> Void
+    let copyNameAndLink: () -> Void
     let view: () -> Void
     let edit: () -> Void
     let togglePinned: () -> Void
@@ -383,6 +398,22 @@ private struct HistoryEntryRow: View {
     private var websiteTitleURL: URL? {
         guard entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return LinkExtractor.exactHTTPURL(in: entry)
+    }
+
+    private var exactLinkURL: URL? {
+        LinkExtractor.exactURL(in: entry)
+    }
+
+    private var hasNamedLink: Bool {
+        exactLinkURL != nil && !entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showsCopyLinkAlternative: Bool {
+        hasNamedLink && copyLinkNamesByDefault
+    }
+
+    private var showsCopyNameAndLinkAlternative: Bool {
+        hasNamedLink && !copyLinkNamesByDefault
     }
 
     var body: some View {
@@ -429,11 +460,22 @@ private struct HistoryEntryRow: View {
             .accessibilityLabel(entry.accessibilityLabelText)
             .accessibilityHint("Double tap to copy to clipboard.")
             .accessibilityAddTraits(.isButton)
+            .namedLinkAccessibilityAction(enabled: showsCopyLinkAlternative, label: "Copy Link", action: copyLinkOnly)
+            .namedLinkAccessibilityAction(enabled: showsCopyNameAndLinkAlternative, action: copyNameAndLink)
             .websiteTitleAccessibilityAction(enabled: websiteTitleURL != nil) {
                 if let websiteTitleURL { useWebsiteTitle(websiteTitleURL) }
             }
             .contextMenu {
-                Button("Copy", action: copy)
+                if exactLinkURL != nil {
+                    if showsCopyLinkAlternative {
+                        Button("Copy Link", action: copyLinkOnly)
+                    }
+                    if showsCopyNameAndLinkAlternative {
+                        Button("Copy Name and Link", action: copyNameAndLink)
+                    }
+                } else {
+                    Button("Copy", action: copy)
+                }
                 if let url = singleLink {
                     Button("Open Link") { UIApplication.shared.open(url) }
                 }
@@ -464,7 +506,10 @@ private struct HistoryEntryRow: View {
 
 private struct LinkHistoryRow: View {
     let item: LinkExtractor.LinkItem
+    let copyLinkNamesByDefault: Bool
     let copy: () -> Void
+    let copyLinkOnly: () -> Void
+    let copyNameAndLink: () -> Void
     let open: () -> Void
     let view: () -> Void
     let edit: () -> Void
@@ -475,6 +520,18 @@ private struct LinkHistoryRow: View {
     private var canUseWebsiteTitle: Bool {
         return item.entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && LinkExtractor.isExactWebsiteTitleTarget(item.entry, matching: item.url)
+    }
+
+    private var hasName: Bool {
+        !item.entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showsCopyLinkAlternative: Bool {
+        hasName && copyLinkNamesByDefault
+    }
+
+    private var showsCopyNameAndLinkAlternative: Bool {
+        hasName && !copyLinkNamesByDefault
     }
 
     var body: some View {
@@ -517,9 +574,16 @@ private struct LinkHistoryRow: View {
         .accessibilityLabel(item.accessibilityLabelText)
         .accessibilityHint("Double tap to copy link to clipboard.")
         .accessibilityAddTraits(.isButton)
+        .namedLinkAccessibilityAction(enabled: showsCopyLinkAlternative, label: "Copy Link", action: copyLinkOnly)
+        .namedLinkAccessibilityAction(enabled: showsCopyNameAndLinkAlternative, action: copyNameAndLink)
         .websiteTitleAccessibilityAction(enabled: canUseWebsiteTitle, action: useWebsiteTitle)
         .contextMenu {
-            Button("Copy Link", action: copy)
+            if showsCopyLinkAlternative {
+                Button("Copy Link", action: copyLinkOnly)
+            }
+            if showsCopyNameAndLinkAlternative {
+                Button("Copy Name and Link", action: copyNameAndLink)
+            }
             Button("Open Link", action: open)
             Button("View", action: view)
             Button("Edit", action: edit)
@@ -533,6 +597,19 @@ private struct LinkHistoryRow: View {
 }
 
 private extension View {
+    @ViewBuilder
+    func namedLinkAccessibilityAction(
+        enabled: Bool,
+        label: String = "Copy Name and Link",
+        action: @escaping () -> Void
+    ) -> some View {
+        if enabled {
+            accessibilityAction(named: label, action)
+        } else {
+            self
+        }
+    }
+
     @ViewBuilder
     func websiteTitleAccessibilityAction(enabled: Bool, action: @escaping () -> Void) -> some View {
         if enabled {

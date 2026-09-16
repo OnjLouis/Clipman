@@ -22,7 +22,30 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
-    throw 'JAVA_HOME must point to a JDK 17 or newer installation.'
+    throw 'JAVA_HOME must point to a JDK 17 installation.'
+}
+$javaExecutable = @(
+    (Join-Path $env:JAVA_HOME 'bin\java.exe'),
+    (Join-Path $env:JAVA_HOME 'bin/java')
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($javaExecutable)) {
+    throw "JAVA_HOME does not contain a Java executable: $env:JAVA_HOME"
+}
+$javaVersionProcess = New-Object Diagnostics.ProcessStartInfo
+$javaVersionProcess.FileName = $javaExecutable
+$javaVersionProcess.Arguments = '-version'
+$javaVersionProcess.UseShellExecute = $false
+$javaVersionProcess.RedirectStandardOutput = $true
+$javaVersionProcess.RedirectStandardError = $true
+$javaVersionResult = [Diagnostics.Process]::Start($javaVersionProcess)
+$javaVersionText = $javaVersionResult.StandardError.ReadToEnd() + $javaVersionResult.StandardOutput.ReadToEnd()
+$javaVersionResult.WaitForExit()
+if ($javaVersionResult.ExitCode -ne 0) {
+    throw "Could not inspect JAVA_HOME with '$javaExecutable -version'."
+}
+$javaVersionMatch = [regex]::Match($javaVersionText, 'version\s+"(?<major>\d+)')
+if (!$javaVersionMatch.Success -or [int]$javaVersionMatch.Groups['major'].Value -ne 17) {
+    throw "Clipman Android requires JDK 17 exactly. JAVA_HOME is '$env:JAVA_HOME' and reported: $($javaVersionText.Trim())"
 }
 $androidSdk = if (![string]::IsNullOrWhiteSpace($env:ANDROID_SDK_ROOT)) { $env:ANDROID_SDK_ROOT } else { $env:ANDROID_HOME }
 if ([string]::IsNullOrWhiteSpace($androidSdk)) {

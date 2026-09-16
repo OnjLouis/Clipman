@@ -56,6 +56,27 @@ class LinkPresentationTest {
     }
 
     @Test
+    fun namedLinkClipboardTextKeepsTheStoredUrlAndUsesOneLineForTheName() {
+        val entry = ClipEntry(
+            Text = "https://example.org/articles/screen-reader-access  link",
+            Name = "  Screen reader access  "
+        )
+
+        assertEquals(
+            "Screen reader access\nhttps://example.org/articles/screen-reader-access",
+            LinkClipboardText.make(entry, includeName = true)
+        )
+        assertEquals(
+            "https://example.org/articles/screen-reader-access",
+            LinkClipboardText.make(entry, includeName = false)
+        )
+        assertEquals(
+            "https://example.org/articles/screen-reader-access",
+            LinkClipboardText.make(entry.copy(Name = ""), includeName = true)
+        )
+    }
+
+    @Test
     fun bareWebAddressesRemainLinkEntries() {
         assertTrue(LinkPresentation.isStandaloneLink("example.org/path"))
         assertEquals("Path; example.org/path", LinkPresentation.rowText(ClipEntry(Text = "example.org/path")))

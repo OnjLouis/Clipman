@@ -101,10 +101,10 @@
   <p>The main toolbar includes:</p>
   <ul>
     <li><strong>Paste</strong>: adds the current Android clipboard text and available HTML formatting to Clipman history when Rich Text history is enabled.</li>
-    <li><strong>Switch to Text</strong>, <strong>Switch to Rich Text</strong>, or <strong>Switch to Links</strong>: moves to the next enabled history section. Rich Text appears only when formatting preservation is enabled.</li>
+    <li><strong>Quick Clip</strong>: creates a new entry without replacing the Android clipboard. An unfinished draft survives switching apps or Android suspending Clipman until you save or explicitly cancel it.</li>
+    <li><strong>More</strong>: opens a stable menu containing every other enabled history section, Settings, and Close. Section changes preserve the current group or device filter.</li>
     <li><strong>Share to Clipman</strong>: choose Clipman from Android's share sheet to add text, a link, or one photo directly to history. Shared HTML is retained when Rich Text history is enabled.</li>
     <li><strong>Filter</strong>: shows All first, followed by named Groups and Devices in separate sections. Group and device names are not prefixed, so TalkBack can read them directly.</li>
-    <li><strong>Settings</strong>: opens the full-screen Settings screen.</li>
     <li><strong>Top</strong>: returns to the beginning of the current history list.</li>
     <li><strong>Status</strong>: the bottom status combines the number of entries in the current section with local or server state and temporary operation results. It is also a button: activate it to move to the end of the current history list, or long-press it to use the next sort order. TalkBack actions can choose Manual order, Newest first, Oldest first, or Text directly.</li>
 </ul>
@@ -114,7 +114,7 @@
 
   <p>Double-tap an entry to copy it to the Android clipboard. Clipman announces <strong>Copied to clipboard</strong> and plays the copy sound when sounds are enabled.</p>
 
-  <p>Long-press, or use TalkBack actions, to open <strong>View entry</strong>. The action order matches iPhone and iPad: <strong>Open link</strong> when the entry contains one link, <strong>View entry</strong>, <strong>Edit entry</strong>, <strong>Use Website Title as Name</strong> for one unnamed public HTTP or HTTPS link, <strong>Pin entry</strong> or <strong>Unpin entry</strong>, then <strong>Delete entry</strong>. An image entry then adds <strong>Save to Photos</strong> followed by <strong>Share</strong>; ordinary entries do not include those two actions. Clipman asks before contacting the selected site, can find useful titles on modern script-heavy pages, ignores misleading bot-check titles, and stores a successful result in the ordinary Name field. Local or private destinations, non-standard ports, credential-related parameters, signed requests and token-like paths are refused. Website titles are never fetched automatically or in bulk.</p>
+  <p>Long-press, or use TalkBack actions, to open <strong>View Entry</strong>. The action order matches iPhone and iPad. A named link first offers the copy format opposite to ordinary activation: <strong>Copy Name and Link</strong>, or <strong>Copy Link</strong> when named-link copying is enabled. An unnamed public HTTP or HTTPS link can instead offer <strong>Use Website Title as Name</strong>. Link actions then continue with <strong>Open Link</strong>, <strong>View Entry</strong>, <strong>Edit Entry</strong>, <strong>Pin Entry</strong> or <strong>Unpin Entry</strong>, and <strong>Delete Entry</strong>. An image entry then adds <strong>Save to Photos</strong> followed by <strong>Share</strong>; ordinary entries do not include those two actions. Clipman asks before contacting the selected site, can find useful titles on modern script-heavy pages, ignores misleading bot-check titles, and stores a successful result in the ordinary Name field. Local or private destinations, non-standard ports, credential-related parameters, signed requests and token-like paths are refused. Website titles are never fetched automatically or in bulk.</p>
 
   <h2 id="view-entry">View Entry</h2>
   <p><strong>View entry</strong> shows the clipboard text line by line so TalkBack can review it naturally.</p>

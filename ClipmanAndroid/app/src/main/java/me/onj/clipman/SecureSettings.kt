@@ -59,6 +59,14 @@ class AndroidSettings(context: Context) {
         get() = preferences.getBoolean("addClipboardOnLaunch", false)
         set(value) = preferences.edit().putBoolean("addClipboardOnLaunch", value).apply()
 
+    var copyLinkNamesByDefault: Boolean
+        get() = preferences.getBoolean("copyLinkNamesByDefault", false)
+        set(value) = preferences.edit().putBoolean("copyLinkNamesByDefault", value).apply()
+
+    var quickClipDraftPayload: String
+        get() = getString("quickClipDraftPayload")
+        set(value) = putString("quickClipDraftPayload", value)
+
     var historySort: HistorySort
         get() = HistorySort.fromStoredValue(preferences.getString("historySort", null))
         set(value) = preferences.edit().putString("historySort", value.storedValue).apply()

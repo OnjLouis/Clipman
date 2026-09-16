@@ -25,6 +25,7 @@
 		1D606F3AF13E42FEE401D59A /* PendingSharedTextStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B732D83BB668CA4B519F9B18 /* PendingSharedTextStoreTests.swift */; };
 		210E0E853E14D1545E4E9F9B /* EmbeddedImageActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2DD45D61DAC284441E87117 /* EmbeddedImageActionTests.swift */; };
 		27F6E1A23D45B312371BFEDC /* ClipmanAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E70064E80A3EF247968D286 /* ClipmanAppModel.swift */; };
+		2B73E32153634B876E5E86C8 /* QuickClipDraftStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70CCA2F218AD38918E882A9B /* QuickClipDraftStore.swift */; };
 		2C4499D2744D363D0FDAA807 /* copy.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2B73540DCE1C118E33B75CAF /* copy.wav */; };
 		2D6A40F4231C442F3B9FE479 /* HTMLEntityDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5958A72B23F83979A9200C6 /* HTMLEntityDecoder.swift */; };
 		3032B1A0EA6C2DF2194683F4 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CD05FE0E19C7744ACFD87B4 /* Security.framework */; };
@@ -45,6 +46,7 @@
 		60B3DA13369B6F9C5E9EEAAF /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DEBE1F15E6D167D47F35AE /* AuthenticationService.swift */; };
 		63230AB36E74FDD29076CE5A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D4195FBB5149532BA117A9B8 /* Assets.xcassets */; };
 		63AFA7C59E8422A22A98E7F0 /* ServerDatabaseIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */; };
+		687FC3196B47534C3B073F3F /* QuickClipDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB2EFB1F20C842F594E83B53 /* QuickClipDraftTests.swift */; };
 		6A857283F950DB08ABE7CB53 /* CloudHistoryBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */; };
 		7420302BAF4F059B6C321C95 /* SyncRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94940CAE7D6528560D7A1168 /* SyncRules.swift */; };
 		74F4E328D4514636B26AE593 /* DatabaseWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3757E95599655BFEB3101654 /* DatabaseWorker.swift */; };
@@ -53,6 +55,7 @@
 		80DF3940EAE12616EAA0047D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642C84289DC631AC184C2C31 /* Models.swift */; };
 		80E45DA5F475B7C4C11DCA46 /* SyncRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94940CAE7D6528560D7A1168 /* SyncRules.swift */; };
 		811C3C8A52CA33E287A66E3D /* EmbeddedImageActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB3337F4B5D8DCE696C3B0F /* EmbeddedImageActions.swift */; };
+		8A663E92DE347351DB43E840 /* LinkClipboardText.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBF05E24A7471BF1F390339E /* LinkClipboardText.swift */; };
 		8E14E84367FA3025E0FF6F54 /* ClipDatabaseSaltTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DA0CFB29CBE4E02F2F2C08 /* ClipDatabaseSaltTests.swift */; };
 		8F0D5F48C10FD6FABA1F693A /* SettingsMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421A92023DE62708F907B221 /* SettingsMigrationTests.swift */; };
 		8F36F2EE641D68D7866D98C6 /* ShareSyncConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF9BFECC49A353B1183B30A /* ShareSyncConfigurationStore.swift */; };
@@ -160,6 +163,7 @@
 		60F380468EAD667D829F4D30 /* off.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = off.wav; sourceTree = "<group>"; };
 		642C84289DC631AC184C2C31 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		706E33429FE88528D3BEAAE0 /* DeletionUXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionUXTests.swift; sourceTree = "<group>"; };
+		70CCA2F218AD38918E882A9B /* QuickClipDraftStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickClipDraftStore.swift; sourceTree = "<group>"; };
 		70E9160FA444DB6E3A61314E /* EntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryView.swift; sourceTree = "<group>"; };
 		721C35A41DED299959E74C8A /* ServerSettingsSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsSanitizer.swift; sourceTree = "<group>"; };
 		73C366AEA8A16804897C0B74 /* ClipDatabaseFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipDatabaseFile.swift; sourceTree = "<group>"; };
@@ -184,6 +188,7 @@
 		B732D83BB668CA4B519F9B18 /* PendingSharedTextStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSharedTextStoreTests.swift; sourceTree = "<group>"; };
 		B809A3FD1C9A5ADFE4D9E87D /* StatusPublicationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPublicationTests.swift; sourceTree = "<group>"; };
 		B93930D01A31ABF77524F78C /* skip.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = skip.wav; sourceTree = "<group>"; };
+		BBF05E24A7471BF1F390339E /* LinkClipboardText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkClipboardText.swift; sourceTree = "<group>"; };
 		C02D9422349D165D345B5D71 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		C622212374EB41352FE2ACC0 /* ShareSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSyncServiceTests.swift; sourceTree = "<group>"; };
 		C897A28F494E2398E450EF72 /* ClipmanShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClipmanShareExtension.entitlements; sourceTree = "<group>"; };
@@ -196,6 +201,7 @@
 		DE80C6C473747E57E01F38BD /* PendingSharedImageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSharedImageStoreTests.swift; sourceTree = "<group>"; };
 		E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanAppIntents.swift; sourceTree = "<group>"; };
 		E794D8E5ABCF25641147F7F3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EB2EFB1F20C842F594E83B53 /* QuickClipDraftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickClipDraftTests.swift; sourceTree = "<group>"; };
 		EE24A8535EA9BC2E20E5A203 /* BackupFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFolderPicker.swift; sourceTree = "<group>"; };
 		EFCE0C638D22648BD22C7867 /* LinkDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkDisplay.swift; sourceTree = "<group>"; };
 		F4C3A7208086EFE0482CCD9C /* WebsiteTitleFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteTitleFetcher.swift; sourceTree = "<group>"; };
@@ -276,6 +282,7 @@
 				20DAD07A69EEC91C4A73C6E6 /* LinkDisplayTests.swift */,
 				DE80C6C473747E57E01F38BD /* PendingSharedImageStoreTests.swift */,
 				B732D83BB668CA4B519F9B18 /* PendingSharedTextStoreTests.swift */,
+				EB2EFB1F20C842F594E83B53 /* QuickClipDraftTests.swift */,
 				421A92023DE62708F907B221 /* SettingsMigrationTests.swift */,
 				56A4B204CD27A6D152E8BC67 /* SharedFolderStorageClientTests.swift */,
 				C622212374EB41352FE2ACC0 /* ShareSyncServiceTests.swift */,
@@ -373,6 +380,7 @@
 				3757E95599655BFEB3101654 /* DatabaseWorker.swift */,
 				CB3C049A1958230E5EAFCBCC /* EmbeddedImage.swift */,
 				93D166EC7141EE64B5371FD2 /* Gzip.swift */,
+				BBF05E24A7471BF1F390339E /* LinkClipboardText.swift */,
 				98BD1A7B6DF3026608F8AB94 /* MobileHistoryRepository.swift */,
 				76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */,
 				642C84289DC631AC184C2C31 /* Models.swift */,
@@ -394,6 +402,7 @@
 				C02D9422349D165D345B5D71 /* KeychainStore.swift */,
 				EFCE0C638D22648BD22C7867 /* LinkDisplay.swift */,
 				FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */,
+				70CCA2F218AD38918E882A9B /* QuickClipDraftStore.swift */,
 				1D9F1160B15E56B6C8602519 /* ServerConnectionDocument.swift */,
 				721C35A41DED299959E74C8A /* ServerSettingsSanitizer.swift */,
 				1DEE98C808FFF8ACF4D7E982 /* ServerStorageClient.swift */,
@@ -551,6 +560,7 @@
 				2D6A40F4231C442F3B9FE479 /* HTMLEntityDecoder.swift in Sources */,
 				5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */,
 				C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */,
+				8A663E92DE347351DB43E840 /* LinkClipboardText.swift in Sources */,
 				B5D1D758FCE7614E543A5108 /* LinkDisplay.swift in Sources */,
 				40AD1042987A906BDF7CBF4B /* LinkExtractor.swift in Sources */,
 				C118156BAF0F9513BCCCBEFE /* MobileHistoryRepository.swift in Sources */,
@@ -558,6 +568,7 @@
 				80DF3940EAE12616EAA0047D /* Models.swift in Sources */,
 				0D9E71F12365D0E883798075 /* PendingSharedImageStore.swift in Sources */,
 				B126EC03990C775ED80CD68A /* PendingSharedTextStore.swift in Sources */,
+				2B73E32153634B876E5E86C8 /* QuickClipDraftStore.swift in Sources */,
 				A8912F558B14C788063B7A9B /* RootView.swift in Sources */,
 				C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */,
 				55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */,
@@ -613,6 +624,7 @@
 				907ECD326B3CCBAA44AD4DEC /* LinkDisplayTests.swift in Sources */,
 				05EA2EAD81ABF61AD07F9704 /* PendingSharedImageStoreTests.swift in Sources */,
 				1D606F3AF13E42FEE401D59A /* PendingSharedTextStoreTests.swift in Sources */,
+				687FC3196B47534C3B073F3F /* QuickClipDraftTests.swift in Sources */,
 				8F0D5F48C10FD6FABA1F693A /* SettingsMigrationTests.swift in Sources */,
 				517D038A8DD78B4940576C43 /* ShareSyncServiceTests.swift in Sources */,
 				BB5E14AB7BC4C8391E49E40D /* SharedFolderStorageClientTests.swift in Sources */,
@@ -643,7 +655,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
-				CURRENT_PROJECT_VERSION = 31101;
+				CURRENT_PROJECT_VERSION = 31102;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -668,7 +680,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31101;
+				CURRENT_PROJECT_VERSION = 31102;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -771,7 +783,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31101;
+				CURRENT_PROJECT_VERSION = 31102;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -880,7 +892,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
-				CURRENT_PROJECT_VERSION = 31101;
+				CURRENT_PROJECT_VERSION = 31102;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

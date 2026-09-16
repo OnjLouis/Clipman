@@ -92,6 +92,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.4 Android</h3>
+  <ul>
+    <li>Quick Clip now retains an unfinished draft when you switch apps or Android suspends Clipman. Save adds it to history, while Cancel deliberately discards it.</li>
+    <li>Named links can be copied as either the unchanged link or the saved Name followed by the link. The off-by-default <strong>Copy link names by default</strong> setting controls ordinary activation, while the entry menu and TalkBack actions expose only the opposite format instead of repeating the default.</li>
+    <li>Aligned the Android history controls with iOS: Paste, Quick Clip, and More form the primary toolbar; More contains section switching and Settings; Filter and Android's dedicated Top command remain directly available. Switching sections now preserves either a group or device filter consistently.</li>
+  </ul>
   <h3>3.1.4 Windows, macOS and Linux</h3>
   <ul>
     <li>Protected stored images when editing their properties. Image content is now clearly read-only while Name, Group, pinning, and Quick Paste settings remain editable, preventing an accidental text edit from discarding the embedded image.</li>
@@ -116,6 +122,9 @@
   </ul>
   <h3>3.1.1 Windows, Android and iOS</h3>
   <ul>
+    <li>iOS Quick Clip now retains an unfinished draft when you switch apps or iOS suspends Clipman. Save adds it to history, while Cancel deliberately discards it.</li>
+    <li>iOS named links can be copied as either the unchanged link or the saved Name followed by the link. The off-by-default <strong>Copy link names by default</strong> setting controls ordinary activation, while the entry menu and VoiceOver actions expose only the opposite format instead of repeating the default.</li>
+    <li>iOS Settings now keeps the optional Tip Jar inside a collapsed <strong>Support Clipman</strong> disclosure and loads locally priced tip choices only when it is opened.</li>
     <li>iOS protects stored images when editing their properties. Image content is now clearly read-only while Name, Group, and pinning remain editable, preventing an accidental text edit from discarding the embedded image.</li>
     <li>Android adds optional <strong>Shared Folder</strong> synchronization through Android's system folder picker. Clipman keeps an encrypted private cache, checks the selected folder before writing, merges concurrent and offline changes plus recognised provider conflict copies, and retries interrupted writes while Clipman is open. An existing encrypted-backup folder is reused as the initial choice. The provider must offer persistent read and write access; provider availability and synchronization remain controlled by Android and the installed storage app.</li>
     <li>Fixed repeated sync-rules downloads that could delay Quick Paste, clipboard capture and history changes while using Clipman Server.</li>
@@ -822,7 +831,7 @@
 
   <p><strong>Save Current Clipboard to History</strong> is another deliberate command that works while monitoring is off. Use it from the Clipman menu, or assign its optional global hotkey in Preferences. It reads the clipboard once and sends supported text, links, rich text, or files through normal duplicate, storage, and synchronization handling without turning monitoring on. Ignored-application and sensitive-pattern rules apply to automatic capture, so they do not block this explicit save; cooperative private-clipboard markers and concealed pasteboard data remain protected.</p>
 
-  <p><strong>Quick Clip</strong> creates a new saved entry without changing or reading the system clipboard. Press <code>Ctrl+N</code> on Windows or Linux, or <code>Command+N</code> on Mac, then enter the text and optional Name, Group, pin, or template setting. Enter adds a new line in the Clipboard text field; tab to Save when finished, press <code>Ctrl+Enter</code> on Windows or Linux, or press <code>Command+Enter</code> on Mac. Windows also accepts <code>Alt+S</code>, and Mac accepts <code>Command+S</code>. Desktop Preferences can assign an optional global Quick Clip hotkey so the editor can be opened from another application. On mobile, use the Quick Clip button beside Paste or long-press the Clipman launcher icon. iOS also offers Quick Clip through Siri, Shortcuts and the Action Button.</p>
+  <p><strong>Quick Clip</strong> creates a new saved entry without changing or reading the system clipboard. Press <code>Ctrl+N</code> on Windows or Linux, or <code>Command+N</code> on Mac, then enter the text and optional Name, Group, pin, or template setting. Enter adds a new line in the Clipboard text field; tab to Save when finished, press <code>Ctrl+Enter</code> on Windows or Linux, or press <code>Command+Enter</code> on Mac. Windows also accepts <code>Alt+S</code>, and Mac accepts <code>Command+S</code>. Desktop Preferences can assign an optional global Quick Clip hotkey so the editor can be opened from another application. On mobile, use the Quick Clip button beside Paste or long-press the Clipman launcher icon. iOS also offers Quick Clip through Siri, Shortcuts and the Action Button. Android and iOS retain an unfinished Quick Clip draft when you switch away or the operating system suspends Clipman; Save adds it to history, while Cancel deliberately discards it.</p>
 
   <p><strong>Open Link</strong> opens exactly one selected standalone HTTP or HTTPS entry in the default browser with <code>Alt+Enter</code> on Windows or Linux, or <code>Option+Enter</code> on Mac. It also works when Links history is disabled and the standalone link appears in Text history. Clipman does not launch ordinary prose containing a link or private <code>clipman://</code> configuration links through this command.</p>
 
@@ -897,6 +906,8 @@
   <p>Links are not stored in a separate database and are not removed from shared text history. The Links tab is a filtered view of the same entries, so copy, cut, paste after selected, grouping, pinning, Quick Paste, templates, search, sorting, cleanup actions, and sharing across machines work like Text history wherever applicable. If the Links tab is disabled, links simply appear in Text history as before.</p>
 
   <p>Clipman gives unnamed links a readable label from the address itself, such as <strong>Issues 50; github.com/OnjLouis/Clipman/issues/50</strong>. This works immediately, including for existing history, and never contacts the website. An F2 name remains first and always takes precedence.</p>
+
+  <p>On Android and iOS, <strong>Copy link names by default</strong> in mobile Settings controls how an ordinary activation copies a named link. It is off by default, so activation copies the unchanged link and the entry menu or screen-reader actions offer <strong>Copy Name and Link</strong>. When enabled, activation places the saved Name on the first line and the link on the next line, while the alternative action becomes <strong>Copy Link</strong>. This avoids presenting a second action that merely repeats the default behaviour.</p>
 
   <p>For an unnamed HTTP or HTTPS link, use <strong>Use website title as name</strong> from the entry menu when you deliberately want Clipman to contact that site once. Clipman explains that the website can see the request and asks before continuing. The desktop confirmation includes <strong>Do not show this again</strong>; restore it with <strong>Ask before contacting a website for its title</strong> in Preferences. Clipman sends the selected link request without cookies, credentials, or other clipboard content. A deliberate request may contact an otherwise safe public link even when its path or query contains tracking data or looks token-like, but Clipman still refuses embedded credentials, local or private destinations, non-standard ports, unsafe redirects and overlong addresses. Automatic title naming remains more conservative and does not contact capability-looking links. A useful returned title is stored in the ordinary Name field, where it is visible and editable in Entry Properties. If the site cannot be reached or does not return a usable web-page title, Clipman instead saves the same generic offline label already shown for the URL; this works for direct downloads and ordinary pages without relying on a list of file extensions. The exact URL is never replaced and remains available in F4, Entry Properties, and copy operations. Because this is an ordinary name rather than a separate preview file, it follows the entry to other synced clients.</p>
 
@@ -1192,7 +1203,7 @@
 
   <p>Android and iOS Settings also offer <strong>Require biometric or device authentication</strong>. It is off by default. When enabled, Clipman asks for Face ID, Touch ID, biometrics, or the device credential before showing history after the app returns to the foreground.</p>
 
-  <p>Mobile Settings includes optional ways to support Clipman. Android opens Clipman's donation page, while iOS presents one-time tips through Apple's in-app purchase system. Tips do not unlock features, content, or services.</p>
+  <p>Mobile Settings includes optional ways to support Clipman. Android opens Clipman's donation page, while iOS keeps one-time Apple in-app purchases inside a collapsed <strong>Support Clipman</strong> disclosure. Tip choices are loaded only when that disclosure is opened. Tips do not unlock features, content, or services.</p>
 
   <p>Android and iOS Settings include <strong>Open Manual</strong> in a separate Help section. It opens the rendered Clipman manual in the default browser and does not save or discard Settings changes.</p>
 

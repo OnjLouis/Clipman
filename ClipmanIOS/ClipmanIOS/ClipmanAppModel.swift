@@ -39,6 +39,7 @@ final class ClipmanAppModel: ObservableObject {
     @Published var status = "Ready."
     @Published var showingSettings = false
     @Published var showingQuickClip = false
+    private(set) var quickClipDraft: ClipEntry?
     @Published var isRefreshing = false
     @Published private(set) var pendingServerConnection: ServerConnectionDetails?
     @Published private(set) var serverConnectionImportError = ""
@@ -51,6 +52,7 @@ final class ClipmanAppModel: ObservableObject {
 
     private let soundService = SoundService()
     private let historyRepository: any MobileHistoryRepositoryProtocol
+    private let quickClipDraftStore: QuickClipDraftStore
     private var revision = ""
     private var unlockTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
@@ -80,11 +82,14 @@ final class ClipmanAppModel: ObservableObject {
 
     init(
         settings initialSettings: ClipmanSettings? = nil,
-        historyRepository: any MobileHistoryRepositoryProtocol = MobileHistoryRepository.shared
+        historyRepository: any MobileHistoryRepositoryProtocol = MobileHistoryRepository.shared,
+        quickClipDraftStore: QuickClipDraftStore = QuickClipDraftStore()
     ) {
         let loaded = initialSettings ?? SettingsStore.load()
         settings = loaded
         self.historyRepository = historyRepository
+        self.quickClipDraftStore = quickClipDraftStore
+        quickClipDraft = try? quickClipDraftStore.load()
         // Startup always flows through unlock(), which also loads history and starts polling.
         // When authentication is disabled, unlock() completes without showing a prompt.
         isUnlocked = false
@@ -326,6 +331,8 @@ final class ClipmanAppModel: ObservableObject {
                 var launchClipboardPayload: MobileClipboardPayload?
                 if hasQuickAction {
                     processPendingQuickAction()
+                } else if quickClipDraft != nil {
+                    showingQuickClip = true
                 } else if isImportingServerConnection {
                     // The import completion opens Settings once the file has finished loading.
                     shouldRefreshServer = false
@@ -461,7 +468,7 @@ final class ClipmanAppModel: ObservableObject {
         showingSettings = false
         switch action {
         case .quickClip:
-            showingQuickClip = true
+            beginQuickClip()
         case .addClipboard:
             requestClipboardImport()
         case .copyLatest:
@@ -480,6 +487,7 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func sceneMovedToBackground() {
+        persistQuickClipDraft()
         isSceneActive = false
         foregroundGeneration += 1
         unlockTask?.cancel()
@@ -969,6 +977,10 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func copy(_ entry: ClipEntry) {
+        if let url = LinkExtractor.exactURL(in: entry) {
+            copyLink(entry, url: url)
+            return
+        }
         MobileRichTextClipboard.write(entry, includeRichText: settings.richTextEnabled)
         database = markUsed(entry)
         soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
@@ -980,6 +992,25 @@ final class ClipmanAppModel: ObservableObject {
         UIPasteboard.general.string = text
         soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
         setTransientStatus("Copied to clipboard.")
+    }
+
+    func copyLink(_ item: LinkExtractor.LinkItem, includeName: Bool? = nil) {
+        copyLink(item.entry, url: item.url, includeName: includeName)
+    }
+
+    func copyLink(_ entry: ClipEntry, url: URL, includeName: Bool? = nil) {
+        let shouldIncludeName = includeName ?? settings.copyLinkNamesByDefault
+        UIPasteboard.general.string = LinkClipboardText.make(
+            entry: entry,
+            url: url,
+            includeName: shouldIncludeName
+        )
+        database = markUsed(entry)
+        soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+        let copiedName = shouldIncludeName
+            && !entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        setTransientStatus(copiedName ? "Copied name and link to clipboard." : "Copied link to clipboard.")
+        queueUpload(successMessage: nil)
     }
 
     func togglePinned(_ entry: ClipEntry) {
@@ -1056,6 +1087,37 @@ final class ClipmanAppModel: ObservableObject {
             successMessage: "Quick Clip saved.",
             progressMessage: "Quick Clip saved; server sync in progress."
         )
+    }
+
+    func beginQuickClip() {
+        if quickClipDraft == nil {
+            quickClipDraft = ClipEntry()
+        }
+        showingQuickClip = true
+    }
+
+    func updateQuickClipDraft(_ entry: ClipEntry) {
+        quickClipDraft = entry
+    }
+
+    func saveQuickClipDraft(_ entry: ClipEntry) {
+        addQuickClip(entry)
+        discardQuickClipDraft()
+    }
+
+    func discardQuickClipDraft() {
+        quickClipDraft = nil
+        showingQuickClip = false
+        try? quickClipDraftStore.clear()
+    }
+
+    private func persistQuickClipDraft() {
+        guard let quickClipDraft else { return }
+        do {
+            try quickClipDraftStore.save(quickClipDraft)
+        } catch {
+            setTransientStatus("Quick Clip draft could not be saved: \(error.localizedDescription)")
+        }
     }
 
     private func canonicalGroup(_ requestedValue: String) -> String {
