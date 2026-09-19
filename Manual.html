@@ -92,6 +92,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.5 Windows</h3>
+  <ul>
+    <li>When Clipman Server becomes reachable after an interrupted upload, the notification-area tooltip, menu, and history status now clear the stale storage-unavailable warning as soon as synchronization succeeds. The runtime log records only the unavailable and recovered transitions, while the existing retry continues to preserve, merge, and upload the pending history. Fixes <a href="https://github.com/OnjLouis/Clipman/issues/75">issue #75</a>.</li>
+  </ul>
   <h3>3.1.4 Android</h3>
   <ul>
     <li>Quick Clip now retains an unfinished draft when you switch apps or Android suspends Clipman. Save adds it to history, while Cancel deliberately discards it.</li>

@@ -9,6 +9,18 @@ using System.Threading;
 
 namespace Clipman
 {
+    internal sealed class StorageStateChangedEventArgs : EventArgs
+    {
+        public bool Unavailable { get; private set; }
+        public string Error { get; private set; }
+
+        public StorageStateChangedEventArgs(bool unavailable, string error)
+        {
+            Unavailable = unavailable;
+            Error = error ?? string.Empty;
+        }
+    }
+
     internal sealed class ClipStore : IDisposable
     {
         private readonly object sync = new object();
@@ -22,6 +34,10 @@ namespace Clipman
         private string serverRevision = string.Empty;
         private bool serverSyncInProgress;
         private bool storageUnavailable;
+        private bool storageStateChangedNotificationPending;
+        private bool pendingStorageOriginalUnavailable;
+        private bool pendingStorageUnavailable;
+        private string pendingStorageError = string.Empty;
         private long serverLastPollUnixMs;
         private long serverLastSuccessUnixMs;
         private long serverLastUploadUnixMs;
@@ -84,6 +100,7 @@ namespace Clipman
         }
 
         public event EventHandler Changed;
+        public event EventHandler<StorageStateChangedEventArgs> StorageStateChanged;
 
         public string DatabasePath { get; private set; }
         public string LastStorageError { get; private set; }
@@ -263,8 +280,7 @@ namespace Clipman
         {
             lock (sync)
             {
-                storageUnavailable = true;
-                LastStorageError = "Server retry failed: " + (error == null ? "Unknown error." : error.Message);
+                SetStorageStateLocked(true, "Server retry failed: " + (error == null ? "Unknown error." : error.Message));
                 MarkServerFailureLocked();
             }
 
@@ -1147,8 +1163,7 @@ namespace Clipman
                 if (RulesActiveLocked())
                 {
                     LoadChannelsFromDiskLocked(password);
-                    storageUnavailable = false;
-                    LastStorageError = string.Empty;
+                    SetStorageStateLocked(false, string.Empty);
                     return;
                 }
 
@@ -1158,16 +1173,14 @@ namespace Clipman
                 NormalizeDeletedEntriesLocked();
                 ApplyDeletedEntriesLocked();
                 NormalizeManualOrderLocked();
-                storageUnavailable = false;
-                LastStorageError = string.Empty;
+                SetStorageStateLocked(false, string.Empty);
             }
             catch (Exception ex)
             {
                 if (!IsStorageAccessException(ex)) throw;
                 database = new ClipDatabase();
                 ClearChannelStateLocked();
-                storageUnavailable = true;
-                LastStorageError = ex.Message;
+                SetStorageStateLocked(true, ex.Message);
             }
         }
 
@@ -1195,8 +1208,7 @@ namespace Clipman
                 NormalizeDeletedEntriesLocked();
                 ApplyDeletedEntriesLocked();
                 ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
-                storageUnavailable = false;
-                LastStorageError = string.Empty;
+                SetStorageStateLocked(false, string.Empty);
                 if (watcher == null)
                 {
                     ResetWatcherLocked();
@@ -1206,8 +1218,7 @@ namespace Clipman
             catch (Exception ex)
             {
                 if (!IsStorageAccessException(ex) && !IsRecoverableServerException(ex)) throw;
-                storageUnavailable = true;
-                LastStorageError = ex.Message;
+                SetStorageStateLocked(true, ex.Message);
             }
         }
 
@@ -1292,8 +1303,7 @@ namespace Clipman
             catch (Exception ex)
             {
                 if (!IsStorageAccessException(ex)) throw;
-                storageUnavailable = true;
-                LastStorageError = ex.Message;
+                SetStorageStateLocked(true, ex.Message);
                 if (watcher != null) watcher.Dispose();
                 if (reloadTimer != null) reloadTimer.Dispose();
                 watcher = null;
@@ -1385,22 +1395,19 @@ namespace Clipman
                             catch (WebException retryEx)
                             {
                                 if (serverClient != null && serverClient.IsNotFound(retryEx)) return;
-                                storageUnavailable = true;
-                                LastStorageError = "Server poll failed: " + retryEx.Message;
+                                SetStorageStateLocked(true, "Server poll failed: " + retryEx.Message);
                                 MarkServerFailureLocked();
                                 return;
                             }
                         }
-                        storageUnavailable = true;
-                        LastStorageError = "Server poll failed: " + ex.Message;
+                        SetStorageStateLocked(true, "Server poll failed: " + ex.Message);
                         MarkServerFailureLocked();
                         return;
                     }
                     catch (Exception ex)
                     {
                         if (!IsRecoverableServerException(ex)) return;
-                        storageUnavailable = true;
-                        LastStorageError = "Server poll failed: " + ex.Message;
+                        SetStorageStateLocked(true, "Server poll failed: " + ex.Message);
                         MarkServerFailureLocked();
                         return;
                     }
@@ -1416,6 +1423,7 @@ namespace Clipman
                 {
                     OnChanged(true);
                 }
+                RaiseStorageStateChangedIfPending();
                 ScheduleNextServerPoll(pollGeneration);
             }
         }
@@ -1451,8 +1459,7 @@ namespace Clipman
                 if (headFirst)
                 {
                     var metadata = serverClient.GetMetadata();
-                    storageUnavailable = false;
-                    LastStorageError = string.Empty;
+                    SetStorageStateLocked(false, string.Empty);
                     MarkServerSuccessLocked(false);
                     if (string.IsNullOrWhiteSpace(metadata.Revision) ||
                         string.Equals(metadata.Revision, serverRevision, StringComparison.Ordinal))
@@ -1496,8 +1503,7 @@ namespace Clipman
                             ClipDatabaseFile.SaveAtomic(DatabasePath, database, CurrentPassword());
                             var metadata = serverClient.Upload(File.ReadAllBytes(DatabasePath), string.Empty);
                             serverRevision = metadata == null ? string.Empty : metadata.Revision;
-                            storageUnavailable = false;
-                            LastStorageError = string.Empty;
+                            SetStorageStateLocked(false, string.Empty);
                             MarkServerSuccessLocked(true);
                         }
                         return false;
@@ -1521,8 +1527,7 @@ namespace Clipman
                     var mergedMetadata = serverClient.Upload(File.ReadAllBytes(DatabasePath), serverRevision);
                     serverRevision = mergedMetadata == null ? string.Empty : mergedMetadata.Revision;
                 }
-                storageUnavailable = false;
-                LastStorageError = string.Empty;
+                SetStorageStateLocked(false, string.Empty);
                 MarkServerSuccessLocked(uploadMerged);
                 return changed;
             }
@@ -1545,8 +1550,7 @@ namespace Clipman
                     }
                     catch (Exception ex)
                     {
-                        storageUnavailable = true;
-                        LastStorageError = "Server sync failed: " + ex.Message;
+                        SetStorageStateLocked(true, "Server sync failed: " + ex.Message);
                         MarkServerFailureLocked();
                     }
                 }
@@ -1567,8 +1571,7 @@ namespace Clipman
                 {
                     var metadata = serverClient.Upload(File.ReadAllBytes(DatabasePath), serverRevision);
                     serverRevision = metadata == null ? string.Empty : metadata.Revision;
-                    storageUnavailable = false;
-                    LastStorageError = string.Empty;
+                    SetStorageStateLocked(false, string.Empty);
                     MarkServerSuccessLocked(true);
                     return;
                 }
@@ -1588,8 +1591,7 @@ namespace Clipman
                 var retry = serverClient.Upload(File.ReadAllBytes(DatabasePath), server.Metadata == null ? string.Empty : server.Metadata.Revision);
                 serverRevision = retry == null ? string.Empty : retry.Revision;
                 TryDelete(DatabasePath + ".server.tmp");
-                storageUnavailable = false;
-                LastStorageError = string.Empty;
+                SetStorageStateLocked(false, string.Empty);
                 MarkServerSuccessLocked(true);
             }
             catch
@@ -2875,8 +2877,7 @@ namespace Clipman
                 NormalizeManualOrderLocked();
                 CommitRoutedChannelsLocked(TimeUtil.NowUnixMs(), forceServerUpload);
 
-                storageUnavailable = false;
-                LastStorageError = string.Empty;
+                SetStorageStateLocked(false, string.Empty);
                 if (watcher == null)
                 {
                     ResetWatcherLocked();
@@ -2885,8 +2886,7 @@ namespace Clipman
             catch (Exception ex)
             {
                 if (!IsStorageAccessException(ex) && !IsRecoverableServerException(ex)) throw;
-                storageUnavailable = true;
-                LastStorageError = ex.Message;
+                SetStorageStateLocked(true, ex.Message);
             }
         }
 
@@ -3607,8 +3607,7 @@ namespace Clipman
                     }
                 }
 
-                storageUnavailable = false;
-                LastStorageError = string.Empty;
+                SetStorageStateLocked(false, string.Empty);
                 MarkServerSuccessLocked(false);
                 return changed;
             }
@@ -3892,6 +3891,46 @@ namespace Clipman
             return normalized.Length == 0 ? (Environment.MachineName ?? string.Empty).Trim() : normalized;
         }
 
+        private void SetStorageStateLocked(bool unavailable, string error)
+        {
+            var nextError = unavailable ? (error ?? string.Empty) : string.Empty;
+            var wasUnavailable = storageUnavailable || !string.IsNullOrWhiteSpace(LastStorageError);
+            var isUnavailable = unavailable || !string.IsNullOrWhiteSpace(nextError);
+            storageUnavailable = isUnavailable;
+            LastStorageError = nextError;
+            if (wasUnavailable == isUnavailable) return;
+
+            if (!storageStateChangedNotificationPending)
+            {
+                storageStateChangedNotificationPending = true;
+                pendingStorageOriginalUnavailable = wasUnavailable;
+            }
+            pendingStorageUnavailable = isUnavailable;
+            pendingStorageError = nextError;
+            if (pendingStorageOriginalUnavailable == isUnavailable)
+            {
+                storageStateChangedNotificationPending = false;
+            }
+        }
+
+        private void RaiseStorageStateChangedIfPending()
+        {
+            EventHandler<StorageStateChangedEventArgs> handler;
+            StorageStateChangedEventArgs args;
+            lock (sync)
+            {
+                if (!storageStateChangedNotificationPending) return;
+                storageStateChangedNotificationPending = false;
+                handler = StorageStateChanged;
+                args = new StorageStateChangedEventArgs(pendingStorageUnavailable, pendingStorageError);
+            }
+
+            if (handler != null)
+            {
+                handler(this, args);
+            }
+        }
+
         private void OnChanged()
         {
             OnChanged(false);
@@ -3899,6 +3938,7 @@ namespace Clipman
 
         private void OnChanged(bool external)
         {
+            RaiseStorageStateChangedIfPending();
             lock (sync)
             {
                 lastChangeWasExternal = external;

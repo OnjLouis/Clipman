@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace Clipman.Tests
@@ -21,6 +22,8 @@ namespace Clipman.Tests
             Run("database container caps are aligned", DatabaseContainerCapsAreAligned);
             Run("server polls cannot overlap and respect failure backoff", ServerPollSchedulingIsBounded);
             Run("storage retries contain network failures", StorageRetriesContainNetworkFailures);
+            Run("storage recovery publishes availability transitions", StorageRecoveryPublishesAvailabilityTransitions);
+            Run("failed server uploads recover and refresh storage state", FailedServerUploadsRecoverAndRefreshStorageState);
             Run("existing instances have a dedicated recovery signal", ExistingInstancesHaveRecoverySignal);
             Run("paste input keeps Control active through V", PasteInputKeepsControlActiveThroughV);
             Run("bounded exact reads handle partial streams", BoundedExactReadsHandlePartialStreams);
@@ -380,6 +383,106 @@ namespace Clipman.Tests
             Assert(fileReloaded, "A text/server timeout prevented the independent file-history retry.");
             Assert(result.Error != null && result.Error.Message.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0,
                 "The retry result did not retain a useful timeout explanation.");
+        }
+
+        private static void StorageRecoveryPublishesAvailabilityTransitions()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanStorageState-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb"), string.Empty, "Test device"))
+                {
+                    var transitions = new List<StorageStateChangedEventArgs>();
+                    store.StorageStateChanged += delegate(object sender, StorageStateChangedEventArgs args)
+                    {
+                        transitions.Add(args);
+                    };
+
+                    store.RecordServerRetryFailure(new WebException("Temporary gateway failure", WebExceptionStatus.ProtocolError));
+                    Assert(transitions.Count == 1 && transitions[0].Unavailable,
+                        "Entering unavailable storage did not publish a state transition.");
+                    Assert(transitions[0].Error.IndexOf("Temporary gateway failure", StringComparison.OrdinalIgnoreCase) >= 0,
+                        "The unavailable transition did not retain its diagnostic reason.");
+
+                    store.Reload();
+                    Assert(transitions.Count == 2 && !transitions[1].Unavailable,
+                        "Successful storage recovery did not publish an available transition.");
+                    Assert(string.IsNullOrWhiteSpace(store.LastStorageError),
+                        "Successful storage recovery retained the old storage error.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static void FailedServerUploadsRecoverAndRefreshStorageState()
+        {
+            const string password = "server recovery test password";
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanServerRecovery-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var seedPath = Path.Combine(directory, "server-seed.clipdb");
+                var seed = new ClipDatabase();
+                seed.Entries.Add(new ClipEntry
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Text = "Existing server entry",
+                    CreatedUnixMs = TimeUtil.NowUnixMs(),
+                    LastUsedUnixMs = TimeUtil.NowUnixMs()
+                });
+                ClipDatabaseFile.SaveAtomic(seedPath, seed, password);
+
+                using (var server = new RecoveringStorageServer(File.ReadAllBytes(seedPath)))
+                using (var store = new ClipStore(Path.Combine(directory, "local-history.clipdb"), password, "Test device"))
+                {
+                    var unavailableSeen = false;
+                    var recoveredSeen = false;
+                    store.StorageStateChanged += delegate(object sender, StorageStateChangedEventArgs args)
+                    {
+                        if (args.Unavailable) unavailableSeen = true;
+                        if (!args.Unavailable && unavailableSeen) recoveredSeen = true;
+                    };
+
+                    store.ConfigureServerStorage(true, server.Url, "test-token", string.Empty, string.Empty);
+                    Assert(WaitUntil(() => store.GetServerSyncStatus().LastSuccessUnixMs > 0, 5000),
+                        "The disposable server did not complete the initial synchronization.");
+
+                    server.FailNextUpload();
+                    store.AddText("Queued during outage", "KeepBoth", 100, 0);
+                    Assert(unavailableSeen && !string.IsNullOrWhiteSpace(store.LastStorageError),
+                        "The failed upload did not enter unavailable storage state.");
+
+                    Assert(WaitUntil(() => server.SuccessfulUploads > 0 && string.IsNullOrWhiteSpace(store.LastStorageError), 12000),
+                        "The failed upload was not retried after the server recovered.");
+                    Assert(recoveredSeen,
+                        "The successful retry did not publish a recovered storage transition.");
+
+                    var recoveredPath = Path.Combine(directory, "server-recovered.clipdb");
+                    File.WriteAllBytes(recoveredPath, server.Data);
+                    var recovered = ClipDatabaseFile.Load(recoveredPath, password);
+                    Assert(recovered.Entries.Any(entry => entry.Text == "Queued during outage"),
+                        "The history entry from the failed upload never reached the recovered server.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static bool WaitUntil(Func<bool> condition, int timeoutMilliseconds)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (condition()) return true;
+                Thread.Sleep(25);
+            }
+            return condition();
         }
 
         private static void ExistingInstancesHaveRecoverySignal()
@@ -2498,6 +2601,168 @@ namespace Clipman.Tests
                 return;
             }
             throw new InvalidOperationException("Expected " + typeof(TException).Name + ".");
+        }
+
+        private sealed class RecoveringStorageServer : IDisposable
+        {
+            private readonly object sync = new object();
+            private readonly HttpListener listener;
+            private readonly Thread thread;
+            private byte[] data;
+            private string revision = "revision-1";
+            private bool failNextUpload;
+            private int successfulUploads;
+
+            public RecoveringStorageServer(byte[] initialData)
+            {
+                data = initialData ?? new byte[0];
+                var port = FindAvailablePort();
+                Url = "http://127.0.0.1:" + port + "/";
+                listener = new HttpListener();
+                listener.Prefixes.Add(Url);
+                listener.Start();
+                thread = new Thread(Listen) { IsBackground = true, Name = "Clipman regression HTTP server" };
+                thread.Start();
+            }
+
+            public string Url { get; private set; }
+
+            public byte[] Data
+            {
+                get
+                {
+                    lock (sync)
+                    {
+                        return data.ToArray();
+                    }
+                }
+            }
+
+            public int SuccessfulUploads
+            {
+                get
+                {
+                    lock (sync)
+                    {
+                        return successfulUploads;
+                    }
+                }
+            }
+
+            public void FailNextUpload()
+            {
+                lock (sync)
+                {
+                    failNextUpload = true;
+                }
+            }
+
+            private void Listen()
+            {
+                while (listener.IsListening)
+                {
+                    try
+                    {
+                        Handle(listener.GetContext());
+                    }
+                    catch (HttpListenerException)
+                    {
+                        return;
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            private void Handle(HttpListenerContext context)
+            {
+                try
+                {
+                    byte[] responseData;
+                    string responseRevision;
+                    lock (sync)
+                    {
+                        responseData = data.ToArray();
+                        responseRevision = revision;
+                    }
+
+                    context.Response.Headers["X-Clipman-Revision"] = responseRevision;
+                    if (string.Equals(context.Request.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Response.StatusCode = (int)HttpStatusCode.OK;
+                        context.Response.ContentLength64 = responseData.LongLength;
+                        return;
+                    }
+
+                    if (string.Equals(context.Request.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Response.StatusCode = (int)HttpStatusCode.OK;
+                        context.Response.ContentLength64 = responseData.LongLength;
+                        context.Response.OutputStream.Write(responseData, 0, responseData.Length);
+                        return;
+                    }
+
+                    if (string.Equals(context.Request.HttpMethod, "PUT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        byte[] uploaded;
+                        using (var memory = new MemoryStream())
+                        {
+                            context.Request.InputStream.CopyTo(memory);
+                            uploaded = memory.ToArray();
+                        }
+
+                        lock (sync)
+                        {
+                            if (failNextUpload)
+                            {
+                                failNextUpload = false;
+                                context.Response.StatusCode = (int)HttpStatusCode.RequestEntityTooLarge;
+                                return;
+                            }
+
+                            data = uploaded;
+                            successfulUploads++;
+                            revision = "revision-" + (successfulUploads + 1);
+                            context.Response.Headers["X-Clipman-Revision"] = revision;
+                        }
+                        context.Response.StatusCode = (int)HttpStatusCode.OK;
+                        context.Response.ContentLength64 = 0;
+                        return;
+                    }
+
+                    context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                }
+                finally
+                {
+                    context.Response.Close();
+                }
+            }
+
+            private static int FindAvailablePort()
+            {
+                var socket = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+                socket.Start();
+                try
+                {
+                    return ((System.Net.IPEndPoint)socket.LocalEndpoint).Port;
+                }
+                finally
+                {
+                    socket.Stop();
+                }
+            }
+
+            public void Dispose()
+            {
+                listener.Stop();
+                listener.Close();
+                if (!thread.Join(3000))
+                {
+                    throw new InvalidOperationException("The disposable Clipman server did not stop.");
+                }
+            }
         }
 
         private sealed class PartialReadStream : MemoryStream

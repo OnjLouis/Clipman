@@ -104,6 +104,7 @@ namespace Clipman
             sounds = new SoundService(appDirectory, settingsStore.SettingsDirectory);
             store = new ClipStore(EffectiveTextHistoryDatabasePath(), CurrentDatabasePassword, CurrentDeviceName());
             store.Changed += StoreChanged;
+            store.StorageStateChanged += StoreStorageStateChanged;
             ConfigureTextHistoryServerStorage();
             ResetRemoteAutoCopyBaseline();
             fileEventStore = new FileClipboardEventStore(settingsStore.DefaultFileHistoryDatabasePath(), CurrentDatabasePassword);
@@ -2309,6 +2310,25 @@ namespace Clipman
             }
         }
 
+        private void StoreStorageStateChanged(object sender, StorageStateChangedEventArgs e)
+        {
+            Program.WriteRuntimeLog(
+                e.Unavailable
+                    ? "Text-history storage became unavailable: " + e.Error
+                    : "Text-history storage recovered.",
+                null);
+            try
+            {
+                if (invoker != null && invoker.IsHandleCreated)
+                {
+                    invoker.BeginInvoke(new Action(UpdateTray));
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
         private void SetClipboardIgnoringNotification(Action setClipboard)
         {
             if (setClipboard == null) return;
@@ -2523,6 +2543,7 @@ namespace Clipman
                 }
                 notifyIcon.Visible = false;
                 notifyIcon.Dispose();
+                store.StorageStateChanged -= StoreStorageStateChanged;
                 store.Dispose();
                 fileEventStore.Dispose();
                 messageWindow.Dispose();
