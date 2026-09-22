@@ -124,11 +124,14 @@
   <ul>
     <li>Kept Android Settings clear of the system status and navigation bars on Android 15 and later, so TalkBack touch exploration reaches Clipman's controls instead of System UI. The Settings header now remains visible while the form scrolls, and keyboard insets keep focused fields accessible. Thanks to Glenn Dausch for diagnosis, real-device TalkBack testing, and pull request <a href="https://github.com/OnjLouis/Clipman/pull/73">#73</a>.</li>
   </ul>
-  <h3>3.1.2 iOS</h3>
+  <h3>3.1.3 iOS</h3>
   <ul>
     <li>iOS existing-entry edits now retain an unfinished draft when you switch apps or iOS suspends Clipman. Save stores the changes, while Cancel deliberately discards them.</li>
     <li><strong>Copy Latest Clip</strong> now refreshes synchronized history before choosing an entry. If current server or shared-folder history cannot be reached, Clipman reports the failure instead of copying a potentially stale cached entry.</li>
     <li>Fixed the <strong>More</strong> menu occasionally omitting available history destinations the first time it opened.</li>
+  </ul>
+  <h3>3.1.2 iOS</h3>
+  <ul>
     <li>iOS Quick Clip now retains an unfinished draft when you switch apps or iOS suspends Clipman. Save adds it to history, while Cancel deliberately discards it.</li>
     <li>iOS named links can be copied as either the unchanged link or the saved Name followed by the link. The off-by-default <strong>Copy link names by default</strong> setting controls ordinary activation, while the entry menu and VoiceOver actions expose only the opposite format instead of repeating the default.</li>
     <li>iOS Settings now keeps the optional Tip Jar inside a collapsed <strong>Support Clipman</strong> disclosure and loads locally priced tip choices only when it is opened.</li>
