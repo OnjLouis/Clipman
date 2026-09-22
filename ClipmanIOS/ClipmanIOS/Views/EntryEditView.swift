@@ -15,8 +15,8 @@ struct EntryEditView: View {
         case text
     }
 
-    init(entry: ClipEntry) {
-        _draft = State(initialValue: entry)
+    init(entryEditDraft: ClipEntry) {
+        _draft = State(initialValue: entryEditDraft)
         isNew = false
     }
 
@@ -64,7 +64,11 @@ struct EntryEditView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        if isNew { app.discardQuickClipDraft() }
+                        if isNew {
+                            app.discardQuickClipDraft()
+                        } else {
+                            app.discardEntryEditDraft()
+                        }
                         dismiss()
                     }
                 }
@@ -73,7 +77,7 @@ struct EntryEditView: View {
                         if isNew {
                             app.saveQuickClipDraft(draft)
                         } else {
-                            app.update(draft)
+                            app.saveEntryEditDraft(draft)
                         }
                         dismiss()
                     }
@@ -91,7 +95,11 @@ struct EntryEditView: View {
             get: { draft[keyPath: keyPath] },
             set: { value in
                 draft[keyPath: keyPath] = value
-                if isNew { app.updateQuickClipDraft(draft) }
+                if isNew {
+                    app.updateQuickClipDraft(draft)
+                } else {
+                    app.updateEntryEditDraft(draft)
+                }
             }
         )
     }

@@ -1,9 +1,9 @@
 import Foundation
 
-struct QuickClipDraftStore {
+struct ClipDraftStore {
     private let fileURL: URL
 
-    init(fileURL: URL = Self.defaultFileURL) {
+    init(fileURL: URL) {
         self.fileURL = fileURL
     }
 
@@ -33,11 +33,19 @@ struct QuickClipDraftStore {
         try FileManager.default.removeItem(at: fileURL)
     }
 
-    static var defaultFileURL: URL {
+    static var quickClipFileURL: URL {
+        draftFileURL(named: "quick-clip-draft.json")
+    }
+
+    static var entryEditFileURL: URL {
+        draftFileURL(named: "entry-edit-draft.json")
+    }
+
+    private static func draftFileURL(named filename: String) -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base
             .appendingPathComponent("Clipman", isDirectory: true)
-            .appendingPathComponent("quick-clip-draft.json")
+            .appendingPathComponent(filename)
     }
 }

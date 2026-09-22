@@ -39,7 +39,9 @@ final class ClipmanAppModel: ObservableObject {
     @Published var status = "Ready."
     @Published var showingSettings = false
     @Published var showingQuickClip = false
+    @Published var showingEntryEdit = false
     private(set) var quickClipDraft: ClipEntry?
+    private(set) var entryEditDraft: ClipEntry?
     @Published var isRefreshing = false
     @Published private(set) var pendingServerConnection: ServerConnectionDetails?
     @Published private(set) var serverConnectionImportError = ""
@@ -52,13 +54,15 @@ final class ClipmanAppModel: ObservableObject {
 
     private let soundService = SoundService()
     private let historyRepository: any MobileHistoryRepositoryProtocol
-    private let quickClipDraftStore: QuickClipDraftStore
+    private let quickClipDraftStore: ClipDraftStore
+    private let entryEditDraftStore: ClipDraftStore
     private var revision = ""
     private var unlockTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var uploadTask: Task<Void, Never>?
     private var backgroundSyncIdentifier: UIBackgroundTaskIdentifier = .invalid
     private var pendingShareTask: Task<Void, Never>?
+    private var quickActionTask: Task<Void, Never>?
     private var refreshInProgress = false
     private var mutationSyncInProgress = false
     private var hasPendingLocalChanges = false
@@ -73,6 +77,8 @@ final class ClipmanAppModel: ObservableObject {
     private var transientStatusActive = false
     private var statusResetTask: Task<Void, Never>?
     private let pollingIntervalNanoseconds: UInt64 = 5_000_000_000
+    private let quickActionRefreshWaitNanoseconds: UInt64 = 50_000_000
+    private let quickActionRefreshWaitAttempts = 600
     private var skipNextSettingsClosedRefresh = false
     private var pureLinkEntryIDs = Set<String>()
     private var machineName: String {
@@ -83,13 +89,16 @@ final class ClipmanAppModel: ObservableObject {
     init(
         settings initialSettings: ClipmanSettings? = nil,
         historyRepository: any MobileHistoryRepositoryProtocol = MobileHistoryRepository.shared,
-        quickClipDraftStore: QuickClipDraftStore = QuickClipDraftStore()
+        quickClipDraftStore: ClipDraftStore = ClipDraftStore(fileURL: ClipDraftStore.quickClipFileURL),
+        entryEditDraftStore: ClipDraftStore = ClipDraftStore(fileURL: ClipDraftStore.entryEditFileURL)
     ) {
         let loaded = initialSettings ?? SettingsStore.load()
         settings = loaded
         self.historyRepository = historyRepository
         self.quickClipDraftStore = quickClipDraftStore
+        self.entryEditDraftStore = entryEditDraftStore
         quickClipDraft = try? quickClipDraftStore.load()
+        entryEditDraft = try? entryEditDraftStore.load()
         // Startup always flows through unlock(), which also loads history and starts polling.
         // When authentication is disabled, unlock() completes without showing a prompt.
         isUnlocked = false
@@ -331,6 +340,8 @@ final class ClipmanAppModel: ObservableObject {
                 var launchClipboardPayload: MobileClipboardPayload?
                 if hasQuickAction {
                     processPendingQuickAction()
+                } else if entryEditDraft != nil {
+                    showingEntryEdit = true
                 } else if quickClipDraft != nil {
                     showingQuickClip = true
                 } else if isImportingServerConnection {
@@ -466,19 +477,21 @@ final class ClipmanAppModel: ObservableObject {
     func processPendingQuickAction() {
         guard isUnlocked, let action = ClipmanQuickActionCenter.shared.consume() else { return }
         showingSettings = false
+        quickActionTask?.cancel()
+        quickActionTask = Task { [weak self] in
+            await self?.performQuickAction(action)
+        }
+    }
+
+    private func performQuickAction(_ action: ClipmanQuickAction) async {
         switch action {
         case .quickClip:
             beginQuickClip()
         case .addClipboard:
             requestClipboardImport()
         case .copyLatest:
-            guard let latest = database.Entries
-                .filter({ !$0.Text.isEmpty })
-                .max(by: {
-                    if $0.CreatedUnixMs == $1.CreatedUnixMs { return $0.Id < $1.Id }
-                    return $0.CreatedUnixMs < $1.CreatedUnixMs
-                }) else {
-                setTransientStatus("Clipman history is empty.")
+            guard let latest = await latestEntryForQuickAction() else {
+                if Task.isCancelled { return }
                 soundService.play("skip", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
                 return
             }
@@ -486,8 +499,40 @@ final class ClipmanAppModel: ObservableObject {
         }
     }
 
+    func latestEntryForQuickAction() async -> ClipEntry? {
+        for _ in 0..<quickActionRefreshWaitAttempts {
+            if !refreshInProgress && !mutationSyncInProgress { break }
+            do {
+                try await Task.sleep(nanoseconds: quickActionRefreshWaitNanoseconds)
+            } catch {
+                return nil
+            }
+        }
+        guard !refreshInProgress && !mutationSyncInProgress else {
+            setTransientStatus("Latest clip was not copied because history synchronization is still in progress.")
+            return nil
+        }
+        guard await refresh(
+            showStatus: false,
+            allowRemoteClipboardWrite: false,
+            announceRemoteChanges: false,
+            requireCurrentSynchronizedStorage: true
+        ) else { return nil }
+        let latest = database.Entries
+            .filter { !$0.Text.isEmpty }
+            .max {
+                if $0.CreatedUnixMs == $1.CreatedUnixMs { return $0.Id < $1.Id }
+                return $0.CreatedUnixMs < $1.CreatedUnixMs
+            }
+        if latest == nil {
+            setTransientStatus("Clipman history is empty.")
+        }
+        return latest
+    }
+
     func sceneMovedToBackground() {
         persistQuickClipDraft()
+        persistEntryEditDraft()
         isSceneActive = false
         foregroundGeneration += 1
         unlockTask?.cancel()
@@ -496,6 +541,8 @@ final class ClipmanAppModel: ObservableObject {
         refreshTask = nil
         pendingShareTask?.cancel()
         pendingShareTask = nil
+        quickActionTask?.cancel()
+        quickActionTask = nil
         showingSettings = false
         isUnlocked = false
         statusResetTask?.cancel()
@@ -579,7 +626,9 @@ final class ClipmanAppModel: ObservableObject {
     func refresh(
         showStatus: Bool,
         localCacheIsCurrent: Bool = false,
-        allowRemoteClipboardWrite: Bool = true
+        allowRemoteClipboardWrite: Bool = true,
+        announceRemoteChanges: Bool = true,
+        requireCurrentSynchronizedStorage: Bool = false
     ) async -> Bool {
         guard !refreshInProgress, !mutationSyncInProgress else { return false }
         let generation = storageGeneration
@@ -697,9 +746,11 @@ final class ClipmanAppModel: ObservableObject {
                     MobileRichTextClipboard.write(newest, includeRichText: settings.richTextEnabled)
                 }
                 lastRemoteEntryID = newest.Id
-                let source = newest.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
-                setTransientStatus(source.isEmpty ? "Clipboard updated by another device." : "Clipboard updated by \(source).")
-                soundService.play("remote", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+                if announceRemoteChanges {
+                    let source = newest.SourceMachine.trimmingCharacters(in: .whitespacesAndNewlines)
+                    setTransientStatus(source.isEmpty ? "Clipboard updated by another device." : "Clipboard updated by \(source).")
+                    soundService.play("remote", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
+                }
             }
             if showStatus {
                 let message = sync.backupError.map {
@@ -725,7 +776,7 @@ final class ClipmanAppModel: ObservableObject {
                         database = cached
                     }
                     setSteadyStatus("Using local history; \(syncPendingName(for: settingsSnapshot.storageMode)) sync is pending: \(error.localizedDescription)")
-                    return true
+                    return !requireCurrentSynchronizedStorage
                 }
             } catch {
                 guard generation == storageGeneration,
@@ -1111,12 +1162,41 @@ final class ClipmanAppModel: ObservableObject {
         try? quickClipDraftStore.clear()
     }
 
+    func beginEditing(_ entry: ClipEntry) {
+        entryEditDraft = entry
+        showingEntryEdit = true
+    }
+
+    func updateEntryEditDraft(_ entry: ClipEntry) {
+        entryEditDraft = entry
+    }
+
+    func saveEntryEditDraft(_ entry: ClipEntry) {
+        update(entry)
+        discardEntryEditDraft()
+    }
+
+    func discardEntryEditDraft() {
+        entryEditDraft = nil
+        showingEntryEdit = false
+        try? entryEditDraftStore.clear()
+    }
+
     private func persistQuickClipDraft() {
         guard let quickClipDraft else { return }
         do {
             try quickClipDraftStore.save(quickClipDraft)
         } catch {
             setTransientStatus("Quick Clip draft could not be saved: \(error.localizedDescription)")
+        }
+    }
+
+    private func persistEntryEditDraft() {
+        guard let entryEditDraft else { return }
+        do {
+            try entryEditDraftStore.save(entryEditDraft)
+        } catch {
+            setTransientStatus("Entry edit draft could not be saved: \(error.localizedDescription)")
         }
     }
 

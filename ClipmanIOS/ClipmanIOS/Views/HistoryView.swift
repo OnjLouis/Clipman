@@ -4,13 +4,11 @@ import UIKit
 struct HistoryView: View {
     @EnvironmentObject private var app: ClipmanAppModel
     @State private var viewingEntry: ClipEntry?
-    @State private var editingEntry: ClipEntry?
     @State private var pendingDeleteEntry: ClipEntry?
     @State private var pendingWebsiteTitleItem: LinkExtractor.LinkItem?
     @State private var imageShareFile: EmbeddedImageShareFile?
     @State private var showingHistoryFilter = false
-    @State private var showingMoreActions = false
-    @State private var moreActionSections: [ClipmanAppModel.Section] = []
+    @State private var moreActionPresentation: HistoryMoreActionPresentation?
     @State private var pendingMoreAction: HistoryMoreAction?
     @AccessibilityFocusState private var focusedHistoryItemID: String?
 
@@ -44,8 +42,13 @@ struct HistoryView: View {
                     }
                     .accessibilityHint("Creates a clipboard entry without changing the iOS clipboard.")
                     Button("More", systemImage: "ellipsis.circle") {
-                        moreActionSections = app.visibleSections.filter { $0 != app.selectedSection }
-                        showingMoreActions = true
+                        // Keep the first presentation from capturing an earlier empty state value.
+                        moreActionPresentation = HistoryMoreActionPresentation(
+                            sections: HistoryMoreActionSections.available(
+                                from: app.visibleSections,
+                                selected: app.selectedSection
+                            )
+                        )
                     }
                     .accessibilityLabel("More")
                     .accessibilityHint("Shows history sections and settings.")
@@ -63,8 +66,10 @@ struct HistoryView: View {
             .sheet(item: $viewingEntry) { entry in
                 EntryView(entry: entry)
             }
-            .sheet(item: $editingEntry) { entry in
-                EntryEditView(entry: entry)
+            .sheet(isPresented: $app.showingEntryEdit) {
+                if let draft = app.entryEditDraft {
+                    EntryEditView(entryEditDraft: draft)
+                }
             }
             .sheet(isPresented: $app.showingQuickClip) {
                 EntryEditView(quickClipDraft: app.quickClipDraft ?? ClipEntry())
@@ -88,10 +93,10 @@ struct HistoryView: View {
                 HistoryFilterChooser()
                     .environmentObject(app)
             }
-            .sheet(isPresented: $showingMoreActions, onDismiss: performPendingMoreAction) {
-                HistoryMoreActionsSheet(sections: moreActionSections) { action in
+            .sheet(item: $moreActionPresentation, onDismiss: performPendingMoreAction) { presentation in
+                HistoryMoreActionsSheet(sections: presentation.sections) { action in
                     pendingMoreAction = action
-                    showingMoreActions = false
+                    moreActionPresentation = nil
                 }
             }
             .alert("Delete clipboard entry?", isPresented: Binding(
@@ -181,7 +186,7 @@ struct HistoryView: View {
                         copyNameAndLink: { app.copyLink(item, includeName: true) },
                         open: { UIApplication.shared.open(item.url) },
                         view: { viewingEntry = item.entry },
-                        edit: { editingEntry = item.entry },
+                        edit: { app.beginEditing(item.entry) },
                         togglePinned: { app.togglePinned(item.entry) },
                         delete: { requestDelete(item.entry) },
                         useWebsiteTitle: { pendingWebsiteTitleItem = item }
@@ -208,7 +213,7 @@ struct HistoryView: View {
                             app.copyLink(entry, url: url, includeName: true)
                         },
                         view: { viewingEntry = entry },
-                        edit: { editingEntry = entry },
+                        edit: { app.beginEditing(entry) },
                         togglePinned: { app.togglePinned(entry) },
                         delete: { requestDelete(entry) },
                         saveImageToPhotos: saveImageToPhotos,
@@ -321,6 +326,20 @@ struct HistoryView: View {
 private enum HistoryMoreAction {
     case section(ClipmanAppModel.Section)
     case settings
+}
+
+struct HistoryMoreActionPresentation: Identifiable {
+    let id = UUID()
+    let sections: [ClipmanAppModel.Section]
+}
+
+enum HistoryMoreActionSections {
+    static func available(
+        from visibleSections: [ClipmanAppModel.Section],
+        selected: ClipmanAppModel.Section
+    ) -> [ClipmanAppModel.Section] {
+        visibleSections.filter { $0 != selected }
+    }
 }
 
 private struct HistoryMoreActionsSheet: View {
