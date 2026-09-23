@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 final class UpdateService {
     private struct GitHubRelease: Decodable {
+        let id: Int
         let tag_name: String
         let html_url: String
         let draft: Bool
@@ -36,9 +37,19 @@ final class UpdateService {
                     return
                 }
                 guard let data,
-                      let releases = try? JSONDecoder().decode([GitHubRelease].self, from: data),
-                      let candidate = self.bestUpdate(in: releases, currentVersion: currentVersion)
+                      let releases = try? JSONDecoder().decode([GitHubRelease].self, from: data)
                 else {
+                    if manual { self.showNoUpdate(currentVersion: currentVersion) }
+                    return
+                }
+                let candidate: UpdateCandidate?
+                do {
+                    candidate = try await self.bestUpdate(in: releases, currentVersion: currentVersion)
+                } catch {
+                    if manual { self.showError("Could Not Check for Updates", error.localizedDescription) }
+                    return
+                }
+                guard let candidate else {
                     if manual { self.showNoUpdate(currentVersion: currentVersion) }
                     return
                 }
@@ -60,25 +71,52 @@ final class UpdateService {
         }
     }
 
-    private func bestUpdate(in releases: [GitHubRelease], currentVersion: String) -> UpdateCandidate? {
-        releases
-            .filter { !$0.draft && !$0.prerelease }
-            .compactMap { release -> UpdateCandidate? in
-                let version = normalizedVersion(release.tag_name)
-                guard isVersion(version, newerThan: currentVersion),
-                      let assetName = MacReleaseAssetSelector.preferredName(
-                        in: release.assets.map(\.name),
-                        version: version,
-                        architecture: .current
-                      ),
-                      let asset = release.assets.first(where: { $0.name == assetName }),
-                      let releaseURL = URL(string: release.html_url),
-                      let downloadURL = URL(string: asset.browser_download_url)
-                else { return nil }
-                return UpdateCandidate(version: version, releaseURL: releaseURL, downloadURL: downloadURL, assetName: asset.name)
+    private func bestUpdate(in releases: [GitHubRelease], currentVersion: String) async throws -> UpdateCandidate? {
+        let ranked = releases
+            .filter { !$0.draft && !$0.prerelease && ($0.tag_name.hasPrefix("v") || $0.tag_name.hasPrefix("mac-v")) }
+            .sorted {
+                versionParts(normalizedVersion($1.tag_name)).lexicographicallyPrecedes(
+                    versionParts(normalizedVersion($0.tag_name))
+                )
             }
-            .sorted { versionParts($0.version).lexicographicallyPrecedes(versionParts($1.version)) == false }
-            .first
+        var lookupError: Error?
+        for release in ranked {
+            let version = normalizedVersion(release.tag_name)
+            guard isVersion(version, newerThan: currentVersion) else { continue }
+            let asset: GitHubAsset?
+            do {
+                asset = try await MacReleaseAssetSelector.preferredAsset(
+                    in: release.assets,
+                    name: \.name,
+                    version: version,
+                    architecture: .current
+                ) {
+                    try await self.fetchReleaseAssets(id: release.id)
+                }
+            } catch {
+                lookupError = error
+                continue
+            }
+            guard let asset,
+                  let releaseURL = URL(string: release.html_url),
+                  let downloadURL = URL(string: asset.browser_download_url)
+            else { continue }
+            return UpdateCandidate(version: version, releaseURL: releaseURL, downloadURL: downloadURL, assetName: asset.name)
+        }
+        if let lookupError { throw lookupError }
+        return nil
+    }
+
+    private func fetchReleaseAssets(id: Int) async throws -> [GitHubAsset] {
+        let url = URL(string: "https://api.github.com/repos/OnjLouis/Clipman/releases/\(id)/assets?per_page=100")!
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw NSError(domain: "ClipmanUpdate", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "GitHub could not provide the release assets. Try again later."
+            ])
+        }
+        return try JSONDecoder().decode([GitHubAsset].self, from: data)
     }
 
     private func promptForUpdate(_ candidate: UpdateCandidate) {
