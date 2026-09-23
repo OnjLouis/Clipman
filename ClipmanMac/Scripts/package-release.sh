@@ -9,7 +9,20 @@ APP="$DIST/Clipman.app"
 VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
 BUILD_STAMP="$(zsh "$ROOT/Scripts/shared-version.sh" stamp)"
-ZIP="$DIST/Clipman-macOS-$VERSION.zip"
+ARCH="${CLIPMAN_MAC_ARCH:-arm64}"
+case "$ARCH" in
+  arm64)
+    ZIP="$DIST/Clipman-macOS-$VERSION.zip"
+    ;;
+  x86_64)
+    ZIP="$DIST/Clipman-macOS-Intel-$VERSION.zip"
+    ;;
+  *)
+    echo "Unsupported Mac release architecture: $ARCH" >&2
+    exit 2
+    ;;
+esac
+TARGET_TRIPLE="$ARCH-apple-macosx13.0"
 SIGNING_IDENTITY="${CLIPMAN_MAC_SIGNING_IDENTITY:-Developer ID Application: Andre Louis (83NN3HS237)}"
 EXPECTED_TEAM_ID="83NN3HS237"
 NOTARY_PROFILE="${CLIPMAN_MAC_NOTARY_PROFILE:-ClipmanNotary}"
@@ -53,17 +66,18 @@ fi
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
-swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release
-swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release ClipmanCodecSmoke
-swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release ClipmanSyncSmoke
-swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release ClipmanFileHistorySmoke
+swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE"
+swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanCodecSmoke
+swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanSyncSmoke
+swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanFileHistorySmoke
 zsh "$ROOT/Scripts/test-startup-service.sh" "$SCRATCH/startup-service-smoke"
 zsh "$ROOT/Scripts/test-debug-logger.sh" "$SCRATCH/debug-logger-smoke"
 
-BIN_DIR="$(swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --show-bin-path)"
+BIN_DIR="$(swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" --show-bin-path)"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Clipman" "$APP/Contents/MacOS/Clipman"
+lipo -verify_arch "$ARCH" "$APP/Contents/MacOS/Clipman"
 cp -R "$ROOT/Sources/Clipman/Resources/sounds" "$APP/Contents/Resources/sounds"
 cp "$ROOT/../Manual.html" "$APP/Contents/Resources/Manual.html"
 cp "$ROOT/../LICENSE.txt" "$APP/Contents/Resources/LICENSE.txt"

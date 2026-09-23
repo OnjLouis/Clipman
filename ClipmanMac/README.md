@@ -121,11 +121,13 @@ Build a release app zip for testers with:
 Scripts/package-release.sh
 ```
 
-The signed and notarized zip is created at:
+The default Apple Silicon signed and notarized ZIP is created at:
 
 ```text
-dist/Clipman-macOS-<version>.zip
+~/Projects/Codex/Temp/clipman/mac-release-dist/Clipman-macOS-<version>.zip
 ```
+
+Set `CLIPMAN_MAC_ARCH=x86_64` to build the Intel ZIP named `Clipman-macOS-Intel-<version>.zip` instead. Each package contains a single-architecture app for macOS 13 or later. The in-app updater selects the matching architecture automatically.
 
 Testers should unzip it, move or drag `Clipman.app` into `/Applications`, and open it normally. The package is Developer ID signed, notarized by Apple, stapled, and verified with Gatekeeper before release.
 

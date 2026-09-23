@@ -12,7 +12,7 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 - [Read the complete Clipman manual](https://onjlouis.github.io/Clipman/manual.html).
 - [Read the Clipman Server manual](https://onjlouis.github.io/Clipman/server/manual.html).
 
-Windows is portable, macOS uses a signed and notarized app, Linux includes a per-user installer, and the mobile apps use the normal platform installation flow. Clipman Server is a separate, optional download; ordinary Clipman does not require it.
+Windows is portable, macOS has signed and notarized Apple Silicon and Intel builds, Linux includes a per-user installer, and the mobile apps use the normal platform installation flow. Clipman Server is a separate, optional download; ordinary Clipman does not require it.
 
 ## What Makes It Useful
 

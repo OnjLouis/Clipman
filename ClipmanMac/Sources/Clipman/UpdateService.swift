@@ -1,4 +1,5 @@
 import AppKit
+import ClipmanCore
 import Foundation
 
 @MainActor
@@ -65,7 +66,12 @@ final class UpdateService {
             .compactMap { release -> UpdateCandidate? in
                 let version = normalizedVersion(release.tag_name)
                 guard isVersion(version, newerThan: currentVersion),
-                      let asset = preferredMacAsset(in: release.assets),
+                      let assetName = MacReleaseAssetSelector.preferredName(
+                        in: release.assets.map(\.name),
+                        version: version,
+                        architecture: .current
+                      ),
+                      let asset = release.assets.first(where: { $0.name == assetName }),
                       let releaseURL = URL(string: release.html_url),
                       let downloadURL = URL(string: asset.browser_download_url)
                 else { return nil }
@@ -151,6 +157,10 @@ final class UpdateService {
         }
 
         try verifyReleaseSignature(of: stagedApp)
+        try run("/usr/bin/lipo", arguments: [
+            "-verify_arch", MacReleaseAssetSelector.Architecture.current.machOName,
+            stagedApp.appendingPathComponent("Contents/MacOS/Clipman").path
+        ])
 
         let targetApp = Bundle.main.bundleURL.path.hasPrefix("/Applications/")
             ? Bundle.main.bundleURL
@@ -210,21 +220,6 @@ final class UpdateService {
         alert.messageText = title
         alert.informativeText = message
         alert.runModal()
-    }
-
-    private func preferredMacAsset(in assets: [GitHubAsset]) -> GitHubAsset? {
-        assets.first(where: { isSignedMacAsset($0.name) })
-            ?? assets.first(where: { isLegacyMacAsset($0.name) })
-    }
-
-    private func isSignedMacAsset(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower.hasSuffix(".zip") && lower.hasPrefix("clipman-macos-")
-    }
-
-    private func isLegacyMacAsset(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower.hasSuffix(".zip") && lower.contains("clipmanmac")
     }
 
     private func normalizedVersion(_ value: String) -> String {

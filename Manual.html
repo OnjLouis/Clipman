@@ -92,6 +92,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.5 macOS</h3>
+  <ul>
+    <li>Added a signed and notarized Intel Mac download alongside the Apple Silicon build. Both support macOS 13 or later. Mac updates now choose the ZIP for the computer's processor and refuse to install an app without compatible code.</li>
+  </ul>
   <h3>3.1.5 Windows</h3>
   <ul>
     <li>When Clipman Server becomes reachable after an interrupted upload, the notification-area tooltip, menu, and history status now clear the stale storage-unavailable warning as soon as synchronization succeeds. The runtime log records only the unavailable and recovered transitions, while the existing retry continues to preserve, merge, and upload the pending history. Fixes <a href="https://github.com/OnjLouis/Clipman/issues/75">issue #75</a>.</li>
@@ -1251,7 +1255,7 @@
   <p>Old Clipman and Ditto imports are Windows-only and read text entries only. They do not import images or every custom clipboard format. Imported entries are grouped as <strong>Imported from old Clipman</strong> or <strong>Imported from Ditto</strong> so they are easy to review after import.</p>
 
   <h2 id="updates">Updates</h2>
-  <p>Use <strong>Help, Check for updates</strong> on Windows, the Clipman status or history-window menu on Mac, or <code>Shift+F1</code> on either platform to check GitHub releases. If a newer release includes a Clipman ZIP package for your platform, Clipman can download it and update the app.</p>
+  <p>Use <strong>Help, Check for updates</strong> on Windows, the Clipman status or history-window menu on Mac, or <code>Shift+F1</code> on either platform to check GitHub releases. If a newer release includes a Clipman ZIP package for your platform, Clipman can download it and update the app. Mac downloads are separate for Apple Silicon and Intel; choose the matching ZIP for a manual install, while the in-app updater chooses automatically.</p>
 
   <p>Use <strong>Preferences, Startup and updates</strong> to choose whether Clipman checks for updates never, at startup, hourly, or daily. If <strong>Install updates silently when possible</strong> is enabled, automatic checks can install a newer ZIP release without prompting where supported. Manual update checks still show the normal update dialog.</p>
 
