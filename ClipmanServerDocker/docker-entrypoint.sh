@@ -8,6 +8,7 @@ LOG_PATH="${CLIPMAN_LOG:-$DATA_DIR/logs/clipman-server.log}"
 HOST="${CLIPMAN_HOST:-0.0.0.0}"
 PORT="${CLIPMAN_PORT:-8080}"
 ADVERTISE_HOST="${CLIPMAN_ADVERTISE_HOST:-}"
+ADVERTISE_URL="${CLIPMAN_ADVERTISE_URL:-}"
 CERT_FILE="${CLIPMAN_CERT_FILE:-}"
 KEY_FILE="${CLIPMAN_KEY_FILE:-}"
 SERVER_SCRIPT="${CLIPMAN_SERVER_SCRIPT:-/app/clipman_server.py}"
@@ -27,6 +28,9 @@ if [ "${CLIPMAN_SELF_SIGNED_CERT:-}" = "true" ] && [ -z "$CERT_FILE" ] && [ -z "
       --create-tls-certificate
     if [ -n "$ADVERTISE_HOST" ]; then
       set -- "$@" --advertise-host "$ADVERTISE_HOST"
+    fi
+    if [ -n "$ADVERTISE_URL" ]; then
+      set -- "$@" --advertise-url "$ADVERTISE_URL"
     fi
     for name in ${CLIPMAN_CERT_HOSTS:-}; do
       set -- "$@" --cert-host "$name"
@@ -52,6 +56,9 @@ set -- "$SERVER_SCRIPT" \
 if [ -n "$ADVERTISE_HOST" ]; then
   set -- "$@" --advertise-host "$ADVERTISE_HOST"
 fi
+if [ -n "$ADVERTISE_URL" ]; then
+  set -- "$@" --advertise-url "$ADVERTISE_URL"
+fi
 
 if [ -n "$CERT_FILE" ] && [ -n "$KEY_FILE" ]; then
   set -- "$@" --cert-file "$CERT_FILE" --key-file "$KEY_FILE"
@@ -68,13 +75,17 @@ else
   esac
 fi
 
-case "${ADVERTISE_HOST:-$HOST}" in
-  0.0.0.0|::|\[::\])
-    echo "Connection files were not written because a wildcard listener does not identify an address another device can use." >&2
-    echo "Set CLIPMAN_ADVERTISE_HOST to the DNS name or IP address used by Clipman clients." >&2
-    ;;
-  *)
-    python3 "$@" --write-connection-info >/dev/null
-    ;;
-esac
+if [ -n "$ADVERTISE_URL" ]; then
+  python3 "$@" --write-connection-info >/dev/null
+else
+  case "${ADVERTISE_HOST:-$HOST}" in
+    0.0.0.0|::|\[::\])
+      echo "Connection files were not written because a wildcard listener does not identify an address another device can use." >&2
+      echo "Set CLIPMAN_ADVERTISE_HOST or CLIPMAN_ADVERTISE_URL to the address used by Clipman clients." >&2
+      ;;
+    *)
+      python3 "$@" --write-connection-info >/dev/null
+      ;;
+  esac
+fi
 exec python3 "$@"

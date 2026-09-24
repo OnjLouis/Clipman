@@ -25,6 +25,11 @@
   // clients should connect through a DNS name or VPN address.
   "AdvertiseHost": "",
 
+  // Public HTTPS root used in generated client connection files when a TLS
+  // reverse proxy fronts this server. Include the public port if not 443.
+  // This takes precedence over AdvertiseHost and the private listener port.
+  "AdvertiseUrl": "",
+
   // TCP port for the server. A fresh settings file gets a random high port.
   "Port": 49152,
 
@@ -69,9 +74,9 @@
 
   // Optional browser address used for temporary client-onboarding links.
   //
-  // Leave blank when AdvertiseHost and Port are directly reachable. Set this
-  // to the public HTTPS root when a reverse proxy provides HTTPS in front of
-  // the server, for example "https://clipman.example". Public HTTP is refused.
+  // Leave blank to use AdvertiseUrl, or AdvertiseHost and Port when directly
+  // reachable. Set this to a different HTTPS root when setup links should use
+  // a separate VPN-only host. Public HTTP is refused.
   "SetupBaseUrl": "",
 
   // Backup behavior.

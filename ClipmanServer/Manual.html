@@ -157,12 +157,27 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
   --network dockernet \
   -e CLIPMAN_IS_BEHIND_REVERSE_PROXY=true \
   -e CLIPMAN_PORT=8080 \
+  -e CLIPMAN_ADVERTISE_URL=https://clipman.example \
   -v /data/docker/clipman:/data \
   ghcr.io/onjlouis/clipman-server:latest</code></pre>
 
   <p>The container stores settings, connection details, databases, backups, and logs under the mounted <code>/data</code> volume. Keep that volume backed up. The container listens on <code>0.0.0.0:8080</code> by default inside the container so a reverse proxy or Docker network can reach it.</p>
 
-  <p>If you are using Caddy, nginx, Traefik, or another TLS reverse proxy, leave Clipman Server as plain HTTP inside the private Docker network and expose only the reverse proxy to the public internet. Set <code>CLIPMAN_IS_BEHIND_REVERSE_PROXY=true</code> so the server permits that private container listener. Clipman clients should use the public HTTPS address from the reverse proxy.</p>
+  <p>If you are using Caddy, nginx, Traefik, or another TLS reverse proxy, leave Clipman Server as plain HTTP inside the private Docker network and expose only the reverse proxy to the public internet. Set <code>CLIPMAN_IS_BEHIND_REVERSE_PROXY=true</code> so the server permits that private container listener. Set <code>CLIPMAN_ADVERTISE_URL</code> to the HTTPS address clients actually use, including its port if it is not 443. The generated connection file will then contain that public address rather than the container's private HTTP port.</p>
+
+  <p>To copy the generated connection file out of the running container, use:</p>
+
+  <pre><code>docker cp clipman-server:/data/clipman-server-connection.clpconf ./clipman-server-connection.clpconf</code></pre>
+
+  <p>Import this file into Clipman, then store or remove your local copy securely. It contains the server bearer token. Do not paste it into a public issue or print it to container logs. To onboard another device without exposing the file permanently, create a temporary setup link:</p>
+
+  <pre><code>docker exec clipman-server python3 /app/clipman_server.py \
+  --config /data/clipman-server-settings.json \
+  --create-setup-link</code></pre>
+
+  <p>The link expires and has a download limit; it can be revoked early with the same command using <code>--revoke-setup-link</code> instead. If the setup page should use a separate VPN-only hostname, pass <code>--setup-base-url https://setup.example</code> when creating the link and restrict that hostname at the reverse proxy. The connection file will still point clients to <code>CLIPMAN_ADVERTISE_URL</code>. A permanent setup link would grant long-lived access to the server token and is not supported.</p>
+
+  <p>Opening the server root URL in a browser shows a basic running message. It does not expose the connection file or token.</p>
 
   <p>For a server whose published port is reachable only through a trusted LAN or VPN, explicitly allow that private plain-HTTP transport:</p>
 
@@ -186,7 +201,8 @@ Readable connection:   ~/.config/clipman-server/clipman-server-connection.txt</c
       <tr><td><code>CLIPMAN_DATA_DIR</code></td><td>Container data folder. Defaults to <code>/data</code>.</td></tr>
       <tr><td><code>CLIPMAN_HOST</code></td><td>Listen host inside the container. Defaults to <code>0.0.0.0</code>.</td></tr>
       <tr><td><code>CLIPMAN_PORT</code></td><td>Listen port inside the container. Defaults to <code>8080</code>.</td></tr>
-      <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Host written into generated connection files. Set this when <code>CLIPMAN_HOST</code> is a wildcard such as <code>0.0.0.0</code>; otherwise the server runs but does not generate an unusable connection file.</td></tr>
+      <tr><td><code>CLIPMAN_ADVERTISE_HOST</code></td><td>Client-facing host for direct connections. Set this when <code>CLIPMAN_HOST</code> is a wildcard and clients connect to the server's own port.</td></tr>
+      <tr><td><code>CLIPMAN_ADVERTISE_URL</code></td><td>Full public HTTPS root for a TLS reverse proxy, including a nonstandard public port if needed. Overrides the host and port in generated client connection files.</td></tr>
       <tr><td><code>CLIPMAN_IS_BEHIND_REVERSE_PROXY</code></td><td>Set to <code>true</code> when TLS is handled by a reverse proxy.</td></tr>
       <tr><td><code>CLIPMAN_ALLOW_INSECURE_REMOTE</code></td><td>Set to <code>true</code> only when the published port is restricted to a trusted LAN or VPN.</td></tr>
       <tr><td><code>CLIPMAN_CERT_FILE</code> and <code>CLIPMAN_KEY_FILE</code></td><td>Optional direct TLS certificate and key paths inside the container.</td></tr>

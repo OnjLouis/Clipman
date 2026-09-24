@@ -74,6 +74,8 @@ class ServerStartupTests(unittest.TestCase):
         self.assertLess(entrypoint.index(write_command), entrypoint.index(run_command))
         self.assertIn("CLIPMAN_ALLOW_INSECURE_REMOTE=true only on a trusted LAN or VPN", entrypoint)
         self.assertIn("a wildcard listener does not identify an address another device can use", entrypoint)
+        self.assertIn("CLIPMAN_ADVERTISE_URL", entrypoint)
+        self.assertIn('--advertise-url "$ADVERTISE_URL"', entrypoint)
 
     def test_new_settings_use_persistent_port_range(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -169,6 +171,38 @@ class ServerStartupTests(unittest.TestCase):
             self.assertEqual(0, result)
             self.assertEqual(34567, saved["Port"])
             self.assertNotEqual(before_hash, hashlib.sha256(config.read_bytes()).hexdigest())
+
+    def test_advertise_url_cli_saves_public_endpoint_in_connection_file(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config, settings = self.write_test_settings(root)
+            settings.update({"Host": "0.0.0.0", "Port": 8080})
+            clipman_server.save_settings(config, settings)
+            args = [
+                "clipman_server.py", "--config", str(config),
+                "--advertise-url", "https://clip.example:8443/", "--write-connection-info",
+            ]
+            with mock.patch("sys.argv", args), \
+                 mock.patch.object(clipman_server, "configure_logging"), \
+                 redirect_stdout(io.StringIO()):
+                result = clipman_server.main()
+
+            saved = json.loads(config.read_text(encoding="utf-8"))
+            connection = json.loads(clipman_server.default_connection_config_path(config).read_text(encoding="utf-8"))
+            self.assertEqual(0, result)
+            self.assertEqual("https://clip.example:8443", saved["AdvertiseUrl"])
+            self.assertEqual("https://clip.example:8443", connection["address"])
+            self.assertEqual(8443, connection["port"])
+
+    def test_invalid_advertise_url_does_not_change_saved_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            config, _settings = self.write_test_settings(Path(folder))
+            original = config.read_bytes()
+            args = ["clipman_server.py", "--config", str(config), "--advertise-url", "https://[invalid"]
+            with mock.patch("sys.argv", args), redirect_stderr(io.StringIO()):
+                result = clipman_server.main()
+            self.assertEqual(2, result)
+            self.assertEqual(original, config.read_bytes())
 
     def test_settings_replacement_preserves_existing_owner(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -297,6 +331,41 @@ class ConnectionConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "wildcard listening address"):
             clipman_server.write_connection_config(self.config_path, self.settings)
 
+    def test_reverse_proxy_url_sets_public_address_host_and_port(self) -> None:
+        self.settings.update({
+            "Host": "0.0.0.0",
+            "Port": 8080,
+            "AdvertiseHost": "",
+            "AdvertiseUrl": "https://clip.example",
+        })
+        document = clipman_server.connection_config_document(self.settings)
+        self.assertEqual("https://clip.example", document["address"])
+        self.assertEqual("clip.example", document["host"])
+        self.assertEqual(443, document["port"])
+        clipman_server.write_connection_info(self.config_path, self.settings)
+        info = clipman_server.default_connection_info_path(self.config_path).read_text(encoding="utf-8")
+        self.assertIn("Server address: https://clip.example", info)
+        self.assertIn("Port: 443", info)
+        self.assertNotIn("8080", info)
+
+    def test_reverse_proxy_url_preserves_nonstandard_public_port(self) -> None:
+        self.settings["AdvertiseUrl"] = "https://clip.example:8443/"
+        document = clipman_server.connection_config_document(self.settings)
+        self.assertEqual("https://clip.example:8443", document["address"])
+        self.assertEqual(8443, document["port"])
+
+    def test_reverse_proxy_url_rejects_insecure_or_ambiguous_values(self) -> None:
+        for value in (
+            "http://clip.example",
+            "https://user:pass@clip.example",
+            "https://clip.example/setup",
+            "https://clip.example?token=abc",
+            "https://clip.example:bad",
+            "https://[invalid",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                clipman_server.validate_advertise_url(value)
+
 
 class TemporarySetupLinkTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -396,6 +465,25 @@ class TemporarySetupLinkTests(unittest.TestCase):
         self.assertEqual("permanent-test-token", document["token"])
         self.assertNotIn("password", json.dumps(document).lower())
         self.assertEqual(1, json.loads(clipman_server.setup_state_path(self.config_path).read_text())["remaining_downloads"])
+
+    def test_reverse_proxy_setup_link_download_uses_public_client_address(self) -> None:
+        self.settings["AdvertiseUrl"] = "https://clip.example"
+        url, code, _state = self.create()
+        self.assertEqual(f"https://clip.example/setup/{code}", url)
+        status, body, _headers = self.request("GET", f"/setup/{code}/connection.clpconf")
+        self.assertEqual(200, status)
+        document = json.loads(body)
+        self.assertEqual("https://clip.example", document["address"])
+        self.assertEqual(443, document["port"])
+
+    def test_root_confirms_service_without_exposing_private_details(self) -> None:
+        for method in ("GET", "HEAD"):
+            with self.subTest(method=method):
+                status, body, headers = self.request(method, "/")
+                self.assertEqual(200, status)
+                self.assertEqual("text/plain; charset=utf-8", headers["content-type"])
+                self.assertNotIn(self.settings["AuthToken"].encode("utf-8"), body)
+                self.assertEqual(b"" if method == "HEAD" else b"Clipman Server is running.\n", body)
 
     def test_final_download_revokes_link(self) -> None:
         _url, code, _state = self.create(downloads=1)

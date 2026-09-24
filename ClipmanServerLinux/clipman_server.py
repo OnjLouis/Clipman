@@ -140,6 +140,7 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     data_dir = default_data_dir()
     settings.setdefault("Host", "127.0.0.1")
     settings.setdefault("AdvertiseHost", "")
+    settings.setdefault("AdvertiseUrl", "")
     if "Port" not in settings:
         settings["Port"] = find_available_server_port()
     settings.setdefault("DatabasePath", str(data_dir / "clipman-history.clipdb"))
@@ -236,6 +237,24 @@ def advertised_host(settings: Dict[str, Any]) -> str:
     return host
 
 
+def validate_advertise_url(value: str) -> str:
+    value = value.strip()
+    parsed = urlparse(value)
+    if any(character.isspace() for character in value) or parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("AdvertiseUrl must be an HTTPS URL with a host name.")
+    if parsed.username or parsed.password or parsed.params or parsed.query or parsed.fragment:
+        raise ValueError("AdvertiseUrl cannot contain credentials, parameters, a query, or a fragment.")
+    if parsed.path not in {"", "/"}:
+        raise ValueError("AdvertiseUrl must not contain a path.")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("AdvertiseUrl must have a valid TCP port.") from error
+    if parsed.netloc.endswith(":") or (port is not None and not 1 <= port <= 65535):
+        raise ValueError("AdvertiseUrl must have a valid TCP port.")
+    return f"https://{parsed.netloc}"
+
+
 def is_local_or_private_host(host: str) -> bool:
     host = (host or "").strip().lower()
     if host in {"localhost", "localhost.localdomain"}:
@@ -271,7 +290,7 @@ def setup_state_path(config_path: Path) -> Path:
 
 
 def setup_base_url(settings: Dict[str, Any], override: str = "") -> str:
-    configured = (override or str(settings.get("SetupBaseUrl", ""))).strip()
+    configured = (override or str(settings.get("SetupBaseUrl", "")) or str(settings.get("AdvertiseUrl", ""))).strip()
     if configured:
         parsed = urlparse(configured)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -1090,22 +1109,32 @@ def default_connection_config_path(config_path: Path) -> Path:
     return config_path.parent / "clipman-server-connection.clpconf"
 
 
-def client_server_address(settings: Dict[str, Any]) -> str:
+def client_connection_endpoint(settings: Dict[str, Any]) -> Tuple[str, str, int]:
+    public_url = str(settings.get("AdvertiseUrl", "")).strip()
+    if public_url:
+        address = validate_advertise_url(public_url)
+        parsed = urlparse(address)
+        return address, str(parsed.hostname), parsed.port or 443
     scheme = "https" if has_tls(settings) else "clipman"
     host = advertised_host(settings)
     host_for_url = f"[{host}]" if ":" in host and not host.startswith("[") else host
-    return f"{scheme}://{host_for_url}:{settings['Port']}"
+    return f"{scheme}://{host_for_url}:{settings['Port']}", host, int(settings["Port"])
+
+
+def client_server_address(settings: Dict[str, Any]) -> str:
+    return client_connection_endpoint(settings)[0]
 
 
 def write_connection_info(config_path: Path, settings: Dict[str, Any]) -> Path:
     target = default_connection_info_path(config_path)
     make_private_dir(target.parent)
     authority = inspect_private_ca(settings)
+    address, _host, port = client_connection_endpoint(settings)
     lines = [
         "Clipman Server connection details",
         "",
-        f"Server address: {client_server_address(settings)}",
-        f"Port: {settings['Port']}",
+        f"Server address: {address}",
+        f"Port: {port}",
         f"Token: {settings['AuthToken']}",
     ]
     if authority is not None:
@@ -1131,12 +1160,13 @@ def write_connection_info(config_path: Path, settings: Dict[str, Any]) -> Path:
 
 def connection_config_document(settings: Dict[str, Any]) -> Dict[str, Any]:
     authority = inspect_private_ca(settings)
+    address, host, port = client_connection_endpoint(settings)
     document = {
         "clipman": "server-connection",
         "version": 1,
-        "address": client_server_address(settings),
-        "host": advertised_host(settings),
-        "port": int(settings["Port"]),
+        "address": address,
+        "host": host,
+        "port": port,
         "token": str(settings["AuthToken"]),
     }
     if authority is not None:
@@ -1749,6 +1779,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def route(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+        if path == "/" and self.command in {"GET", "HEAD"}:
+            self.send_setup_response(200, b"Clipman Server is running.\n", "text/plain; charset=utf-8")
+            return
         setup_match = SETUP_PATH_PATTERN.fullmatch(path)
         if setup_match and self.command in {"GET", "HEAD"}:
             self.serve_setup(setup_match.group(1), bool(setup_match.group(2)))
@@ -1977,6 +2010,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default=str(Path.cwd() / "Settings" / DEFAULT_CONFIG), help="Path to server settings JSON.")
     parser.add_argument("--host", help="Override listen host for this run and save it.")
     parser.add_argument("--advertise-host", help="Override the host written to connection details for this run and save it.")
+    parser.add_argument("--advertise-url", help="Public HTTPS root written to connection files behind a reverse proxy; may include a nonstandard port. Saves AdvertiseUrl.")
     parser.add_argument("--port", type=int, help="Override listen port for this run and save it.")
     parser.add_argument("--suggest-port", action="store_true", help="Print an available persistent server port and exit.")
     parser.add_argument("--database", help="Override database path and save it.")
@@ -2097,6 +2131,16 @@ def main() -> int:
         settings["Host"] = args.host
     if args.advertise_host:
         settings["AdvertiseHost"] = args.advertise_host
+    if args.advertise_url:
+        settings["AdvertiseUrl"] = args.advertise_url
+    if settings.get("AdvertiseUrl"):
+        try:
+            validated_url = validate_advertise_url(str(settings["AdvertiseUrl"]))
+        except ValueError as error:
+            print(f"Invalid AdvertiseUrl: {error}", file=sys.stderr)
+            return 2
+        if args.advertise_url:
+            settings["AdvertiseUrl"] = validated_url
     if args.port is not None:
         settings["Port"] = args.port
     if args.database:
