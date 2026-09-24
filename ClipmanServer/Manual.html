@@ -43,6 +43,7 @@
     <li><a href="#downloads">Downloads and Client App</a></li>
     <li><a href="#server-program">Server Program</a></li>
     <li><a href="#security">Security Model</a></li>
+    <li><a href="#sharing-a-server">Sharing One Server</a></li>
     <li><a href="#linux-install">Recommended Linux Install</a></li>
     <li><a href="#docker">Docker and GHCR</a></li>
     <li><a href="#first-run">First Run</a></li>
@@ -103,6 +104,13 @@
   </table>
 
   <p>Do not expose plain HTTP or plain <code>clipman://</code> directly to the public internet.</p>
+
+  <h2 id="sharing-a-server">Sharing One Server</h2>
+  <p>One Clipman Server can hold separate histories for several people or groups. The server token is a shared credential for connecting to that server, not an account for one person and not the password that encrypts history. Each Clipman client combines the token with its own history password to choose a database bucket. The server never receives the history password.</p>
+
+  <p>For example, two family members can import the same <code>.clpconf</code> connection file and choose different, strong history passwords. Their clients use different buckets and do not normally sync with one another. To share one history deliberately, configure those clients with the same server token <em>and</em> the same history password. A short analogy: the token opens the building; the history password chooses the room.</p>
+
+  <p><strong>This is not separate user-account security.</strong> Anyone with the server token can make requests to the server, and the server does not enforce per-person bucket permissions or quotas. Someone who also knows or guesses a group's history password can derive that group's bucket ID. Keep the token and connection file private, use HTTPS on the public internet, and give each independent history a strong, unique password. If people need independently revocable access or separate server-level permissions, run separate server instances with separate tokens. Changing a client's history password selects a different bucket; changing the server token affects every client using that server.</p>
 
   <h2 id="linux-install">Recommended Linux Install</h2>
   <p>On Linux, especially a Raspberry Pi or small always-on server, run the installer from the extracted server package:</p>
@@ -608,7 +616,7 @@ Logs:               ~/Library/Logs/Clipman Server/logs/clipman-server.log</code>
 /var/log/clipman-server/clipman-server.log</code></pre>
 
   <h2 id="multiple-databases">Multiple Databases</h2>
-  <p>The server can serve multiple separate Clipman histories. Clients derive a server-side database ID from the server token and the Clipman history password.</p>
+  <p>As described in <a href="#sharing-a-server">Sharing One Server</a>, clients derive a server-side database ID from the server token and the Clipman history password. One server can therefore hold multiple separate Clipman histories without issuing a different token for each one.</p>
 
   <p>Clients using the same token and same history password use the same database bucket. Clients using a wrong or different history password use a different bucket and cannot overwrite the existing history.</p>
 
