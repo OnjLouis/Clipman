@@ -34,7 +34,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.6.6"
+APP_VERSION = "2.6.7"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 BACKUP_PRUNE_INTERVAL_SECONDS = 60 * 60
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
