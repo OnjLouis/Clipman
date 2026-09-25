@@ -21,8 +21,8 @@ android {
         minSdk = 26
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 33
-        versionName = "3.1.4"
+        versionCode = 34
+        versionName = "3.1.6"
         buildConfigField("String", "CLIPMAN_BUILD_STAMP_UTC_MS", "\"$sharedBuildStamp\"")
     }
 

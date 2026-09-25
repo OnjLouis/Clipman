@@ -902,6 +902,14 @@ namespace Clipman
                 return;
             }
 
+            var hasUnicodeText = Clipboard.ContainsText(TextDataFormat.UnicodeText);
+            string urlOnlyText = null;
+            if (!hasUnicodeText)
+            {
+                try { urlOnlyText = ClipboardUrlData.TryRead(Clipboard.GetDataObject()); }
+                catch { }
+            }
+
             ClipboardEventSummary fileSummary = null;
             try
             {
@@ -910,7 +918,7 @@ namespace Clipman
             catch
             {
             }
-            if (fileSummary != null)
+            if (fileSummary != null && urlOnlyText == null)
             {
                 if (startupCapture && fileEventStore.Contains(fileSummary))
                 {
@@ -929,17 +937,21 @@ namespace Clipman
                 return;
             }
 
-            if (!Clipboard.ContainsText(TextDataFormat.UnicodeText))
+            if (!hasUnicodeText && urlOnlyText == null)
             {
                 clipMergeDetector.Reset();
                 sounds.Skip(settings.SoundsEnabled);
                 return;
             }
 
-            string text;
+            var text = urlOnlyText;
             try
             {
-                text = Clipboard.GetText(TextDataFormat.UnicodeText);
+                if (hasUnicodeText) text = Clipboard.GetText(TextDataFormat.UnicodeText);
+                if (string.IsNullOrEmpty(text))
+                {
+                    text = ClipboardUrlData.TryRead(Clipboard.GetDataObject());
+                }
             }
             catch
             {
@@ -2133,6 +2145,18 @@ namespace Clipman
             copied |= SnapshotText(source, snapshot, DataFormats.Rtf, TextDataFormat.Rtf);
             copied |= SnapshotText(source, snapshot, DataFormats.Html, TextDataFormat.Html);
             copied |= SnapshotText(source, snapshot, DataFormats.CommaSeparatedValue, TextDataFormat.CommaSeparatedValue);
+
+            var url = ClipboardUrlData.TryRead(source);
+            if (url != null)
+            {
+                if (!snapshot.GetDataPresent(DataFormats.UnicodeText, false))
+                {
+                    snapshot.SetText(url, TextDataFormat.UnicodeText);
+                }
+                snapshot.SetData("UniformResourceLocatorW", false,
+                    new MemoryStream(Encoding.Unicode.GetBytes(url + "\0")));
+                copied = true;
+            }
 
             try
             {

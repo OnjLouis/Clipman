@@ -4,6 +4,7 @@ import UIKit
 struct EntryView: View {
     let entry: ClipEntry
     @Environment(\.dismiss) private var dismiss
+    @State private var showingLargeImage = false
 
     private var links: [URL] {
         LinkExtractor.links(in: entry.Text)
@@ -24,12 +25,15 @@ struct EntryView: View {
                 }
                 if let embeddedImage, let image = UIImage(data: embeddedImage.data) {
                     Section("Image preview") {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(embeddedImage.altText)
+                        Button {
+                            showingLargeImage = true
+                        } label: {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                        }
+                        .accessibilityLabel("View larger image: \(embeddedImage.altText)")
                     }
                 }
                 if !links.isEmpty {
@@ -53,6 +57,23 @@ struct EntryView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Close") { dismiss() }
+                }
+            }
+            .fullScreenCover(isPresented: $showingLargeImage) {
+                if let embeddedImage, let image = UIImage(data: embeddedImage.data) {
+                    NavigationStack {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityLabel(embeddedImage.altText)
+                            .navigationTitle("Image preview")
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Close") { showingLargeImage = false }
+                                }
+                            }
+                    }
                 }
             }
         }

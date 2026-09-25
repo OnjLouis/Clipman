@@ -22,6 +22,7 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,6 +83,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
@@ -2436,6 +2439,25 @@ private fun ViewEntryDialog(
     }
     val embeddedImage = remember(entry.RichText) { EmbeddedImageRichText.parse(entry.RichText) }
     val previewBitmap = remember(embeddedImage) { embeddedImage?.let(AndroidImageClipboard::decodePreview) }
+    var showingLargeImage by remember(entry.Id) { mutableStateOf(false) }
+    if (showingLargeImage && embeddedImage != null && previewBitmap != null) {
+        Dialog(
+            onDismissRequest = { showingLargeImage = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+                Column {
+                    TextButton(onClick = { showingLargeImage = false }) { Text("Close image preview") }
+                    Image(
+                        bitmap = previewBitmap.asImageBitmap(),
+                        contentDescription = embeddedImage.altText,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxWidth().weight(1f)
+                    )
+                }
+            }
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("View Entry") },
@@ -2463,6 +2485,7 @@ private fun ViewEntryDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 320.dp)
+                            .clickable(onClickLabel = "View larger image") { showingLargeImage = true }
                     )
                 }
                 Text(

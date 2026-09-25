@@ -6,6 +6,31 @@ import XCTest
 @testable import Clipman
 
 final class EmbeddedImageTests: XCTestCase {
+    @MainActor
+    func testURLOnlyClipboardCanBeImported() throws {
+        let url = "https://example.com/article?from=safari"
+        let pasteboardName = UIPasteboard.Name("ClipmanIOSTests.\(UUID().uuidString)")
+        let pasteboard = try XCTUnwrap(UIPasteboard(name: pasteboardName, create: true))
+        defer { UIPasteboard.remove(withName: pasteboardName) }
+        pasteboard.setItems([[UTType.url.identifier: url]])
+
+        XCTAssertTrue(MobileRichTextClipboard.containsSupportedContent(includeImages: false, in: pasteboard))
+        XCTAssertEqual(MobileRichTextClipboard.readCurrent(includeImages: false, in: pasteboard)?.text, url)
+        XCTAssertEqual(MobileClipboardPayload.payload(fromURLData: Data(url.utf8)).text, url)
+    }
+
+    @MainActor
+    func testURLObjectClipboardCanBeImported() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.com/page"))
+        let pasteboardName = UIPasteboard.Name("ClipmanIOSTests.\(UUID().uuidString)")
+        let pasteboard = try XCTUnwrap(UIPasteboard(name: pasteboardName, create: true))
+        defer { UIPasteboard.remove(withName: pasteboardName) }
+        pasteboard.setItems([[UTType.url.identifier: url]])
+
+        XCTAssertTrue(MobileRichTextClipboard.containsSupportedContent(includeImages: false, in: pasteboard))
+        XCTAssertEqual(MobileRichTextClipboard.readCurrent(includeImages: false, in: pasteboard)?.text, url.absoluteString)
+    }
+
     func testSmallPNGPreservesOriginalBytesAndRoundTripsCanonicalWrapper() throws {
         let original = try makePNG(width: 20, height: 10)
         let payload = try EmbeddedImageCodec.makePayload(data: original, suggestedFilename: "sample.png")

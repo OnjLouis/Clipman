@@ -836,6 +836,15 @@ def parse_file_clipboard_payload(text, mime_type="text/uri-list"):
     return paths, operation
 
 
+def web_url_from_uri_list(text):
+    urls = [line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            if line.strip() and not line.lstrip().startswith("#")]
+    if len(urls) != 1:
+        return None
+    url = urls[0]
+    return url if url.casefold().startswith(("http://", "https://", "clipman://")) and is_standalone_link(url) else None
+
+
 def local_image_file_candidate(paths):
     if len(paths) != 1:
         if paths:
@@ -2477,6 +2486,14 @@ class ClipmanApplication(Gtk.Application):
             try: stream.close(None)
             except GLib.Error: pass
         paths, operation = parse_file_clipboard_payload(payload, mime_type)
+        if mime_type == "text/uri-list" and not paths:
+            url = web_url_from_uri_list(payload)
+            if url:
+                if force:
+                    self._put_text(url)
+                else:
+                    self._process_clipboard_text(clipboard, url, None)
+                return
         self._capture_file_paths(clipboard, paths, operation, mime_type, force)
 
     def _capture_file_paths(self, clipboard, paths, operation, mime_type, force):

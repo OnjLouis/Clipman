@@ -32,6 +32,9 @@ struct MobileClipboardPayload: Transferable, Sendable {
         DataRepresentation(importedContentType: .jpeg) { data in
             imagePayload(from: data)
         }
+        DataRepresentation(importedContentType: .url) { data in
+            payload(fromURLData: data)
+        }
         DataRepresentation(importedContentType: .plainText) { data in
             MobileClipboardPayload(
                 text: String(data: data, encoding: .utf8) ?? "",
@@ -55,6 +58,11 @@ struct MobileClipboardPayload: Transferable, Sendable {
         } catch {
             return MobileClipboardPayload(text: "", richText: nil, importError: error.localizedDescription)
         }
+    }
+
+    static func payload(fromURLData data: Data) -> MobileClipboardPayload {
+        let text = String(data: data, encoding: .utf8) ?? ""
+        return MobileClipboardPayload(text: text, richText: nil, importError: nil)
     }
 
     static func payload(fromHTMLData data: Data) -> MobileClipboardPayload {
@@ -88,6 +96,7 @@ enum MobileRichTextClipboard {
         var types = [
             UTType.plainText.identifier,
             UTType.utf8PlainText.identifier,
+            UTType.url.identifier,
             UTType.html.identifier,
             UTType.rtf.identifier
         ]
@@ -122,10 +131,16 @@ enum MobileRichTextClipboard {
                 return MobileClipboardPayload(text: "", richText: nil, importError: error.localizedDescription)
             }
         }
-        let text = pasteboard.string
-            ?? htmlData.map { plainText(from: $0, documentType: .html) }
-            ?? rtfData.map { plainText(from: $0, documentType: .rtf) }
-            ?? ""
+        let text = [
+            pasteboard.string,
+            htmlData.map { plainText(from: $0, documentType: .html) },
+            rtfData.map { plainText(from: $0, documentType: .rtf) },
+            pasteboard.url?.absoluteString
+                ?? pasteboard.data(forPasteboardType: UTType.url.identifier)
+                    .flatMap { String(data: $0, encoding: .utf8) }
+        ]
+        .compactMap { $0 }
+        .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let preferredFormat = htmlData == nil && rtfData != nil ? "Rtf" : "Html"
             let richText = normalize(RichTextPayload(

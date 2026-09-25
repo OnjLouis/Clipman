@@ -278,6 +278,41 @@ class SensitiveDataTests(unittest.TestCase):
         )
 
 
+class FileClipboardURLTests(unittest.TestCase):
+    def test_web_uri_list_is_a_link_without_changing_file_uris(self):
+        web = "https://example.com/article?from=browser"
+        self.assertEqual(clipman.parse_file_clipboard_payload(web + "\r\n"), ([], "Copy"))
+        self.assertEqual(clipman.web_url_from_uri_list(web + "\r\n"), web)
+        self.assertEqual(clipman.web_url_from_uri_list("# copied from browser\r\n" + web + "\r\n"), web)
+        self.assertIsNone(clipman.web_url_from_uri_list("file:///home/user/note.txt\r\n"))
+        self.assertIsNone(clipman.web_url_from_uri_list(web + "\r\nfile:///home/user/note.txt\r\n"))
+
+    def test_uri_list_callback_routes_web_links_and_local_files_separately(self):
+        def dispatch(payload, force=False):
+            app = mock.Mock()
+            app.clipboard_read_busy = True
+            stream = mock.Mock()
+            stream.read_bytes_finish.return_value.get_data.return_value = payload.encode("utf-8")
+            clipboard = object()
+            clipman.ClipmanApplication._clipboard_file_payload_read(
+                app, stream, None, (clipboard, "text/uri-list", force)
+            )
+            return app, clipboard
+
+        web = "https://example.com/article"
+        app, clipboard = dispatch(web + "\r\n")
+        app._process_clipboard_text.assert_called_once_with(clipboard, web, None)
+        app._capture_file_paths.assert_not_called()
+
+        app, _ = dispatch(web + "\r\n", force=True)
+        app._put_text.assert_called_once_with(web)
+
+        app, clipboard = dispatch("file:///home/user/note.txt\r\n")
+        app._capture_file_paths.assert_called_once_with(
+            clipboard, ["/home/user/note.txt"], "Copy", "text/uri-list", False
+        )
+
+
 class EmbeddedImageTests(unittest.TestCase):
     def test_wrapper_recognition_and_native_clipboard_payload(self):
         rich_text = image_rich_text()

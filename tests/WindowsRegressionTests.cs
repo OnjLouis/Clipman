@@ -30,6 +30,7 @@ namespace Clipman.Tests
             Run("encrypted database round trip", EncryptedDatabaseRoundTrip);
             Run("URL length is bounded before presentation or fetch", UrlLengthIsBounded);
             Run("Open Link accepts only standalone web links", OpenLinkAcceptsOnlyStandaloneWebLinks);
+            Run("URL-only clipboard items are imported as links", UrlOnlyClipboardItemsAreImportedAsLinks);
             Run("URL labels accept characters that are illegal in Windows paths", UrlLabelsAcceptWindowsPathCharacters);
             Run("website title safety distinguishes readable slugs from capability tokens", WebsiteTitleSafetyDistinguishesReadableSlugs);
             Run("explicit website title requests allow sensitive-looking public links", ExplicitWebsiteTitleRequestsAllowSensitiveLookingPublicLinks);
@@ -102,6 +103,33 @@ namespace Clipman.Tests
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
+        }
+
+        private static void UrlOnlyClipboardItemsAreImportedAsLinks()
+        {
+            const string url = "https://example.com/article?from=browser";
+            var data = new DataObject();
+            data.SetData("UniformResourceLocatorW", false,
+                new MemoryStream(Encoding.Unicode.GetBytes(url + "\0")));
+            Assert(!data.GetDataPresent(DataFormats.UnicodeText, false),
+                "A URL-only clipboard item should not masquerade as Unicode text.");
+            Assert(ClipboardUrlData.TryRead(data) == url,
+                "The URL-only clipboard representation should produce its web address.");
+            var snapshot = ClipmanApplicationContext.SnapshotClipboardData(data);
+            Assert(snapshot != null && (string)snapshot.GetData(DataFormats.UnicodeText, false) == url,
+                "Quick Paste must be able to restore a URL-only clipboard item.");
+
+            var legacy = new DataObject();
+            legacy.SetData("UniformResourceLocator", false,
+                new MemoryStream(Encoding.ASCII.GetBytes(url + "\0")));
+            Assert(ClipboardUrlData.TryRead(legacy) == url,
+                "Legacy URL-only clipboard items should also be readable.");
+
+            var file = new DataObject();
+            file.SetData("UniformResourceLocatorW", false,
+                new MemoryStream(Encoding.Unicode.GetBytes("file:///C:/private.txt\0")));
+            Assert(ClipboardUrlData.TryRead(file) == null,
+                "Local file URLs must not bypass file-history handling.");
         }
 
         private static void DatabaseContainerCapsAreAligned()

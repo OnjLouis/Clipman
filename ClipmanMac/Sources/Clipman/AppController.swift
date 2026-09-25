@@ -1403,7 +1403,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             }
             return
         }
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+        guard let text = PasteboardLinkText.read(from: .general), !text.isEmpty else {
             NSSound.beep()
             return
         }

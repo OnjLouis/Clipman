@@ -92,6 +92,11 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.6 Windows, macOS, Linux, Android and iOS</h3>
+  <ul>
+    <li>Windows, macOS, Linux and iOS now recognize web links copied as URL-only clipboard items, even when the source application supplies no plain-text representation. Local file links remain in the existing file-handling path.</li>
+    <li>On iPhone and Android, the image preview in View Entry can now be opened at screen size and closed to return to the entry.</li>
+  </ul>
   <h3>3.1.5 macOS</h3>
   <ul>
     <li>Added a signed and notarized Intel Mac download alongside the Apple Silicon build. Both support macOS 13 or later. Mac updates choose the ZIP for the computer's processor, check the release's assets directly if GitHub's summary is incomplete, and refuse to install an app without compatible code.</li>
@@ -944,6 +949,8 @@
   <p>Android captures and restores HTML, the rich-text format supported by Android's standard text clipboard. It preserves RTF received from desktop or iOS clients but uses the plain-text fallback when an entry contains only RTF. iPhone and iPad capture and restore both HTML and RTF through Apple's explicit Paste control. On mobile, use the section-switch button or the screen-reader page gesture to move through Text, Rich Text and Links while the option is enabled.</p>
 
   <p><strong>Include copied images in rich text history</strong> is a separate option beneath Rich Text history and is also off by default. When enabled, Clipman can store a standalone PNG or JPEG clipboard image inside the existing history database. On Android or iPhone, choose Clipman from the system Share sheet to add one selected photo directly; Clipman waits for the normal device unlock and history load before storing it. The Rich Text row announces its filename rather than a content fingerprint, F4 or View provides an accessible image preview and dimensions, and copying the entry restores a native image format alongside its plain-text fallback. On mobile, an image row also provides <strong>Save to Photos</strong> followed by <strong>Share</strong> after the standard entry actions in both TalkBack and VoiceOver. These image-only actions save the stored image to the device photo library or open the system Share sheet without changing the history entry. The stored image follows the same local, shared-folder, or Clipman Server storage path as the rest of the history; no sidecar image folder or server change is required. When editing an image entry's properties, its embedded content is read-only; use Name to change how the entry appears without risking its stored image.</p>
+
+  <p>On iPhone and Android, open an image entry with View to see its preview, then activate the image to view it at screen size. Close the large preview to return to the entry. Clipman keeps an original filename when the source supplies one; otherwise it uses a generic image name rather than guessing which app supplied it.</p>
 
   <p>Image capture accepts at most 16 MiB, 16 megapixels, and 4096 pixels in either dimension. An image already within 512 KiB and 2048 pixels keeps its original PNG or JPEG bytes and metadata. Larger accepted images are reduced to at most 2048 pixels and 512 KiB, retaining a bounded amount of metadata where the platform supports it. Metadata can include camera or location information and follows the history's encryption and sync choices. Clipman refuses another locally captured image when embedded images already occupy 8 MiB of the current database. Concurrent additions from several syncing devices can take a merged history beyond that threshold; Clipman keeps those existing entries and refuses further image capture rather than silently deleting data.</p>
 

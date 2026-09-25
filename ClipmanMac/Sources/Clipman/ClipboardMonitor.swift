@@ -252,7 +252,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             captureAdditionalRichTextImageIfEnabled(from: fileCapture.files, startupCapture: startupCapture)
             return
         }
-        let text = pasteboard.string(forType: .string)
+        let text = PasteboardLinkText.read(from: pasteboard)
         let fileReferenceCount = pasteboard.pasteboardItems?.filter {
             $0.types.contains(.fileURL) || $0.types.contains(NSPasteboard.PasteboardType("public.file-url"))
         }.count ?? 0
