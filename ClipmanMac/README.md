@@ -64,14 +64,14 @@ The native menu bar provides Clipman, File, Edit, Actions, Groups, Quick Paste, 
 
 The history window includes an accessible toolbar after the history type control. The Clipman button remains tabbable; Set Group, Set to current filter, Filter, selected group status, Sort, Direction, and Preferences are exposed in the toolbar for VoiceOver navigation without adding extra Tab stops.
 
-- `Control+1` through `Control+4`: switch to the visible history area currently shown at that position. The View menu and Clipman toolbar menu show the current assignments.
-- `Option+Left` or `Option+Right`: move the focused history tab, keep focus on it, and update the positional `Control+number` assignments.
+- `Command+1` through `Command+4`: switch to the visible history area currently shown at that position. The View menu and Clipman toolbar menu show the current assignments.
+- `Option+Left` or `Option+Right`: move the focused history tab, keep focus on it, and update the positional `Command+number` assignments.
 - `Tab` or `Shift+Tab`: enter the selected history tab from the normal key loop and continue between the main controls and history list.
 - `Option+M`: Open the Clipman actions menu.
 - `Command+G`: group selected text entries.
 - `Option+G`: open the group filter menu.
 - `Option+1` through `Option+0`: apply one of the first ten group filters in menu order: All, Pinned, Named, Ungrouped, then custom groups.
-- `Command+1` through `Command+0`: choose one of the first ten pinned items in the active history.
+- `Control+1` through `Control+0`: choose one of the first ten pinned items in the active history.
 - `Option+Up` or `Option+Down`: move selected entries in manual order.
 - `Enter`: choose the selected text entry or restore the selected file event.
 - `Shift+Enter`: pin or unpin the selected item.

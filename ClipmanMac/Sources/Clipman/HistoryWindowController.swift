@@ -532,12 +532,12 @@ final class HistoryWindow: NSWindow {
     private func handleClipmanShortcut(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if let digitIndex = Self.digitIndex(for: event.keyCode) {
-			if modifiers == [.command] {
-                onPinnedShortcut?(digitIndex)
+			if modifiers == [.control] {
+				onPinnedShortcut?(digitIndex)
                 return true
             }
-			if modifiers == [.control], digitIndex >= 0 && digitIndex <= 3 {
-                onSwitchMode?(digitIndex)
+			if modifiers == [.command], digitIndex >= 0 && digitIndex <= 3 {
+				onSwitchMode?(digitIndex)
                 return true
             }
             if modifiers == [.option] {
@@ -1148,9 +1148,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             button.setButtonType(.toggle)
             button.bezelStyle = .rounded
             button.state = visibleMode == mode ? .on : .off
-			button.toolTip = "\(title), Control+\(index + 1)"
-            button.setAccessibilityLabel(title)
-			button.setAccessibilityHelp("Control+\(index + 1). Use Left or Right Arrow to switch sections. Use Option+Left or Option+Right to move this section.")
+			button.toolTip = "\(title), Command+\(index + 1)"
+			button.setAccessibilityLabel(title)
+			button.setAccessibilityHelp("Command+\(index + 1). Use Left or Right Arrow to switch sections. Use Option+Left or Option+Right to move this section.")
             button.onNavigate = { [weak self] direction in
                 self?.navigateModeTabs(from: visibleMode.tabID, direction: direction)
             }
@@ -1644,7 +1644,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 				pinnedMenu.autoenablesItems = false
 				for (index, row) in pinned.prefix(10).enumerated() {
 					let key = index == 9 ? "0" : "\(index + 1)"
-					let item = addNativeItem(rowTitle(row), action: #selector(menuPinnedChoose(_:)), to: pinnedMenu, key: key, modifiers: [.command], enabled: enabled)
+					let item = addNativeItem(rowTitle(row), action: #selector(menuPinnedChoose(_:)), to: pinnedMenu, key: key, modifiers: [.control], enabled: enabled)
 					item.representedObject = index
 				}
 				let root = NSMenuItem(title: "Pinned Shortcuts", action: nil, keyEquivalent: "")
@@ -1711,7 +1711,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 			}
 		case "View":
 			for (index, visibleMode) in visibleModes().enumerated() {
-				let item = addNativeItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, key: "\(index + 1)", modifiers: [.control], enabled: enabled)
+				let item = addNativeItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, key: "\(index + 1)", modifiers: [.command], enabled: enabled)
 				item.state = mode == visibleMode ? .on : .off
 			}
 			menu.addItem(.separator())
@@ -1794,7 +1794,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             menu.addItem(.separator())
         }
         for (index, visibleMode) in visibleModes().enumerated() {
-			addMenuItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, shortcut: "Control+\(index + 1)").state = mode == visibleMode ? .on : .off
+			addMenuItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, shortcut: "Command+\(index + 1)").state = mode == visibleMode ? .on : .off
         }
         addMenuItem("Move History Tab Left", action: #selector(menuMoveHistoryTabLeft), to: menu, shortcut: "Option+Left")
         addMenuItem("Move History Tab Right", action: #selector(menuMoveHistoryTabRight), to: menu, shortcut: "Option+Right")
@@ -1934,7 +1934,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         for (index, row) in pinned.prefix(10).enumerated() {
             let number = index == 9 ? "0" : "\(index + 1)"
             let title = "\(number). \(rowTitle(row))"
-			let choose = addMenuItem("Choose \(title)", action: #selector(menuPinnedChoose(_:)), to: pinnedMenu, shortcut: "Command+\(number)")
+			let choose = addMenuItem("Choose \(title)", action: #selector(menuPinnedChoose(_:)), to: pinnedMenu, shortcut: "Control+\(number)")
             choose.representedObject = index
         }
         let pinnedRoot = NSMenuItem(title: "Pinned Shortcuts", action: nil, keyEquivalent: "")
