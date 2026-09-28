@@ -24,7 +24,7 @@ fi
 
 MAC_VERSION_FILE="$ROOT/VERSION"
 if [[ -f "$MAC_VERSION_FILE" ]]; then
-  MAC_VERSION="$(< "$MAC_VERSION_FILE")"
+  MAC_VERSION="$(tr -d '\r' < "$MAC_VERSION_FILE")"
   if [[ ! "$MAC_VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
     echo "Invalid Mac version in $MAC_VERSION_FILE: $MAC_VERSION" >&2
     exit 1

@@ -212,7 +212,7 @@ final class UpdateService {
         done
         rm -rf \(shellQuote(targetApp.path))
         /usr/bin/ditto \(shellQuote(stagedApp.path)) \(shellQuote(targetApp.path))
-        /usr/bin/open \(shellQuote(targetApp.path))
+        /usr/bin/open -g \(shellQuote(targetApp.path))
         rm -rf \(shellQuote(staging.path))
         """
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)

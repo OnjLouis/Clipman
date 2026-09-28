@@ -60,6 +60,7 @@ final class StartupService {
             "Label": label,
             "ProgramArguments": [
                 "/usr/bin/open",
+                "-g",
                 appBundleURL.path
             ],
             "RunAtLoad": true

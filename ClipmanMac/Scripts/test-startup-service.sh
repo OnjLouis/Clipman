@@ -56,6 +56,9 @@ require(commands.isEmpty, "disabling an absent registration invoked launchctl")
 try service.setEnabled(true, appBundleURL: appURL)
 require(commands.count == 1 && commands[0].first == "bootstrap", "first registration did not bootstrap directly")
 require(service.isEnabled(), "first registration did not create its property list")
+let registrationData = try Data(contentsOf: launchAgents.appendingPathComponent("com.andrelouis.clipman.login.plist"))
+let registration = try PropertyListSerialization.propertyList(from: registrationData, format: nil) as? [String: Any]
+require(registration?["ProgramArguments"] as? [String] == ["/usr/bin/open", "-g", appURL.path], "login registration does not launch in the background")
 
 commands.removeAll()
 try service.setEnabled(true, appBundleURL: appURL)

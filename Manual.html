@@ -92,6 +92,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.8 macOS</h3>
+  <ul>
+    <li>Starting at login or after an update now leaves the previous app in focus. Command+H dismisses Clipman windows through the same lifecycle as closing History, so Clipman leaves Command+Tab while its menu extra keeps running. The redundant direct File History command has been removed from the menu extra; Files remains available through History.</li>
+  </ul>
   <h3>3.1.7 macOS</h3>
   <ul>
     <li>Clipman now uses the native Mac menu bar while a window is open, then returns to menu-extra-only mode when its windows close. History commands follow the active tab and selection, and the View menu lists navigation shortcuts. The menu extra remains available throughout. Thanks to Johann for <a href="https://github.com/OnjLouis/Clipman/pull/81">pull request #81</a>.</li>
@@ -894,7 +898,7 @@
 
   <p><strong>Linux:</strong> Clipman is a GTK 4 desktop app that connects to Clipman Server and keeps an encrypted offline read cache. Its archive includes a per-user installer and a dedicated accessible manual covering desktop dependencies, X11 and Wayland differences, shortcuts, updates, File History, Secrets, and installed files.</p>
 
-	<p>The Mac status menu includes Show or Hide History, Show File History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. While a Clipman window is open, its native File, Edit, Actions, Groups, Quick Paste, View, Window, and Help menus provide history commands. In File History, Actions includes Clear Unpinned File History and Remove Unavailable File Events. Clearing asks for confirmation and does not delete files from disk. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
+	<p>The Mac status menu includes Show or Hide History, Toggle Monitoring, Secrets, Open Manual, Check for Updates, Version History, Project Page, Contact, Donate, Diagnostics, Preferences, About, and Quit. While a Clipman window is open, its native File, Edit, Actions, Groups, Quick Paste, View, Window, and Help menus provide history commands. In File History, Actions includes Clear Unpinned File History and Remove Unavailable File Events. Clearing asks for confirmation and does not delete files from disk. Mac Preferences uses Keychain only when password remembering is explicitly enabled.</p>
 
   <p><strong>Mac VoiceOver notes:</strong> Clipman keeps its menu extra while running. Opening a Clipman window shows it in the Dock and Command-Tab with native menus; after the last window closes, it returns to menu-extra-only mode. Use the Show History global hotkey to bring the history window forward. If VoiceOver reports that the system has a new window but focus lands badly, press the Show History hotkey once to dismiss Clipman and press it again to reopen with a fresh focus attempt. In the history window, use the native menu bar for commands and <code>Command+F</code> for search. The View menu shows the current <code>Command+number</code> for each visible history area; those numbers update immediately when tabs are moved. The status line shows the active history area and visible entry count. It is not part of normal Tab navigation, but VoiceOver can reach it with VoiceOver navigation. Pressing <code>Enter</code> from search returns focus to the history list.</p>
 

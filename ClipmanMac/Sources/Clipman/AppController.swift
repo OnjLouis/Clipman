@@ -33,6 +33,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
     private var secretsWindow: SecretsWindowController?
     private var syncRulesWindow: SyncRulesWindowController?
 	private var openManagedWindowIDs = Set<ObjectIdentifier>()
+	private var emptyActivationPending = false
     private var previousFrontmostProcessIdentifier: pid_t?
     private var pasteAfterHistoryHide = false
     private var lastPasteTargetInspection = "Not checked"
@@ -170,7 +171,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         registerHotkeys()
         RuntimeLogger.debug("Global hotkeys registered.")
         buildMainMenu()
-        _ = NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(self, selector: #selector(managedWindowWillClose(_:)), name: NSWindow.willCloseNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(managedWindowDidBecomeKey(_:)), name: NSWindow.didBecomeKeyNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(editingFocusChanged(_:)), name: NSControl.textDidBeginEditingNotification, object: nil)
@@ -186,7 +186,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         }
         warnAboutPasswordlessServerConfiguration(initialPassword: initialPassword)
         RuntimeLogger.debug("Application launch callback completed.")
+		RuntimeLogger.debug("Quiet launch scheduled.", details: "active=\(NSApp.isActive) policy=\(NSApp.activationPolicy().rawValue)")
+		scheduleEmptyActivationDismissal()
     }
+
+	func applicationDidBecomeActive(_ notification: Notification) {
+		RuntimeLogger.debug("Application became active.", details: "quietDismissalPending=\(emptyActivationPending) managedWindows=\(openManagedWindowIDs.count)")
+		DispatchQueue.main.async { [weak self] in
+			self?.dismissPendingEmptyActivation()
+		}
+	}
 
     private func warnAboutPasswordlessServerConfiguration(initialPassword: String) {
         guard isServerStorageEnabled(settings),
@@ -260,7 +269,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 	func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
 		guard !hasVisibleWindows else { return true }
 		guard let window = managedWindows.first(where: { openManagedWindowIDs.contains(ObjectIdentifier($0)) }) else {
-			showHistory(nil)
+			scheduleEmptyActivationDismissal()
 			return false
 		}
 		sender.unhide(nil)
@@ -274,8 +283,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 		[historyWindow?.window, preferencesWindow?.window, secretsWindow?.window, syncRulesWindow?.window].compactMap { $0 }
 	}
 
+	private func scheduleEmptyActivationDismissal() {
+		emptyActivationPending = true
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+			self?.dismissPendingEmptyActivation()
+		}
+	}
+
+	private func dismissPendingEmptyActivation() {
+		RuntimeLogger.debug("Quiet activation checked.", details: "pending=\(emptyActivationPending) active=\(NSApp.isActive) managedWindows=\(openManagedWindowIDs.count) modal=\(NSApp.modalWindow != nil)")
+		guard emptyActivationPending, openManagedWindowIDs.isEmpty, NSApp.modalWindow == nil else { return }
+		emptyActivationPending = false
+		NSApp.hide(nil)
+		let changed = NSApp.setActivationPolicy(.accessory)
+		RuntimeLogger.debug("Empty launch dismissed.", details: "policyChanged=\(changed) policy=\(NSApp.activationPolicy().rawValue) active=\(NSApp.isActive) hidden=\(NSApp.isHidden)")
+	}
+
 	private func presentManagedWindow(_ window: NSWindow?, _ present: () -> Void) {
 		if let window { openManagedWindowIDs.insert(ObjectIdentifier(window)) }
+		NSApp.unhide(nil)
 		if NSApp.activationPolicy() != .regular {
 			guard NSApp.setActivationPolicy(.regular) else {
 				RuntimeLogger.debug("Could not show Clipman in the Dock while opening a window.")
@@ -353,7 +379,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 		appMenu.addItem(mainMenuItem("Secrets...", action: #selector(showSecrets(_:)), key: "e", modifiers: [.command, .shift]))
 		appMenu.addItem(mainMenuItem("Toggle Monitoring", action: #selector(toggleMonitoring(_:))))
 		appMenu.addItem(.separator())
-		appMenu.addItem(mainMenuItem("Hide Clipman", action: #selector(NSApplication.hide(_:)), key: "h", target: NSApp))
+		appMenu.addItem(mainMenuItem("Hide Clipman", action: #selector(hideClipman(_:)), key: "h"))
 		appMenu.addItem(mainMenuItem("Quit Clipman", action: #selector(quit(_:)), key: "q"))
 
 		for title in ["File", "Edit", "Actions", "Groups", "Quick Paste", "View"] {
@@ -436,6 +462,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 		NSApp.keyWindow?.performClose(sender)
 	}
 
+	@objc private func hideClipman(_ sender: Any?) {
+		let historyIsOpen = historyWindow.window.map { openManagedWindowIDs.contains(ObjectIdentifier($0)) } ?? false
+		for window in managedWindows where window !== historyWindow.window && openManagedWindowIDs.contains(ObjectIdentifier(window)) {
+			window.orderOut(nil)
+			openManagedWindowIDs.remove(ObjectIdentifier(window))
+		}
+		if historyIsOpen {
+			historyWindow.hide()
+		} else {
+			updateActivationPolicyForWindows()
+			NSApp.deactivate()
+		}
+	}
+
 	@objc private func minimizeFrontWindow(_ sender: Any?) {
 		NSApp.keyWindow?.miniaturize(sender)
 	}
@@ -456,12 +496,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
             menu.addItem(NSMenuItem(title: "Retry Server Sync", action: #selector(retryStorage(_:)), keyEquivalent: ""))
             menu.addItem(.separator())
         }
-		menu.addItem(NSMenuItem(title: "Show or Hide History", action: #selector(toggleHistoryFromStatusMenu(_:)), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
+		menu.addItem(NSMenuItem(title: "Show or Hide History (\(settings.showHistoryHotkey.description))", action: #selector(toggleHistoryFromStatusMenu(_:)), keyEquivalent: ""))
         let monitorTitle = storageUnavailableReason.isEmpty
             ? (settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On")
             : "Monitoring Paused Until Storage Returns"
-        menu.addItem(NSMenuItem(title: monitorTitle, action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "\(monitorTitle) (\(settings.toggleMonitoringHotkey.description))", action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Save Current Clipboard to History", action: #selector(saveCurrentClipboard(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "New Quick Clip...", action: #selector(showQuickClip(_:)), keyEquivalent: ""))
         let statusSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
