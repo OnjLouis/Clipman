@@ -54,11 +54,17 @@ When database compatibility changes, also perform a manual cross-platform smoke:
 4. Encrypted databases reject wrong passwords without corrupting the file.
 5. Finder/file clipboard events appear in File History and do not appear in shared Text History.
 
+## Window and Menu Bar
+
+Clipman starts in the menu bar without a Dock or Command-Tab entry. Opening History, Preferences, Secrets, or Sync Rules makes it a regular Mac app with a Dock icon and native menus. It returns to menu-bar-only mode after the last of those windows closes. Minimized windows count as open. Closing History with its close button, Command+W, or Escape hides that window without quitting clipboard monitoring.
+
+The native menu bar provides Clipman, File, Edit, Actions, Groups, Quick Paste, View, Window, and Help menus. History commands follow the current tab and selection. Commands that require a history selection are disabled when another Clipman window has focus. The Clipman toolbar button remains an accessible way to open the history command menu inside the window.
+
 ## History Window Shortcuts
 
-The history window includes an accessible toolbar after the history type control. The Clipman button remains tabbable as the main command menu; Set Group, Set to current filter, Filter, selected group status, Sort, Direction, and Preferences are exposed in the toolbar for VoiceOver navigation without adding extra Tab stops.
+The history window includes an accessible toolbar after the history type control. The Clipman button remains tabbable; Set Group, Set to current filter, Filter, selected group status, Sort, Direction, and Preferences are exposed in the toolbar for VoiceOver navigation without adding extra Tab stops.
 
-- `Control+1` through `Control+4`: switch to the visible history area currently shown at that position. The Clipman menu shows the current assignments.
+- `Control+1` through `Control+4`: switch to the visible history area currently shown at that position. The View menu and Clipman toolbar menu show the current assignments.
 - `Option+Left` or `Option+Right`: move the focused history tab, keep focus on it, and update the positional `Control+number` assignments.
 - `Tab` or `Shift+Tab`: enter the selected history tab from the normal key loop and continue between the main controls and history list.
 - `Option+M`: Open the Clipman actions menu.
@@ -66,6 +72,7 @@ The history window includes an accessible toolbar after the history type control
 - `Option+G`: open the group filter menu.
 - `Option+1` through `Option+0`: apply one of the first ten group filters in menu order: All, Pinned, Named, Ungrouped, then custom groups.
 - `Command+1` through `Command+0`: choose one of the first ten pinned items in the active history.
+- `Option+Up` or `Option+Down`: move selected entries in manual order.
 - `Enter`: choose the selected text entry or restore the selected file event.
 - `Shift+Enter`: pin or unpin the selected item.
 - `Command+C`: copy selected text entries or selected file paths.
@@ -82,6 +89,7 @@ The history window includes an accessible toolbar after the history type control
 - `Backspace`: jump to the first normal item below pinned items.
 - `Command+F`: focus search.
 - `Escape`: hide the history window.
+- `Command+W`: close the focused Clipman window. Closing History hides it in the menu bar.
 
 Preferences can assign an optional global Quick Clip hotkey. It is unset by default and opens the same editor from another application without reading or replacing the current clipboard.
 

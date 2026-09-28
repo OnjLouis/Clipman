@@ -11,7 +11,7 @@ private enum ExportPasswordChoice {
 }
 
 @MainActor
-final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, FileHistoryStoreDelegate, ClipboardMonitorDelegate, HistoryWindowControllerDelegate, PreferencesWindowControllerDelegate, SecretsWindowControllerDelegate {
+final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, ClipStoreDelegate, FileHistoryStoreDelegate, ClipboardMonitorDelegate, HistoryWindowControllerDelegate, PreferencesWindowControllerDelegate, SecretsWindowControllerDelegate {
     private let settingsStore = SettingsStore()
     private let keychain = KeychainPasswordStore()
     private let serverTokenKeychain = KeychainPasswordStore(service: "Clipman.server.token")
@@ -30,6 +30,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     private var preferencesWindow: PreferencesWindowController?
     private var secretsWindow: SecretsWindowController?
     private var syncRulesWindow: SyncRulesWindowController?
+	private var openManagedWindowIDs = Set<ObjectIdentifier>()
     private var previousFrontmostProcessIdentifier: pid_t?
     private var pasteAfterHistoryHide = false
     private var lastPasteTargetInspection = "Not checked"
@@ -169,6 +170,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         NSApp.setActivationPolicy(.accessory)
         RuntimeLogger.debug("Application activation policy set.", details: "policy=accessory")
         buildMainMenu()
+        NotificationCenter.default.addObserver(self, selector: #selector(managedWindowWillClose(_:)), name: NSWindow.willCloseNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(managedWindowDidBecomeKey(_:)), name: NSWindow.didBecomeKeyNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(editingFocusChanged(_:)), name: NSControl.textDidBeginEditingNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(editingFocusChanged(_:)), name: NSControl.textDidEndEditingNotification, object: nil)
         RuntimeLogger.debug("Main menu created.")
         scheduleUpdateChecks()
         scheduleServerRecoveryChecks()
@@ -243,12 +248,76 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
 
     func applicationWillTerminate(_ notification: Notification) {
         RuntimeLogger.debug("Application termination started.")
+        NotificationCenter.default.removeObserver(self)
         monitor.stop()
         hotkeys.unregisterAll()
         updateTimer?.invalidate()
         serverRecoveryTimer?.invalidate()
         RuntimeLogger.debug("Application termination cleanup completed.")
     }
+
+	func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+		guard !hasVisibleWindows,
+			let window = managedWindows.first(where: { openManagedWindowIDs.contains(ObjectIdentifier($0)) }) else { return true }
+		sender.unhide(nil)
+		if window.isMiniaturized { window.deminiaturize(nil) }
+		window.makeKeyAndOrderFront(nil)
+		sender.activate(ignoringOtherApps: true)
+		return false
+	}
+
+	private var managedWindows: [NSWindow] {
+		[historyWindow?.window, preferencesWindow?.window, secretsWindow?.window, syncRulesWindow?.window].compactMap { $0 }
+	}
+
+	private func presentManagedWindow(_ window: NSWindow?, _ present: () -> Void) {
+		if let window { openManagedWindowIDs.insert(ObjectIdentifier(window)) }
+		if NSApp.activationPolicy() != .regular {
+			guard NSApp.setActivationPolicy(.regular) else {
+				RuntimeLogger.debug("Could not show Clipman in the Dock while opening a window.")
+				present()
+				return
+			}
+		}
+		present()
+		refreshNativeMenus()
+	}
+
+	private func updateActivationPolicyForWindows() {
+		let desiredPolicy: NSApplication.ActivationPolicy = openManagedWindowIDs.isEmpty ? .accessory : .regular
+		if NSApp.activationPolicy() != desiredPolicy {
+			_ = NSApp.setActivationPolicy(desiredPolicy)
+		}
+		refreshNativeMenus()
+	}
+
+	@objc private func managedWindowDidBecomeKey(_ notification: Notification) {
+		guard let window = notification.object as? NSWindow,
+			managedWindows.contains(where: { $0 === window }) else { return }
+		refreshNativeMenus()
+	}
+
+	@objc private func editingFocusChanged(_ notification: Notification) {
+		DispatchQueue.main.async { [weak self] in
+			self?.refreshNativeMenus()
+		}
+	}
+
+	private func refreshNativeMenus() {
+		guard let menu = NSApp.mainMenu else { return }
+		for item in menu.items where ["File", "Edit", "Actions", "Groups", "Quick Paste", "View"].contains(item.title) {
+			if let submenu = item.submenu { menuNeedsUpdate(submenu) }
+		}
+	}
+
+	@objc private func managedWindowWillClose(_ notification: Notification) {
+		guard let window = notification.object as? NSWindow,
+			managedWindows.contains(where: { $0 === window }) else { return }
+		openManagedWindowIDs.remove(ObjectIdentifier(window))
+		DispatchQueue.main.async { [weak self] in
+			self?.updateActivationPolicyForWindows()
+		}
+	}
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -260,43 +329,113 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         guard let button = statusItem?.button else { return }
         let title = settings.monitoringEnabled ? "Clipman: On" : "Clipman: Off"
         button.title = title
-        button.setAccessibilityLabel(title)
-        button.toolTip = statusWarningReason.isEmpty ? title : "Clipman: \(statusWarningReason)"
+		// Give VoiceOver the full name and state once, without a second accessibility title.
+		button.setAccessibilityLabel(title)
+		button.setAccessibilityTitle(nil)
+		button.toolTip = statusWarningReason.isEmpty ? nil : "Clipman: \(statusWarningReason)"
+		if let monitoringItem = NSApp.mainMenu?.item(withTitle: "Clipman")?.submenu?.items.first(where: { $0.action == #selector(toggleMonitoring(_:)) }) {
+			monitoringItem.title = settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On"
+			monitoringItem.isEnabled = storageUnavailableReason.isEmpty
+		}
     }
 
     private func buildMainMenu() {
-        let mainMenu = NSMenu(title: "Clipman")
-        let appMenuItem = NSMenuItem(title: "Clipman", action: nil, keyEquivalent: "")
-        let appMenu = NSMenu(title: "Clipman")
-        appMenu.addItem(NSMenuItem(title: "Show History", action: #selector(showHistory(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Toggle Monitoring", action: #selector(toggleMonitoring(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Save Current Clipboard to History", action: #selector(saveCurrentClipboard(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "New Quick Clip...", action: #selector(showQuickClip(_:)), keyEquivalent: "n"))
-        let appSecretsItem = NSMenuItem(title: "Secrets...", action: #selector(showSecrets(_:)), keyEquivalent: "e")
-        appSecretsItem.keyEquivalentModifierMask = [.command, .shift]
-        appMenu.addItem(appSecretsItem)
-        appMenu.addItem(NSMenuItem(title: "Open Manual", action: #selector(openManual(_:)), keyEquivalent: ""))
-        appMenu.addItem(.separator())
-        appMenu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Version History...", action: #selector(openVersionHistory(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Project Page", action: #selector(openProjectPage(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Contact", action: #selector(openContactPage(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Donate", action: #selector(openDonatePage(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Diagnostics...", action: #selector(showDiagnostics(_:)), keyEquivalent: ""))
-        appMenu.addItem(NSMenuItem(title: "Open Settings Folder", action: #selector(openSettingsFolder(_:)), keyEquivalent: ""))
-        appMenu.addItem(.separator())
-        appMenu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences(_:)), keyEquivalent: ","))
-        appMenu.addItem(NSMenuItem(title: "About Clipman", action: #selector(showAbout(_:)), keyEquivalent: ""))
-        appMenu.addItem(.separator())
-        appMenu.addItem(NSMenuItem(title: "Quit Clipman", action: #selector(quit(_:)), keyEquivalent: "q"))
-        for item in appMenu.items {
-            item.target = self
-        }
-        appMenuItem.submenu = appMenu
-        mainMenu.addItem(appMenuItem)
-        NSApp.mainMenu = mainMenu
+		let mainMenu = NSMenu(title: "Clipman")
+		let appMenu = NSMenu(title: "Clipman")
+		mainMenu.addItem(mainMenuRoot("Clipman", submenu: appMenu))
+		appMenu.addItem(mainMenuItem("About Clipman", action: #selector(showAbout(_:))))
+		appMenu.addItem(.separator())
+		appMenu.addItem(mainMenuItem("Preferences...", action: #selector(showPreferences(_:)), key: ","))
+		appMenu.addItem(mainMenuItem("Secrets...", action: #selector(showSecrets(_:)), key: "e", modifiers: [.command, .shift]))
+		appMenu.addItem(mainMenuItem("Toggle Monitoring", action: #selector(toggleMonitoring(_:))))
+		appMenu.addItem(.separator())
+		appMenu.addItem(mainMenuItem("Hide Clipman", action: #selector(NSApplication.hide(_:)), key: "h", target: NSApp))
+		appMenu.addItem(mainMenuItem("Quit Clipman", action: #selector(quit(_:)), key: "q"))
+
+		for title in ["File", "Edit", "Actions", "Groups", "Quick Paste", "View"] {
+			let menu = NSMenu(title: title)
+			menu.delegate = self
+			mainMenu.addItem(mainMenuRoot(title, submenu: menu))
+		}
+
+		let windowMenu = NSMenu(title: "Window")
+		windowMenu.addItem(mainMenuItem("Show History", action: #selector(showHistory(_:))))
+		windowMenu.addItem(mainMenuItem("Show File History", action: #selector(showFileHistory(_:))))
+		windowMenu.addItem(mainMenuItem("Show Preferences", action: #selector(showPreferences(_:))))
+		windowMenu.addItem(.separator())
+		windowMenu.addItem(mainMenuItem("Minimize", action: #selector(minimizeFrontWindow(_:)), key: "m"))
+		mainMenu.addItem(mainMenuRoot("Window", submenu: windowMenu))
+		NSApp.windowsMenu = windowMenu
+
+		let helpMenu = NSMenu(title: "Help")
+		helpMenu.addItem(mainMenuItem("Clipman Manual", action: #selector(openManual(_:))))
+		helpMenu.addItem(mainMenuItem("Check for Updates...", action: #selector(checkForUpdates(_:))))
+		helpMenu.addItem(mainMenuItem("Version History...", action: #selector(openVersionHistory(_:))))
+		helpMenu.addItem(mainMenuItem("Project Page", action: #selector(openProjectPage(_:))))
+		helpMenu.addItem(mainMenuItem("Contact", action: #selector(openContactPage(_:))))
+		helpMenu.addItem(mainMenuItem("Donate", action: #selector(openDonatePage(_:))))
+		helpMenu.addItem(.separator())
+		helpMenu.addItem(mainMenuItem("Diagnostics...", action: #selector(showDiagnostics(_:))))
+		helpMenu.addItem(mainMenuItem("Open Settings Folder", action: #selector(openSettingsFolder(_:))))
+		mainMenu.addItem(mainMenuRoot("Help", submenu: helpMenu))
+		NSApp.helpMenu = helpMenu
+		NSApp.mainMenu = mainMenu
+		updateStatusItem()
+		refreshNativeMenus()
     }
+
+	private func mainMenuRoot(_ title: String, submenu: NSMenu) -> NSMenuItem {
+		let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+		item.submenu = submenu
+		return item
+	}
+
+	private func mainMenuItem(_ title: String, action: Selector, key: String = "", modifiers: NSEvent.ModifierFlags = [.command], target: AnyObject? = nil) -> NSMenuItem {
+		let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+		item.keyEquivalentModifierMask = modifiers
+		item.target = target ?? self
+		return item
+	}
+
+	func menuNeedsUpdate(_ menu: NSMenu) {
+		let historyIsKey = NSApp.keyWindow === historyWindow.window
+		let useStandardEditMenu = menu.title == "Edit" && (!historyIsKey || NSApp.keyWindow?.firstResponder is NSTextView)
+		menu.autoenablesItems = useStandardEditMenu
+		menu.removeAllItems()
+		if menu.title == "File" {
+			menu.addItem(mainMenuItem("New Quick Clip...", action: #selector(showQuickClip(_:)), key: "n"))
+			menu.addItem(.separator())
+		}
+		if useStandardEditMenu {
+			for (title, action, key) in [
+				("Cut", #selector(NSText.cut(_:)), "x"),
+				("Copy", #selector(NSText.copy(_:)), "c"),
+				("Paste", #selector(NSText.paste(_:)), "v"),
+				("Select All", #selector(NSText.selectAll(_:)), "a")
+			] {
+				menu.addItem(mainMenuItem(title, action: action, key: key, target: nil))
+				menu.items.last?.target = nil
+			}
+		} else {
+			historyWindow.populateNativeMenu(menu, enabled: historyIsKey)
+		}
+		if menu.title == "File" {
+			menu.addItem(.separator())
+			menu.addItem(mainMenuItem("Save Current Clipboard to History", action: #selector(saveCurrentClipboard(_:))))
+			menu.addItem(.separator())
+			let close = mainMenuItem("Close Window", action: #selector(closeFrontWindow(_:)), key: "w")
+			close.isEnabled = NSApp.keyWindow != nil
+			menu.addItem(close)
+		}
+	}
+
+	@objc private func closeFrontWindow(_ sender: Any?) {
+		NSApp.keyWindow?.performClose(sender)
+	}
+
+	@objc private func minimizeFrontWindow(_ sender: Any?) {
+		NSApp.keyWindow?.miniaturize(sender)
+	}
 
     private func rebuildMenu() {
         guard statusItem != nil else { return }
@@ -314,7 +453,7 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             menu.addItem(NSMenuItem(title: "Retry Server Sync", action: #selector(retryStorage(_:)), keyEquivalent: ""))
             menu.addItem(.separator())
         }
-        menu.addItem(NSMenuItem(title: "Show History", action: #selector(showHistory(_:)), keyEquivalent: ""))
+		menu.addItem(NSMenuItem(title: "Show or Hide History", action: #selector(toggleHistoryFromStatusMenu(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Show File History", action: #selector(showFileHistory(_:)), keyEquivalent: ""))
         let monitorTitle = storageUnavailableReason.isEmpty
             ? (settings.monitoringEnabled ? "Turn Monitoring Off" : "Turn Monitoring On")
@@ -352,8 +491,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             historyWindow.showHistoryTab(lastReceivedHistoryTab)
             receivedHistoryTabPending = false
         }
-        historyWindow.showWindow(nil)
-        historyWindow.focusHistoryWindow(nil)
+		presentManagedWindow(historyWindow.window) {
+			historyWindow.showWindow(nil)
+			historyWindow.focusHistoryWindow(nil)
+		}
     }
 
     private func toggleHistoryFromHotkey() {
@@ -363,6 +504,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         }
         showHistory(nil)
     }
+
+	@objc private func toggleHistoryFromStatusMenu(_ sender: Any?) {
+		toggleHistoryFromHotkey()
+	}
 
     @objc private func showFileHistory(_ sender: Any?) {
         showHistory(sender)
@@ -383,7 +528,9 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
             secretsWindow = SecretsWindowController(store: secretStore)
             secretsWindow?.secretsDelegate = self
         }
-        secretsWindow?.showWindow(sender)
+		presentManagedWindow(secretsWindow?.window) {
+			secretsWindow?.showWindow(sender)
+		}
     }
 
     private func confirmSecretsPassword(currentPassword: String) -> Bool {
@@ -752,8 +899,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
                 databasePasswordAvailable: databasePasswordAvailable
             )
         }
-        preferencesWindow?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+		presentManagedWindow(preferencesWindow?.window) {
+			preferencesWindow?.showWindow(nil)
+			NSApp.activate(ignoringOtherApps: true)
+		}
     }
 
     @objc private func openSettingsFolder(_ sender: Any?) {
@@ -1989,9 +2138,16 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
     }
 
     func historyWindowDidHide(_ controller: HistoryWindowController) {
+		if let window = controller.window { openManagedWindowIDs.remove(ObjectIdentifier(window)) }
+		updateActivationPolicyForWindows()
         let pasteAfterActivation = pasteAfterHistoryHide
         pasteAfterHistoryHide = false
-        restorePreviousFrontmostApplication(pasteAfterActivation: pasteAfterActivation)
+		let anotherWindowIsOpen = !openManagedWindowIDs.isEmpty
+		if pasteAfterActivation || !anotherWindowIsOpen {
+			restorePreviousFrontmostApplication(pasteAfterActivation: pasteAfterActivation)
+		} else {
+			previousFrontmostProcessIdentifier = nil
+		}
     }
 
     func secretsWindow(_ controller: SecretsWindowController, quickPaste secret: SecretEntry) {
@@ -2006,8 +2162,10 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         if syncRulesWindow == nil {
             syncRulesWindow = SyncRulesWindowController(store: store)
         }
-        syncRulesWindow?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+		presentManagedWindow(syncRulesWindow?.window) {
+			syncRulesWindow?.showWindow(nil)
+			NSApp.activate(ignoringOtherApps: true)
+		}
     }
 
     func preferencesWindow(_ controller: PreferencesWindowController, didUpdate settings: ClipmanSettings, passwordToSave: String?) -> Bool {
@@ -2102,7 +2260,8 @@ final class AppController: NSObject, NSApplicationDelegate, ClipStoreDelegate, F
         fileStore.delegate = self
         fileStore.load()
         secretStore.setDatabaseURL(secretsURL(for: settings))
-        secretsWindow = nil
+		secretsWindow?.close()
+		secretsWindow = nil
         historyWindow.configureSort(
             textSortMode: settings.sortMode,
             textDescending: settings.sortDescending,
