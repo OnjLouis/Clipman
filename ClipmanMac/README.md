@@ -56,18 +56,17 @@ When database compatibility changes, also perform a manual cross-platform smoke:
 
 ## Window and Menu Bar
 
-Clipman starts in the menu bar without a Dock or Command-Tab entry. Opening History, Preferences, Secrets, or Sync Rules makes it a regular Mac app with a Dock icon and native menus. It returns to menu-bar-only mode after the last of those windows closes. Minimized windows count as open. Closing History with its close button, Command+W, or Escape hides that window without quitting clipboard monitoring.
+Clipman keeps its menu extra while running. Opening History, Preferences, Secrets, or Sync Rules shows Clipman in the Dock and Command-Tab with native menus. After the last window closes, Clipman returns to menu-extra-only mode without quitting clipboard monitoring.
 
-The native menu bar provides Clipman, File, Edit, Actions, Groups, Quick Paste, View, Window, and Help menus. History commands follow the current tab and selection. Commands that require a history selection are disabled when another Clipman window has focus. The Clipman toolbar button remains an accessible way to open the history command menu inside the window.
+The native menu bar provides Clipman, File, Edit, Actions, Groups, Quick Paste, View, Window, and Help menus. Check for Updates is in the Clipman menu. History commands follow the current tab and selection. Commands that require a history selection are disabled when another Clipman window has focus. In File History, Actions also provides Clear Unpinned File History and Remove Unavailable File Events. Clearing asks for confirmation and never deletes files from disk.
 
 ## History Window Shortcuts
 
-The history window includes an accessible toolbar after the history type control. The Clipman button remains tabbable; Set Group, Set to current filter, Filter, selected group status, Sort, Direction, and Preferences are exposed in the toolbar for VoiceOver navigation without adding extra Tab stops.
+The history window includes an accessible toolbar after the history type control. Set Group, Set to current filter, Filter, selected group status, Sort, Direction, and Preferences remain available there without adding extra Tab stops. Use the native menu bar for the full command set.
 
-- `Command+1` through `Command+4`: switch to the visible history area currently shown at that position. The View menu and Clipman toolbar menu show the current assignments.
+- `Command+1` through `Command+4`: switch to the visible history area currently shown at that position. The View menu shows the current assignments.
 - `Option+Left` or `Option+Right`: move the focused history tab, keep focus on it, and update the positional `Command+number` assignments.
 - `Tab` or `Shift+Tab`: enter the selected history tab from the normal key loop and continue between the main controls and history list.
-- `Option+M`: Open the Clipman actions menu.
 - `Command+G`: group selected text entries.
 - `Option+G`: open the group filter menu.
 - `Option+1` through `Option+0`: apply one of the first ten group filters in menu order: All, Pinned, Named, Ungrouped, then custom groups.
@@ -86,7 +85,11 @@ The history window includes an accessible toolbar after the history type control
 - `Command+Shift+S`: clean selected links for sharing.
 - `Command+Enter`: go to the selected file-history file or folder in Finder.
 - `Command+Backspace`: delete selected unpinned items.
+- `Control+Backspace`: clear unpinned File History after confirmation.
+- `Option+Backspace`: remove unavailable unpinned file-history events.
 - `Backspace`: jump to the first normal item below pinned items.
+- `Home` or `End`: jump to the first or last history row.
+- `Page Up` or `Page Down`: move through the history list by page.
 - `Command+F`: focus search.
 - `Escape`: hide the history window.
 - `Command+W`: close the focused Clipman window. Closing History hides it in the menu bar.
@@ -95,7 +98,7 @@ Preferences can assign an optional global Quick Clip hotkey. It is unset by defa
 
 Add current clipboard item on start adds genuinely new content but leaves an existing entry or file event unchanged, including its original device, group, and timestamp.
 
-For VoiceOver users, `Option+M` opens the history window's Clipman command menu directly. If macOS reports a new Clipman window but focus lands badly, press the Show History global hotkey once to dismiss the window and again to reopen it with a fresh focus attempt.
+For VoiceOver users, the native File, Edit, Actions, Groups, Quick Paste, View, Window, and Help menus provide history commands while a Clipman window is open. If macOS reports a new Clipman window but focus lands badly, press the Show History global hotkey once to dismiss the window and again to reopen it with a fresh focus attempt.
 
 ## Development App Build
 
@@ -136,6 +139,8 @@ The default Apple Silicon signed and notarized ZIP is created at:
 ```
 
 Set `CLIPMAN_MAC_ARCH=x86_64` to build the Intel ZIP named `Clipman-macOS-Intel-<version>.zip` instead. Each package contains a single-architecture app for macOS 13 or later. The in-app updater selects the matching architecture automatically.
+
+For a Mac-only release, `VERSION` supplies the Mac app and ZIP version without changing other clients. Update or remove that file when the next coordinated release catches up.
 
 Testers should unzip it, move or drag `Clipman.app` into `/Applications`, and open it normally. The package is Developer ID signed, notarized by Apple, stapled, and verified with Gatekeeper before release.
 

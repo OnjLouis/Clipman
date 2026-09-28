@@ -10,6 +10,8 @@ private enum ExportPasswordChoice {
     case none
 }
 
+private let f1KeyEquivalent = String(UnicodeScalar(NSF1FunctionKey)!)
+
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, ClipStoreDelegate, FileHistoryStoreDelegate, ClipboardMonitorDelegate, HistoryWindowControllerDelegate, PreferencesWindowControllerDelegate, SecretsWindowControllerDelegate {
     private let settingsStore = SettingsStore()
@@ -167,9 +169,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         }
         registerHotkeys()
         RuntimeLogger.debug("Global hotkeys registered.")
-        NSApp.setActivationPolicy(.accessory)
-        RuntimeLogger.debug("Application activation policy set.", details: "policy=accessory")
         buildMainMenu()
+        _ = NSApp.setActivationPolicy(.accessory)
         NotificationCenter.default.addObserver(self, selector: #selector(managedWindowWillClose(_:)), name: NSWindow.willCloseNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(managedWindowDidBecomeKey(_:)), name: NSWindow.didBecomeKeyNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(editingFocusChanged(_:)), name: NSControl.textDidBeginEditingNotification, object: nil)
@@ -257,8 +258,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
     }
 
 	func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-		guard !hasVisibleWindows,
-			let window = managedWindows.first(where: { openManagedWindowIDs.contains(ObjectIdentifier($0)) }) else { return true }
+		guard !hasVisibleWindows else { return true }
+		guard let window = managedWindows.first(where: { openManagedWindowIDs.contains(ObjectIdentifier($0)) }) else {
+			showHistory(nil)
+			return false
+		}
 		sender.unhide(nil)
 		if window.isMiniaturized { window.deminiaturize(nil) }
 		window.makeKeyAndOrderFront(nil)
@@ -278,17 +282,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 				present()
 				return
 			}
+			buildMainMenu()
 		}
 		present()
+		_ = NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
 		refreshNativeMenus()
 	}
 
 	private func updateActivationPolicyForWindows() {
-		let desiredPolicy: NSApplication.ActivationPolicy = openManagedWindowIDs.isEmpty ? .accessory : .regular
-		if NSApp.activationPolicy() != desiredPolicy {
-			_ = NSApp.setActivationPolicy(desiredPolicy)
-		}
-		refreshNativeMenus()
+		guard openManagedWindowIDs.isEmpty, NSApp.activationPolicy() != .accessory else { return }
+		_ = NSApp.setActivationPolicy(.accessory)
 	}
 
 	@objc private func managedWindowDidBecomeKey(_ notification: Notification) {
@@ -346,6 +349,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 		appMenu.addItem(mainMenuItem("About Clipman", action: #selector(showAbout(_:))))
 		appMenu.addItem(.separator())
 		appMenu.addItem(mainMenuItem("Preferences...", action: #selector(showPreferences(_:)), key: ","))
+		appMenu.addItem(mainMenuItem("Check for Updates...", action: #selector(checkForUpdates(_:)), key: f1KeyEquivalent, modifiers: [.shift]))
 		appMenu.addItem(mainMenuItem("Secrets...", action: #selector(showSecrets(_:)), key: "e", modifiers: [.command, .shift]))
 		appMenu.addItem(mainMenuItem("Toggle Monitoring", action: #selector(toggleMonitoring(_:))))
 		appMenu.addItem(.separator())
@@ -368,14 +372,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 		NSApp.windowsMenu = windowMenu
 
 		let helpMenu = NSMenu(title: "Help")
-		helpMenu.addItem(mainMenuItem("Clipman Manual", action: #selector(openManual(_:))))
-		helpMenu.addItem(mainMenuItem("Check for Updates...", action: #selector(checkForUpdates(_:))))
+		helpMenu.addItem(mainMenuItem("Clipman Manual", action: #selector(openManual(_:)), key: f1KeyEquivalent, modifiers: []))
 		helpMenu.addItem(mainMenuItem("Version History...", action: #selector(openVersionHistory(_:))))
-		helpMenu.addItem(mainMenuItem("Project Page", action: #selector(openProjectPage(_:))))
+		helpMenu.addItem(mainMenuItem("Project Page", action: #selector(openProjectPage(_:)), key: f1KeyEquivalent, modifiers: [.control]))
 		helpMenu.addItem(mainMenuItem("Contact", action: #selector(openContactPage(_:))))
 		helpMenu.addItem(mainMenuItem("Donate", action: #selector(openDonatePage(_:))))
 		helpMenu.addItem(.separator())
-		helpMenu.addItem(mainMenuItem("Diagnostics...", action: #selector(showDiagnostics(_:))))
+		helpMenu.addItem(mainMenuItem("Diagnostics...", action: #selector(showDiagnostics(_:)), key: f1KeyEquivalent, modifiers: [.option]))
 		helpMenu.addItem(mainMenuItem("Open Settings Folder", action: #selector(openSettingsFolder(_:))))
 		mainMenu.addItem(mainMenuRoot("Help", submenu: helpMenu))
 		NSApp.helpMenu = helpMenu
@@ -2117,20 +2120,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         openProjectPage(nil)
     }
 
-    func historyWindowDidRequestContact(_ controller: HistoryWindowController) {
-        openContactPage(nil)
-    }
-
-    func historyWindowDidRequestDonate(_ controller: HistoryWindowController) {
-        openDonatePage(nil)
-    }
-
     func historyWindowDidRequestDiagnostics(_ controller: HistoryWindowController) {
         showDiagnostics(nil)
-    }
-
-    func historyWindowDidRequestSettingsFolder(_ controller: HistoryWindowController) {
-        openSettingsFolder(nil)
     }
 
     func historyWindowDidRequestSecrets(_ controller: HistoryWindowController) {

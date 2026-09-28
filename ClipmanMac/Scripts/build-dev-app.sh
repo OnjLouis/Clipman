@@ -57,8 +57,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>$BUILD_VERSION</string>
   <key>ClipmanBuildStampUtcMs</key>
   <string>$BUILD_STAMP</string>
-  <key>LSUIElement</key>
-  <true/>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsArbitraryLoads</key>

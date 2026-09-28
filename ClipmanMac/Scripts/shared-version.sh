@@ -22,6 +22,17 @@ if [[ -z "$BUILD" ]]; then
   BUILD="${VERSION}.0"
 fi
 
+MAC_VERSION_FILE="$ROOT/VERSION"
+if [[ -f "$MAC_VERSION_FILE" ]]; then
+  MAC_VERSION="$(< "$MAC_VERSION_FILE")"
+  if [[ ! "$MAC_VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
+    echo "Invalid Mac version in $MAC_VERSION_FILE: $MAC_VERSION" >&2
+    exit 1
+  fi
+  VERSION="$MAC_VERSION"
+  BUILD="${MAC_VERSION}.0"
+fi
+
 case "${1:-version}" in
   version)
     echo "$VERSION"
