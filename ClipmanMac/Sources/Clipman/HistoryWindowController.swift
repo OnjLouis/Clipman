@@ -532,12 +532,12 @@ final class HistoryWindow: NSWindow {
     private func handleClipmanShortcut(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if let digitIndex = Self.digitIndex(for: event.keyCode) {
-            if modifiers == [.command] {
-                onPinnedShortcut?(digitIndex)
+			if modifiers == [.control] {
+				onPinnedShortcut?(digitIndex)
                 return true
             }
-            if modifiers == [.control], digitIndex >= 0 && digitIndex <= 3 {
-                onSwitchMode?(digitIndex)
+			if modifiers == [.command], digitIndex >= 0 && digitIndex <= 3 {
+				onSwitchMode?(digitIndex)
                 return true
             }
             if modifiers == [.option] {
@@ -569,11 +569,11 @@ final class HistoryWindow: NSWindow {
             onMoveHistoryTab?(1)
             return true
         }
-        if event.keyCode == UInt16(kVK_UpArrow), modifiers == [.option] {
+		if event.keyCode == UInt16(kVK_UpArrow), modifiers == [.option] {
             onMoveUp?()
             return true
         }
-        if event.keyCode == UInt16(kVK_DownArrow), modifiers == [.option] {
+		if event.keyCode == UInt16(kVK_DownArrow), modifiers == [.option] {
             onMoveDown?()
             return true
         }
@@ -581,9 +581,9 @@ final class HistoryWindow: NSWindow {
     }
 
     private func handleListNavigationShortcut(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else {
-            return false
-        }
+		guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else {
+			return false
+		}
         if event.keyCode == UInt16(kVK_Home) {
             onFirstRow?()
             return true
@@ -987,6 +987,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     override func showWindow(_ sender: Any?) {
+		if window?.isMiniaturized == true {
+			window?.deminiaturize(sender)
+		}
         super.showWindow(sender)
         focusHistoryWindow(sender)
         if tableView.selectedRow < 0 && !filteredEntries.isEmpty {
@@ -1145,9 +1148,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             button.setButtonType(.toggle)
             button.bezelStyle = .rounded
             button.state = visibleMode == mode ? .on : .off
-            button.toolTip = "\(title), Control+\(index + 1)"
-            button.setAccessibilityLabel(title)
-            button.setAccessibilityHelp("Control+\(index + 1). Use Left or Right Arrow to switch sections. Use Option+Left or Option+Right to move this section.")
+			button.toolTip = "\(title), Command+\(index + 1)"
+			button.setAccessibilityLabel(title)
+			button.setAccessibilityHelp("Command+\(index + 1). Use Left or Right Arrow to switch sections. Use Option+Left or Option+Right to move this section.")
             button.onNavigate = { [weak self] direction in
                 self?.navigateModeTabs(from: visibleMode.tabID, direction: direction)
             }
@@ -1609,6 +1612,141 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         tableView.tableColumns.first?.title = modeTitle(for: mode)
     }
 
+	func populateNativeMenu(_ menu: NSMenu, enabled: Bool) {
+		let hasTextSelection = enabled && !selectedEntries().isEmpty && mode != .files
+		let hasFileSelection = enabled && !selectedFileEvents().isEmpty && mode == .files
+		let hasSelection = hasTextSelection || hasFileSelection
+		switch menu.title {
+		case "File":
+			addNativeItem("Import...", action: #selector(menuImport), to: menu, key: "i", enabled: enabled)
+			addNativeItem("Export...", action: #selector(menuExport), to: menu, key: "e", enabled: enabled)
+		case "Edit":
+			addNativeItem("Copy", action: #selector(menuCopySelected), to: menu, key: "c", enabled: hasSelection)
+			addNativeItem("Copy Name and Content", action: #selector(menuCopyNameAndContent), to: menu, enabled: hasTextSelection)
+			addNativeItem("Cut", action: #selector(menuCutSelected), to: menu, key: "x", enabled: hasTextSelection)
+			addNativeItem("Paste After Selected", action: #selector(menuPasteAfterSelected), to: menu, key: "v", enabled: enabled && mode != .files)
+			menu.addItem(.separator())
+			addNativeItem("Entry Properties...", action: #selector(menuEditSelected), to: menu, enabled: hasTextSelection)
+			addNativeItem(mode == .files ? "View File Event Details" : "View Selected Text", action: #selector(menuViewSelected), to: menu, enabled: hasSelection)
+			menu.addItem(.separator())
+			addNativeItem("Find...", action: #selector(menuFind), to: menu, key: "f", enabled: enabled)
+			addNativeItem("Find Next", action: #selector(menuFindNext), to: menu, enabled: enabled)
+			addNativeItem("Find Previous", action: #selector(menuFindPrevious), to: menu, enabled: enabled)
+		case "Actions":
+			addNativeItem("Choose Selected", action: #selector(menuChooseSelected), to: menu, enabled: hasSelection)
+			addNativeItem("Pin or Unpin Selected", action: #selector(menuTogglePin), to: menu, enabled: hasSelection)
+			addNativeItem("Delete Selected", action: #selector(menuDeleteSelected), to: menu, enabled: hasSelection)
+			addNativeItem("Move Up", action: #selector(menuMoveUp), to: menu, enabled: hasSelection)
+			addNativeItem("Move Down", action: #selector(menuMoveDown), to: menu, enabled: hasSelection)
+			let pinned = pinnedRows()
+			if !pinned.isEmpty {
+				let pinnedMenu = NSMenu(title: "Pinned Shortcuts")
+				pinnedMenu.autoenablesItems = false
+				for (index, row) in pinned.prefix(10).enumerated() {
+					let key = index == 9 ? "0" : "\(index + 1)"
+					let item = addNativeItem(rowTitle(row), action: #selector(menuPinnedChoose(_:)), to: pinnedMenu, key: key, modifiers: [.control], enabled: enabled)
+					item.representedObject = index
+				}
+				let root = NSMenuItem(title: "Pinned Shortcuts", action: nil, keyEquivalent: "")
+				root.submenu = pinnedMenu
+				menu.addItem(root)
+			}
+			menu.addItem(.separator())
+			if mode == .files {
+				addNativeItem("Go to File", action: #selector(menuGoToFile), to: menu, enabled: hasFileSelection)
+			} else {
+				addNativeItem("Open Link", action: #selector(menuOpenLink), to: menu, enabled: enabled && selectedEntry().map { LinkPresentation.webURL($0.Text) != nil } == true)
+				addNativeItem("Set as Quick Paste Target...", action: #selector(menuSetQuickCopyTarget), to: menu, enabled: hasTextSelection)
+				addNativeItem("Push to Other Devices", action: #selector(menuPushToOtherMachines), to: menu, key: "p", enabled: hasTextSelection)
+				if let entry = selectedEntry(), entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, LinkClassifier.isLinkOnlyText(entry.Text) {
+					addNativeItem("Use Website Title as Name...", action: #selector(menuUseWebsiteTitleAsName), to: menu, enabled: enabled)
+				}
+				menu.addItem(.separator())
+				addNativeItem("Remove URL Tracking", action: #selector(menuCleanTracking), to: menu, key: "r", modifiers: [.command, .shift], enabled: hasTextSelection)
+				addNativeItem("Clean Link for Sharing", action: #selector(menuCleanForSharing), to: menu, key: "s", modifiers: [.command, .shift], enabled: hasTextSelection)
+				let lineMenu = NSMenu(title: "Line Endings")
+				lineMenu.autoenablesItems = false
+				addNativeItem("Convert to Windows CRLF", action: #selector(menuNormalizeLineEndingsWindows), to: lineMenu, enabled: hasTextSelection)
+				addNativeItem("Convert to Unix LF", action: #selector(menuNormalizeLineEndingsUnix), to: lineMenu, enabled: hasTextSelection)
+				addNativeItem("Convert to Old Mac CR", action: #selector(menuNormalizeLineEndingsOldMac), to: lineMenu, enabled: hasTextSelection)
+				let root = NSMenuItem(title: "Line Endings", action: nil, keyEquivalent: "")
+				root.submenu = lineMenu
+				menu.addItem(root)
+			}
+		case "Groups":
+			addNativeItem("Group Selected...", action: #selector(menuGroupSelected), to: menu, key: "g", enabled: hasTextSelection)
+			addNativeItem("Set Selected to \(groupFilter)", action: #selector(menuGroupSelectedToCurrentFilter), to: menu, enabled: hasTextSelection && !isDeviceFilterActive && !isReservedGroupFilter(groupFilter))
+			menu.addItem(.separator())
+			for (index, group) in groupFilterItems().enumerated() {
+				if index == reservedGroupFilterItems().count { menu.addItem(.separator()) }
+				let key = index < 10 ? (index == 9 ? "0" : "\(index + 1)") : ""
+				let item = addNativeItem(group, action: #selector(menuGroupFilterChanged(_:)), to: menu, key: key, modifiers: [.option], enabled: enabled && mode != .files)
+				item.representedObject = group
+				item.state = !isDeviceFilterActive && group.caseInsensitiveCompare(groupFilter) == .orderedSame ? .on : .off
+			}
+			if !existingDevices().isEmpty {
+				menu.addItem(.separator())
+				let devicesMenu = NSMenu(title: "Devices")
+				devicesMenu.autoenablesItems = false
+				for device in existingDevices() {
+					let item = addNativeItem(device, action: #selector(menuDeviceFilterChanged(_:)), to: devicesMenu, enabled: enabled && mode != .files)
+					item.representedObject = device
+					item.state = isDeviceFilterActive && device.caseInsensitiveCompare(deviceFilter) == .orderedSame ? .on : .off
+				}
+				let root = NSMenuItem(title: "Devices", action: nil, keyEquivalent: "")
+				root.submenu = devicesMenu
+				menu.addItem(root)
+			}
+		case "Quick Paste":
+			let targets = quickPasteTargets()
+			if targets.isEmpty {
+				let item = NSMenuItem(title: "No Quick Paste targets assigned", action: nil, keyEquivalent: "")
+				item.isEnabled = false
+				menu.addItem(item)
+			} else {
+				for target in targets {
+					let item = addNativeItem(quickPasteTargetMenuTitle(entry: target.entry, hotkey: target.hotkey, mode: target.mode), action: #selector(menuQuickPasteTargetSelected(_:)), to: menu, enabled: enabled)
+					item.representedObject = target.entry.Id
+				}
+			}
+		case "View":
+			for (index, visibleMode) in visibleModes().enumerated() {
+				let item = addNativeItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, key: "\(index + 1)", modifiers: [.command], enabled: enabled)
+				item.state = mode == visibleMode ? .on : .off
+			}
+			menu.addItem(.separator())
+			addNativeItem("Move History Tab Left", action: #selector(menuMoveHistoryTabLeft), to: menu, enabled: enabled)
+			addNativeItem("Move History Tab Right", action: #selector(menuMoveHistoryTabRight), to: menu, enabled: enabled)
+			let sortMenu = NSMenu(title: "Sort By")
+			sortMenu.autoenablesItems = false
+			for option in sortOptions() {
+				let item = addNativeItem(option.title, action: #selector(menuSortChanged(_:)), to: sortMenu, enabled: enabled)
+				item.representedObject = option.value
+				item.state = option.value.caseInsensitiveCompare(currentSortMode()) == .orderedSame ? .on : .off
+			}
+			let sortRoot = NSMenuItem(title: "Sort By", action: nil, keyEquivalent: "")
+			sortRoot.submenu = sortMenu
+			menu.addItem(.separator())
+			menu.addItem(sortRoot)
+			addNativeItem(sortDirectionTitle(descending: currentSortDescending()), action: #selector(menuToggleDirection), to: menu, enabled: enabled)
+		addNativeItem("First History Row", action: #selector(menuFirstRow), to: menu, enabled: enabled)
+		addNativeItem("Last History Row", action: #selector(menuLastRow), to: menu, enabled: enabled)
+		addNativeItem("Jump to Normal Entries", action: #selector(menuJumpToNormal), to: menu, enabled: enabled)
+		default:
+			break
+		}
+	}
+
+	@discardableResult
+	private func addNativeItem(_ title: String, action: Selector, to menu: NSMenu, key: String = "", modifiers: NSEvent.ModifierFlags = [.command], enabled: Bool) -> NSMenuItem {
+		let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+		item.keyEquivalentModifierMask = modifiers
+		item.target = self
+		item.isEnabled = enabled
+		menu.addItem(item)
+		return item
+	}
+
     private func showActionsMenu() {
         let menu = NSMenu(title: "Clipman")
         addMenuItem("Choose Selected", action: #selector(menuChooseSelected), to: menu, shortcut: "Enter")
@@ -1633,8 +1771,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }
         addMenuItem("Pin or Unpin Selected", action: #selector(menuTogglePin), to: menu, shortcut: "Shift+Enter")
         addMenuItem("Delete Selected", action: #selector(menuDeleteSelected), to: menu, shortcut: "Command+Backspace")
-        addMenuItem("Move Up", action: #selector(menuMoveUp), to: menu, shortcut: "Option+Up")
-        addMenuItem("Move Down", action: #selector(menuMoveDown), to: menu, shortcut: "Option+Down")
+		addMenuItem("Move Up", action: #selector(menuMoveUp), to: menu, shortcut: "Option+Up")
+		addMenuItem("Move Down", action: #selector(menuMoveDown), to: menu, shortcut: "Option+Down")
         menu.addItem(.separator())
         addMenuItem("Import Clipboard Entries...", action: #selector(menuImport), to: menu, shortcut: "Command+I")
         addMenuItem("Export Clipboard Entries...", action: #selector(menuExport), to: menu, shortcut: "Command+E")
@@ -1656,7 +1794,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             menu.addItem(.separator())
         }
         for (index, visibleMode) in visibleModes().enumerated() {
-            addMenuItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, shortcut: "Control+\(index + 1)").state = mode == visibleMode ? .on : .off
+			addMenuItem(modeTitle(for: visibleMode), action: menuSelector(for: visibleMode), to: menu, shortcut: "Command+\(index + 1)").state = mode == visibleMode ? .on : .off
         }
         addMenuItem("Move History Tab Left", action: #selector(menuMoveHistoryTabLeft), to: menu, shortcut: "Option+Left")
         addMenuItem("Move History Tab Right", action: #selector(menuMoveHistoryTabRight), to: menu, shortcut: "Option+Right")
@@ -1796,7 +1934,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         for (index, row) in pinned.prefix(10).enumerated() {
             let number = index == 9 ? "0" : "\(index + 1)"
             let title = "\(number). \(rowTitle(row))"
-            let choose = addMenuItem("Choose \(title)", action: #selector(menuPinnedChoose(_:)), to: pinnedMenu, shortcut: "Command+\(number)")
+			let choose = addMenuItem("Choose \(title)", action: #selector(menuPinnedChoose(_:)), to: pinnedMenu, shortcut: "Control+\(number)")
             choose.representedObject = index
         }
         let pinnedRoot = NSMenuItem(title: "Pinned Shortcuts", action: nil, keyEquivalent: "")
@@ -1868,6 +2006,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     @objc private func menuDeleteSelected() { deleteSelectedEntry() }
     @objc private func menuMoveUp() { moveSelectedItems(direction: -1) }
     @objc private func menuMoveDown() { moveSelectedItems(direction: 1) }
+	@objc private func menuFirstRow() { selectBoundaryRow(first: true) }
+	@objc private func menuLastRow() { selectBoundaryRow(first: false) }
     @objc private func menuTextHistory() { setMode(.text, notify: true) }
     @objc private func menuLinksHistory() { setMode(.links, notify: true) }
     @objc private func menuRichTextHistory() { setMode(.richText, notify: true) }
