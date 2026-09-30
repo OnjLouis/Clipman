@@ -1466,7 +1466,7 @@ namespace Clipman
                     }
                     catch (Exception ex)
                     {
-                        if (!IsRecoverableServerException(ex)) return;
+                        if (!IsRecoverableServerException(ex) && !IsTransientServerFailure(ex)) return;
                         ReportServerPollFailureLocked(ex, "Server poll failed: " + ex.Message);
                         return;
                     }
@@ -1518,11 +1518,12 @@ namespace Clipman
                 if (headFirst)
                 {
                     var metadata = serverClient.GetMetadata();
-                    SetStorageStateLocked(false, string.Empty);
-                    MarkServerSuccessLocked(false);
                     if (string.IsNullOrWhiteSpace(metadata.Revision) ||
                         string.Equals(metadata.Revision, serverRevision, StringComparison.Ordinal))
                     {
+                        // Changed metadata is not a successful poll until its download completes.
+                        SetStorageStateLocked(false, string.Empty);
+                        MarkServerSuccessLocked(false);
                         return changed;
                     }
                 }

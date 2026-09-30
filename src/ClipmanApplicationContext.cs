@@ -2508,7 +2508,7 @@ namespace Clipman
                 {
                     return monitoring + "Server is not configured; using local cache.";
                 }
-                if (sync.ConsecutiveFailures > 0)
+                if (!string.IsNullOrWhiteSpace(sync.LastError))
                 {
                     return monitoring + "Server unavailable; using local cache.";
                 }

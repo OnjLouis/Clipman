@@ -22,6 +22,8 @@ namespace Clipman.Tests
             Run("database container caps are aligned", DatabaseContainerCapsAreAligned);
             Run("server polls cannot overlap and respect failure backoff", ServerPollSchedulingIsBounded);
             Run("brief server poll timeouts do not report storage unavailable", TransientServerPollFailuresAreQuiet);
+            Run("history status respects transient server grace", HistoryStatusRespectsTransientServerGrace);
+            Run("metadata success cannot mask failed downloads", MetadataSuccessCannotMaskFailedDownloads);
             Run("storage retries contain network failures", StorageRetriesContainNetworkFailures);
             Run("storage recovery publishes availability transitions", StorageRecoveryPublishesAvailabilityTransitions);
             Run("failed server uploads recover and refresh storage state", FailedServerUploadsRecoverAndRefreshStorageState);
@@ -1687,6 +1689,14 @@ namespace Clipman.Tests
                 "A server error response should still be reported straight away.");
             Assert(!ClipStore.IsTransientServerFailure(new InvalidOperationException("Cannot convert payload")),
                 "A data error should still be reported straight away.");
+            Assert(!ClipStore.IsTransientServerFailure(new WebException("Invalid certificate", WebExceptionStatus.TrustFailure)),
+                "A certificate failure must not be hidden by the network grace period.");
+            Assert(!ClipStore.IsTransientServerFailure(new WebException("TLS failure", WebExceptionStatus.SecureChannelFailure)),
+                "A TLS handshake failure must not be hidden by the network grace period.");
+            Assert(ClipStore.IsTransientServerFailure(new TimeoutException()), "A raw timeout should be transient.");
+            Assert(ClipStore.IsTransientServerFailure(new System.Net.Sockets.SocketException()), "A socket error should be transient.");
+            Assert(ClipStore.IsTransientServerFailure(new IOException("Socket failure", new System.Net.Sockets.SocketException())),
+                "A wrapped socket error should be transient.");
 
             Assert(!ClipStore.ShouldReportTransientServerFailure(0, 5000),
                 "No transient failure should mean nothing to report.");
@@ -1694,6 +1704,82 @@ namespace Clipman.Tests
                 "A timeout that recovers within seconds should not report storage as unavailable.");
             Assert(ClipStore.ShouldReportTransientServerFailure(10000, 10000 + ClipStore.TransientServerFailureGraceMilliseconds),
                 "Transient failures that last through the grace period should report storage as unavailable.");
+        }
+
+        private static void HistoryStatusRespectsTransientServerGrace()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanPollStatus-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb")))
+                {
+                    var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                    typeof(ClipStore).GetField("serverClient", flags).SetValue(store,
+                        new ServerStorageClient("http://127.0.0.1:1/", "test-token", "test-password", string.Empty, string.Empty));
+                    typeof(ClipStore).GetMethod("MarkServerSuccessLocked", flags).Invoke(store, new object[] { false });
+                    var context = (ClipmanApplicationContext)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(ClipmanApplicationContext));
+                    typeof(ClipmanApplicationContext).GetField("settings", flags).SetValue(context, new AppSettings { StorageMode = "Server", Active = true });
+                    typeof(ClipmanApplicationContext).GetField("store", flags).SetValue(context, store);
+                    var status = typeof(ClipmanApplicationContext).GetMethod("HistorySteadyStatusText", flags);
+                    var report = typeof(ClipStore).GetMethod("ReportServerPollFailureLocked", flags);
+                    var raise = typeof(ClipStore).GetMethod("RaiseStorageStateChangedIfPending", flags);
+                    var transitions = new List<bool>();
+                    store.StorageStateChanged += delegate(object sender, StorageStateChangedEventArgs args) { transitions.Add(args.Unavailable); };
+                    report.Invoke(store, new object[] { new WebException("Timeout", WebExceptionStatus.Timeout), "Timeout" });
+                    raise.Invoke(store, null);
+                    Assert(transitions.Count == 0 && string.IsNullOrEmpty(store.LastStorageError), "A brief timeout announced an outage.");
+                    Assert((string)status.Invoke(context, null) == "Ready. Server sync connected.", "The history status bypassed the transient grace period.");
+                    typeof(ClipStore).GetField("serverFirstTransientFailureUnixMs", flags).SetValue(store,
+                        TimeUtil.NowUnixMs() - ClipStore.TransientServerFailureGraceMilliseconds);
+                    report.Invoke(store, new object[] { new WebException("Timeout", WebExceptionStatus.Timeout), "Timeout" });
+                    raise.Invoke(store, null);
+                    Assert(transitions.SequenceEqual(new[] { true }), "A sustained outage was not announced once.");
+                    Assert(((string)status.Invoke(context, null)).Contains("Server unavailable"), "A sustained outage was hidden from history status.");
+                    typeof(ClipStore).GetMethod("SetStorageStateLocked", flags).Invoke(store, new object[] { false, string.Empty });
+                    typeof(ClipStore).GetMethod("MarkServerSuccessLocked", flags).Invoke(store, new object[] { false });
+                    raise.Invoke(store, null);
+                    Assert(transitions.SequenceEqual(new[] { true, false }), "Recovery did not announce one transition.");
+                    Assert((long)typeof(ClipStore).GetField("serverFirstTransientFailureUnixMs", flags).GetValue(store) == 0, "Recovery retained the grace timestamp.");
+                    report.Invoke(store, new object[] { new WebException("Forbidden", WebExceptionStatus.ProtocolError), "Forbidden" });
+                    raise.Invoke(store, null);
+                    Assert(transitions.SequenceEqual(new[] { true, false, true }), "Protocol errors were incorrectly deferred.");
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        private static void MetadataSuccessCannotMaskFailedDownloads()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanPollDownload-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var seedPath = Path.Combine(directory, "seed.clipdb");
+                ClipDatabaseFile.SaveAtomic(seedPath, new ClipDatabase(), "test-password");
+                using (var server = new RecoveringStorageServer(File.ReadAllBytes(seedPath)))
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb"), "test-password"))
+                {
+                    var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                    typeof(ClipStore).GetField("serverClient", flags).SetValue(store,
+                        new ServerStorageClient(server.Url, "test-token", "test-password", string.Empty, string.Empty));
+                    typeof(ClipStore).GetField("syncRulesNextCheckUnixMs", flags).SetValue(store, TimeUtil.NowUnixMs() + 60000);
+                    var firstFailure = TimeUtil.NowUnixMs() - ClipStore.TransientServerFailureGraceMilliseconds;
+                    typeof(ClipStore).GetField("serverFirstTransientFailureUnixMs", flags).SetValue(store, firstFailure);
+                    var poll = typeof(ClipStore).GetMethod("PollServer", flags);
+                    server.StallDownloads = true;
+                    poll.Invoke(store, new object[] { 0 });
+                    Assert(!string.IsNullOrEmpty(store.LastStorageError), "Successful metadata reset an overdue download outage.");
+                    Assert((long)typeof(ClipStore).GetField("serverFirstTransientFailureUnixMs", flags).GetValue(store) == firstFailure,
+                        "A metadata-only success restarted the grace period.");
+                    server.ResumeDownloads();
+                    typeof(ClipStore).GetField("serverNextPollUnixMs", flags).SetValue(store, 0L);
+                    poll.Invoke(store, new object[] { 0 });
+                    Assert(string.IsNullOrEmpty(store.LastStorageError) && store.GetServerSyncStatus().ConsecutiveFailures == 0,
+                        "A complete successful download did not recover storage.");
+                }
+            }
+            finally { Directory.Delete(directory, true); }
         }
 
         private static void UrlLabelsAcceptWindowsPathCharacters()
@@ -2655,6 +2741,14 @@ namespace Clipman.Tests
 
         private sealed class RecoveringStorageServer : IDisposable
         {
+            private readonly ManualResetEvent downloadResume = new ManualResetEvent(false);
+            public bool StallDownloads { get; set; }
+
+            public void ResumeDownloads()
+            {
+                StallDownloads = false;
+                downloadResume.Set();
+            }
             private readonly object sync = new object();
             private readonly HttpListener listener;
             private readonly Thread thread;
@@ -2748,6 +2842,11 @@ namespace Clipman.Tests
 
                     if (string.Equals(context.Request.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase))
                     {
+                        if (StallDownloads)
+                        {
+                            downloadResume.WaitOne();
+                            return;
+                        }
                         context.Response.StatusCode = (int)HttpStatusCode.OK;
                         context.Response.ContentLength64 = responseData.LongLength;
                         context.Response.OutputStream.Write(responseData, 0, responseData.Length);
@@ -2806,12 +2905,14 @@ namespace Clipman.Tests
 
             public void Dispose()
             {
+                downloadResume.Set();
                 listener.Stop();
                 listener.Close();
                 if (!thread.Join(3000))
                 {
                     throw new InvalidOperationException("The disposable Clipman server did not stop.");
                 }
+                downloadResume.Dispose();
             }
         }
 

@@ -92,6 +92,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.7 Windows</h3>
+  <ul>
+    <li>Brief background server-poll timeouts now retry quietly with the existing backoff. Network failures lasting at least 30 seconds still report unavailable storage at the next failed retry; authentication, server-response, data, upload and manual retry errors remain immediate. History status uses the same availability state as the tray. A successful metadata check cannot hide a failed download. Thanks to Raywonder for <a href="https://github.com/OnjLouis/Clipman/pull/82">pull request #82</a>.</li>
+  </ul>
   <h3>3.1.8 macOS</h3>
   <ul>
     <li>Starting at login or after an update now leaves the previous app in focus. Command+H dismisses Clipman windows through the same lifecycle as closing History, so Clipman leaves Command+Tab while its menu extra keeps running. The redundant direct File History command has been removed from the menu extra; Files remains available through History.</li>
