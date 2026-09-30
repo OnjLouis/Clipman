@@ -3,13 +3,13 @@ import UIKit
 
 struct HistoryView: View {
     @EnvironmentObject private var app: ClipmanAppModel
-    @State private var viewingEntry: ClipEntry?
     @State private var pendingDeleteEntry: ClipEntry?
     @State private var pendingWebsiteTitleItem: LinkExtractor.LinkItem?
     @State private var imageShareFile: EmbeddedImageShareFile?
     @State private var showingHistoryFilter = false
     @State private var moreActionPresentation: HistoryMoreActionPresentation?
     @State private var pendingMoreAction: HistoryMoreAction?
+    @State private var bottomRequests: [ClipmanAppModel.Section: Int] = [:]
     @AccessibilityFocusState private var focusedHistoryItemID: String?
 
     private let statusFocusID = "history-status"
@@ -31,6 +31,9 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("Clipman")
+            .onChange(of: focusedHistoryItemID) { id in
+                if let id, id != statusFocusID { app.readingState.historyFocusID = id }
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     PasteButton(payloadType: MobileClipboardPayload.self) { values in
@@ -63,8 +66,13 @@ struct HistoryView: View {
             .onChange(of: app.status) { newStatus in
                 app.announceStatus(newStatus)
             }
-            .sheet(item: $viewingEntry) { entry in
-                EntryView(entry: entry)
+            .sheet(isPresented: Binding(
+                get: { app.showingEntryView },
+                set: { if !$0 { app.closeViewedEntry() } }
+            ), onDismiss: restoreHistoryFocus) {
+                if let entry = app.viewedEntry {
+                    EntryView(entry: entry)
+                }
             }
             .sheet(isPresented: $app.showingEntryEdit) {
                 if let draft = app.entryEditDraft {
@@ -128,6 +136,19 @@ struct HistoryView: View {
         }
     }
 
+    private func restoreHistoryFocus() {
+        guard app.isUnlocked, !app.showingEntryView else { return }
+        let saved = app.readingState.historyFocusID
+        let valid = app.selectedSection == .links
+            ? app.visibleLinkItems.map { linkFocusID($0.id) }
+            : app.visibleEntries.map { entryFocusID($0.Id) }
+        guard let saved, valid.contains(saved) else { return }
+        Task { @MainActor in
+            await Task.yield()
+            focusedHistoryItemID = saved
+        }
+    }
+
     private func performPendingMoreAction() {
         guard let action = pendingMoreAction else { return }
         pendingMoreAction = nil
@@ -171,7 +192,16 @@ struct HistoryView: View {
     }
 
     private func entryList(for section: ClipmanAppModel.Section) -> some View {
-        List {
+        let space = "history-" + section.rawValue
+        let rowIDs = section == .links ? app.visibleLinkItems(in: section).map(\.id) : app.visibleEntries(in: section).map(\.Id)
+        return RememberedList(
+            coordinateSpace: space,
+            rowIDs: rowIDs,
+            savedAnchor: app.readingState.historyAnchors[section.rawValue],
+            bottomRequest: bottomRequests[section, default: 0],
+            remember: { app.readingState.historyAnchors[section.rawValue] = $0 },
+            onRestore: { if section == app.selectedSection { restoreHistoryFocus() } }
+        ) {
             if section == .links {
                 if app.visibleLinkItems(in: section).isEmpty {
                     Text("No links.")
@@ -185,13 +215,13 @@ struct HistoryView: View {
                         copyLinkOnly: { app.copyLink(item, includeName: false) },
                         copyNameAndLink: { app.copyLink(item, includeName: true) },
                         open: { UIApplication.shared.open(item.url) },
-                        view: { viewingEntry = item.entry },
+                        view: { app.beginViewing(item.entry) },
                         edit: { app.beginEditing(item.entry) },
                         togglePinned: { app.togglePinned(item.entry) },
                         delete: { requestDelete(item.entry) },
                         useWebsiteTitle: { pendingWebsiteTitleItem = item }
                     )
-                    .id(item.id)
+                    .readingPositionRow(item.id, in: space)
                     .accessibilityFocused($focusedHistoryItemID, equals: linkFocusID(item.id))
                 }
             } else {
@@ -212,7 +242,7 @@ struct HistoryView: View {
                             guard let url = LinkExtractor.exactURL(in: entry) else { return }
                             app.copyLink(entry, url: url, includeName: true)
                         },
-                        view: { viewingEntry = entry },
+                        view: { app.beginViewing(entry) },
                         edit: { app.beginEditing(entry) },
                         togglePinned: { app.togglePinned(entry) },
                         delete: { requestDelete(entry) },
@@ -226,12 +256,11 @@ struct HistoryView: View {
                             )
                         }
                     )
-                    .id(entry.Id)
+                    .readingPositionRow(entry.Id, in: space)
                     .accessibilityFocused($focusedHistoryItemID, equals: entryFocusID(entry.Id))
                 }
             }
         }
-        .listStyle(.plain)
     }
 
     private func requestDelete(_ entry: ClipEntry) {
@@ -290,11 +319,10 @@ struct HistoryView: View {
     private func linkFocusID(_ linkID: String) -> String { "link:\(linkID)" }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
+        bottomRequests[app.selectedSection, default: 0] += 1
         if app.selectedSection == .links, let last = app.visibleLinkItems.last {
-            proxy.scrollTo(last.id, anchor: .bottom)
             UIAccessibility.post(notification: .layoutChanged, argument: last.accessibilityLabelText)
         } else if let last = app.visibleEntries.last {
-            proxy.scrollTo(last.Id, anchor: .bottom)
             UIAccessibility.post(notification: .layoutChanged, argument: last.accessibilityLabelText)
         }
     }

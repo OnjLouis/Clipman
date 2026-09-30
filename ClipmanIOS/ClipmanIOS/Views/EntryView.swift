@@ -3,8 +3,10 @@ import UIKit
 
 struct EntryView: View {
     let entry: ClipEntry
-    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var app: ClipmanAppModel
     @State private var showingLargeImage = false
+    @AccessibilityFocusState private var focusedRowID: String?
+    private let readingSpace = "entry-viewer"
 
     private var links: [URL] {
         LinkExtractor.links(in: entry.Text)
@@ -16,11 +18,19 @@ struct EntryView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            RememberedList(
+                coordinateSpace: readingSpace,
+                rowIDs: readingRowIDs,
+                savedAnchor: app.readingState.viewerAnchor,
+                remember: { app.readingState.viewerAnchor = $0 },
+                onRestore: restoreReadingFocus
+            ) {
                 Section("Clipboard text") {
-                    ForEach(lines, id: \.self) { line in
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                         Text(line)
                             .textSelection(.enabled)
+                            .readingPositionRow("text-\(index)", in: readingSpace)
+                            .accessibilityFocused($focusedRowID, equals: "text-\(index)")
                     }
                 }
                 if let embeddedImage, let image = UIImage(data: embeddedImage.data) {
@@ -34,29 +44,45 @@ struct EntryView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .accessibilityLabel("View larger image: \(embeddedImage.altText)")
+                        .readingPositionRow("image", in: readingSpace)
+                        .accessibilityFocused($focusedRowID, equals: "image")
                     }
                 }
                 if !links.isEmpty {
                     Section("Links") {
-                        ForEach(Array(links.enumerated()), id: \.offset) { _, url in
+                        ForEach(Array(links.enumerated()), id: \.offset) { index, url in
                             Button(url.absoluteString) {
                                 UIApplication.shared.open(url)
                             }
                             .accessibilityLabel(url.absoluteString)
+                            .readingPositionRow("link-\(index)", in: readingSpace)
+                            .accessibilityFocused($focusedRowID, equals: "link-\(index)")
                         }
                     }
                 }
                 Section("Details") {
-                    ForEach(metadataLines, id: \.self) { line in
+                    ForEach(Array(metadataLines.enumerated()), id: \.offset) { index, line in
                         Text(line)
                             .textSelection(.enabled)
+                            .readingPositionRow("detail-\(index)", in: readingSpace)
+                            .accessibilityFocused($focusedRowID, equals: "detail-\(index)")
                     }
                 }
             }
             .navigationTitle("View Entry")
+            .task {
+                showingLargeImage = app.readingState.showingLargeImage
+            }
+            .onChange(of: focusedRowID) { id in
+                if let id { app.readingState.viewerFocusID = id }
+            }
+            .onChange(of: showingLargeImage) { value in
+                if app.isUnlocked { app.readingState.showingLargeImage = value }
+            }
+            .accessibilityAction(.escape) { app.closeViewedEntry() }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Close") { dismiss() }
+                    Button("Close") { app.closeViewedEntry() }
                 }
             }
             .fullScreenCover(isPresented: $showingLargeImage) {
@@ -77,6 +103,21 @@ struct EntryView: View {
                 }
             }
         }
+    }
+
+    private func restoreReadingFocus() {
+        guard let id = app.readingState.viewerFocusID, readingRowIDs.contains(id) else { return }
+        Task { @MainActor in
+            await Task.yield()
+            if app.isUnlocked, app.showingEntryView, !showingLargeImage { focusedRowID = id }
+        }
+    }
+
+    private var readingRowIDs: [String] {
+        lines.indices.map { "text-\($0)" }
+            + (embeddedImage == nil ? [] : ["image"])
+            + links.indices.map { "link-\($0)" }
+            + metadataLines.indices.map { "detail-\($0)" }
     }
 
     private var lines: [String] {

@@ -40,6 +40,9 @@ final class ClipmanAppModel: ObservableObject {
     @Published var showingSettings = false
     @Published var showingQuickClip = false
     @Published var showingEntryEdit = false
+    @Published var showingEntryView = false
+    private(set) var viewedEntry: ClipEntry?
+    var readingState: HistoryReadingState
     private(set) var quickClipDraft: ClipEntry?
     private(set) var entryEditDraft: ClipEntry?
     @Published var isRefreshing = false
@@ -56,6 +59,7 @@ final class ClipmanAppModel: ObservableObject {
     private let historyRepository: any MobileHistoryRepositoryProtocol
     private let quickClipDraftStore: ClipDraftStore
     private let entryEditDraftStore: ClipDraftStore
+    private let readingStateStore: HistoryReadingStateStore
     private var revision = ""
     private var unlockTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
@@ -90,13 +94,19 @@ final class ClipmanAppModel: ObservableObject {
         settings initialSettings: ClipmanSettings? = nil,
         historyRepository: any MobileHistoryRepositoryProtocol = MobileHistoryRepository.shared,
         quickClipDraftStore: ClipDraftStore = ClipDraftStore(fileURL: ClipDraftStore.quickClipFileURL),
-        entryEditDraftStore: ClipDraftStore = ClipDraftStore(fileURL: ClipDraftStore.entryEditFileURL)
+        entryEditDraftStore: ClipDraftStore = ClipDraftStore(fileURL: ClipDraftStore.entryEditFileURL),
+        readingStateStore: HistoryReadingStateStore = HistoryReadingStateStore(fileURL: HistoryReadingStateStore.fileURL)
     ) {
         let loaded = initialSettings ?? SettingsStore.load()
         settings = loaded
         self.historyRepository = historyRepository
         self.quickClipDraftStore = quickClipDraftStore
         self.entryEditDraftStore = entryEditDraftStore
+        self.readingStateStore = readingStateStore
+        readingState = (try? readingStateStore.load()) ?? HistoryReadingState()
+        let restoredSection = Section(rawValue: readingState.section) ?? .text
+        let availableSections = [Section.text] + (loaded.richTextEnabled ? [.richText] : []) + (loaded.linksEnabled ? [.links] : [])
+        selectedSection = availableSections.contains(restoredSection) ? restoredSection : .text
         quickClipDraft = try? quickClipDraftStore.load()
         entryEditDraft = try? entryEditDraftStore.load()
         // Startup always flows through unlock(), which also loads history and starts polling.
@@ -344,6 +354,8 @@ final class ClipmanAppModel: ObservableObject {
                     showingEntryEdit = true
                 } else if quickClipDraft != nil {
                     showingQuickClip = true
+                } else if restoreViewedEntry() {
+                    showingEntryView = true
                 } else if isImportingServerConnection {
                     // The import completion opens Settings once the file has finished loading.
                     shouldRefreshServer = false
@@ -533,7 +545,9 @@ final class ClipmanAppModel: ObservableObject {
     func sceneMovedToBackground() {
         persistQuickClipDraft()
         persistEntryEditDraft()
+        persistReadingState()
         isSceneActive = false
+        showingEntryView = false
         foregroundGeneration += 1
         unlockTask?.cancel()
         unlockTask = nil
@@ -1043,6 +1057,50 @@ final class ClipmanAppModel: ObservableObject {
         UIPasteboard.general.string = text
         soundService.play("copy", soundsEnabled: settings.soundsEnabled, hapticsEnabled: settings.hapticsEnabled)
         setTransientStatus("Copied to clipboard.")
+    }
+
+    func beginViewing(_ entry: ClipEntry) {
+        if readingState.viewedEntryID != entry.Id {
+            readingState.viewerAnchor = nil
+            readingState.viewerFocusID = nil
+            readingState.showingLargeImage = false
+        }
+        viewedEntry = entry
+        readingState.viewedEntryID = entry.Id
+        showingEntryView = true
+    }
+
+    func closeViewedEntry() {
+        guard isSceneActive, isUnlocked else { return }
+        showingEntryView = false
+        viewedEntry = nil
+        readingState.viewedEntryID = nil
+        readingState.viewerAnchor = nil
+        readingState.viewerFocusID = nil
+        readingState.showingLargeImage = false
+        persistReadingState()
+    }
+
+    private func restoreViewedEntry() -> Bool {
+        guard let id = readingState.viewedEntryID,
+              let entry = database.Entries.first(where: { $0.Id == id }) else {
+            viewedEntry = nil
+            readingState.viewedEntryID = nil
+            return false
+        }
+        viewedEntry = entry
+        return true
+    }
+
+    private func persistReadingState() {
+        readingState.section = selectedSection.rawValue
+        // A search or filter is transient; do not persist its content or apply its positions to All history.
+        var saved = readingState
+        if !searchText.isEmpty || historyFilter != .all {
+            saved.historyAnchors = [:]
+            saved.historyFocusID = nil
+        }
+        try? readingStateStore.save(saved)
     }
 
     func copyLink(_ item: LinkExtractor.LinkItem, includeName: Bool? = nil) {

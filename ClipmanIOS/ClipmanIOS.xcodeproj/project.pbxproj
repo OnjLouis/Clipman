@@ -32,6 +32,7 @@
 		3032B1A0EA6C2DF2194683F4 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CD05FE0E19C7744ACFD87B4 /* Security.framework */; };
 		31DF1873E5EA0F7A2A225723 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 283C9770D01F5E67699D4EAC /* SettingsView.swift */; };
 		33522F9AEA675F6478D6ED15 /* ClipmanAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */; };
+		35E97094D398BF201EB126E1 /* RememberedList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 908F34F02075AB1FC378B98F /* RememberedList.swift */; };
 		3644C1291732B31AE8044E12 /* DeletionUXTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706E33429FE88528D3BEAAE0 /* DeletionUXTests.swift */; };
 		3853E72967534A420918CBF6 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05CA47DBCD9B9B962169510E /* ShareViewController.swift */; };
 		38B8D1322F8D02C86F55A45C /* SoundServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03032F860A00CBC6F3EB3214 /* SoundServiceTests.swift */; };
@@ -41,6 +42,7 @@
 		4D1D99193BC8BC0F167B79A8 /* BackupFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE24A8535EA9BC2E20E5A203 /* BackupFolderPicker.swift */; };
 		517D038A8DD78B4940576C43 /* ShareSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C622212374EB41352FE2ACC0 /* ShareSyncServiceTests.swift */; };
 		55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */; };
+		572E00CB905B1C951EDFFDD2 /* HistoryReadingStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11271ED55C1DD889D9C28F18 /* HistoryReadingStateTests.swift */; };
 		5750CF7FAE9FBA004D4FD2FB /* MobileRichTextClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76F0D2CA597BA590CCA6E279 /* MobileRichTextClipboard.swift */; };
 		5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C5029F5D137A6D4490F765 /* HistoryView.swift */; };
 		5DBEFFA812575AB91307CEF7 /* SoundService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98DD96F176CD3DE6A07D271 /* SoundService.swift */; };
@@ -49,6 +51,7 @@
 		63AFA7C59E8422A22A98E7F0 /* ServerDatabaseIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */; };
 		687FC3196B47534C3B073F3F /* QuickClipDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB2EFB1F20C842F594E83B53 /* QuickClipDraftTests.swift */; };
 		6A857283F950DB08ABE7CB53 /* CloudHistoryBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9EDC00BC0C882B8442AE7E /* CloudHistoryBackup.swift */; };
+		6C182B12A729B92E7328344D /* HistoryReadingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101976425FFC3B73C4153EAF /* HistoryReadingState.swift */; };
 		7420302BAF4F059B6C321C95 /* SyncRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94940CAE7D6528560D7A1168 /* SyncRules.swift */; };
 		74F4E328D4514636B26AE593 /* DatabaseWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3757E95599655BFEB3101654 /* DatabaseWorker.swift */; };
 		753DCF0B2F6323E2F82D4EFA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642C84289DC631AC184C2C31 /* Models.swift */; };
@@ -139,7 +142,9 @@
 		032F062DF28E39F5953D7824 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		034B2C3AA4CE7BEF91F64664 /* ServerDatabaseIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDatabaseIdentity.swift; sourceTree = "<group>"; };
 		05CA47DBCD9B9B962169510E /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		101976425FFC3B73C4153EAF /* HistoryReadingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryReadingState.swift; sourceTree = "<group>"; };
 		10B2781922F5FA5D25969EB5 /* PendingSharedTextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSharedTextStore.swift; sourceTree = "<group>"; };
+		11271ED55C1DD889D9C28F18 /* HistoryReadingStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryReadingStateTests.swift; sourceTree = "<group>"; };
 		113AFEAF2ED9AF4723DB6832 /* ShareSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSyncService.swift; sourceTree = "<group>"; };
 		15C075089BD6891E606C98F3 /* EntryEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEditView.swift; sourceTree = "<group>"; };
 		16D1BC07F2C20A19047A050B /* HistoryRowPreviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRowPreviewTests.swift; sourceTree = "<group>"; };
@@ -175,6 +180,7 @@
 		8414DF9B18A4F4627ADF4A55 /* SharedFolderStorageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFolderStorageClient.swift; sourceTree = "<group>"; };
 		88D6EF9C4A77E0BE70A22FA6 /* QuickActionRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionRefreshTests.swift; sourceTree = "<group>"; };
 		89C5029F5D137A6D4490F765 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		908F34F02075AB1FC378B98F /* RememberedList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RememberedList.swift; sourceTree = "<group>"; };
 		92A596CC59ABF62C25837654 /* SyncRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRulesTests.swift; sourceTree = "<group>"; };
 		9330DEB559F71A2DF6CF2E1F /* HistorySortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySortTests.swift; sourceTree = "<group>"; };
 		93D166EC7141EE64B5371FD2 /* Gzip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gzip.swift; sourceTree = "<group>"; };
@@ -282,6 +288,7 @@
 				D2DD45D61DAC284441E87117 /* EmbeddedImageActionTests.swift */,
 				9ACB54CFA7EECAFD185EE92D /* EmbeddedImageTests.swift */,
 				4E54439065F06408A2D77B13 /* HistoryMoreActionsTests.swift */,
+				11271ED55C1DD889D9C28F18 /* HistoryReadingStateTests.swift */,
 				16D1BC07F2C20A19047A050B /* HistoryRowPreviewTests.swift */,
 				9330DEB559F71A2DF6CF2E1F /* HistorySortTests.swift */,
 				20DAD07A69EEC91C4A73C6E6 /* LinkDisplayTests.swift */,
@@ -307,6 +314,7 @@
 				15C075089BD6891E606C98F3 /* EntryEditView.swift */,
 				70E9160FA444DB6E3A61314E /* EntryView.swift */,
 				89C5029F5D137A6D4490F765 /* HistoryView.swift */,
+				908F34F02075AB1FC378B98F /* RememberedList.swift */,
 				032F062DF28E39F5953D7824 /* RootView.swift */,
 				283C9770D01F5E67699D4EAC /* SettingsView.swift */,
 			);
@@ -406,6 +414,7 @@
 				00F18B48633E261F19EA0703 /* ClipmanQuickActions.swift */,
 				9B6AB4D8070EFBD0D2139FDE /* ClipmanSettings.swift */,
 				3FB3337F4B5D8DCE696C3B0F /* EmbeddedImageActions.swift */,
+				101976425FFC3B73C4153EAF /* HistoryReadingState.swift */,
 				C02D9422349D165D345B5D71 /* KeychainStore.swift */,
 				EFCE0C638D22648BD22C7867 /* LinkDisplay.swift */,
 				FDA3F9107EE475A861C6D324 /* LinkExtractor.swift */,
@@ -565,6 +574,7 @@
 				C676E48CA1A7CDAA51D4C9B5 /* EntryView.swift in Sources */,
 				11F918FE112D3FCF183D6587 /* Gzip.swift in Sources */,
 				2D6A40F4231C442F3B9FE479 /* HTMLEntityDecoder.swift in Sources */,
+				6C182B12A729B92E7328344D /* HistoryReadingState.swift in Sources */,
 				5762F36F73C4113842ECB6EC /* HistoryView.swift in Sources */,
 				C3868C0813B87AA305C70CCB /* KeychainStore.swift in Sources */,
 				8A663E92DE347351DB43E840 /* LinkClipboardText.swift in Sources */,
@@ -575,6 +585,7 @@
 				80DF3940EAE12616EAA0047D /* Models.swift in Sources */,
 				0D9E71F12365D0E883798075 /* PendingSharedImageStore.swift in Sources */,
 				B126EC03990C775ED80CD68A /* PendingSharedTextStore.swift in Sources */,
+				35E97094D398BF201EB126E1 /* RememberedList.swift in Sources */,
 				A8912F558B14C788063B7A9B /* RootView.swift in Sources */,
 				C94D6E70CCECB51D737876DF /* ServerConnectionDocument.swift in Sources */,
 				55924A6B8C95581B1639D1D9 /* ServerDatabaseIdentity.swift in Sources */,
@@ -626,6 +637,7 @@
 				210E0E853E14D1545E4E9F9B /* EmbeddedImageActionTests.swift in Sources */,
 				086BAA1E9EE5D69DFD7806E2 /* EmbeddedImageTests.swift in Sources */,
 				CE9278E3DDF0D58CC12C1C2A /* HistoryMoreActionsTests.swift in Sources */,
+				572E00CB905B1C951EDFFDD2 /* HistoryReadingStateTests.swift in Sources */,
 				93CF2C3F38ECCFE2A99CF534 /* HistoryRowPreviewTests.swift in Sources */,
 				C2341AB4F664244178963CC5 /* HistorySortTests.swift in Sources */,
 				907ECD326B3CCBAA44AD4DEC /* LinkDisplayTests.swift in Sources */,
@@ -663,7 +675,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
-				CURRENT_PROJECT_VERSION = 31601;
+				CURRENT_PROJECT_VERSION = 31701;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -672,7 +684,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.1.6;
+				MARKETING_VERSION = 3.1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.share;
 				PRODUCT_NAME = "Share to Clipman";
 				SDKROOT = iphoneos;
@@ -688,7 +700,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31601;
+				CURRENT_PROJECT_VERSION = 31701;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -698,7 +710,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.1.6;
+				MARKETING_VERSION = 3.1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -791,7 +803,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31601;
+				CURRENT_PROJECT_VERSION = 31701;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -801,7 +813,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.1.6;
+				MARKETING_VERSION = 3.1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -900,7 +912,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
-				CURRENT_PROJECT_VERSION = 31601;
+				CURRENT_PROJECT_VERSION = 31701;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -909,7 +921,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.1.6;
+				MARKETING_VERSION = 3.1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.share;
 				PRODUCT_NAME = "Share to Clipman";
 				SDKROOT = iphoneos;

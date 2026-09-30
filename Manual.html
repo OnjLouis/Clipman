@@ -92,6 +92,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.7 iOS</h3>
+  <ul>
+    <li>View Entry now stays open when you switch apps and return, retaining its reading position and an open large image preview.</li>
+    <li>History remembers the current tab and each list's position rather than returning to the top. Closing View Entry returns to the history you left, including VoiceOver focus when that entry still exists.</li>
+    <li>Viewing is restored only after history is unlocked. Deleted entries are not restored; only entry references and position metadata are saved, not a separate copy of clipboard contents.</li>
+  </ul>
   <h3>3.1.7 Windows</h3>
   <ul>
     <li>Brief background server-poll timeouts now retry quietly with the existing backoff. Network failures lasting at least 30 seconds still report unavailable storage at the next failed retry; authentication, server-response, data, upload and manual retry errors remain immediate. History status uses the same availability state as the tray. A successful metadata check cannot hide a failed download. Thanks to Raywonder for <a href="https://github.com/OnjLouis/Clipman/pull/82">pull request #82</a>.</li>
