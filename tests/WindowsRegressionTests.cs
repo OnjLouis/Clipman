@@ -21,6 +21,7 @@ namespace Clipman.Tests
         {
             Run("database container caps are aligned", DatabaseContainerCapsAreAligned);
             Run("server polls cannot overlap and respect failure backoff", ServerPollSchedulingIsBounded);
+            Run("brief server poll timeouts do not report storage unavailable", TransientServerPollFailuresAreQuiet);
             Run("storage retries contain network failures", StorageRetriesContainNetworkFailures);
             Run("storage recovery publishes availability transitions", StorageRecoveryPublishesAvailabilityTransitions);
             Run("failed server uploads recover and refresh storage state", FailedServerUploadsRecoverAndRefreshStorageState);
@@ -1672,6 +1673,27 @@ namespace Clipman.Tests
                 "A near-term retry should not create a tight polling loop.");
             Assert(ClipStore.CalculateServerPollDelayMilliseconds(1000, 7000) == 6000,
                 "A failed server poll should sleep until its retry backoff expires.");
+        }
+
+        private static void TransientServerPollFailuresAreQuiet()
+        {
+            Assert(ClipStore.IsTransientServerFailure(new WebException("The operation has timed out", WebExceptionStatus.Timeout)),
+                "A server poll timeout should be treated as a transient network failure.");
+            Assert(ClipStore.IsTransientServerFailure(new WebException("The request was aborted: The operation has timed out.", WebExceptionStatus.RequestCanceled)),
+                "An aborted server poll should be treated as a transient network failure.");
+            Assert(ClipStore.IsTransientServerFailure(new WebException("Unable to connect", WebExceptionStatus.ConnectFailure)),
+                "A failed server connection should be treated as a transient network failure.");
+            Assert(!ClipStore.IsTransientServerFailure(new WebException("Forbidden", WebExceptionStatus.ProtocolError)),
+                "A server error response should still be reported straight away.");
+            Assert(!ClipStore.IsTransientServerFailure(new InvalidOperationException("Cannot convert payload")),
+                "A data error should still be reported straight away.");
+
+            Assert(!ClipStore.ShouldReportTransientServerFailure(0, 5000),
+                "No transient failure should mean nothing to report.");
+            Assert(!ClipStore.ShouldReportTransientServerFailure(10000, 14000),
+                "A timeout that recovers within seconds should not report storage as unavailable.");
+            Assert(ClipStore.ShouldReportTransientServerFailure(10000, 10000 + ClipStore.TransientServerFailureGraceMilliseconds),
+                "Transient failures that last through the grace period should report storage as unavailable.");
         }
 
         private static void UrlLabelsAcceptWindowsPathCharacters()

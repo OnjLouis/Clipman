@@ -43,6 +43,7 @@ namespace Clipman
         private long serverLastUploadUnixMs;
         private long serverNextPollUnixMs;
         private int serverConsecutiveFailures;
+        private long serverFirstTransientFailureUnixMs;
         private bool lastChangeWasExternal;
         private string machineName;
 
@@ -1318,6 +1319,7 @@ namespace Clipman
             serverLastUploadUnixMs = 0;
             serverNextPollUnixMs = 0;
             serverConsecutiveFailures = 0;
+            serverFirstTransientFailureUnixMs = 0;
         }
 
         private void MarkServerSuccessLocked(bool upload)
@@ -1330,6 +1332,7 @@ namespace Clipman
             }
             serverConsecutiveFailures = 0;
             serverNextPollUnixMs = 0;
+            serverFirstTransientFailureUnixMs = 0;
         }
 
         private void MarkServerFailureLocked()
@@ -1338,6 +1341,65 @@ namespace Clipman
             serverConsecutiveFailures = Math.Min(serverConsecutiveFailures + 1, 8);
             var delaySeconds = Math.Min(60, 2 << Math.Min(serverConsecutiveFailures, 5));
             serverNextPollUnixMs = now + delaySeconds * 1000L;
+        }
+
+        internal const int TransientServerFailureGraceMilliseconds = 30000;
+
+        // A background poll that times out or loses its connection is usually a brief network
+        // hiccup that the next retry recovers from. Keep retrying with backoff, but only report
+        // storage as unavailable once such failures have lasted for the grace period, so a
+        // single slow request does not flip the tray and announcements to "storage unavailable".
+        private void ReportServerPollFailureLocked(Exception ex, string message)
+        {
+            if (!storageUnavailable && IsTransientServerFailure(ex))
+            {
+                var now = TimeUtil.NowUnixMs();
+                if (serverFirstTransientFailureUnixMs == 0)
+                {
+                    serverFirstTransientFailureUnixMs = now;
+                }
+
+                if (!ShouldReportTransientServerFailure(serverFirstTransientFailureUnixMs, now))
+                {
+                    MarkServerFailureLocked();
+                    return;
+                }
+            }
+
+            SetStorageStateLocked(true, message);
+            MarkServerFailureLocked();
+        }
+
+        internal static bool ShouldReportTransientServerFailure(long firstFailureUnixMs, long nowUnixMs)
+        {
+            return firstFailureUnixMs > 0 && nowUnixMs - firstFailureUnixMs >= TransientServerFailureGraceMilliseconds;
+        }
+
+        internal static bool IsTransientServerFailure(Exception ex)
+        {
+            var web = ex as WebException;
+            if (web != null)
+            {
+                switch (web.Status)
+                {
+                    case WebExceptionStatus.Timeout:
+                    case WebExceptionStatus.RequestCanceled:
+                    case WebExceptionStatus.ConnectFailure:
+                    case WebExceptionStatus.ConnectionClosed:
+                    case WebExceptionStatus.KeepAliveFailure:
+                    case WebExceptionStatus.NameResolutionFailure:
+                    case WebExceptionStatus.PipelineFailure:
+                    case WebExceptionStatus.ReceiveFailure:
+                    case WebExceptionStatus.SendFailure:
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+
+            return ex is TimeoutException ||
+                   ex is System.Net.Sockets.SocketException ||
+                   (ex is IOException && ex.InnerException is System.Net.Sockets.SocketException);
         }
 
         internal static int CalculateServerPollDelayMilliseconds(long nowUnixMs, long nextPollUnixMs)
@@ -1395,20 +1457,17 @@ namespace Clipman
                             catch (WebException retryEx)
                             {
                                 if (serverClient != null && serverClient.IsNotFound(retryEx)) return;
-                                SetStorageStateLocked(true, "Server poll failed: " + retryEx.Message);
-                                MarkServerFailureLocked();
+                                ReportServerPollFailureLocked(retryEx, "Server poll failed: " + retryEx.Message);
                                 return;
                             }
                         }
-                        SetStorageStateLocked(true, "Server poll failed: " + ex.Message);
-                        MarkServerFailureLocked();
+                        ReportServerPollFailureLocked(ex, "Server poll failed: " + ex.Message);
                         return;
                     }
                     catch (Exception ex)
                     {
                         if (!IsRecoverableServerException(ex)) return;
-                        SetStorageStateLocked(true, "Server poll failed: " + ex.Message);
-                        MarkServerFailureLocked();
+                        ReportServerPollFailureLocked(ex, "Server poll failed: " + ex.Message);
                         return;
                     }
                 }
