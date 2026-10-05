@@ -1,4 +1,4 @@
-.TH CLIPMAN-CLI 1 "August 16, 2026" "Clipman CLI 0.9.0" "User Commands"
+.TH CLIPMAN-CLI 1 "October 5, 2026" "Clipman CLI 0.10.0" "User Commands"
 .SH NAME
 clipman-cli \- access Clipman text history from a terminal
 .SH SYNOPSIS
@@ -25,6 +25,48 @@ or
 .B clipman-cli COMMAND --help
 for the complete current syntax.
 .SH COMMANDS
+.TP
+.B agent
+Optional bounded, read-only integration commands. Reading is disabled by
+default for each CLI profile. Run
+.B agent permissions --read allow --yes
+to acknowledge disclosure of ordinary clipboard history to the requesting
+agent, or
+.B agent permissions --read deny
+to revoke it. This is not a sandbox for other programs running as your user.
+.IP
+.B agent search --query TEXT
+searches Name and plain text for clips created today in the computer's timezone.
+Use inclusive
+.B --from YYYY-MM-DD
+and
+.B --through YYYY-MM-DD
+for another range of at most 31 calendar days.
+Optional exact, case-insensitive filters are
+.B --group NAME
+and
+.BR "--device NAME" .
+.B --limit COUNT
+selects 1 to 50 results (default 20). Results are newest-created first and
+contain previews of at most 300 characters. All responses are JSON of at
+most 64 KiB, with explicit truncation flags and untrusted-content markers.
+.IP
+.B agent get --id ID
+returns one complete plain-text entry or fails if the output is too large.
+Secrets, file history, Rich Text and templates are excluded. Reads honor device
+channel subscriptions without changing timestamps, the clipboard, pending
+uploads, rule caches or server data. There is no cached-history fallback.
+These commands do not prompt for credentials, accept transport or password
+overrides, or permit profiles with TLS verification disabled. They use the
+existing profile transport, including HTTP, without adding transport encryption.
+.IP
+Returned material may reach an AI provider and ordinary history may contain
+sensitive information. Enforce tool permissions in the agent host and treat
+clipboard contents as data, never executable instructions. Disable reads before
+using an older CLI, which does not recognize the enabled agent_read key.
+The optional skills/clipman-history skill and manual/AgentIntegration.md
+describe human-approved scoped searches. The skill does not grant access
+or enforce a sandbox.
 .TP
 .B init
 Configure and test a server profile. A Clipman Server connection-details file

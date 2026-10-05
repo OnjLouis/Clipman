@@ -18,6 +18,9 @@ if ([string]::IsNullOrWhiteSpace($version)) { throw 'VERSION is empty.' }
 $packageFiles = @(
     @{ Source = Join-Path $PSScriptRoot 'Manual.html'; Destination = 'manual/Manual.html' },
     @{ Source = Join-Path $PSScriptRoot 'clipman-cli.1'; Destination = 'manual/clipman-cli.1' },
+    @{ Source = Join-Path $PSScriptRoot 'AgentIntegration.md'; Destination = 'manual/AgentIntegration.md' },
+    @{ Source = Join-Path $PSScriptRoot 'skills/clipman-history/SKILL.md'; Destination = 'skills/clipman-history/SKILL.md' },
+    @{ Source = Join-Path $PSScriptRoot 'skills/clipman-history/agents/openai.yaml'; Destination = 'skills/clipman-history/agents/openai.yaml' },
     @{ Source = Join-Path (Split-Path -Parent $PSScriptRoot) 'LICENSE.txt'; Destination = 'LICENSE.txt' }
 )
 foreach ($file in $packageFiles) {

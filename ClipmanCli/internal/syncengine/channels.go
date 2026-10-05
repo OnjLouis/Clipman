@@ -55,7 +55,12 @@ type ViewState struct {
 // merges them into a single view. With rules absent or disabled it produces
 // exactly what the single-bucket Read produces, normalized.
 func (e *Engine) ReadView(ctx context.Context, deviceName string) (*ViewState, error) {
-	return e.readView(ctx, deviceName, time.Now().UnixMilli())
+	return e.readView(ctx, deviceName, time.Now().UnixMilli(), true)
+}
+
+// ReadViewReadOnly reads subscribed history without repairing server state.
+func (e *Engine) ReadViewReadOnly(ctx context.Context, deviceName string) (*ViewState, error) {
+	return e.readView(ctx, deviceName, time.Now().UnixMilli(), false)
 }
 
 // WriteThroughError reports that entries bound for channels this device does
@@ -116,7 +121,7 @@ func (w *WriteThroughError) Unwrap() error { return w.Err }
 // that failure and part of the mutation was not committed.
 func (e *Engine) MutateView(ctx context.Context, deviceName string, mutate func(database *model.Database) error) (*ViewState, error) {
 	now := time.Now().UnixMilli()
-	view, err := e.readView(ctx, deviceName, now)
+	view, err := e.readView(ctx, deviceName, now, true)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +427,7 @@ func removeMarkerFor(markers []model.DeletedEntry, id string) []model.DeletedEnt
 // Dirty detection depends on that: model.Database carries UpdatedUnixMs, so a
 // rebuild stamped with a different clock reading would never match the hash
 // recorded at the last transfer.
-func (e *Engine) readView(ctx context.Context, deviceName string, now int64) (*ViewState, error) {
+func (e *Engine) readView(ctx context.Context, deviceName string, now int64, restoreRules bool) (*ViewState, error) {
 	if e.Client == nil {
 		return nil, errors.New("no Clipman Server is configured")
 	}
@@ -430,7 +435,7 @@ func (e *Engine) readView(ctx context.Context, deviceName string, now int64) (*V
 	if err != nil {
 		return nil, err
 	}
-	document, rulesRevision, err := e.readRules(ctx, core.blob)
+	document, rulesRevision, err := e.readRules(ctx, core.blob, restoreRules)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +466,7 @@ func (e *Engine) readView(ctx context.Context, deviceName string, now int64) (*V
 // Caching); a blob that cannot be decoded or parsed degrades to no rules at
 // all, because a damaged rules document must not stop history from syncing.
 // coreBlob supplies the salt the re-upload shares with the history database.
-func (e *Engine) readRules(ctx context.Context, coreBlob []byte) (*rules.Document, string, error) {
+func (e *Engine) readRules(ctx context.Context, coreBlob []byte, restore bool) (*rules.Document, string, error) {
 	rulesID := identity.SyncRulesDatabaseID(e.syncToken(), e.Password)
 	if rulesID == "" {
 		return nil, "", nil
@@ -475,6 +480,9 @@ func (e *Engine) readRules(ctx context.Context, coreBlob []byte) (*rules.Documen
 		// until an up-to-date client restores the document (spec section 4).
 		if e.CachedRules == nil || rules.ReadOnly(e.CachedRules) {
 			return nil, "", nil
+		}
+		if !restore {
+			return e.CachedRules, "", nil
 		}
 		return e.CachedRules, e.uploadCachedRules(ctx, client, coreBlob), nil
 	}

@@ -20,6 +20,7 @@ type Config struct {
 	CACertPEM                                                                                                string
 	CAHost                                                                                                   string
 	PinnedFirst, TLSInsecure, CAExclusive                                                                    bool
+	AgentRead                                                                                                bool
 	Limits                                                                                                   Limits
 }
 
@@ -83,6 +84,9 @@ func Save(path string, value Config) error {
 	writeString("machine", value.Machine)
 	writeString("renderer", value.Renderer)
 	fmt.Fprintf(&out, "pinned_first = %t\n", value.PinnedFirst)
+	if value.AgentRead {
+		fmt.Fprintln(&out, "agent_read = true")
+	}
 	if value.TLSInsecure {
 		fmt.Fprintln(&out, "tls_insecure = true")
 	}
@@ -264,6 +268,12 @@ func assign(c *Config, section, key, raw string) error {
 			return err
 		}
 		c.PinnedFirst = value
+	case "agent_read":
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return err
+		}
+		c.AgentRead = value
 	case "tls_insecure":
 		value, err := strconv.ParseBool(raw)
 		if err != nil {

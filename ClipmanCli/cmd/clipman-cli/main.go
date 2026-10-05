@@ -41,7 +41,7 @@ import (
 	"github.com/OnjLouis/Clipman/ClipmanCli/internal/ui/tui"
 )
 
-var version = "0.9.0"
+var version = "0.10.0"
 
 type appError struct {
 	code int
@@ -118,13 +118,15 @@ func run(args []string) int {
 		}
 		return printError(fail(2, "usage: clipman-cli help [COMMAND]"))
 	}
-	known := map[string]bool{"init": true, "status": true, "list": true, "get": true, "put": true, "rm": true, "sync": true, "pick": true, "menu": true, "rules": true}
+	known := map[string]bool{"init": true, "status": true, "list": true, "get": true, "put": true, "rm": true, "sync": true, "pick": true, "menu": true, "rules": true, "agent": true}
 	if !known[command] {
 		return printError(fail(2, "unknown command %q", command))
 	}
 	var commandErr error
 	if command == "init" {
 		commandErr = runInit(globals, commandArgs)
+	} else if command == "agent" {
+		commandErr = runAgent(globals, commandArgs)
 	} else {
 		ctx, err := loadContext(globals)
 		if err != nil {
@@ -456,6 +458,10 @@ func promptTrustCertificate(ctx context.Context, rawURL string) ([]byte, error) 
 }
 
 func loadContext(g globals) (*appContext, error) {
+	return loadContextWithPrompt(g, true)
+}
+
+func loadContextWithPrompt(g globals, allowPrompt bool) (*appContext, error) {
 	path, err := platform.ConfigPath(g.configPath)
 	if err != nil {
 		return nil, fail(3, "cannot locate configuration: %v", err)
@@ -471,7 +477,7 @@ func loadContext(g globals) (*appContext, error) {
 	if err != nil {
 		return nil, fail(3, "cannot unlock server token: %v", err)
 	}
-	password, err := resolvePassword(g, cfg, true)
+	password, err := resolvePassword(g, cfg, allowPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -1695,11 +1701,15 @@ func writeJSON(value any) error {
 	return encoder.Encode(value)
 }
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Browse history interactively; the default when no command is given\n  sync     Download and validate current history\n  rules    Manage sync channels and device subscriptions\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --verbose         Write diagnostic messages to standard error\n  --version         Show version information")
+	fmt.Fprintln(out, "Clipman CLI - terminal access to Clipman text history\n\nUsage: clipman-cli [global options] <command> [options]\n\nCommands:\n  init     Configure a Clipman Server profile\n  status   Check server and history status\n  list     List text-history entries\n  get      Write one entry to standard output\n  put      Read UTF-8 text and add it to history\n  rm       Delete exactly one entry\n  pick     Select one entry and write it to standard output\n  menu     Browse history interactively; the default when no command is given\n  sync     Download and validate current history\n  agent    Opt-in bounded, read-only history search for integrations\n  rules    Manage sync channels and device subscriptions\n\nGlobal options:\n  --config PATH     Select a configuration file\n  --server URL      Override the configured server\n  --password VALUE  Supply the history password\n  --ca-cert FILE    Trust an additional PEM CA/certificate for a self-signed server\n  --insecure        Disable TLS certificate verification (use only on a trusted network)\n  --json            Emit structured JSON where supported\n  --quiet, -q       Suppress nonessential messages\n  --verbose         Write diagnostic messages to standard error\n  --version         Show version information")
 }
 
 func printCommandUsage(out io.Writer, command string) bool {
 	usage := map[string]string{
+		"agent":                "Usage: clipman-cli [--config PATH] agent <permissions|search|get> ...\n  agent permissions [--read allow|deny] [--yes]\n  agent search --query TEXT [--from YYYY-MM-DD] [--through YYYY-MM-DD] [--group NAME] [--device NAME] [--limit COUNT]\n  agent get --id ID\n  Agent reads are disabled by default, never prompt for credentials, and always return bounded JSON.",
+		"agent permissions":    "Usage: clipman-cli [--config PATH] agent permissions [--read allow|deny] [--yes]\n  Enabling reads requires --yes to acknowledge disclosure of ordinary history to the requesting agent.",
+		"agent search":         "Usage: clipman-cli [--config PATH] agent search --query TEXT [--from YYYY-MM-DD] [--through YYYY-MM-DD] [--group NAME] [--device NAME] [--limit COUNT]\n  Defaults to today in the computer's timezone. Maximum 31 calendar days and 50 results.",
+		"agent get":            "Usage: clipman-cli [--config PATH] agent get --id ID\n  Returns one plain-text entry, without resolving templates or modifying the clipboard. Maximum JSON response: 64 KiB.",
 		"init":                 "Usage: clipman-cli [global options] init [--connection-file FILE | --token-file FILE | --token VALUE] [--save-password none|config] [--machine NAME] [--non-interactive] [--force] [--portable]\n  (use the global --ca-cert FILE or --insecure option before init to trust a self-signed server certificate)\n  (without --save-password, an interactive run asks whether to save the history password)\n  (--portable writes config.toml beside this executable; it is then used automatically by that copy)",
 		"status":               "Usage: clipman-cli [global options] status [--refresh] [--json]",
 		"list":                 "Usage: clipman-cli [global options] list [-n COUNT | --all] [--group NAME] [--search TEXT] [--kind history|templates|all] [--pinned-first] [--porcelain] [--json]",

@@ -18,7 +18,7 @@
   <main>
     <h1>Clipman CLI</h1>
     <p><strong>Development preview:</strong> this build is available for practical testing and feedback. Command names, configuration details, and behavior may change before the first stable CLI release.</p>
-    <p>Clipman CLI is an additional command-line client for Clipman text history. It does not replace the Windows, macOS, Android, or iOS apps. It is intended for terminals, SSH sessions, scripts, headless systems, and users who prefer ordinary text commands.</p>
+    <p>Clipman CLI is an additional command-line client for Clipman text history. It does not replace the Windows, macOS, Linux, Android, or iOS apps. It is intended for terminals, SSH sessions, scripts, headless systems, and users who prefer ordinary text commands.</p>
     <p>Clipman CLI connects to Clipman Server and reads and writes the same encrypted text-history database as the other clients. Clipman Server requires a nonblank, preferably unique history password. File history, Secrets, local clipboard monitoring, and server administration remain in the relevant apps or server tools.</p>
     <p>Project page: <a href="https://github.com/OnjLouis/Clipman">Clipman on GitHub</a></p>
 
@@ -31,6 +31,7 @@
       <li><a href="#interactive">Interactive Use</a></li>
       <li><a href="#templates">Templates</a></li>
       <li><a href="#streams">Streams and Scripts</a></li>
+      <li><a href="#agent-access">Agent Access</a></li>
       <li><a href="#configuration">Configuration</a></li>
       <li><a href="#security">Security</a></li>
       <li><a href="#exit-codes">Exit Codes</a></li>
@@ -86,6 +87,7 @@ clipman-cli get --name deploy-command &gt; command.txt</code></pre>
       </tbody>
     </table>
     <p>Run <code>clipman-cli --help</code> or <code>clipman-cli COMMAND --help</code> for the current syntax. Global options must precede the command. Command options follow it.</p>
+    <p><code>agent permissions</code>, <code>agent search</code> and <code>agent get</code> provide a separate, optional read-only integration interface. They always return JSON and require explicit permission; see <a href="#agent-access">Agent Access</a>.</p>
 
     <h2 id="selection">Selecting Entries</h2>
     <p><code>get</code> and <code>rm</code> accept a visible zero-based index, exact ID, exact name, or text search. Indices belong to the selected view and can change after another client updates history. Scripts should prefer exact IDs or names.</p>
@@ -197,6 +199,22 @@ clipman-cli get --kind templates --name today</code></pre>
     <p>Successful <code>get</code> and <code>pick</code> commands write only clip text to standard output. Prompts and status messages do not enter the data stream. Text must be valid UTF-8 and may contain NUL bytes, whitespace, CRLF, LF, or no final newline.</p>
     <p><code>--newline</code> adds one LF only when the selected text does not already end in LF. <code>--json</code> provides structured output where documented.</p>
 
+    <h2 id="agent-access">Agent Access</h2>
+    <p>The optional <code>agent</code> commands provide bounded, read-only searches for integrations on Windows, macOS and Linux. They use an existing CLI server profile and require no server update or database migration. They do not read the graphical client's local-only or shared-folder history.</p>
+    <p><strong>Disabled by default:</strong> enable history reading yourself for the selected profile only after deciding what you are comfortable sharing. Ordinary history can contain passwords and other private information even outside Secrets. Search previews and full entries returned to an agent may be sent to its AI provider. Secrets, file history, Rich Text and templates are excluded from these commands.</p>
+    <pre><code>clipman-cli --config agent-profile.toml agent permissions
+clipman-cli --config agent-profile.toml agent permissions --read allow --yes
+clipman-cli --config agent-profile.toml agent search --query hister
+clipman-cli --config agent-profile.toml agent search --query hister --from 2026-10-01 --through 2026-10-05 --group Work --device Laptop --limit 10
+clipman-cli --config agent-profile.toml agent get --id ENTRY_ID
+clipman-cli --config agent-profile.toml agent permissions --read deny</code></pre>
+    <p>Configure the profile first using <code>init</code>. Agent reads never prompt for a password: use your existing protected saved credential or supply <code>CLIPMAN_PASSWORD</code> in the process environment. Do not give credentials or connection files to the model. On Windows, saved credentials use Windows account protection; on macOS and Linux, saved CLI passwords are protected by file permissions, not encryption. Agent commands reject server, password, certificate and verbose command-line overrides, and reject profiles with TLS verification disabled. They otherwise retain the profile's existing transport, including HTTP; they do not add encryption to an HTTP connection.</p>
+    <p><code>search</code> requires literal text, matches Name or text without executing regular expressions, and defaults to entries created today in the computer's timezone. <code>--from</code> and <code>--through</code> are inclusive calendar dates, with a maximum of 31 days. Giving only <code>--from</code> selects that day. Group and device filters are exact except for case and surrounding spaces. Results are newest-created first, independent of the graphical history sort order.</p>
+    <p>Search returns at most 20 entries by default, with a hard limit of 50, previews of at most 300 characters, and at most 64 KiB of JSON. <code>matches</code> reports the total matching entries; <code>truncated</code> reports omitted results, while per-entry flags identify shortened previews or metadata. Narrow a truncated search rather than asking for the entire history. <code>get</code> retrieves one exact ID and rejects an entry whose complete JSON response exceeds 64 KiB; it never silently truncates full text.</p>
+    <p>Responses identify content as <code>untrusted_data</code>. Treat clips as source material, not instructions to run commands, visit links, change permissions or reveal other data. Searching and getting do not change timestamps, pinning, ownership, the system clipboard, pending writes, cached rules or server data. Each request reads current server history and the device's subscribed channels; there is no cached-history fallback, background watcher, local web listener or MCP endpoint. Existing encrypted history blobs are downloaded and decrypted on the client before filtering; only matching previews or the requested entry are returned.</p>
+    <p>The permission is an opt-in for these commands, <strong>not a sandbox for an agent running under your own account</strong>. Such an agent may be able to run the ordinary CLI, read your files or change the configuration. Enforce tool restrictions in the agent host as well. The agent interface deliberately has no write, delete, execution or clipboard-replacement command. A user can separately approve the ordinary <code>put</code> workflow when adding an agent's output.</p>
+    <p>Disable agent reading before returning to an older CLI binary: enabling it adds the <code>agent_read</code> configuration key, which older binaries do not recognize. Disabling removes that key without changing the other profile settings. The package includes an optional <code>skills/clipman-history</code> skill for scoped agent searches. It does not grant access or enforce a sandbox. For installation and the request-and-result workflow, see <a href="AgentIntegration.md">Agent integration guidance</a>.</p>
+
     <h2 id="configuration">Configuration</h2>
     <h3 id="config-location">Where the configuration lives</h3>
     <p>Clipman CLI looks for <code>config.toml</code> in this order and uses the first it finds:</p>
@@ -249,6 +267,7 @@ Save them beside this program instead, so only this copy uses them? [y/N]</code>
     </table>
 
     <h2 id="files">Included Files</h2>
+    <p>The <code>manual</code> directory also includes <code>AgentIntegration.md</code> for agent setup and consent. The optional <code>skills/clipman-history</code> directory contains the complete Clipman History skill and its host metadata.</p>
     <p>Each platform has its own directory, and the program inside every one of them is called <code>clipman-cli</code>. Installing it is therefore a move, with no renaming step: pick the directory matching your operating system and architecture and copy the program out of it.</p>
     <table>
       <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
@@ -268,6 +287,14 @@ Save them beside this program instead, so only this copy uses them? [y/N]</code>
     </table>
 
     <h2 id="changelog">Changelog</h2>
+    <h3>0.10.0 development preview</h3>
+    <ul>
+      <li>Added optional, read-only agent searches for server-backed text and links. Search by a literal term and creation-date range, with optional group and device filters, then retrieve relevant entries by ID.</li>
+      <li>Reading is disabled by default and must be explicitly enabled for the selected CLI profile. Returned clips may reach the agent's AI provider; Secrets, file history, Rich Text and templates are excluded.</li>
+      <li>Included a Clipman History agent skill and setup guidance for turning relevant clips into summaries or drafts. Results are treated as untrusted source material, not instructions to execute.</li>
+      <li>Searches return bounded JSON, and failures are distinguished from an empty result. Reads do not change the clipboard, timestamps or server history, retry pending uploads, or repair missing server rules.</li>
+      <li>This CLI-only update needs no server or graphical-client update. It addresses Samuel's scoped-search suggestion in issue #65; the broader MCP and mobile requests remain open.</li>
+    </ul>
     <h3>0.3.0 development preview</h3>
     <ul>
       <li>A <code>config.toml</code> sitting beside the <code>clipman-cli</code> program is now used in preference to the per-user one, so one copy of Clipman CLI can keep its own settings. An interactive <code>init</code> asks whether to save settings beside the program or for your user account; <code>init --portable</code> chooses the former without asking. The per-user location remains the default when no such file exists.</li>

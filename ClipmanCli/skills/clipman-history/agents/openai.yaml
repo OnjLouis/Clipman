@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clipman History"
+  short_description: "Search approved Clipman history and draft from clips"
+  default_prompt: "Use $clipman-history to find clips within my requested term and date scope and summarise the relevant information."

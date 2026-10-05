@@ -18,7 +18,9 @@ case "$output" in
   "$root"|"$root"/*) echo "Output directory must be outside the Clipman CLI source tree." >&2; exit 1 ;;
 esac
 
-for required in "$root/Manual.html" "$root/clipman-cli.1" "$license"; do
+for required in "$root/Manual.html" "$root/clipman-cli.1" "$license" \
+  "$root/AgentIntegration.md" "$root/skills/clipman-history/SKILL.md" \
+  "$root/skills/clipman-history/agents/openai.yaml"; do
   if [ ! -f "$required" ]; then
     printf 'Required package file is missing: %s\n' "$required" >&2
     exit 1
@@ -75,6 +77,10 @@ build darwin arm64 '' macos-arm64 clipman-cli
 mkdir -p "$staging/manual"
 cp "$root/Manual.html" "$staging/manual/Manual.html"
 cp "$root/clipman-cli.1" "$staging/manual/clipman-cli.1"
+cp "$root/AgentIntegration.md" "$staging/manual/AgentIntegration.md"
+mkdir -p "$staging/skills/clipman-history/agents"
+cp "$root/skills/clipman-history/SKILL.md" "$staging/skills/clipman-history/SKILL.md"
+cp "$root/skills/clipman-history/agents/openai.yaml" "$staging/skills/clipman-history/agents/openai.yaml"
 cp "$license" "$staging/LICENSE.txt"
 rm -rf "$final"
 mv "$staging" "$final"
