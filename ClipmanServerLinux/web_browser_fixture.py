@@ -56,6 +56,7 @@ def main():
     try:
         # Check the real TLS chain and hostname without changing OS trust.
         context = ssl.create_default_context(cafile=settings['CaFile'])
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         with context.wrap_socket(__import__('socket').socket(), server_hostname='127.0.0.1') as connection:
             connection.settimeout(5)
             connection.connect(host.server_address)

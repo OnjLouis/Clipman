@@ -122,11 +122,11 @@ func main() {
 			_, _ = w.Write(data)
 			return
 		}
-		if r.URL.Path == "/client.wasm" || r.URL.Path == "/wasm_exec.js" || r.URL.Path == "/icon.png" {
-			if r.URL.Path == "/client.wasm" {
+		if file := assetFilename(r.URL.Path); file != "" {
+			if file == "client.wasm" {
 				w.Header().Set("Content-Type", "application/wasm")
 			}
-			http.ServeFile(w, r, filepath.Join(*assets, strings.TrimPrefix(r.URL.Path, "/")))
+			http.ServeFile(w, r, filepath.Join(*assets, file))
 			return
 		}
 		w.WriteHeader(404)
@@ -156,3 +156,16 @@ func main() {
 }
 
 func fatal(message string) { fmt.Fprintln(os.Stderr, message); os.Exit(1) }
+
+func assetFilename(path string) string {
+	switch path {
+	case "/client.wasm":
+		return "client.wasm"
+	case "/wasm_exec.js":
+		return "wasm_exec.js"
+	case "/icon.png":
+		return "icon.png"
+	default:
+		return ""
+	}
+}
