@@ -69,6 +69,7 @@ final class ServerController: NSObject, NSApplicationDelegate {
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         let status = NSMenuItem(title: "Clipman Server: \(statusText())", action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
@@ -77,6 +78,12 @@ final class ServerController: NSObject, NSApplicationDelegate {
         let revokeSetup = NSMenuItem(title: "Revoke Temporary Setup Link", action: #selector(revokeTemporarySetupLink), keyEquivalent: "")
         revokeSetup.isEnabled = FileManager.default.fileExists(atPath: setupLinkStateURL.path)
         menu.addItem(revokeSetup)
+        let webAccess = NSMenuItem(title: "Enable Browser Access", action: #selector(toggleBrowserAccess), keyEquivalent: "")
+        webAccess.state = webClientEnabled ? .on : .off
+        menu.addItem(webAccess)
+        let openBrowser = NSMenuItem(title: "Open Browser History", action: #selector(openBrowserHistory), keyEquivalent: "")
+        openBrowser.isEnabled = webClientEnabled
+        menu.addItem(openBrowser)
         menu.addItem(NSMenuItem(title: "Change Listening Port...", action: #selector(changeListeningPort), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Create or Renew HTTPS Certificate", action: #selector(createHTTPSCertificate), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Copy Authority Fingerprint", action: #selector(copyAuthorityFingerprint), keyEquivalent: ""))
@@ -511,6 +518,47 @@ final class ServerController: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(supportURL)
     }
 
+    private var webClientEnabled: Bool {
+        guard let data = try? Data(contentsOf: settingsURL),
+              let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return settings["WebClientEnabled"] as? Bool == true
+    }
+
+    @objc private func toggleBrowserAccess() {
+        let enabled = webClientEnabled
+        if !enabled {
+            let alert = NSAlert()
+            alert.messageText = "Enable HTTPS Browser Access?"
+            alert.informativeText = "Only use trusted browsers and computers. Anyone with your server token and history password can access your history."
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Enable")
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
+        runPythonUtility([enabled ? "--disable-web-client" : "--enable-web-client"], timeout: 30) { [weak self] result in
+            switch result {
+            case .failure(let error): self?.showAlert(error.localizedDescription)
+            case .success:
+                self?.restartServer()
+                self?.showNotification(enabled ? "Browser access disabled." : "Browser access enabled.")
+            }
+        }
+    }
+
+    @objc private func openBrowserHistory() {
+        runPythonUtility(["--show-web-url"], timeout: 10) { [weak self] result in
+            switch result {
+            case .failure(let error): self?.showAlert(error.localizedDescription)
+            case .success(let output):
+                guard let line = output.split(separator: "\n").first(where: { $0.hasPrefix("Browser URL: ") }),
+                      let url = URL(string: String(line.dropFirst(13))), url.scheme == "https" else {
+                    self?.showAlert("Browser access is not ready. Check the HTTPS configuration.")
+                    return
+                }
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
     @objc private func openLogsFolder() {
         NSWorkspace.shared.open(logsURL)
     }
@@ -780,18 +828,22 @@ enum ServerUpdateService {
         let stage = temp.appendingPathComponent("stage", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
-            let data = try Data(contentsOf: zipURL)
-            try data.write(to: zip)
+            try run("/usr/bin/curl", ["--silent", "--show-error", "--fail", "--location", "--proto", "=https", "--proto-redir", "=https", "--max-time", "120", "--max-filesize", "262144000", "--output", zip.path, zipURL.absoluteString])
             try verifySHA256Digest(of: zip, expected: expectedDigest)
+            let signaturePath = temp.appendingPathComponent("release.sig")
+            try run("/usr/bin/curl", ["--silent", "--show-error", "--fail", "--location", "--proto", "=https", "--proto-redir", "=https", "--max-time", "30", "--max-filesize", "384", "--output", signaturePath.path, zipURL.absoluteString + ".sig"])
+            let signature = try Data(contentsOf: signaturePath)
+            try ReleaseSignature.verify(digest: expectedDigest.dropFirst(7).lowercased(), signature: signature)
             try run("/usr/bin/unzip", ["-q", zip.path, "-d", stage.path])
             guard let sourceApp = findMacServerApp(in: stage) else {
                 throw NSError(domain: "ClipmanServerUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: "The server update ZIP did not contain macOS/Clipman Server.app."])
             }
-            try? FileManager.default.removeItem(atPath: appPath)
-            try FileManager.default.copyItem(at: sourceApp, to: URL(fileURLWithPath: appPath))
+            try ServerAppReplacement.replace(source: sourceApp, destination: URL(fileURLWithPath: appPath))
             try? FileManager.default.removeItem(at: temp)
             NSWorkspace.shared.open(URL(fileURLWithPath: appPath))
         } catch {
+            try? FileManager.default.removeItem(at: temp)
+            NSWorkspace.shared.open(URL(fileURLWithPath: appPath))
             showAlert("Clipman Server update failed:\n\n\(error.localizedDescription)")
         }
     }

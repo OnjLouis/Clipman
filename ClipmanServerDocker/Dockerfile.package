@@ -12,6 +12,7 @@ ENV CLIPMAN_PORT=8080
 
 WORKDIR /app
 COPY clipman_server.py /app/clipman_server.py
+COPY web/ /app/web/
 COPY Docker/docker-entrypoint.sh /usr/local/bin/clipman-server-entrypoint
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \

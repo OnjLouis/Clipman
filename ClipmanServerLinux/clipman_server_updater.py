@@ -28,12 +28,29 @@ SERVER_TAG_PATTERN = re.compile(r"^server-v(?P<version>\d+\.\d+(?:\.\d+){0,2})$"
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 600 * 1024 * 1024
 MAX_ZIP_ENTRIES = 2_000
+SIGNATURE_BYTES = 384
+RELEASE_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA2scaX5h0TMLe8EPz8m7I
+uue0CQPDWf3RblD64PxZeZjmngTU49BNCnJ7NdayMRQE8XQOmzBsQsq37qvMmGrX
+O5Rc9j/qRQxxb7WZn+Tb9Akqzzuw07DVtrf+uKBtaJ49y6Mb9Js+uUi+ODo/yrVx
+oXLf/aca0oqu3uKIrW+0nYIcz8J+Q+9IrMa7HODmNEr4zJcv5QJdmxwYEDT3Au7y
+orMMZz8Q3+IaGmq21GDp9I7Fke7iH8h2creF0tUqKyEpNvDW5DpbrEPTxtEtlcG4
+DhXdYqNJ53Yh+2FKUYe9AUTBDB1ydCbJaP4HZkdKwjgcEfcLcH6+G4VU6j9c7mBM
+8RnsBX2bcUmRtmD+5N8Glio9Ge2Cn4kmt3Yb63FjmaOaZahaIWkzTU5dPyELaGpQ
+zmUNugWuKVdaOqePGb6UD7DLb5LRATDPbr361ruegglHKOdT3d9ZpQYBCTLMB40z
+dvTI+eHA4YDHK6SLeI4LKaPIVwJKVmny56yUslySRTU7AgMBAAE=
+-----END PUBLIC KEY-----
+"""
 MANAGED_PROGRAM_FILES = (
     "clipman_server.py",
     "clipman_server_updater.py",
     "Manual.html",
     "LICENSE.txt",
-)
+) + tuple("web/" + name for name in (
+    "index.html", "app.js", "pagination.js", "links.js", "purify.min.js", "rich.js",
+    "worker.js", "style.css", "client.wasm", "wasm_exec.js", "icon.png",
+    "DOMPurify-LICENSE.txt", "browser-assets.json",
+))
 
 
 def version_tuple(value: str) -> Tuple[int, ...]:
@@ -105,6 +122,34 @@ def download_asset(asset: Dict[str, Any], destination: Path) -> None:
             output.write(block)
     expected_digest = str(asset.get("digest") or "").strip().lower()
     verify_sha256_digest(expected_digest, digest.hexdigest())
+    signature_request = urllib.request.Request(str(asset['browser_download_url']) + '.sig',
+                                               headers={'User-Agent': 'Clipman-Server-Linux-Updater'})
+    with urllib.request.urlopen(signature_request, timeout=30) as response:
+        if response.geturl().split(':', 1)[0].lower() != 'https':
+            raise RuntimeError('The release signature redirected outside HTTPS.')
+        signature = response.read(SIGNATURE_BYTES + 1)
+    verify_publisher_signature(digest.hexdigest(), signature)
+
+
+def verify_publisher_signature(digest: str, signature: bytes) -> None:
+    if len(signature) != SIGNATURE_BYTES or not re.fullmatch(r'[0-9a-f]{64}', digest):
+        raise RuntimeError('The server release signature is missing or malformed.')
+    openssl = shutil.which('openssl')
+    if openssl is None:
+        raise RuntimeError('OpenSSL is required to verify signed server updates; no files were changed.')
+    with tempfile.TemporaryDirectory(prefix='clipman-signature-') as temporary:
+        root = Path(temporary)
+        key = root / 'public.pem'
+        signed = root / 'release.sig'
+        message = root / 'message'
+        key.write_text(RELEASE_PUBLIC_KEY, encoding='ascii')
+        signed.write_bytes(signature)
+        message.write_bytes(('Clipman Server ZIP\n' + digest + '\n').encode('ascii'))
+        result = subprocess.run([openssl, 'dgst', '-sha256', '-verify', str(key),
+                                 '-signature', str(signed), str(message)],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15, check=False)
+        if result.returncode != 0:
+            raise RuntimeError('The server release publisher signature is invalid; no files were changed.')
 
 
 def verify_sha256_digest(expected_digest: str, actual_hex: str) -> None:
@@ -140,6 +185,21 @@ def locate_package_root(extracted: Path, expected_version: str) -> Path:
     required = [root / "clipman_server.py", root / "clipman_server_updater.py", root / "Linux" / "install-clipman-server.sh"]
     if any(not path.is_file() for path in required):
         raise RuntimeError("The server update package is missing Linux program files.")
+    if version_tuple(expected_version) >= (2, 7, 0):
+        web_manifest_path = root / "web" / "browser-assets.json"
+        if not web_manifest_path.is_file():
+            raise RuntimeError("The server update package is missing browser assets.")
+        web_manifest = json.loads(web_manifest_path.read_text(encoding="utf-8"))
+        if web_manifest.get("serverVersion") != expected_version:
+            raise RuntimeError("Browser assets do not match the server update version.")
+        for name in MANAGED_PROGRAM_FILES:
+            if not name.startswith("web/") or name == "web/browser-assets.json":
+                continue
+            asset = root / name
+            expected = web_manifest.get("sha256", {}).get(asset.name)
+            if (not asset.is_file() or asset.stat().st_size > 16 * 1024 * 1024
+                    or hashlib.sha256(asset.read_bytes()).hexdigest() != expected):
+                raise RuntimeError("Browser assets are incomplete or damaged.")
     return root
 
 

@@ -98,7 +98,9 @@ func (q Query) Validate() error {
 // Eligible excludes templates and all rich payloads; Secrets use a separate
 // store which the CLI never opens. Extra fields are never returned.
 func Eligible(e model.Entry) bool {
-	_, rich := e.Extra["RichText"]
+	payload, present := e.Extra["RichText"]
+	// Native Windows history includes JSON null for ordinary, unformatted clips.
+	rich := present && strings.TrimSpace(string(payload)) != "null"
 	return !e.IsTemplate && !rich && e.ID != "" && len(e.ID) <= MaxIDBytes && utf8.ValidString(e.ID)
 }
 

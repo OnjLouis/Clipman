@@ -59,6 +59,9 @@ fi
 if [ -n "$ADVERTISE_URL" ]; then
   set -- "$@" --advertise-url "$ADVERTISE_URL"
 fi
+for address in ${CLIPMAN_WEB_PROXY_ADDRESSES:-}; do
+  set -- "$@" --web-proxy-address "$address"
+done
 
 if [ -n "$CERT_FILE" ] && [ -n "$KEY_FILE" ]; then
   set -- "$@" --cert-file "$CERT_FILE" --key-file "$KEY_FILE"
@@ -74,6 +77,13 @@ else
       ;;
   esac
 fi
+
+case "${CLIPMAN_WEB_CLIENT:-}" in
+  true) python3 "$@" --enable-web-client ;;
+  false) python3 "$@" --disable-web-client ;;
+  "") ;;
+  *) echo "CLIPMAN_WEB_CLIENT must be true or false." >&2; exit 2 ;;
+esac
 
 if [ -n "$ADVERTISE_URL" ]; then
   python3 "$@" --write-connection-info >/dev/null

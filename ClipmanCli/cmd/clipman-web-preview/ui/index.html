@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clipman</title><link rel="icon" href="./icon.png"><link rel="stylesheet" href="./style.css"><script src="./pagination.js" defer></script><script src="./links.js" defer></script><script src="./purify.min.js" defer></script><script src="./rich.js" defer></script><script src="./app.js" defer></script></head>
+<body>
+<header><img src="./icon.png" alt="" width="36" height="36"><h1>Clipman</h1><button id="disconnect" hidden>Disconnect</button></header>
+<main>
+<section id="connection"><h2>Connect</h2><p id="server"></p>
+<form id="connect-form" autocomplete="off">
+<label for="config-file">Server connection file</label><input id="config-file" type="file" accept=".clpconf,application/json">
+<label for="token">Server token</label><input id="token" type="password" autocomplete="off" required maxlength="4096">
+<label for="password">History password</label><input id="password" type="password" autocomplete="off" required maxlength="4096">
+<label for="device">Device name</label><input id="device" value="Clipman Web" required maxlength="200">
+<button id="connect" type="submit">Connect</button>
+</form></section>
+<section id="history" hidden aria-labelledby="history-title">
+<div class="section-heading"><h2 id="history-title">History</h2><div class="commands"><button id="new-clip">Quick Clip</button><button id="refresh">Refresh</button></div></div>
+<fieldset id="history-area"><legend>History area</legend><label><input type="radio" name="area" value="all" checked>Text and Links</label><label><input type="radio" name="area" value="text">Text</label><label><input type="radio" name="area" value="links">Links</label><label><input type="radio" name="area" value="rich">Rich Text</label></fieldset>
+<label for="search">Search history</label><input id="search" type="search" maxlength="256" autocomplete="off">
+<nav aria-label="History pages, above entries"><button id="previous-top">Previous page</button><span id="page-links-top"></span><button id="next-top">Next page</button></nav>
+<ol id="entries" aria-label="Text and links history"></ol>
+<h2 id="page-navigation-title">Page navigation</h2>
+<nav id="pagination" aria-labelledby="page-navigation-title"><button id="previous">Previous page</button><span id="page-links"></span><button id="next">Next page</button></nav><p id="page-number"></p>
+</section>
+<dialog id="clip-dialog" aria-labelledby="clip-title"><h2 id="clip-title">Quick Clip</h2><form id="clip-form" autocomplete="off">
+<label for="clip-name">Name (optional)</label><input id="clip-name" maxlength="1024">
+<label for="clip-text">Text or link</label><textarea id="clip-text" rows="6" required></textarea>
+<div class="commands"><button id="paste" type="button">Paste</button><button id="add" type="submit">Add clip</button><button id="close-clip" type="button">Close</button></div>
+</form>
+</dialog>
+<dialog id="copy-dialog" aria-labelledby="copy-title"><h2 id="copy-title">Copy entry</h2><label for="copy-text">Entry text</label><textarea id="copy-text" readonly rows="8"></textarea><button id="copy-again">Copy</button><button id="close-copy">Close</button></dialog>
+<dialog id="rich-dialog" aria-labelledby="rich-title"><h2 id="rich-title">View entry</h2><p id="rich-format"></p><div id="rich-content" role="document" tabindex="0" aria-label="Entry content"></div><button id="copy-rich">Copy formatted</button><button id="close-rich">Close</button></dialog>
+</main>
+<footer aria-label="Clipman status"><p id="status" role="status" aria-live="polite" aria-atomic="true">Loading Clipman.</p></footer>
+</body></html>

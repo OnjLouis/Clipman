@@ -1,7 +1,8 @@
 param(
     [string]$OutputDirectory = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_SERVER_PACKAGE_DIR)) { Join-Path ([IO.Path]::GetTempPath()) 'Clipman-server-package' } else { $env:CLIPMAN_SERVER_PACKAGE_DIR }),
     [string]$MacHost = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_MAC_HOST)) { 'mac' } else { $env:CLIPMAN_MAC_HOST }),
-    [string]$MacRepo = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_MAC_REPO)) { '$HOME/clipman' } else { $env:CLIPMAN_MAC_REPO })
+    [string]$MacRepo = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_MAC_REPO)) { '$HOME/clipman' } else { $env:CLIPMAN_MAC_REPO }),
+    [string]$GoPath = $(if ([string]::IsNullOrWhiteSpace($env:CLIPMAN_GO)) { 'go' } else { $env:CLIPMAN_GO })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,7 @@ function Get-ClipmanVersion {
     return $version
 }
 
-function Build-WindowsServerWrapper([string]$outputPath) {
+function Build-WindowsServerWrapper([string]$outputPath, [string]$serverScript) {
     $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     if (-not (Test-Path -LiteralPath $csc)) {
         throw "Could not find the .NET Framework C# compiler at $csc"
@@ -61,7 +62,6 @@ function Build-WindowsServerWrapper([string]$outputPath) {
         'System.Web.Extensions.dll'
     ) -join ','
 
-    $serverScript = Join-Path $PSScriptRoot 'ClipmanServerLinux\clipman_server.py'
     if (-not (Test-Path -LiteralPath $serverScript)) {
         throw "Shared Python server script is missing: $serverScript"
     }
@@ -108,12 +108,18 @@ $remoteTempWindowsExe = "$remoteRunDirectory/windows-wrapper.exe"
 $remoteMacDist = "$remoteRunDirectory/mac-dist"
 $remoteCombinedDist = "$remoteRunDirectory/combined-dist"
 $remoteTempZip = "$remoteRunDirectory/ClipmanServer-$version.zip"
+$remoteWebAssets = "$remoteRunDirectory/web"
+$remoteServerScript = "$remoteRunDirectory/clipman_server.py"
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 try {
     New-Item -ItemType Directory -Force -Path $localBuildDirectory | Out-Null
-    Build-WindowsServerWrapper $windowsWrapperDist
+    $localWebAssets = Join-Path $localBuildDirectory 'web'
+    $localServerScript = Join-Path $localBuildDirectory 'clipman_server.py'
+    & python (Join-Path $PSScriptRoot 'ClipmanServer\build_web.py') --output $localWebAssets --go $GoPath --server-output $localServerScript
+    if ($LASTEXITCODE -ne 0) { throw 'Clipman browser asset build failed.' }
+    Build-WindowsServerWrapper $windowsWrapperDist $localServerScript
 
     Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 
@@ -126,8 +132,12 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not copy Windows server wrapper to $MacHost."
     }
+    & scp -r $localWebAssets "${MacHost}:$remoteWebAssets"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not copy browser assets to the server package staging folder.' }
+    & scp $localServerScript "${MacHost}:$remoteServerScript"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not copy the self-contained server to package staging.' }
 
-    & ssh $MacHost "cd `"$MacRepo`" && CLIPMAN_SERVER_MAC_DIST_DIR='$remoteMacDist' zsh ClipmanServerMac/Scripts/package-release.sh && CLIPMAN_SERVER_WINDOWS_EXE='$remoteTempWindowsExe' CLIPMAN_SERVER_MAC_APP='$remoteMacDist/Clipman Server.app' CLIPMAN_SERVER_COMBINED_OUTPUT_DIR='$remoteCombinedDist' zsh ClipmanServerMac/Scripts/package-combined-server.sh && cp '$remoteCombinedDist/ClipmanServer-$version.zip' '$remoteTempZip'"
+    & ssh $MacHost "cd `"$MacRepo`" && CLIPMAN_SERVER_SCRIPT='$remoteServerScript' CLIPMAN_WEB_ASSETS='$remoteWebAssets' CLIPMAN_SERVER_MAC_DIST_DIR='$remoteMacDist' zsh ClipmanServerMac/Scripts/package-release.sh && CLIPMAN_SERVER_SCRIPT='$remoteServerScript' CLIPMAN_WEB_ASSETS='$remoteWebAssets' CLIPMAN_SERVER_WINDOWS_EXE='$remoteTempWindowsExe' CLIPMAN_SERVER_MAC_APP='$remoteMacDist/Clipman Server.app' CLIPMAN_SERVER_COMBINED_OUTPUT_DIR='$remoteCombinedDist' zsh ClipmanServerMac/Scripts/package-combined-server.sh && cp '$remoteCombinedDist/ClipmanServer-$version.zip' '$remoteTempZip'"
     if ($LASTEXITCODE -ne 0) {
         throw "Mac-side Clipman Server bundle build failed on $MacHost."
     }

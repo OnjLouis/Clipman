@@ -111,6 +111,13 @@ namespace ClipmanServerWrapper
                 var revokeSetup = new ToolStripMenuItem("Revoke temporary setup link", null, delegate { RevokeTemporarySetupLink(); });
                 revokeSetup.Enabled = File.Exists(Path.Combine(settingsDirectory, "clipman-server-setup-link.json"));
                 menu.Items.Add(revokeSetup);
+                var webSettings = LoadSettings();
+                var webEnabled = webSettings != null && webSettings.WebClientEnabled;
+                var webAccess = new ToolStripMenuItem("Enable browser access") { Checked = webEnabled };
+                webAccess.Click += delegate { ToggleBrowserAccess(); };
+                menu.Items.Add(webAccess);
+                var openBrowser = menu.Items.Add("Open browser history", null, delegate { OpenBrowserHistory(); });
+                openBrowser.Enabled = webEnabled;
                 menu.Items.Add("Change listening port...", null, delegate { ChangeListeningPort(); });
                 menu.Items.Add("Create or renew HTTPS certificate", null, delegate { CreateHttpsCertificate(); });
                 menu.Items.Add("Copy authority fingerprint", null, delegate { CopyAuthorityFingerprint(); });
@@ -188,6 +195,7 @@ namespace ClipmanServerWrapper
                 StandardErrorEncoding = Encoding.UTF8
             };
 
+            start.EnvironmentVariables["CLIPMAN_WEB_ASSETS"] = Path.GetFullPath(Path.Combine(appDirectory, "..", "web"));
             var process = new Process { StartInfo = start, EnableRaisingEvents = true };
             process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) { LogLine(e.Data); };
             process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { LogLine(e.Data); };
@@ -555,7 +563,7 @@ namespace ClipmanServerWrapper
 
         private ProcessStartInfo CreatePythonStartInfo(PythonLauncher python, string arguments)
         {
-            return new ProcessStartInfo
+            var start = new ProcessStartInfo
             {
                 FileName = python.FileName,
                 Arguments = python.ArgumentsPrefix + Quote(scriptPath) + " --config " + Quote(settingsPath) + " " + arguments,
@@ -567,6 +575,51 @@ namespace ClipmanServerWrapper
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
+            start.EnvironmentVariables["CLIPMAN_WEB_ASSETS"] = Path.GetFullPath(Path.Combine(appDirectory, "..", "web"));
+            return start;
+        }
+
+        private void ToggleBrowserAccess()
+        {
+            var settings = LoadSettings();
+            var enabled = settings != null && settings.WebClientEnabled;
+            if (!enabled && MessageBox.Show("Enable encrypted browser history over HTTPS? Only use trusted browsers and computers. Anyone with your server token and history password can access your history.",
+                "Clipman Server browser access", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = RunPythonUtility(enabled ? "--disable-web-client" : "--enable-web-client", 30000);
+                uiContext.Post(delegate
+                {
+                    if (!result.Succeeded)
+                    {
+                        MessageBox.Show(result.Output, "Clipman Server browser access", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    RestartServer();
+                    tray.ShowBalloonTip(3000, "Clipman Server", enabled ? "Browser access disabled." : "Browser access enabled.", ToolTipIcon.Info);
+                }, null);
+            });
+        }
+
+        private void OpenBrowserHistory()
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = RunPythonUtility("--show-web-url", 10000);
+                var line = result.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault(value => value.StartsWith("Browser URL: ", StringComparison.Ordinal));
+                Uri address;
+                if (!result.Succeeded || line == null || !Uri.TryCreate(line.Substring(13), UriKind.Absolute, out address) || address.Scheme != "https")
+                {
+                    uiContext.Post(delegate { MessageBox.Show("Browser access is not ready. Check the HTTPS configuration.", "Clipman Server", MessageBoxButtons.OK, MessageBoxIcon.Error); }, null);
+                    return;
+                }
+                uiContext.Post(delegate
+                {
+                    try { Process.Start(new ProcessStartInfo(address.AbsoluteUri) { UseShellExecute = true }); }
+                    catch (Exception) { MessageBox.Show("Could not open your default browser.", "Clipman Server", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                }, null);
+            });
         }
 
         private void CopyConnectionDetails()
@@ -1038,6 +1091,7 @@ namespace ClipmanServerWrapper
         public string Host { get; set; }
         public int Port { get; set; }
         public string AuthToken { get; set; }
+        public bool WebClientEnabled { get; set; }
 
         public ServerSettings()
         {
@@ -1226,6 +1280,10 @@ namespace ClipmanServerWrapper
                 Directory.CreateDirectory(stage);
                 DownloadFile(zipUrl, zip);
                 VerifySha256Digest(zip, expectedDigest);
+                var signaturePath = Path.Combine(root, "release.sig");
+                DownloadFile(zipUrl + ".sig", signaturePath, 384);
+                var signature = File.ReadAllBytes(signaturePath);
+                VerifyPublisherSignature(expectedDigest.Substring(7).ToLowerInvariant(), signature);
                 ZipFile.ExtractToDirectory(zip, stage);
                 var sourceExe = Directory.GetFiles(stage, "Clipman Server.exe", SearchOption.AllDirectories)
                     .FirstOrDefault(path => path.IndexOf(Path.DirectorySeparatorChar + "Windows" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -1235,7 +1293,7 @@ namespace ClipmanServerWrapper
                     throw new InvalidOperationException("The server update ZIP did not contain Windows\\Clipman Server.exe.");
                 }
 
-                CopyFileWithRetry(sourceExe, exePath);
+                ReplaceServerExecutable(sourceExe, exePath);
                 TryDeleteDirectory(root);
                 Process.Start(new ProcessStartInfo
                 {
@@ -1246,6 +1304,12 @@ namespace ClipmanServerWrapper
             }
             catch (Exception ex)
             {
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
+                        Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+                }
+                catch { }
                 MessageBox.Show("Clipman Server update failed:" + Environment.NewLine + Environment.NewLine + ex.Message, "Clipman Server updater", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -1313,11 +1377,31 @@ namespace ClipmanServerWrapper
             return client;
         }
 
-        private static void DownloadFile(string url, string destination)
+        private static void DownloadFile(string url, string destination, long maximumBytes = 250L * 1024 * 1024)
         {
-            using (var client = GitHubClient())
+            Uri address;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out address) || address.Scheme != "https")
+                throw new InvalidDataException("Server updates require HTTPS.");
+            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+            var request = (HttpWebRequest)WebRequest.Create(address);
+            request.UserAgent = UserAgent;
+            request.Timeout = 30000;
+            request.ReadWriteTimeout = 90000;
+            using (var response = request.GetResponse())
+            using (var input = response.GetResponseStream())
+            using (var output = File.Create(destination))
             {
-                client.DownloadFile(url, destination);
+                if (response.ResponseUri.Scheme != "https" || response.ContentLength > maximumBytes)
+                    throw new InvalidDataException("The server update download is insecure or too large.");
+                var buffer = new byte[64 * 1024];
+                long total = 0;
+                int count;
+                while ((count = input.Read(buffer, 0, buffer.Length)) != 0)
+                {
+                    total += count;
+                    if (total > maximumBytes) throw new InvalidDataException("The server update download is too large.");
+                    output.Write(buffer, 0, count);
+                }
             }
         }
 
@@ -1329,6 +1413,52 @@ namespace ClipmanServerWrapper
                 return false;
             }
             return value.Substring(7).All(Uri.IsHexDigit);
+        }
+
+        private static void VerifyPublisherSignature(string digest, byte[] signature)
+        {
+            if (signature == null || signature.Length != 384 || digest.Length != 64 || !digest.All(Uri.IsHexDigit))
+                throw new InvalidDataException("The server release signature is missing or malformed.");
+            var modulus = Convert.FromBase64String("2scaX5h0TMLe8EPz8m7Iuue0CQPDWf3RblD64PxZeZjmngTU49BNCnJ7NdayMRQE8XQOmzBsQsq37qvMmGrXO5Rc9j/qRQxxb7WZn+Tb9Akqzzuw07DVtrf+uKBtaJ49y6Mb9Js+uUi+ODo/yrVxoXLf/aca0oqu3uKIrW+0nYIcz8J+Q+9IrMa7HODmNEr4zJcv5QJdmxwYEDT3Au7yorMMZz8Q3+IaGmq21GDp9I7Fke7iH8h2creF0tUqKyEpNvDW5DpbrEPTxtEtlcG4DhXdYqNJ53Yh+2FKUYe9AUTBDB1ydCbJaP4HZkdKwjgcEfcLcH6+G4VU6j9c7mBM8RnsBX2bcUmRtmD+5N8Glio9Ge2Cn4kmt3Yb63FjmaOaZahaIWkzTU5dPyELaGpQzmUNugWuKVdaOqePGb6UD7DLb5LRATDPbr361ruegglHKOdT3d9ZpQYBCTLMB40zdvTI+eHA4YDHK6SLeI4LKaPIVwJKVmny56yUslySRTU7");
+            using (var rsa = new RSACryptoServiceProvider())
+            {
+                rsa.PersistKeyInCsp = false;
+                rsa.ImportParameters(new RSAParameters { Modulus = modulus, Exponent = new byte[] { 1, 0, 1 } });
+                var message = Encoding.ASCII.GetBytes("Clipman Server ZIP\n" + digest.ToLowerInvariant() + "\n");
+                if (!rsa.VerifyData(message, CryptoConfig.MapNameToOID("SHA256"), signature))
+                    throw new InvalidDataException("The server release publisher signature is invalid.");
+            }
+        }
+
+        private static void ReplaceServerExecutable(string source, string destination)
+        {
+            var staged = destination + ".update-" + Guid.NewGuid().ToString("N");
+            var backup = staged + ".rollback";
+            var canRemoveBackup = false;
+            try
+            {
+                File.Copy(source, staged, false);
+                for (var attempt = 0; ; attempt++)
+                {
+                    try { File.Replace(staged, destination, backup, true); break; }
+                    catch (IOException) { if (attempt >= 9) throw; Thread.Sleep(300); }
+                }
+                canRemoveBackup = true;
+            }
+            catch
+            {
+                if (File.Exists(backup))
+                {
+                    File.Copy(backup, destination, true);
+                    canRemoveBackup = true;
+                }
+                throw;
+            }
+            finally
+            {
+                try { if (File.Exists(staged)) File.Delete(staged); } catch { }
+                try { if (canRemoveBackup && File.Exists(backup)) File.Delete(backup); } catch { }
+            }
         }
 
         private static void VerifySha256Digest(string path, string expectedDigest)
@@ -1422,24 +1552,6 @@ namespace ClipmanServerWrapper
             }
         }
 
-        private static void CopyFileWithRetry(string source, string destination)
-        {
-            Exception last = null;
-            for (var attempt = 0; attempt < 30; attempt++)
-            {
-                try
-                {
-                    File.Copy(source, destination, true);
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    last = ex;
-                    Thread.Sleep(1000);
-                }
-            }
-            throw new IOException("Could not replace " + destination + " after waiting for the server wrapper to close.", last);
-        }
 
         private static void TryDeleteDirectory(string path)
         {

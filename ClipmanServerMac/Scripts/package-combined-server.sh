@@ -22,7 +22,12 @@ trap cleanup EXIT
 mkdir -p "$PACKAGE_ROOT/Windows" "$PACKAGE_ROOT/Linux" "$PACKAGE_ROOT/macOS" "$DIST"
 mkdir -p "$PACKAGE_ROOT/Docker"
 
-cp "$ROOT/ClipmanServerLinux/clipman_server.py" "$PACKAGE_ROOT/clipman_server.py"
+cp "${CLIPMAN_SERVER_SCRIPT:-$ROOT/ClipmanServerLinux/clipman_server.py}" "$PACKAGE_ROOT/clipman_server.py"
+if [[ -z "${CLIPMAN_WEB_ASSETS:-}" || ! -f "$CLIPMAN_WEB_ASSETS/client.wasm" ]]; then
+  echo "Build browser assets first and set CLIPMAN_WEB_ASSETS to their folder." >&2
+  exit 1
+fi
+cp -R "$CLIPMAN_WEB_ASSETS" "$PACKAGE_ROOT/web"
 cp "$ROOT/ClipmanServerLinux/clipman_server_updater.py" "$PACKAGE_ROOT/clipman_server_updater.py"
 cp "$ROOT/ClipmanServerLinux/install-clipman-server.sh" "$PACKAGE_ROOT/Linux/install-clipman-server.sh"
 cp "$ROOT/ClipmanServerLinux/install-clipman-server-system-helper.sh" "$PACKAGE_ROOT/Linux/install-clipman-server-system-helper.sh"

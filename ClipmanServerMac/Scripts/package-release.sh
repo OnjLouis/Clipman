@@ -22,9 +22,16 @@ mkdir -p "$MACOS" "$RESOURCES"
 swiftc \
   -o "$MACOS/Clipman Server" \
   "$SERVER_ROOT/Sources/ClipmanServer/main.swift" \
+  "$SERVER_ROOT/Sources/ClipmanServer/ReleaseSignature.swift" \
+  "$SERVER_ROOT/Sources/ClipmanServer/ServerAppReplacement.swift" \
   -framework AppKit
 
-cp "$ROOT/ClipmanServerLinux/clipman_server.py" "$RESOURCES/clipman_server.py"
+cp "${CLIPMAN_SERVER_SCRIPT:-$ROOT/ClipmanServerLinux/clipman_server.py}" "$RESOURCES/clipman_server.py"
+if [[ -z "${CLIPMAN_WEB_ASSETS:-}" || ! -f "$CLIPMAN_WEB_ASSETS/client.wasm" ]]; then
+  echo "Build browser assets first and set CLIPMAN_WEB_ASSETS to their folder." >&2
+  exit 1
+fi
+cp -R "$CLIPMAN_WEB_ASSETS" "$RESOURCES/web"
 cp "$ROOT/ClipmanServer/Manual.html" "$RESOURCES/Manual.html"
 cp "$ROOT/LICENSE.txt" "$RESOURCES/LICENSE.txt"
 

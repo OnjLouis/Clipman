@@ -7,11 +7,13 @@ import argparse
 import base64
 from datetime import datetime, timezone
 import errno
+from functools import lru_cache
 import hashlib
 import hmac
 import html
 import http.server
 import ipaddress
+import io
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -27,14 +29,15 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
-from threading import Event, Lock, Thread
+from threading import BoundedSemaphore, Event, Lock, Thread
 from typing import Any, Callable, Dict, List, Tuple
 from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.6.7"
+APP_VERSION = "2.7.0"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 BACKUP_PRUNE_INTERVAL_SECONDS = 60 * 60
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
@@ -56,6 +59,22 @@ PEM_CERTIFICATE_PATTERN = re.compile(
     rb"\A\s*(-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----)\s*\Z"
 )
 DATABASE_ID_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{32,128}\Z", re.ASCII)
+WEB_ASSET_ROOT = Path(os.environ.get("CLIPMAN_WEB_ASSETS") or (Path(__file__).resolve().parent / "web"))
+MAX_WEB_ASSET_BYTES = 16 * 1024 * 1024
+MAX_WEB_BUNDLE_BYTES = 32 * 1024 * 1024
+# Packaging fills this immutable fallback for older updaters that copy only the server.
+WEB_BUNDLE = ""
+WEB_ASSETS = {
+    "index.html": "text/html; charset=utf-8", "app.js": "text/javascript",
+    "pagination.js": "text/javascript", "links.js": "text/javascript",
+    "purify.min.js": "text/javascript", "rich.js": "text/javascript",
+    "worker.js": "text/javascript", "style.css": "text/css",
+    "client.wasm": "application/wasm", "wasm_exec.js": "text/javascript",
+    "icon.png": "image/png",
+}
+WEB_CSP = ("default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; "
+           "style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; "
+           "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
 
 def now_ms() -> int:
@@ -151,6 +170,8 @@ def load_settings(config_path: Path) -> Tuple[Dict[str, Any], bool]:
     settings.setdefault("CaFile", "")
     settings.setdefault("AllowInsecureRemote", False)
     settings.setdefault("SetupBaseUrl", "")
+    settings.setdefault("WebClientEnabled", False)
+    settings.setdefault("WebProxyAddresses", [])
     settings.setdefault("BackupIntervalMinutes", 60)
     settings.setdefault("BackupRetentionHours", 24)
     settings.setdefault("MaxBackups", 48)
@@ -1125,6 +1146,58 @@ def client_server_address(settings: Dict[str, Any]) -> str:
     return client_connection_endpoint(settings)[0]
 
 
+@lru_cache(maxsize=1)
+def embedded_web_assets(bundle: str) -> Dict[str, bytes]:
+    if len(bundle) > MAX_WEB_BUNDLE_BYTES:
+        raise ValueError("Embedded browser bundle is too large.")
+    try:
+        decoder = zlib.decompressobj()
+        raw = decoder.decompress(base64.b64decode(bundle, validate=True), MAX_WEB_BUNDLE_BYTES + 1)
+        if len(raw) > MAX_WEB_BUNDLE_BYTES or not decoder.eof or decoder.unused_data:
+            raise ValueError("Invalid browser bundle size or container.")
+        encoded = json.loads(raw)
+        assets = {name: base64.b64decode(encoded[name], validate=True) for name in WEB_ASSETS}
+        manifest = json.loads(base64.b64decode(encoded['browser-assets.json'], validate=True))
+        if manifest['serverVersion'] != APP_VERSION:
+            raise ValueError("Browser bundle version differs from the server.")
+        for name, data in assets.items():
+            if len(data) > MAX_WEB_ASSET_BYTES or hashlib.sha256(data).hexdigest() != manifest['sha256'][name]:
+                raise ValueError("Browser bundle integrity check failed.")
+        return assets
+    except (KeyError, TypeError, ValueError, zlib.error) as exc:
+        raise ValueError("Embedded browser assets are invalid; reinstall the server package.") from exc
+
+
+def open_web_asset(name: str) -> Tuple[Any, int]:
+    if WEB_BUNDLE:
+        data = embedded_web_assets(WEB_BUNDLE)[name]
+        return io.BytesIO(data), len(data)
+    asset = WEB_ASSET_ROOT / name
+    if asset.is_symlink() or not asset.is_file():
+        raise ValueError("Browser assets are missing or invalid; install the complete server package.")
+    source = asset.open('rb')
+    size = os.fstat(source.fileno()).st_size
+    if size > MAX_WEB_ASSET_BYTES:
+        source.close()
+        raise ValueError("Browser asset is too large.")
+    return source, size
+
+
+def validate_web_client(settings: Dict[str, Any]) -> str:
+    address = validate_advertise_url(client_server_address(settings))
+    proxies = settings.get("WebProxyAddresses", [])
+    if not isinstance(proxies, list):
+        raise ValueError("WebProxyAddresses must be a list of explicit proxy IP addresses.")
+    for proxy in proxies:
+        ipaddress.ip_address(proxy)
+    if not has_tls(settings) and not proxies:
+        raise ValueError("Browser access requires direct HTTPS or explicitly trusted HTTPS proxy IP addresses.")
+    for name in WEB_ASSETS:
+        source, _ = open_web_asset(name)
+        source.close()
+    return address
+
+
 def write_connection_info(config_path: Path, settings: Dict[str, Any]) -> Path:
     target = default_connection_info_path(config_path)
     make_private_dir(target.parent)
@@ -1662,6 +1735,7 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self._stats_lock = Lock()
         self._database_locks_lock = Lock()
         self.setup_link_lock = Lock()
+        self.web_transfer_slots = BoundedSemaphore(4)
         self._database_locks: Dict[str, Any] = {}
         self._stats: Dict[str, Any] = {
             "Requests": 0,
@@ -1779,6 +1853,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def route(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+        if path == "/web" or path.startswith("/web/"):
+            self.serve_web(parsed)
+            return
         if path == "/" and self.command in {"GET", "HEAD"}:
             self.send_setup_response(200, b"Clipman Server is running.\n", "text/plain; charset=utf-8")
             return
@@ -1792,6 +1869,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.command == "GET" and path == "/api/v1/health":
             self.write_json(status(self.settings, self.server))
             return
+
+        if self.headers.get("X-Clipman-Web") is not None:
+            if (self.settings.get("WebClientEnabled") is not True
+                    or self.headers.get("X-Clipman-Web") != "1"
+                    or not self.web_request_allowed()
+                    or not database_id_from_path(path)
+                    or parsed.query or parsed.params
+                    or self.command not in {"GET", "HEAD", "PUT"}):
+                self.send_web_response(403, b"Browser access is unavailable.\n", "text/plain")
+                return
+            if self.command == "PUT" and (self.headers.get("Origin") != client_server_address(self.settings)
+                    or (not self.headers.get("If-Match") and self.headers.get("If-None-Match") != "*")):
+                self.send_web_response(400, b"Conditional browser upload required.\n", "text/plain")
+                return
 
         if not self.authorized():
             self.send_text(401, "Unauthorized")
@@ -1855,7 +1946,87 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def authorized(self) -> bool:
         token = str(self.settings.get("AuthToken", "")).strip()
-        return bool(token) and self.headers.get("Authorization", "").strip() == "Bearer " + token
+        return bool(token) and hmac.compare_digest(
+            self.headers.get("Authorization", "").strip().encode("utf-8"),
+            ("Bearer " + token).encode("utf-8"),
+        )
+
+    def serve_web(self, parsed: Any) -> None:
+        # Never expose connection files or tokens through the browser host.
+        if self.settings.get("WebClientEnabled") is not True:
+            self.send_web_response(404, b"Browser access is disabled.\n", "text/plain")
+            return
+        name = parsed.path.removeprefix("/web/") if parsed.path.startswith("/web/") else ""
+        if parsed.query or parsed.params or name not in {"", "preview.json", *WEB_ASSETS}:
+            self.send_web_response(404, b"Not found.\n", "text/plain")
+            return
+        address = client_server_address(self.settings)
+        if not self.web_request_allowed(navigation=name == ""):
+            self.send_web_response(403, b"HTTPS and the configured browser origin are required.\n", "text/plain")
+            return
+        if self.command not in {"GET", "HEAD"}:
+            self.send_web_response(405, b"Read-only browser assets.\n", "text/plain")
+            return
+        if parsed.path == "/web":
+            self.send_web_response(308, b"", "text/plain", location="/web/")
+            return
+        if name == "preview.json":
+            self.send_web_response(200, json.dumps({"server": address, "direct": True}).encode(), "application/json")
+            return
+        name = name or "index.html"
+        if not self.server.web_transfer_slots.acquire(blocking=False):
+            self.send_web_response(503, b"Browser host is busy; retry shortly.\n", "text/plain")
+            return
+        try:
+            source, size = open_web_asset(name)
+            with source:
+                self.web_headers(200, size, WEB_ASSETS[name])
+                if self.command != "HEAD":
+                    remaining = size
+                    while remaining:
+                        chunk = source.read(min(remaining, 64 * 1024))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+                self.record(200, bytes_sent=0 if self.command == "HEAD" else size)
+        except (OSError, ValueError):
+            self.close_connection = True
+        finally:
+            self.server.web_transfer_slots.release()
+
+    def web_request_allowed(self, navigation: bool = False) -> bool:
+        address = client_server_address(self.settings)
+        origin = urlparse(address)
+        direct_tls = isinstance(self.connection, ssl.SSLSocket)
+        proxy_tls = (self.client_address[0] in self.settings.get("WebProxyAddresses", [])
+                     and self.headers.get("X-Forwarded-Proto") == "https")
+        cross_site = (self.headers.get("Sec-Fetch-Site") == "cross-site"
+                      and not (navigation and self.headers.get("Sec-Fetch-Dest") == "document"))
+        return (origin.scheme == "https" and (direct_tls or proxy_tls)
+                and self.headers.get("Host") == origin.netloc
+                and self.headers.get("Origin", address) == address and not cross_site)
+
+    def web_headers(self, code: int, length: int, content_type: str, location: str = "") -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", WEB_CSP)
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if location:
+            self.send_header("Location", location)
+        self.send_header("Connection", "close")
+        self.close_connection = True
+        self.end_headers()
+
+    def send_web_response(self, code: int, data: bytes, content_type: str, location: str = "") -> None:
+        self.web_headers(code, len(data), content_type, location)
+        if self.command != "HEAD":
+            self.wfile.write(data)
+        self.record(code, bytes_sent=0 if self.command == "HEAD" else len(data))
 
     def head_database(self, database_id: str) -> None:
         with self.server.database_lock(database_id):  # type: ignore[attr-defined]
@@ -1871,6 +2042,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("ETag", f'"{rev}"')
         self.send_header("X-Clipman-Revision", rev)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(length))
         self.end_headers()
         self.record(200)
@@ -1888,6 +2060,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("ETag", f'"{rev}"')
         self.send_header("X-Clipman-Revision", rev)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -1911,6 +2084,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         data = self.rfile.read(length)
         if len(data) != length:
             self.send_text(400, "Request body ended before Content-Length bytes were received")
+            return
+
+        if self.headers.get("X-Clipman-Web") == "1" and not data.startswith(b"CLIPDB2"):
+            self.send_web_response(400, b"Encrypted browser upload required.\n", "text/plain")
             return
 
         expected = self.headers.get("If-Match", "").strip().strip('"')
@@ -2034,6 +2211,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--setup-minutes", type=int, default=SETUP_DEFAULT_MINUTES, help=f"Lifetime for --create-setup-link (1 to {SETUP_MAX_MINUTES}; default {SETUP_DEFAULT_MINUTES}).")
     parser.add_argument("--setup-downloads", type=int, default=SETUP_DEFAULT_DOWNLOADS, help=f"Connection-file download limit for --create-setup-link (1 to {SETUP_MAX_DOWNLOADS}; default {SETUP_DEFAULT_DOWNLOADS}).")
     parser.add_argument("--setup-base-url", help="Public HTTP or HTTPS root used when creating a setup link; public addresses require HTTPS. Saves SetupBaseUrl.")
+    web_mode = parser.add_mutually_exclusive_group()
+    web_mode.add_argument("--enable-web-client", action="store_true", help="Enable the HTTPS browser client, save settings and exit; restart the server afterwards.")
+    web_mode.add_argument("--disable-web-client", action="store_true", help="Disable the browser client, save settings and exit; restart the server afterwards.")
+    parser.add_argument("--show-web-url", action="store_true", help="Print the enabled HTTPS browser URL and exit; never prints credentials.")
+    parser.add_argument("--web-proxy-address", action="append", default=None, help="Explicit IP of a trusted HTTPS reverse proxy; may be repeated. Proxy must replace Host and X-Forwarded-Proto.")
     parser.add_argument("--list-databases", action="store_true", help="List database buckets known to this server and exit.")
     parser.add_argument("--list-databases-json", action="store_true", help="List database buckets as JSON and exit.")
     parser.add_argument("--delete-database", help="Move one database bucket to DeletedDatabases. Requires --confirm and refuses buckets touched in the last 24 hours unless --force-recent is also passed.")
@@ -2051,6 +2233,8 @@ def run_server(
 ) -> int:
     tls_context = create_tls_context(settings)
     validate_network_security(settings)
+    if settings.get("WebClientEnabled") is True:
+        validate_web_client(settings)
     warn_if_tls_certificate_expiring(settings)
     settings["_TlsCertificateExpires"] = tls_certificate_expiry(settings)
     host = str(settings["Host"])
@@ -2153,6 +2337,21 @@ def main() -> int:
         settings["KeyFile"] = str(Path(args.key_file).expanduser().resolve())
     if args.allow_insecure_remote:
         settings["AllowInsecureRemote"] = True
+    if args.web_proxy_address is not None:
+        try:
+            settings["WebProxyAddresses"] = [str(ipaddress.ip_address(value)) for value in args.web_proxy_address]
+        except ValueError:
+            print("Each --web-proxy-address must be an explicit IP address.", file=sys.stderr)
+            return 2
+    if args.enable_web_client:
+        settings["WebClientEnabled"] = True
+        try:
+            validate_web_client(settings)
+        except ValueError as error:
+            print(f"Could not enable browser access: {error}", file=sys.stderr)
+            return 2
+    if args.disable_web_client:
+        settings["WebClientEnabled"] = False
     if args.setup_base_url:
         try:
             settings["SetupBaseUrl"] = setup_base_url(settings, args.setup_base_url)
@@ -2161,6 +2360,20 @@ def main() -> int:
             return 2
     if settings != settings_before_overrides:
         save_settings(config_path, settings)
+    if args.enable_web_client or args.disable_web_client:
+        print("Browser access " + ("enabled: " + client_server_address(settings) + "/web/" if args.enable_web_client else "disabled."))
+        print("Restart Clipman Server to apply this setting. History and tokens are unchanged.")
+        return 0
+    if args.show_web_url:
+        if settings.get("WebClientEnabled") is not True:
+            print("Browser access is disabled.", file=sys.stderr)
+            return 2
+        try:
+            print("Browser URL: " + validate_web_client(settings) + "/web/")
+        except ValueError as error:
+            print(f"Browser access is unavailable: {error}", file=sys.stderr)
+            return 2
+        return 0
     try:
         connection_info = maybe_write_connection_info(config_path, settings, settings_created, args.write_connection_info)
         connection_config = maybe_write_connection_config(config_path, settings, settings_created, args.write_connection_info)

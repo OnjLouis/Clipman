@@ -1,4 +1,7 @@
 *.sh text eol=lf
+# Signed fixture bytes must be identical on every platform.
+*.sig binary
+ClipmanServerLinux/signature-fixture.txt -text
 ClipmanLinux/*.desktop text eol=lf
 ClipmanLinux/*.xml text eol=lf
 ClipmanLinux/*.py text eol=lf

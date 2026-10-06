@@ -296,6 +296,9 @@ func decrypt(blob []byte, password string) ([]byte, error) {
 }
 
 func derive(password, salt []byte) ([]byte, []byte) {
+	if dk := acceleratedDerivation(password, salt); len(dk) == 64 {
+		return dk[:32], dk[32:]
+	}
 	dk := pbkdf2(password, salt, iterations, 64)
 	return dk[:32], dk[32:]
 }

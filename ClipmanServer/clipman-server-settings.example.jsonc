@@ -79,6 +79,14 @@
   // a separate VPN-only host. Public HTTP is refused.
   "SetupBaseUrl": "",
 
+  // Opt-in browser history. Requires HTTPS and existing encrypted history.
+  // Native clients are unaffected. No credentials are prefilled.
+  "WebClientEnabled": false,
+
+  // Exact proxy peer IPs trusted to supply Host and X-Forwarded-Proto: https.
+  // Leave empty for direct TLS. Never use client IPs or untrusted proxy peers.
+  "WebProxyAddresses": [],
+
   // Backup behavior.
   //
   // Before writes, Clipman Server creates rolling backups under:

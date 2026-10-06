@@ -114,6 +114,10 @@ cp "$SOURCE_ROOT/clipman_server.py" "$APP_DIR/clipman_server.py"
 chmod 700 "$APP_DIR/clipman_server.py" 2>/dev/null || true
 cp "$SOURCE_ROOT/clipman_server_updater.py" "$APP_DIR/clipman_server_updater.py"
 chmod 700 "$APP_DIR/clipman_server_updater.py" 2>/dev/null || true
+if [ -d "$SOURCE_ROOT/web" ]; then
+  mkdir -p "$APP_DIR/web"
+  cp "$SOURCE_ROOT/web/"* "$APP_DIR/web/"
+fi
 
 if [ -f "$SOURCE_ROOT/Manual.html" ]; then
   cp "$SOURCE_ROOT/Manual.html" "$APP_DIR/Manual.html"

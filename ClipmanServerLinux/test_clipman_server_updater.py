@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import ssl
@@ -12,6 +13,18 @@ import clipman_server_updater as updater
 
 
 class ClipmanServerUpdaterTests(unittest.TestCase):
+    @unittest.skipUnless(updater.shutil.which('openssl'), 'OpenSSL unavailable on this test platform')
+    def test_publisher_signature_accepts_only_signed_content(self):
+        fixture = Path(__file__).with_name('signature-fixture.txt')
+        signature = fixture.with_name('signature-fixture.txt.sig').read_bytes()
+        digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
+        updater.verify_publisher_signature(digest, signature)
+        for invalid in [b'', b'\0' * 384, signature[:-1]]:
+            with self.subTest(length=len(invalid)), self.assertRaises(RuntimeError):
+                updater.verify_publisher_signature(digest, invalid)
+        with self.assertRaises(RuntimeError):
+            updater.verify_publisher_signature('0' * 64, signature)
+
     def test_runit_service_backup_excludes_live_supervision_state(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -227,7 +240,7 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
 
     def test_listen_host_change_restarts_and_refreshes_connection_files(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             config = root / "config" / "settings.json"
             bin_dir = root / "bin"
             config.parent.mkdir(parents=True)
@@ -273,7 +286,7 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
 
     def test_failed_listen_host_change_restores_settings_and_connection_files(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             config = root / "config" / "settings.json"
             bin_dir = root / "bin"
             config.parent.mkdir(parents=True)
@@ -438,6 +451,25 @@ class ClipmanServerUpdaterTests(unittest.TestCase):
             self.assertEqual("new helper", helper.read_text(encoding="utf-8"))
             self.assertEqual("new launcher", launcher.read_text(encoding="utf-8"))
             self.assertEqual("new service", service.read_text(encoding="utf-8"))
+
+    def test_browser_assets_install_and_rollback_preserve_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app, package = root / "app", root / "package"
+            (app / "web").mkdir(parents=True)
+            (package / "web").mkdir(parents=True)
+            (app / "web" / "app.js").write_bytes(b"old script")
+            (app / "history.clipdb").write_bytes(b"untouched history")
+            (package / "web" / "app.js").write_bytes(b"new script")
+            (package / "web" / "client.wasm").write_bytes(b"new worker")
+            snapshots = updater.snapshot_managed_program_files(app)
+            updater.install_managed_program_files(package, app)
+            self.assertEqual((app / "web" / "app.js").read_bytes(), b"new script")
+            self.assertEqual((app / "web" / "client.wasm").read_bytes(), b"new worker")
+            updater.restore_managed_program_files(snapshots)
+            self.assertEqual((app / "web" / "app.js").read_bytes(), b"old script")
+            self.assertFalse((app / "web" / "client.wasm").exists())
+            self.assertEqual((app / "history.clipdb").read_bytes(), b"untouched history")
 
     def test_system_managed_update_replaces_only_program_files(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -45,6 +45,8 @@ The server cannot decrypt clipboard history. A server connection file can carry 
 
 ## More Ways To Use It
 
+An optional [HTTPS browser interface](https://onjlouis.github.io/Clipman/server/manual.html#browser-history) lets you search and copy existing encrypted Text, Links and supported Rich Text, or send a Quick Clip without installing a client. The server administrator must enable it; use only a trusted device and browser. Login is not saved, and an inactive session disconnects after five minutes.
+
 The [Clipman CLI](https://github.com/OnjLouis/Clipman/releases/tag/cli-v0.10.0) is the command-line companion for AI agents, shell scripts, terminal workflows, and headless systems on Windows, macOS, and Linux. It can initialize a connection, inspect status, list, retrieve, add, delete and synchronize server-backed text history, with interactive selection and machine-readable JSON output. Optional, bounded agent searches and the included history skill help an agent find relevant clips on request without exposing an automatic history stream. It follows the same encrypted format and synchronization rules as the graphical clients; its current release remains a pre-1.0 preview while its interface settles.
 
 ## Project

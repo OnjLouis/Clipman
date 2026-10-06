@@ -50,6 +50,7 @@
     <li><a href="#startup">Run at System Start</a></li>
     <li><a href="#updates">Updates</a></li>
     <li><a href="#temporary-setup">Temporary Browser Setup</a></li>
+    <li><a href="#browser-history">Optional Browser History</a></li>
     <li><a href="#connection-info">Connection Details File</a></li>
     <li><a href="#settings-example">Commented Settings Example</a></li>
     <li><a href="#linux-helper">Linux Helper Commands</a></li>
@@ -297,6 +298,8 @@ systemctl --user enable --now clipman-server.service</code></pre>
   <p>On runit, the service is supervised from <code>~/.config/service/clipman-server</code>. Use <code>clipmanserver status</code>, <code>clipmanserver restart</code>, and <code>clipmanserver stop</code> for everyday service control with either service manager.</p>
 
   <h2 id="updates">Updates</h2>
+  <p>Starting with 2.7.0, ZIP updates also require a pinned publisher signature. Missing or invalid signatures stop the update before files are replaced. Linux uses OpenSSL to verify it. Older servers cannot enforce this on their first upgrade; subsequent updates use the new verifier. See <a href="https://github.com/OnjLouis/Clipman/blob/main/ClipmanServer/ReleaseSignatures.md">server release signatures</a> for independent verification and the transition limits.</p>
+  <p>Server 2.7.0 adds an optional HTTPS browser interface for existing encrypted history. Search Text and Links, view and copy supported Rich Text and images, and send a Quick Clip without installing an app. Browser access is disabled by default, requires your server token and existing history password, and does not save a login. Native clients and their database format are unchanged. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/83">issue #83</a>.</p>
   <p>Clipman Server updates are published as a separate <code>ClipmanServer-...</code> ZIP. The <a href="https://onjlouis.github.io/Clipman/server/download.html">stable latest-server download</a> always resolves to the newest published server package. The server package can update itself without changing Clipman client settings or server databases, because those live in per-user data folders rather than inside the extracted download folder.</p>
 
   <p>Server 2.6.7 fixes Docker onboarding behind an HTTPS reverse proxy. Generated connection files now use the configured public HTTPS address and port rather than the private container port; the Docker example and file-retrieval instructions have been updated. Visiting the server root shows a minimal running message without exposing credentials. Temporary setup links remain time-limited and revocable, including when served through a separate VPN-only hostname. This resolves <a href="https://github.com/OnjLouis/Clipman/issues/76">issue #76</a> and <a href="https://github.com/OnjLouis/Clipman/issues/78">issue #78</a>.</p>
@@ -388,6 +391,31 @@ clipmanserver revoke-setup-link</code></pre>
   <pre><code>"SetupBaseUrl": "https://clipman.example"</code></pre>
 
   <p>Public HTTP setup links are refused even if the main server listener was deliberately allowed to use insecure remote HTTP. Direct private-CA HTTPS can also be used, but the browser must already trust that private authority; the downloaded <code>.clpconf</code> continues to provide app-specific trust to Clipman itself.</p>
+
+  <h2 id="browser-history">Optional Browser History</h2>
+  <p>Browser history is separate from temporary onboarding. An administrator must explicitly enable it. It remains available at <code>https://your-server.example/web/</code> while enabled; it is not an expiring setup link. Use only a trusted device and browser, and follow your employer's installation and network policies.</p>
+  <h3>Enable or disable access</h3>
+  <p>Configure working HTTPS first. On Windows or Mac, choose <strong>Enable browser access</strong> in the server tray or menu extra, then <strong>Open browser history</strong>. Enabling validates the configuration before saving it and restarts the server. Choosing Enable browser access again disables it.</p>
+  <p>For an installed Linux user service:</p>
+  <pre><code>clipman-server --enable-web-client
+clipmanserver restart
+clipman-server --show-web-url</code></pre>
+  <p>Disable with <code>clipman-server --disable-web-client</code>, then restart. <code>clipman-server</code> is the installed program launcher; <code>clipmanserver</code> manages its service. For a system service, pass its normal <code>--config</code> path to <code>clipman_server.py</code> and restart that service. These switches change settings and exit; they do not start another listener. The packaged server contains its browser assets even when an older updater replaces only the server program.</p>
+  <h3>HTTPS and reverse proxies</h3>
+  <p>Direct HTTPS uses the existing certificate and advertised server address. A private authority must be trusted by the browser or operating system; importing it into a native Clipman profile does not establish browser trust. Do not bypass certificate warnings. A public certificate is usually simpler for browsers.</p>
+  <p>Behind an HTTPS reverse proxy, set <code>AdvertiseUrl</code> to the public HTTPS origin and <code>WebProxyAddresses</code> to the exact IP addresses of the proxies that connect to Clipman. The proxy must replace upstream <code>Host</code> with that public hostname and port, and replace <code>X-Forwarded-Proto</code> with <code>https</code>. Keep the upstream listener private. Forward the existing API and <code>/web/</code> unchanged; an additional URL prefix is not supported. Forwarded headers from other peers are not trusted.</p>
+  <pre><code>python3 clipman_server.py --config /path/to/settings.json \
+  --advertise-url https://clip.example.com \
+  --web-proxy-address 127.0.0.1 --enable-web-client</code></pre>
+  <p>In Docker, use <code>CLIPMAN_WEB_CLIENT=true</code> with direct TLS, or with <code>CLIPMAN_IS_BEHIND_REVERSE_PROXY=true</code>, <code>CLIPMAN_ADVERTISE_URL</code>, and <code>CLIPMAN_WEB_PROXY_ADDRESSES</code>. The last variable is a space-separated list of literal proxy peer IPs, not client addresses, hostnames or networks. The example IP is appropriate only when it is actually the proxy peer. Setting <code>CLIPMAN_WEB_CLIENT=false</code> disables access at container startup; omitting it preserves the saved setting.</p>
+  <h3>Use existing history</h3>
+  <p>Open the browser address, enter the server token or import its connection file, then enter your existing nonblank history password. The browser refuses to create a missing history bucket, so an incorrect password cannot silently create an empty history. Its connection file must refer to this same HTTPS origin. Plain or compressed, unencrypted history is not supported.</p>
+  <p>Search Text, Links, Rich Text, or combined Text and Links. Numbered page controls appear above and below the list, with a Page navigation heading below. Links open separately without opener access to Clipman. Rich Text supports semantic HTML and bounded PNG/JPEG images; active content, external images and styling are removed. RTF-only entries can be viewed and copied as plain text. Stored history is not altered by these display limits.</p>
+  <p>Quick Clip adds plain text or a link. Enter inserts a new line; Control+Enter or Command+Enter sends it. Clipboard permissions vary by browser, so manual copy and ordinary text-field paste remain available. Choose Refresh for changes from other clients. Navigation and search use loaded history without extra requests; there is no background polling. The full encrypted history is downloaded before filtering, so large histories and slow networks can take time.</p>
+  <p>Editing, deleting, file history, templates and machine-local Secrets are not available here. Use a native client for those operations. Channel subscriptions follow existing sync rules; they are not per-user access control.</p>
+  <h3>Privacy limits</h3>
+  <p>Decryption and synchronization run in a WebAssembly worker. Your password and unlocked history remain in the browser; they are not uploaded to the server. Selected entries are displayed by the page itself. Login and history are not saved to cookies, local storage, session storage, IndexedDB or a service worker. Disconnect clears the interface and terminates the worker; five minutes without interaction also disconnects. Closing the tab ends the session. A disconnected operation cannot reopen a private viewer or draft.</p>
+  <p>However, the browser executes code supplied by your server and proxy. A compromised host, extension or borrowed computer can read what you unlock; HTTPS does not make an untrusted device safe. No-cache headers and Disconnect cannot guarantee memory erasure, clear the OS clipboard or retract an upload already received by the server. Disabling the interface stops its normal requests but does not revoke a token or password someone knows. Use strong, distinct passwords and keep the server and browser updated.</p>
 
   <h2 id="connection-info">Connection Files</h2>
   <p><code>clipman-server-connection.clpconf</code> exists so users do not have to open or edit JSON settings or copy individual values. Import it from the server section of Clipman Settings or Preferences. On Android and iOS, you can instead open the file directly from the system file browser. Clipman requires the normal device unlock, displays the server address for review, keeps the token hidden, requires a nonblank history password, and waits for <strong>Save</strong> before applying it.</p>
