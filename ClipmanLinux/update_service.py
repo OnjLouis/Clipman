@@ -158,7 +158,7 @@ def stage_update(candidate, opener=None):
         if packaged_version != normalized_version(candidate.version):
             raise UpdateError("The packaged version does not match the GitHub release.")
         required = [
-            "clipman.py", "clipman-hotkeys.py", "clipman-updater.py", "update_service.py",
+            "clipman.py", "clipman-hotkeys.py", "clipman-updater.py", "update_service.py", "context_help.py",
             "install.sh", "libexec/clipman-gui-backend", "Manual.html", "LICENSE.txt",
             "BUILD_STAMP",
         ]

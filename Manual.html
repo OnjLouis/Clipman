@@ -92,6 +92,15 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.9 Windows, macOS and Linux</h3>
+  <ul>
+    <li>F1 explains the focused control in a readable help dialog, including preferences, entry editors, secrets and sync rules. Open Manual still opens the complete manual.</li>
+    <li>Preference explanations are available on demand instead of being repeated automatically by screen readers. Control names, roles, states and values remain available normally.</li>
+    <li>Plain F1 opens help in hotkey fields without changing their shortcut. Closing help returns to the previous control.</li>
+    <li>Alt+Enter on Windows and Linux, or Option+Enter on Mac, opens a selected embedded image in the default image app. In File History it reveals the selected file or folder. Successful image and link opens close History; failed opens leave it available.</li>
+    <li>Global Quick Clip returns History to its previous visibility when the editor closes, rather than leaving an unwanted History window open.</li>
+    <li>New clipboard images use the source application's name when available, making generic image entries easier to identify. Original image filenames and existing entries are unchanged.</li>
+  </ul>
   <h3>3.1.7 iOS</h3>
   <ul>
     <li>View Entry now stays open when you switch apps and return, retaining its reading position and an open large image preview.</li>
@@ -817,7 +826,7 @@
       <tr><td>Move up by one visible page</td><td><code>Page Up</code></td><td><code>Page Up</code></td></tr>
       <tr><td>Move down by one visible page</td><td><code>Page Down</code></td><td><code>Page Down</code></td></tr>
       <tr><td>Jump to first normal item below pinned items</td><td><code>Backspace</code></td><td><code>Backspace</code></td></tr>
-      <tr><td>Open this manual</td><td><code>F1</code></td><td><code>F1</code></td></tr>
+      <tr><td>Help for the focused control</td><td><code>F1</code></td><td><code>F1</code></td></tr>
       <tr><td>Check for updates</td><td><code>Shift+F1</code></td><td><code>Shift+F1</code></td></tr>
       <tr><td>Open the project page</td><td><code>Ctrl+F1</code></td><td><code>Command+F1</code></td></tr>
       <tr><td>Open diagnostics</td><td><code>Alt+F1</code></td><td><code>Option+F1</code></td></tr>
@@ -831,7 +840,7 @@
       <tr><td>Create a new entry with Quick Clip</td><td><code>Ctrl+N</code></td><td><code>Command+N</code></td></tr>
       <tr><td>Save Entry Properties or Quick Clip</td><td><code>Ctrl+Enter</code> or <code>Alt+S</code></td><td><code>Command+Enter</code> or <code>Command+S</code></td></tr>
       <tr><td>Save Preferences or Sync Rules</td><td>Use the named Save button</td><td><code>Command+S</code></td></tr>
-      <tr><td>Open the selected standalone website link</td><td><code>Alt+Enter</code></td><td><code>Option+Enter</code></td></tr>
+      <tr><td>Open the selected image or standalone website link; reveal a File History item; close History on success</td><td><code>Alt+Enter</code></td><td><code>Option+Enter</code></td></tr>
       <tr><td>Push selected text entry to other synced devices</td><td><code>Ctrl+P</code></td><td><code>Command+P</code></td></tr>
       <tr><td>Pin or unpin selected entry</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
       <tr><td>Open Entry Properties</td><td><code>F2</code></td><td><code>F2</code></td></tr>
@@ -873,7 +882,7 @@
 
   <p><strong>Quick Clip</strong> creates a new saved entry without changing or reading the system clipboard. Press <code>Ctrl+N</code> on Windows or Linux, or <code>Command+N</code> on Mac, then enter the text and optional Name, Group, pin, or template setting. Enter adds a new line in the Clipboard text field; tab to Save when finished, press <code>Ctrl+Enter</code> on Windows or Linux, or press <code>Command+Enter</code> on Mac. Windows also accepts <code>Alt+S</code>, and Mac accepts <code>Command+S</code>. Desktop Preferences can assign an optional global Quick Clip hotkey so the editor can be opened from another application. On mobile, use the Quick Clip button beside Paste or long-press the Clipman launcher icon. iOS also offers Quick Clip through Siri, Shortcuts and the Action Button. Android and iOS retain an unfinished Quick Clip draft when you switch away or the operating system suspends Clipman; iOS also retains an unfinished edit to an existing entry. Save applies the draft, while Cancel deliberately discards it.</p>
 
-  <p><strong>Open Link</strong> opens exactly one selected standalone HTTP or HTTPS entry in the default browser with <code>Alt+Enter</code> on Windows or Linux, or <code>Option+Enter</code> on Mac. It also works when Links history is disabled and the standalone link appears in Text history. Clipman does not launch ordinary prose containing a link or private <code>clipman://</code> configuration links through this command.</p>
+  <p><strong>Open Image or Link</strong> opens exactly one selected standalone HTTP or HTTPS entry in the default browser with <code>Alt+Enter</code> on Windows or Linux, or <code>Option+Enter</code> on Mac. It also works when Links history is disabled and the standalone link appears in Text history. In Rich Text, a selected embedded image opens in its default app; in File History, the command reveals a selected file or folder without running it. History closes after a successful open and remains available if opening fails. Clipman does not launch ordinary prose containing a link or private <code>clipman://</code> configuration links through this command.</p>
 
   <p>Each Quick Paste target has a mode. <strong>Paste and restore previous clipboard</strong> temporarily places the entry on the system clipboard, sends the normal paste command to the active app, and then restores the previous clipboard contents where possible. <strong>Paste and keep target on clipboard</strong> pastes the entry and leaves that entry on the clipboard. <strong>Copy to clipboard only</strong> places the entry on the clipboard without sending a paste command.</p>
 
@@ -1280,6 +1289,7 @@
   <p>Old Clipman and Ditto imports are Windows-only and read text entries only. They do not import images or every custom clipboard format. Imported entries are grouped as <strong>Imported from old Clipman</strong> or <strong>Imported from Ditto</strong> so they are easy to review after import.</p>
 
   <h2 id="updates">Updates</h2>
+  <p>On Windows, Mac and Linux, press <code>F1</code> on a control to read a short explanation of its purpose and relevant choices. Preferences explanations are available there instead of being repeated automatically by a screen reader. Tab and Shift+Tab move between the help text, Open Manual and Close; Escape closes help and returns to the previous control. Plain F1 also works in hotkey fields without replacing the shortcut. The complete manual remains available from <strong>Help, Manual</strong> and from <strong>Open Manual</strong> in the help dialog.</p>
   <p>Use <strong>Help, Check for updates</strong> on Windows, the Clipman application menu or menu extra on Mac, or <code>Shift+F1</code> on either platform to check GitHub releases. If a newer release includes a Clipman ZIP package for your platform, Clipman can download it and update the app. Mac downloads are separate for Apple Silicon and Intel; choose the matching ZIP for a manual install, while the in-app updater chooses automatically.</p>
 
   <p>Use <strong>Preferences, Startup and updates</strong> to choose whether Clipman checks for updates never, at startup, hourly, or daily. If <strong>Install updates silently when possible</strong> is enabled, automatic checks can install a newer ZIP release without prompting where supported. Manual update checks still show the normal update dialog.</p>
@@ -1312,7 +1322,7 @@
       </tr>
       <tr>
         <td><code>Manual.html</code></td>
-        <td>This user manual. Press <code>F1</code> in Clipman to open it. On Mac, the manual is bundled inside <code>Clipman.app</code>.</td>
+        <td>This user manual, available from Help, Manual or the Open Manual button in focused-control help. On Mac, the manual is bundled inside <code>Clipman.app</code>.</td>
       </tr>
       <tr>
         <td><code>LICENSE.txt</code></td>

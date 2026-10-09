@@ -33,6 +33,7 @@ cd "$repo"
 python3 -c 'import pathlib; source=pathlib.Path("ClipmanLinux/clipman.py"); compile(source.read_text(encoding="utf-8"), str(source), "exec")'
 python3 -c 'import pathlib; source=pathlib.Path("ClipmanLinux/clipman-hotkeys.py"); compile(source.read_text(encoding="utf-8"), str(source), "exec")'
 python3 -c 'import pathlib; source=pathlib.Path("ClipmanLinux/update_service.py"); compile(source.read_text(encoding="utf-8"), str(source), "exec")'
+python3 -c 'import pathlib; source=pathlib.Path("ClipmanLinux/context_help.py"); compile(source.read_text(encoding="utf-8"), str(source), "exec")'
 python3 -c 'import pathlib; source=pathlib.Path("ClipmanLinux/clipman-updater.py"); compile(source.read_text(encoding="utf-8"), str(source), "exec")'
 python3 - <<'PY'
 import hashlib
@@ -261,7 +262,7 @@ with tempfile.TemporaryDirectory() as directory:
     package = pathlib.Path(directory) / "Clipman-Linux-GUI-9.8.7"
     package.mkdir()
     for name in (
-        "clipman.py", "clipman-hotkeys.py", "clipman-updater.py", "update_service.py",
+        "clipman.py", "clipman-hotkeys.py", "clipman-updater.py", "update_service.py", "context_help.py",
         "install.sh", "Manual.html", "LICENSE.txt",
     ):
         (package / name).write_text("test\n", encoding="utf-8")
@@ -621,7 +622,7 @@ assert module.file_event_summary({
 }).startswith("example.txt; Operation: Copy; Files: 1; Source: Files; Device: Fedora")
 PY
 install -m 0755 ClipmanLinux/clipman.py ClipmanLinux/clipman-hotkeys.py ClipmanLinux/clipman-updater.py ClipmanLinux/clipman-linux ClipmanLinux/install.sh ClipmanLinux/uninstall.sh "$stage/"
-install -m 0644 ClipmanLinux/update_service.py ClipmanLinux/VERSION ClipmanLinux/Manual.html LICENSE.txt ClipmanLinux/me.onj.clipman.linux.desktop ClipmanLinux/me.onj.clipman.linux.metainfo.xml ClipmanLinux/me.onj.clipman.linux.xml ClipmanLinux/me.onj.clipman.linux.png "$stage/"
+install -m 0644 ClipmanLinux/update_service.py ClipmanLinux/context_help.py ClipmanLinux/VERSION ClipmanLinux/Manual.html LICENSE.txt ClipmanLinux/me.onj.clipman.linux.desktop ClipmanLinux/me.onj.clipman.linux.metainfo.xml ClipmanLinux/me.onj.clipman.linux.xml ClipmanLinux/me.onj.clipman.linux.png "$stage/"
 printf '%s\n' "$build_stamp" > "$stage/BUILD_STAMP"
 install -m 0644 Assets/sounds/*.wav "$stage/sounds/"
 

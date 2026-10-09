@@ -63,7 +63,7 @@ namespace Clipman
             catch { return false; }
         }
 
-        public static RichImageCapture CaptureFromClipboard()
+        public static RichImageCapture CaptureFromClipboard(string sourceApplication = "")
         {
             byte[] original;
             string mime;
@@ -79,7 +79,27 @@ namespace Clipman
                     original = Optimize(clipboardImage, "image/png", null, out mime);
                 }
             }
-            return CreateCapture(original, mime, string.Empty);
+            return CreateCapture(original, mime, SourceImageFileName(sourceApplication, mime));
+        }
+
+        internal static string SourceImageFileName(string sourceApplication, string mime)
+        {
+            var source = NormalizeVirtualFileStem(sourceApplication, 64);
+            return "Clipboard image" + (source.Length == 0 ? "" : " - " + source) +
+                (mime == "image/png" ? ".png" : ".jpg");
+        }
+
+        internal static string CreateViewerFile(ClipEntry entry, string root = null)
+        {
+            RichImageInfo image;
+            if (entry == null || !TryDecode(entry.RichText, out image)) return null;
+            using (image)
+            {
+                var name = BuildExplorerFileName(entry, image.MimeType);
+                return root == null
+                    ? RichImageFileDropData.Add(new DataObject(), image.Data, name, entry.CreatedUnixMs)
+                    : RichImageFileDropData.Add(new DataObject(), image.Data, name, root, DateTime.UtcNow, entry.CreatedUnixMs);
+            }
         }
 
         public static bool TryGetSingleClipboardImageFile(out string path, out string failureMessage)

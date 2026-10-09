@@ -236,8 +236,13 @@ namespace Clipman
 
         public void ShowQuickClip()
         {
+            var historyWasVisible = historyForm != null && !historyForm.IsDisposed && historyForm.Visible;
             ShowHistory();
-            historyForm.ShowQuickClip();
+            try { historyForm.ShowQuickClip(); }
+            finally
+            {
+                if (!historyWasVisible && !historyForm.IsDisposed) historyForm.Hide();
+            }
         }
 
         public void ToggleHistoryWindow()
@@ -877,7 +882,7 @@ namespace Clipman
                 !Clipboard.ContainsText(TextDataFormat.UnicodeText) && RichImageData.ClipboardHasStandaloneImage())
             {
                 clipMergeDetector.Reset();
-                var imageCapture = RichImageData.CaptureFromClipboard();
+                var imageCapture = RichImageData.CaptureFromClipboard(FriendlyProcessName(sourceProcessName));
                 if (imageCapture == null)
                 {
                     sounds.Skip(settings.SoundsEnabled);

@@ -253,6 +253,7 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
             textView.textStorage?.setAttributedString(attributed)
         }
         textView.setAccessibilityLabel(accessibilityLabel)
+        textView.setContextHelp("Read the selected clip without editing it. Text can be selected and copied; Tab moves to its details or Close.")
 
         let textScroll = NSScrollView()
         textScroll.borderType = .bezelBorder
@@ -276,6 +277,7 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
             imageView.imageAlignment = .alignCenter
             imageView.setAccessibilityElement(true)
             imageView.setAccessibilityRole(.image)
+            imageView.setContextHelp("Read-only preview of this embedded image. Copy the history entry to retain its image data; editing the name does not alter the image.")
             imageView.setAccessibilityLabel(embeddedImage.altText.isEmpty
                 ? "Image \(embeddedImage.filename), \(embeddedImage.width) by \(embeddedImage.height) pixels"
                 : "\(embeddedImage.altText), \(embeddedImage.width) by \(embeddedImage.height) pixels")
@@ -619,7 +621,7 @@ final class HistoryWindow: NSWindow {
             } else if modifiers == [.shift] {
                 onUpdateCheck?()
             } else if modifiers.isEmpty {
-                onManual?()
+                ContextHelp.shared.show()
             } else {
                 return false
             }
@@ -1154,7 +1156,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             button.state = visibleMode == mode ? .on : .off
 			button.toolTip = "\(title), Command+\(index + 1)"
 			button.setAccessibilityLabel(title)
-			button.setAccessibilityHelp("Command+\(index + 1). Use Left or Right Arrow to switch sections. Use Option+Left or Option+Right to move this section.")
+			button.setContextHelp("Command+\(index + 1). Use Left or Right Arrow to switch sections. Use Option+Left or Option+Right to move this section.")
             button.onNavigate = { [weak self] direction in
                 self?.navigateModeTabs(from: visibleMode.tabID, direction: direction)
             }
@@ -1245,9 +1247,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         selectedGroupLabel.isHidden = !textMode
         setToFilterButton.title = "Set to \(groupFilter)"
         setToFilterButton.setAccessibilityLabel("Set selected entries to \(groupFilter)")
+        setToFilterButton.setContextHelp("Assign the current group filter to the selected clips. Device filters cannot be assigned as groups.")
         let filterLabel = isDeviceFilterActive ? "Device: \(deviceFilter)" : groupFilter
         groupFilterButton.title = "Filter: \(filterLabel.isEmpty ? "All" : filterLabel)"
         groupFilterButton.setAccessibilityLabel("Filter by group or device, Option+G, current filter \(filterLabel.isEmpty ? "All" : filterLabel)")
+        groupFilterButton.setContextHelp("Show entries from a group or device. All removes this filter; your search and selected history section still apply.")
         updateSelectedGroupStatus()
 
         let selectedSort = sortOptions().first {
@@ -1255,10 +1259,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         }?.title ?? currentSortMode()
         sortButton.title = "Sort: \(selectedSort)"
         sortButton.setAccessibilityLabel("Sort \(modeTitle(for: mode).lowercased()), current sort \(selectedSort)")
+        sortButton.setContextHelp("Choose the ordering for this history section. Manual order preserves positions you arrange yourself.")
 
         let direction = sortDirectionTitle(descending: currentSortDescending())
         directionButton.title = direction
         directionButton.setAccessibilityLabel("Sort direction, \(direction)")
+        directionButton.setContextHelp("Reverse the current sort direction. This does not change clip creation or last-used dates.")
         configureMainKeyViewLoop()
     }
 
@@ -1652,12 +1658,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 			menu.addItem(.separator())
 			if mode == .files {
 				addNativeItem("Go to File", action: #selector(menuGoToFile), to: menu, key: "\r", enabled: hasFileSelection)
+				addNativeItem("Open File Location and Close", action: #selector(menuOpenLink), to: menu, key: "\r", modifiers: [.option], enabled: hasFileSelection)
 				menu.addItem(.separator())
 				let hasNormalFileEvents = allFileEvents.contains { !$0.Pinned }
 				addNativeItem("Clear Unpinned File History...", action: #selector(menuClearNormalFileHistory), to: menu, key: "\u{7f}", modifiers: [.control], enabled: enabled && hasNormalFileEvents)
 				addNativeItem("Remove Unavailable File Events", action: #selector(menuRemoveUnavailableFileHistory), to: menu, key: "\u{7f}", modifiers: [.option], enabled: enabled && hasNormalFileEvents)
 			} else {
-				addNativeItem("Open Link", action: #selector(menuOpenLink), to: menu, key: "\r", modifiers: [.option], enabled: enabled && selectedEntry().map { LinkPresentation.webURL($0.Text) != nil } == true)
+				addNativeItem("Open Image or Link", action: #selector(menuOpenLink), to: menu, key: "\r", modifiers: [.option], enabled: enabled && selectedEntry().map { LinkPresentation.webURL($0.Text) != nil || EmbeddedImageHTML.imageInfo(from: $0.RichText) != nil } == true)
 				addNativeItem("Set as Quick Paste Target...", action: #selector(menuSetQuickCopyTarget), to: menu, enabled: hasTextSelection)
 				addNativeItem("Push to Other Devices", action: #selector(menuPushToOtherMachines), to: menu, key: "p", enabled: hasTextSelection)
 				if let entry = selectedEntry(), entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, LinkClassifier.isLinkOnlyText(entry.Text) {
@@ -1904,7 +1911,47 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         historyDelegate?.historyWindow(self, didRequestWebsiteTitleFor: entry)
     }
 
+    private var openedImageFiles: [EmbeddedImagePasteboardFile] = []
+    private static let maximumOpenedImageFiles = 16
+
     private func openSelectedLink() {
+        guard (mode == .files ? selectedFileEvents().count : selectedEntries().count) == 1 else {
+            reportPasteStatus("Select one image, link or file-history item first.")
+            NSSound.beep()
+            return
+        }
+        if mode == .files {
+            guard let event = selectedFileEvent(), event.Files.count == 1,
+                  FileManager.default.fileExists(atPath: event.Files[0]) else {
+                reportPasteStatus("Select one available file or folder first.")
+                NSSound.beep()
+                return
+            }
+            goToSelectedFileEvent()
+            hide()
+            return
+        }
+        if let entry = selectedEntry(), let image = EmbeddedImageHTML.imageInfo(from: entry.RichText) {
+            do {
+                let file = try EmbeddedImagePasteboardFile(data: image.data,
+                    filename: EmbeddedImageFileNaming.suggestedFilename(capturedUnixMs: entry.CreatedUnixMs,
+                        device: entry.SourceMachine, mimeType: image.mimeType),
+                    capturedUnixMs: entry.CreatedUnixMs)
+                guard NSWorkspace.shared.open(file.fileURL) else {
+                    reportPasteStatus("The selected image could not be opened.")
+                    NSSound.beep()
+                    return
+                }
+                openedImageFiles.append(file)
+                if openedImageFiles.count > Self.maximumOpenedImageFiles { openedImageFiles.removeFirst() }
+                reportPasteStatus("Opened image in the default application.")
+                hide()
+            } catch {
+                reportPasteStatus("The selected image could not be opened: \(error.localizedDescription)")
+                NSSound.beep()
+            }
+            return
+        }
         guard let entry = selectedEntry(),
               let url = LinkPresentation.webURL(entry.Text)
         else {
@@ -1918,6 +1965,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return
         }
         reportPasteStatus("Opened link in the default browser.")
+        hide()
     }
     @objc private func menuToggleDirection() {
         if mode == .files {
@@ -2262,7 +2310,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.setAccessibilityLabel(hasEmbeddedImage ? "Image content" : "Clipboard text")
         if hasEmbeddedImage {
-            textView.setAccessibilityHelp("This image content cannot be edited. Use the Name field to rename how the image appears.")
+            textView.setContextHelp("This image content cannot be edited. Use the Name field to rename how the image appears.")
         }
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 180))
         scroll.borderType = .bezelBorder
@@ -2277,7 +2325,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         templateCheckbox.setAccessibilityLabel("Template entry")
         templateCheckbox.isEnabled = !hasEmbeddedImage
         if hasEmbeddedImage {
-            templateCheckbox.setAccessibilityHelp("Image content cannot be used as a template.")
+            templateCheckbox.setContextHelp("Image content cannot be used as a template.")
         }
         let existingHotkey = quickCopyHotkeys[entry.Id]
         let existingMode = QuickPasteMode.normalize(quickPasteModes[entry.Id])
@@ -2312,7 +2360,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         previewTemplateButton.templateTextView = textView
         let insertPresetButton = TemplateInsertButton(title: "Insert sample...", target: nil, action: nil)
         insertPresetButton.setAccessibilityLabel("Insert sample template")
-        insertPresetButton.setAccessibilityHelp("Opens a menu of sample templates. The chosen sample is inserted at the cursor in the clipboard text field.")
+        insertPresetButton.setContextHelp("Opens a menu of sample templates. The chosen sample is inserted at the cursor in the clipboard text field.")
         insertPresetButton.target = self
         insertPresetButton.action = #selector(entryPropertiesInsertTemplateItem(_:))
         insertPresetButton.templateTextView = textView
@@ -2320,7 +2368,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         insertPresetButton.templateItems = TemplateResolver.presets
         let insertVariableButton = TemplateInsertButton(title: "Insert field...", target: nil, action: nil)
         insertVariableButton.setAccessibilityLabel("Insert template field")
-        insertVariableButton.setAccessibilityHelp("Opens a menu of template fields. The chosen field is inserted at the cursor in the clipboard text field.")
+        insertVariableButton.setContextHelp("Opens a menu of template fields. The chosen field is inserted at the cursor in the clipboard text field.")
         insertVariableButton.target = self
         insertVariableButton.action = #selector(entryPropertiesInsertTemplateItem(_:))
         insertVariableButton.templateTextView = textView

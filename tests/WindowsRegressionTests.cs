@@ -19,6 +19,9 @@ namespace Clipman.Tests
         [STAThread]
         private static int Main()
         {
+            Run("plain F1 is never captured as a global hotkey", PlainF1IsNeverCaptured);
+            Run("context help preserves explanations without private values", ContextHelpPreservesExplanations);
+            Run("desktop dialog controls have tailored context help", PreferencesHaveContextHelp);
             Run("database container caps are aligned", DatabaseContainerCapsAreAligned);
             Run("server polls cannot overlap and respect failure backoff", ServerPollSchedulingIsBounded);
             Run("brief server poll timeouts do not report storage unavailable", TransientServerPollFailuresAreQuiet);
@@ -43,6 +46,7 @@ namespace Clipman.Tests
             Run("the updater selects the Windows package when a release has several ZIP assets", UpdaterSelectsWindowsPackageFromMixedReleaseAssets);
             Run("the updater skips newer releases without a Windows package", UpdaterSkipsReleasesWithoutWindowsPackage);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
+            Run("image viewers preserve bytes, dates and history", ImageViewerFilesPreserveHistory);
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
             Run("embedded image properties preserve image content", EmbeddedImagePropertiesPreserveImageContent);
             Run("embedded image file-drop cache cleanup is bounded", EmbeddedImageFileDropCacheCleanupIsBounded);
@@ -54,6 +58,7 @@ namespace Clipman.Tests
             Run("filtered pinned links move within the visible section", FilteredPinnedLinksMoveWithinVisibleSection);
             Run("entry editors reserve Enter for multiline text", EntryEditorsReserveEnterForMultilineText);
             Run("history window constructs before an entry is selected", HistoryWindowConstructsWithoutSelection);
+            Run("history explanations are reserved for F1 help", HistoryExplanationsAreReservedForHelp);
             Run("unchanged history reloads keep native rows stable", UnchangedHistoryReloadsKeepNativeRowsStable);
             Run("name and content copy formatting is deterministic", NameAndContentCopyFormattingIsDeterministic);
             Run("multiple-entry separators are configurable", MultipleEntrySeparatorsAreConfigurable);
@@ -106,6 +111,105 @@ namespace Clipman.Tests
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
+        }
+
+        private static void PlainF1IsNeverCaptured()
+        {
+            var method = typeof(PreferencesForm).GetMethod("HotkeyBoxKeyDown", BindingFlags.NonPublic | BindingFlags.Static);
+            using (var field = new TextBox { Text = "Control+Alt+H" })
+            {
+                var key = new KeyEventArgs(Keys.F1);
+                method.Invoke(null, new object[] { field, key });
+                Assert(!key.Handled && !key.SuppressKeyPress && field.Text == "Control+Alt+H",
+                    "Plain F1 must pass to help, not beep or replace a shortcut.");
+                using (var entry = new EntryPropertiesForm(new ClipEntry { Text = "test" }, false, "", QuickPasteModes.CopyOnly, false))
+                using (var secret = new SecretEditorForm(new SecretEntry(), true))
+                {
+                    foreach (var editor in new Form[] { entry, secret })
+                    {
+                        var handlerName = editor is EntryPropertiesForm ? "QuickCopyHotkeyBoxKeyDown" : "HotkeyBoxKeyDown";
+                        var handler = editor.GetType().GetMethod(handlerName, BindingFlags.NonPublic | BindingFlags.Instance);
+                        key = new KeyEventArgs(Keys.F1);
+                        handler.Invoke(editor, new object[] { field, key });
+                        Assert(!key.Handled && !key.SuppressKeyPress && field.Text == "Control+Alt+H",
+                            "Plain F1 must not replace an entry or secret shortcut.");
+                    }
+                }
+            }
+        }
+
+        private static void ImageViewerFilesPreserveHistory()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+                var payload = new RichTextPayload { HtmlFragment = RichImageData.BuildHtml(png, "image/png", "camera.png", ""), PreferredFormat = "Html" };
+                var entry = new ClipEntry { Text = "original image label", RichText = payload, CreatedUnixMs = 1700000000000L, SourceMachine = "Test device" };
+                var path = RichImageData.CreateViewerFile(entry, directory);
+                Assert(File.ReadAllBytes(path).SequenceEqual(png), "Opening an image re-encoded its bytes.");
+                Assert(File.GetLastWriteTimeUtc(path) == TimeUtil.FromUnixMs(entry.CreatedUnixMs).ToUniversalTime(), "Opening an image changed its captured date.");
+                Assert(entry.Text == "original image label" && ReferenceEquals(entry.RichText, payload), "Opening changed the saved entry.");
+                Assert(RichImageData.CreateViewerFile(new ClipEntry { Text = "not an image" }, directory) == null, "Non-image content became a viewer file.");
+                Assert(RichImageData.SourceImageFileName("Firefox", "image/png") == "Clipboard image - Firefox.png", "Image names lost their capture source.");
+                Assert(RichImageData.SourceImageFileName("../Bad:App\u202e", "image/jpeg") == "Clipboard image - ..BadApp.jpg", "Image source names were not sanitized.");
+                Assert(RichImageData.SourceImageFileName("", "image/png") == "Clipboard image.png", "Unknown sources should retain the generic name.");
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        private static void ContextHelpPreservesExplanations()
+        {
+            using (var form = new Form())
+            using (var field = new TextBox { AccessibleName = "History password", AccessibleDescription = "Unlock the encrypted history.", Text = "private-password", UseSystemPasswordChar = true })
+            {
+                form.Controls.Add(field);
+                ContextHelp.Prepare(form, true);
+                Assert(field.AccessibleDescription == string.Empty, "Preferences hints should not repeat automatically.");
+                Assert(ContextHelp.Description(field) == "Unlock the encrypted history.", "F1 must retain the existing explanation.");
+                Assert(!ContextHelp.Description(field).Contains(field.Text), "Help must never read a private field value.");
+                using (var dialog = new ContextHelpDialog(ContextHelp.ControlName(field), ContextHelp.Description(field)))
+                {
+                    var viewer = dialog.Controls.OfType<TextBox>().Single();
+                    Assert(viewer.ReadOnly && viewer.Multiline && !viewer.AcceptsTab, "Help must be selectable and allow Tab to leave.");
+                    Assert(dialog.CancelButton != null, "Escape must close help.");
+                }
+            }
+        }
+
+        private static void PreferencesHaveContextHelp()
+        {
+            var forms = new Form[] {
+                new PreferencesForm(new AppSettings(), _ => {}, _ => {}, () => false),
+                new EntryPropertiesForm(new ClipEntry { Text = "test" }, false, "", QuickPasteModes.CopyOnly, false),
+                new SecretEditorForm(new SecretEntry(), true),
+                new PasswordPromptForm("Unlock", "Enter the history password."),
+                new TextViewerForm("test"),
+                new SyncChannelEditorForm(null, new List<string>(), new List<string>(), new SyncRulesDocument(), -1),
+                new SyncDeviceSubscriptionForm("Test device", new List<SyncChannel>(), new List<string>()),
+                (Form)Activator.CreateInstance(typeof(ExportPasswordForm), BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { false, new Func<string, bool>(_ => false) }, null)
+            };
+            try
+            {
+                var missing = new List<string>();
+                Action<Control> inspect = null;
+                inspect = parent =>
+                {
+                    foreach (Control control in parent.Controls)
+                    {
+                        if (control is TextBoxBase || control is NumericUpDown || control is ComboBox || control is ButtonBase || control is ListBox || control is TabControl)
+                        {
+                            var help = ContextHelp.Description(control);
+                            if (help.StartsWith("Enter or review") || help.StartsWith("Type a number") || help.StartsWith("Choose an option") || help.StartsWith("Space changes") || help.StartsWith("Activate this command") || help.StartsWith("Navigate items"))
+                                missing.Add(ContextHelp.ControlName(control));
+                        }
+                        inspect(control);
+                    }
+                };
+                foreach (var form in forms) inspect(form);
+                Assert(missing.Count == 0, "Missing help: " + string.Join("; ", missing.Distinct().ToArray()));
+            }
+            finally { foreach (var form in forms) form.Dispose(); }
         }
 
         private static void UrlOnlyClipboardItemsAreImportedAsLinks()
@@ -2176,6 +2280,20 @@ namespace Clipman.Tests
                 using (var form = CreateTestHistoryForm(store, () => new List<ClipboardEventSummary>()))
                 {
                     Assert(form.MainMenuStrip != null, "The history window did not finish constructing its menu.");
+                    var helpMenu = form.MainMenuStrip.Items.OfType<ToolStripMenuItem>()
+                        .Single(item => item.Text.Replace("&", "") == "Help");
+                    var helpMnemonics = new HashSet<char>();
+                    foreach (var item in helpMenu.DropDownItems.OfType<ToolStripMenuItem>())
+                    {
+                        for (var index = 0; index + 1 < item.Text.Length; index++)
+                        {
+                            if (item.Text[index] != '&') continue;
+                            if (item.Text[index + 1] == '&') { index++; continue; }
+                            Assert(helpMnemonics.Add(char.ToUpperInvariant(item.Text[index + 1])),
+                                "The Help menu has a duplicate mnemonic: " + item.Text);
+                            break;
+                        }
+                    }
                     var textList = (ListView)typeof(HistoryForm)
                         .GetField("list", BindingFlags.Instance | BindingFlags.NonPublic)
                         .GetValue(form);
@@ -2207,6 +2325,52 @@ namespace Clipman.Tests
             {
                 Directory.Delete(directory, true);
             }
+        }
+
+        private static void HistoryExplanationsAreReservedForHelp()
+        {
+            var directory = NewRegressionDirectory();
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb")))
+                using (var form = CreateTestHistoryForm(store, () => new List<ClipboardEventSummary>()))
+                {
+                    var controls = new List<Control>();
+                    Action<Control> collect = null;
+                    collect = parent =>
+                    {
+                        foreach (Control child in parent.Controls)
+                        {
+                            controls.Add(child);
+                            collect(child);
+                        }
+                    };
+                    collect(form);
+                    var filter = controls.Single(control => control.AccessibleName == "History filter");
+                    Assert(string.IsNullOrEmpty(filter.AccessibleDescription),
+                        "The history filter still reads its F1 explanation automatically.");
+                    Assert(ContextHelp.Description(filter) == "Choose a clipboard group or device to show.",
+                        "F1 lost the history filter explanation.");
+                    var buttons = controls.OfType<ShortcutButton>().ToList();
+                    Assert(buttons.Count == 4, "Expected both Close buttons and both file-history actions.");
+                    foreach (var button in buttons)
+                    {
+                        Assert(string.IsNullOrEmpty(button.AccessibleDescription),
+                            button.AccessibleName + " still reads its F1 explanation automatically.");
+                        Assert(!string.IsNullOrEmpty(ContextHelp.Description(button)),
+                            button.AccessibleName + " lost its F1 help.");
+                        Assert(button.AccessibilityObject.KeyboardShortcut == button.ShortcutText,
+                            button.AccessibleName + " lost its native shortcut announcement.");
+                        if (button.AccessibleName == "Close")
+                        {
+                            Assert(ContextHelp.Description(button) == "Closes the history window. Shortcut Escape.",
+                                "F1 lost the history-specific Close explanation.");
+                            Assert(button.ShortcutKeys == Keys.Escape, "Close lost its Escape shortcut.");
+                        }
+                    }
+                }
+            }
+            finally { Directory.Delete(directory, true); }
         }
 
         private static void UnchangedHistoryReloadsKeepNativeRowsStable()

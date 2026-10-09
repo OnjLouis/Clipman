@@ -62,6 +62,7 @@ let package = Package(
             dependencies: [
                 "ClipmanCore"
             ]
-        )
+        ),
+        .testTarget(name: "ClipmanAppTests", dependencies: ["Clipman"])
     ]
 )

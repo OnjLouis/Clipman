@@ -278,6 +278,7 @@ namespace Clipman
 
             try
             {
+                using (var contextHelp = new ContextHelp())
                 using (var app = new ClipmanApplicationContext())
                 {
                     Application.Run(app);

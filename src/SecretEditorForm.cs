@@ -155,6 +155,7 @@ namespace Clipman
 
         private void HotkeyBoxKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyData == Keys.F1) return;
             e.Handled = true;
             e.SuppressKeyPress = true;
             if (e.KeyCode == Keys.Delete || e.KeyCode == Keys.Back)

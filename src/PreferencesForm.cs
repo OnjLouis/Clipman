@@ -426,6 +426,7 @@ namespace Clipman
 
             WireLiveEvents();
             loading = false;
+            ContextHelp.Prepare(this, true);
         }
 
         public void SetActiveChecked(bool value)
@@ -1295,6 +1296,8 @@ namespace Clipman
 
         private static void AddRow(TableLayoutPanel panel, string labelText, Control control)
         {
+            if (string.IsNullOrWhiteSpace(control.AccessibleName) && !(control is Panel))
+                control.AccessibleName = labelText.Replace("&", "").Trim().TrimEnd(':');
             var row = panel.RowCount++;
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             panel.Controls.Add(new Label { Text = labelText, AutoSize = true, Padding = new Padding(0, 5, 0, 8) }, 0, row);
@@ -1525,6 +1528,7 @@ namespace Clipman
 
         private static void HotkeyBoxKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyData == Keys.F1) return;
             if (e.KeyCode == Keys.Tab || e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter)
             {
                 return;

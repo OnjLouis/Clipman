@@ -343,7 +343,8 @@ final class ClipboardMonitor: @unchecked Sendable {
             Task { @MainActor [weak self] in
                 do {
                     let prepared = try await Task.detached(priority: .utility) {
-                        try EmbeddedImageHTML.makePayload(data: input.data, filename: input.filename)
+                        try EmbeddedImageHTML.makePayload(data: input.data,
+                            filename: RichTextData.sourceImageFilename(input.filename, application: sourceApplication))
                     }.value
                     guard let self else { return }
                     self.lastClipboardDiagnostic = self.clipboardDiagnostic(

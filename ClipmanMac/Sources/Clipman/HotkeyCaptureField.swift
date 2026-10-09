@@ -33,7 +33,7 @@ final class HotkeyCaptureField: NSTextField {
         isSelectable = false
         focusRingType = .default
         setAccessibilityRole(.textField)
-        setAccessibilityHelp("Press a valid global shortcut. Two modifiers are safest. One modifier is allowed only with function keys, Grave, Backslash, or ISO section. Press Delete or Backspace to clear this hotkey.")
+        setContextHelp("Press a valid global shortcut. Two modifiers are safest. One modifier is allowed only with function keys, Grave, Backslash, or ISO section. Press Delete or Backspace to clear this hotkey. Plain F1 opens help without changing the shortcut.")
     }
 
     override func becomeFirstResponder() -> Bool {
@@ -62,6 +62,10 @@ final class HotkeyCaptureField: NSTextField {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_F1), event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
+            ContextHelp.shared.show()
+            return
+        }
         if moveFocusIfNeeded(for: event) {
             return
         }
@@ -82,6 +86,7 @@ final class HotkeyCaptureField: NSTextField {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.keyCode == UInt16(kVK_F1), event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty { return false }
         guard window?.firstResponder === self else {
             return false
         }

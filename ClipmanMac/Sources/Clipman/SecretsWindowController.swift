@@ -53,7 +53,7 @@ final class SecretsWindowController: NSWindowController, NSTableViewDataSource, 
         table.dataSource = self
         table.usesAlternatingRowBackgroundColors = true
         table.setAccessibilityLabel("Secrets")
-        table.setAccessibilityHelp("Saved secret names. Values are hidden. Press Return to quick paste, F2 for properties, Insert to add, or Delete to remove.")
+        table.setContextHelp("Saved secret names. Values are hidden. Press Return to quick paste, F2 for properties, Insert to add, or Delete to remove.")
         table.target = self
         table.doubleAction = #selector(quickPasteSelected(_:))
 

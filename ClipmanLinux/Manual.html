@@ -18,6 +18,9 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 </ul></nav>
 
 <h2 id="changelog">Changelog</h2>
+<h3>3.1.9</h3>
+<p>F1 explains the focused control in a readable help dialog. Preferences explanations are available on demand instead of repeating automatically through Orca. Plain F1 opens help without changing a hotkey; closing help returns to the previous control. The complete manual remains available from Help, Manual and Open Manual.</p>
+<p>Alt+Enter opens embedded images in the default image app or reveals a File History item's location. Successful opens close History. Global Quick Clip restores History's previous visibility when the editor closes. New generic clipboard images include the source application's name when available; original filenames and existing entries are unchanged.</p>
 <h3>3.1.6</h3>
 <ul><li>Web links copied as URL-only clipboard items now appear in Links history even when the source application supplies no plain-text representation. Local file links continue to use File History.</li></ul>
 <h3>3.1.4</h3>
@@ -128,7 +131,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 </tbody></table>
 <p>Automatic remote clipboard receipt, dynamic history and automatic tracking removal are opt-in. Dynamic history makes a newly accepted item select its matching section the next time history opens. That automatic selection is used once, so a section you choose manually remains selected until another new item arrives. Missing custom sounds fall back to factory sounds.</p>
 <p>Entry deletion asks for confirmation by default. The confirmation can remember <strong>Do not ask again</strong>; re-enable it from General preferences. Clearing an entire history area keeps its separate confirmation.</p>
-<p><strong>Quick Clip</strong> creates a new saved entry without reading or changing the system clipboard. Use <kbd>Ctrl+N</kbd>, the File menu, or assign its optional global hotkey. Enter inserts a new line in the editor and <kbd>Ctrl+Enter</kbd> saves. <strong>Open Link</strong> uses <kbd>Alt+Enter</kbd> to open exactly one selected standalone HTTP or HTTPS entry; ordinary prose and private <code>clipman://</code> configuration links are not launched.</p>
+<p><strong>Quick Clip</strong> creates a new saved entry without reading or changing the system clipboard. Use <kbd>Ctrl+N</kbd>, the File menu, or assign its optional global hotkey. Enter inserts a new line in the editor and <kbd>Ctrl+Enter</kbd> saves. Global Quick Clip restores History's previous visibility when the editor closes. <strong>Open Image or Link</strong> uses <kbd>Alt+Enter</kbd> to open exactly one selected standalone HTTP or HTTPS entry or embedded image in its default app. In File History it reveals the selected file or folder without running it. History closes on success and remains available on failure; ordinary prose and private <code>clipman://</code> configuration links are not launched.</p>
 
 <h2 id="shortcuts">Keyboard shortcuts</h2>
 <table><thead><tr><th>Action</th><th>Shortcut</th></tr></thead><tbody>
@@ -139,7 +142,7 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <tr><td>Paste clipboard text after selected entry</td><td><kbd>Ctrl+V</kbd></td></tr>
 <tr><td>Open Quick Clip</td><td><kbd>Ctrl+N</kbd></td></tr>
 <tr><td>Save Entry Properties or Quick Clip</td><td><kbd>Ctrl+Enter</kbd></td></tr>
-<tr><td>Open selected standalone website link</td><td><kbd>Alt+Enter</kbd></td></tr>
+<tr><td>Open selected image or website link; reveal File History location; close History on success</td><td><kbd>Alt+Enter</kbd></td></tr>
 <tr><td>Select all visible entries</td><td><kbd>Ctrl+A</kbd></td></tr>
 <tr><td>Import or export</td><td><kbd>Ctrl+I</kbd> or <kbd>Ctrl+E</kbd></td></tr>
 <tr><td>Group selected entry</td><td><kbd>Ctrl+G</kbd></td></tr>
@@ -168,11 +171,13 @@ body{font:1rem/1.55 system-ui,sans-serif;max-width:68rem;margin:auto;padding:1re
 <tr><td>Preferences</td><td><kbd>Ctrl+,</kbd></td></tr>
 <tr><td>Secrets</td><td><kbd>Ctrl+Shift+E</kbd></td></tr>
 <tr><td>Assigned Quick Paste or secret</td><td>User-assigned global hotkey</td></tr>
-<tr><td>Manual, update check or project page</td><td><kbd>F1</kbd>, <kbd>Shift+F1</kbd>, <kbd>Ctrl+F1</kbd></td></tr>
+<tr><td>Help for the focused control</td><td><kbd>F1</kbd></td></tr>
+<tr><td>Update check or project page</td><td><kbd>Shift+F1</kbd>, <kbd>Ctrl+F1</kbd></td></tr>
 <tr><td>Diagnostics</td><td><kbd>Alt+F1</kbd></td></tr>
 </tbody></table>
 
 <h2 id="accessibility">Accessibility</h2>
+<p>Press <kbd>F1</kbd> on a control for a short explanation tailored to that control. Tab and Shift+Tab move through the read-only help text, Open Manual and Close; Escape returns to the previous control. Preference explanations are available on demand rather than repeated automatically by Orca. Plain F1 opens help even in a hotkey field, without replacing its shortcut. The complete manual remains available from Help, Manual and Open Manual.</p>
 <p>The interface uses native GTK 4 controls exposed through AT-SPI. A conventional menu bar exposes commands and shortcuts. Tab and Shift+Tab move between controls; Up and Down move one history entry. Every history row is one focus stop. Its accessible text includes relevant state, group, device and list position without duplicating visible content.</p>
 <p>History polling does not reconstruct unchanged rows, so Orca focus and braille position remain stable. Status changes are announced without taking keyboard focus. Tab and Shift+Tab leave multiline editors instead of inserting tab characters.</p>
 <p>Global shortcuts and background clipboard monitoring work normally under X11. Wayland compositors control those capabilities and support varies. Use <strong>Save Current Clipboard to History</strong> when a compositor prevents automatic capture.</p>

@@ -11,6 +11,16 @@ enum RichTextData {
     static let maxRTFBytes = 1024 * 1024
     static let maxCombinedBytes = 1792 * 1024
 
+    static func sourceImageFilename(_ filename: String, application: String) -> String {
+        guard URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent.lowercased() == "clipboard image" else { return filename }
+        let excluded = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/:\\\"<>|?*"))
+        let source = String(application.unicodeScalars.filter {
+            !excluded.contains($0) && $0.properties.generalCategory != .format
+        }.map(String.init).joined().trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
+        guard !source.isEmpty else { return filename }
+        return "Clipboard image - \(source).\(URL(fileURLWithPath: filename).pathExtension)"
+    }
+
     static func capture(from pasteboard: NSPasteboard) -> RichTextPayload? {
         let html = pasteboard.data(forType: .html).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         let rtf = pasteboard.data(forType: .rtf)

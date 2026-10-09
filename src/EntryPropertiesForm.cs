@@ -64,7 +64,7 @@ namespace Clipman
                 Width = 590,
                 Text = entry == null ? string.Empty : entry.Name ?? string.Empty,
                 AccessibleName = "Entry name",
-                AccessibleDescription = "Optional name shown before the clipboard text. The name is not copied."
+                AccessibleDescription = "Optional name shown before the clipboard text. Enter copies the content alone; Control+Enter includes the name."
             };
             Controls.Add(nameBox);
 
@@ -136,7 +136,7 @@ namespace Clipman
                 Location = new Point(15, 146),
                 Size = new Size(665, 80),
                 AccessibleName = "Quick Paste mode",
-                AccessibleDescription = "Controls what the Quick Paste hotkey does with the clipboard."
+                AccessibleDescription = "Choose whether Quick Paste pastes and restores the previous clipboard, pastes and keeps this clip, or only copies it."
             };
             pasteRestoreMode = new RadioButton
             {
@@ -313,6 +313,7 @@ namespace Clipman
 
         private void QuickCopyHotkeyBoxKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyData == Keys.F1) return;
             if (e.KeyCode == Keys.Tab || e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter)
             {
                 return;

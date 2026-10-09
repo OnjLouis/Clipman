@@ -162,25 +162,25 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             grid.topAnchor.constraint(equalTo: content.topAnchor, constant: 16)
         ])
 
-        machineNameField.setAccessibilityHelp("Name recorded on new clipboard entries created by this Mac. Existing entries keep their original device name.")
+        machineNameField.setContextHelp("Name recorded on new clipboard entries created by this Mac. Existing entries keep their original device name.")
         addRow("Device name", machineNameField)
         addRow("Settings folder", databasePathField, button(title: "Choose...", action: #selector(chooseSettingsFolder)))
-        databasePathField.setAccessibilityHelp("Choose the Clipman data/settings folder. Clipman will use clipman-history.clipdb inside that folder.")
+        databasePathField.setContextHelp("Choose the Clipman data/settings folder. Clipman will use clipman-history.clipdb inside that folder.")
         storageModePopup.addItems(withTitles: ["Local or shared folder", "Clipman Server"])
         storageModePopup.setAccessibilityLabel("History storage type")
         addRow("History storage type", storageModePopup)
         serverUrlField.setAccessibilityLabel("Clipman Server host")
         addRow("Server host", serverUrlField)
         serverTokenField.setAccessibilityLabel("Clipman Server token")
-        serverTokenField.setAccessibilityHelp("Server authentication token. The token is hidden on screen and saved in this Mac user's Keychain.")
+        serverTokenField.setContextHelp("Server authentication token. The token is hidden on screen and saved in this Mac user's Keychain.")
         let importServerButton = button(title: "Import Server File...", action: #selector(importServerConnection))
-        importServerButton.setAccessibilityHelp("Import a Clipman Server connection file, review its address, then save preferences.")
+        importServerButton.setContextHelp("Import a Clipman Server connection file, review its address, then save preferences.")
         let exportServerButton = button(title: "Export Server File...", action: #selector(exportServerConnection))
-        exportServerButton.setAccessibilityHelp("Export the current Clipman Server address and private token to a connection file.")
+        exportServerButton.setContextHelp("Export the current Clipman Server address and private token to a connection file.")
         let importAuthorityButton = button(title: "Import Authority...", action: #selector(importServerAuthority))
-        importAuthorityButton.setAccessibilityHelp("Import a public private-authority certificate for the current HTTPS server host.")
+        importAuthorityButton.setContextHelp("Import a public private-authority certificate for the current HTTPS server host.")
         let removeAuthorityButton = button(title: "Remove Authority", action: #selector(removeServerAuthority))
-        removeAuthorityButton.setAccessibilityHelp("Remove the app-specific private certificate authority without changing the server address or token.")
+        removeAuthorityButton.setContextHelp("Remove the app-specific private certificate authority without changing the server address or token.")
         let serverFileButtons = NSStackView(views: [importServerButton, exportServerButton, importAuthorityButton, removeAuthorityButton])
         serverFileButtons.orientation = .horizontal
         serverFileButtons.spacing = 8
@@ -198,7 +198,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         syncRulesLabel.alignment = .right
         let syncRulesButton = button(title: "Sync Rules...", action: #selector(showSyncRules))
         syncRulesButton.setAccessibilityLabel("Sync rules")
-        syncRulesButton.setAccessibilityHelp("Open the sync rules editor, where clipboard entries are routed into named sync channels and each device chooses which channels it downloads.")
+        syncRulesButton.setContextHelp("Open the sync rules editor, where clipboard entries are routed into named sync channels and each device chooses which channels it downloads.")
         grid.addRow(with: [syncRulesLabel, syncRulesButton])
         let syncRulesNote = NSTextField(wrappingLabelWithString: syncRulesGuidanceText)
         syncRulesNote.textColor = .secondaryLabelColor
@@ -211,11 +211,11 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         addRow("Save current clipboard hotkey, optional", saveCurrentClipboardHotkeyField)
         addRow("Open Quick Clip hotkey, optional", quickClipHotkeyField)
         confirmSingleModifierHotkeysCheckbox.setAccessibilityLabel("Warn before saving single-modifier global hotkeys")
-        confirmSingleModifierHotkeysCheckbox.setAccessibilityHelp("When checked, Clipman warns before saving an allowed global hotkey that uses only one modifier. You can also turn this warning off from its confirmation dialog.")
+        confirmSingleModifierHotkeysCheckbox.setContextHelp("When checked, Clipman warns before saving an allowed global hotkey that uses only one modifier. You can also turn this warning off from its confirmation dialog.")
         grid.addRow(with: [NSGridCell.emptyContentView, confirmSingleModifierHotkeysCheckbox])
         addRow("History password", passwordField)
         rememberPasswordCheckbox.setAccessibilityLabel("Remember history password in Keychain")
-        rememberPasswordCheckbox.setAccessibilityHelp("When checked, Clipman stores the history password in this Mac user's Keychain. When unchecked, Clipman asks for the password each app session and keeps it only in memory.")
+        rememberPasswordCheckbox.setContextHelp("When checked, Clipman stores the history password in this Mac user's Keychain. When unchecked, Clipman asks for the password each app session and keeps it only in memory.")
         grid.addRow(with: [NSGridCell.emptyContentView, rememberPasswordCheckbox])
         addIgnoredApplicationsRow(to: grid)
         showHotkeyField.hotkeyDelegate = self
@@ -231,13 +231,13 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         soundsCheckbox.target = nil
         soundsCheckbox.action = nil
         soundsCheckbox.setAccessibilityLabel("Play sounds")
-        soundsCheckbox.setAccessibilityHelp("When checked, Clipman plays sounds for copy, remote sync, monitoring on, monitoring off, and skipped clipboard events.")
+        soundsCheckbox.setContextHelp("When checked, Clipman plays sounds for copy, remote sync, monitoring on, monitoring off, and skipped clipboard events.")
         grid.addRow(with: [NSGridCell.emptyContentView, soundsCheckbox])
 
         clipMergeCheckbox.target = self
         clipMergeCheckbox.action = #selector(clipMergeSettingChanged)
         clipMergeCheckbox.setAccessibilityLabel("Enable ClipMerge")
-        clipMergeCheckbox.setAccessibilityHelp("When checked, copying the same text or file selection twice within the merge window appends it to the clipboard. This is off by default.")
+        clipMergeCheckbox.setContextHelp("When checked, copying the same text or file selection twice within the merge window appends it to the clipboard. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, clipMergeCheckbox])
         clipMergeWindowField.setAccessibilityLabel("ClipMerge window in milliseconds")
         addRow("ClipMerge window, milliseconds", clipMergeWindowField)
@@ -247,7 +247,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         clipMergeSeparatorPopup.setAccessibilityLabel("ClipMerge text separator")
         addRow("ClipMerge text separator", clipMergeSeparatorPopup)
         clipMergeCustomSeparatorField.setAccessibilityLabel("Custom ClipMerge text separator")
-        clipMergeCustomSeparatorField.setAccessibilityHelp("Backslash n, backslash r backslash n, and backslash t are supported. Merged formatted text becomes plain text.")
+        clipMergeCustomSeparatorField.setContextHelp("Backslash n, backslash r backslash n, and backslash t are supported. Merged formatted text becomes plain text.")
         addRow("Custom separator", clipMergeCustomSeparatorField)
         multipleEntrySeparatorPopup.addItems(withTitles: ["No separator", "New line", "Blank line", "Space", "Comma and space", "Custom"])
         multipleEntrySeparatorPopup.target = self
@@ -255,7 +255,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         multipleEntrySeparatorPopup.setAccessibilityLabel("Multiple selected entries separator")
         addRow("Multiple-entry separator", multipleEntrySeparatorPopup)
         multipleEntryCustomSeparatorField.setAccessibilityLabel("Custom multiple-entry separator")
-        multipleEntryCustomSeparatorField.setAccessibilityHelp("Backslash n, backslash r backslash n, and backslash t are supported.")
+        multipleEntryCustomSeparatorField.setContextHelp("Backslash n, backslash r backslash n, and backslash t are supported.")
         addRow("Custom multiple-entry separator", multipleEntryCustomSeparatorField)
 
         runAtStartupCheckbox.target = nil
@@ -266,49 +266,49 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         captureClipboardOnStartupCheckbox.target = nil
         captureClipboardOnStartupCheckbox.action = nil
         captureClipboardOnStartupCheckbox.setAccessibilityLabel("Add current clipboard item to Clipman on start")
-        captureClipboardOnStartupCheckbox.setAccessibilityHelp("When checked, Clipman tries to add the current Mac clipboard item to history once when Clipman starts. This is off by default and still follows monitoring, ignored application, concealed pasteboard, and sensitive data settings.")
+        captureClipboardOnStartupCheckbox.setContextHelp("When checked, Clipman tries to add the current Mac clipboard item to history once when Clipman starts. This is off by default and still follows monitoring, ignored application, concealed pasteboard, and sensitive data settings.")
         grid.addRow(with: [NSGridCell.emptyContentView, captureClipboardOnStartupCheckbox])
 
         autoCopyRemoteCheckbox.target = nil
         autoCopyRemoteCheckbox.action = nil
         autoCopyRemoteCheckbox.setAccessibilityLabel("Copy latest remote text to this Mac clipboard")
-        autoCopyRemoteCheckbox.setAccessibilityHelp("When enabled, new text copied on another device sharing this database is placed on this Mac clipboard. This is off by default.")
+        autoCopyRemoteCheckbox.setContextHelp("When enabled, new text copied on another device sharing this database is placed on this Mac clipboard. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, autoCopyRemoteCheckbox])
 
         pasteAfterEnterCheckbox.target = nil
         pasteAfterEnterCheckbox.action = nil
         pasteAfterEnterCheckbox.setAccessibilityLabel("After Enter, paste into the previous application")
-        pasteAfterEnterCheckbox.setAccessibilityHelp("When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. macOS will ask for permission to let Clipman send the paste command. This is off by default.")
+        pasteAfterEnterCheckbox.setContextHelp("When checked, pressing Enter on a Text or Links history entry copies it, closes Clipman, returns to the previously active application, and pastes it. macOS will ask for permission to let Clipman send the paste command. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, pasteAfterEnterCheckbox])
 
         dynamicHistoryModeCheckbox.target = nil
         dynamicHistoryModeCheckbox.action = nil
         dynamicHistoryModeCheckbox.setAccessibilityLabel("Open history to the most recent clipboard type")
-        dynamicHistoryModeCheckbox.setAccessibilityHelp("When checked, opening history selects Text, Links, or Files according to the most recent clipboard data Clipman accepted during this run. This is off by default.")
+        dynamicHistoryModeCheckbox.setContextHelp("When checked, opening history selects Text, Links, or Files according to the most recent clipboard data Clipman accepted during this run. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, dynamicHistoryModeCheckbox])
 
         linksHistoryCheckbox.target = nil
         linksHistoryCheckbox.action = nil
         linksHistoryCheckbox.setAccessibilityLabel("Show Links history tab")
-        linksHistoryCheckbox.setAccessibilityHelp("When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.")
+        linksHistoryCheckbox.setContextHelp("When checked, copied HTTP and HTTPS links that are the whole clipboard entry also appear in a separate Links history tab. When unchecked, links remain in Text history.")
         grid.addRow(with: [NSGridCell.emptyContentView, linksHistoryCheckbox])
 
         richTextHistoryCheckbox.target = self
         richTextHistoryCheckbox.action = #selector(richTextHistoryChanged)
         richTextHistoryCheckbox.setAccessibilityLabel("Preserve copied formatting and show Rich Text history")
-        richTextHistoryCheckbox.setAccessibilityHelp("When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows the Rich Text history tab. Enable this before copying formatted content. This is off by default.")
+        richTextHistoryCheckbox.setContextHelp("When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows the Rich Text history tab. Enable this before copying formatted content. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, richTextHistoryCheckbox])
 
         includeImagesCheckbox.target = self
         includeImagesCheckbox.action = #selector(imageHistorySettingChanged)
         includeImagesCheckbox.setAccessibilityLabel("Include images in Rich Text history")
-        includeImagesCheckbox.setAccessibilityHelp(includeImagesEnabledAccessibilityHelp)
+        includeImagesCheckbox.setContextHelp(includeImagesEnabledAccessibilityHelp)
         grid.addRow(with: [NSGridCell.emptyContentView, includeImagesCheckbox])
 
         alsoAddCopiedImageFilesCheckbox.target = nil
         alsoAddCopiedImageFilesCheckbox.action = nil
         alsoAddCopiedImageFilesCheckbox.setAccessibilityLabel("Also add copied PNG and JPEG files to Rich Text history")
-        alsoAddCopiedImageFilesCheckbox.setAccessibilityHelp("When checked, copying exactly one local PNG or JPEG file keeps the normal File History event and also adds the image to Rich Text history. This is off by default.")
+        alsoAddCopiedImageFilesCheckbox.setContextHelp("When checked, copying exactly one local PNG or JPEG file keeps the normal File History event and also adds the image to Rich Text history. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, alsoAddCopiedImageFilesCheckbox])
         includeImagesPrivacyLabel.textColor = .secondaryLabelColor
         includeImagesPrivacyLabel.setAccessibilityLabel("Image metadata privacy")
@@ -322,13 +322,13 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         confirmWebsiteTitleRequestsCheckbox.target = nil
         confirmWebsiteTitleRequestsCheckbox.action = nil
         confirmWebsiteTitleRequestsCheckbox.setAccessibilityLabel("Ask before contacting a website for its title")
-        confirmWebsiteTitleRequestsCheckbox.setAccessibilityHelp("When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog.")
+        confirmWebsiteTitleRequestsCheckbox.setContextHelp("When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog.")
         grid.addRow(with: [NSGridCell.emptyContentView, confirmWebsiteTitleRequestsCheckbox])
 
         autoNameCopiedWebsiteLinksCheckbox.target = nil
         autoNameCopiedWebsiteLinksCheckbox.action = nil
         autoNameCopiedWebsiteLinksCheckbox.setAccessibilityLabel("Automatically name copied website links from page headings")
-        autoNameCopiedWebsiteLinksCheckbox.setAccessibilityHelp("When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default.")
+        autoNameCopiedWebsiteLinksCheckbox.setContextHelp("When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default.")
         grid.addRow(with: [NSGridCell.emptyContentView, autoNameCopiedWebsiteLinksCheckbox])
 
         updateFrequencyPopup.addItems(withTitles: ["Never", "At startup", "Hourly", "Daily"])
@@ -338,7 +338,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         installUpdatesSilentlyCheckbox.target = nil
         installUpdatesSilentlyCheckbox.action = nil
         installUpdatesSilentlyCheckbox.setAccessibilityLabel("Install updates silently")
-        installUpdatesSilentlyCheckbox.setAccessibilityHelp("When checked, Clipman installs available Mac updates in the background and relaunches itself.")
+        installUpdatesSilentlyCheckbox.setContextHelp("When checked, Clipman installs available Mac updates in the background and relaunches itself.")
         grid.addRow(with: [NSGridCell.emptyContentView, installUpdatesSilentlyCheckbox])
 
         sensitiveDataModePopup.addItems(withTitles: ["Off", "Exclude from history"])
@@ -620,7 +620,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             includeImagesCheckbox.state = .off
         }
         includeImagesCheckbox.isEnabled = enabled
-        includeImagesCheckbox.setAccessibilityHelp(enabled
+        includeImagesCheckbox.setContextHelp(enabled
             ? includeImagesEnabledAccessibilityHelp
             : "Enable Preserve copied formatting and show Rich Text history before including images.")
         let automaticFileCaptureEnabled = enabled && includeImagesCheckbox.state == .on
@@ -628,7 +628,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
             alsoAddCopiedImageFilesCheckbox.state = .off
         }
         alsoAddCopiedImageFilesCheckbox.isEnabled = automaticFileCaptureEnabled
-        alsoAddCopiedImageFilesCheckbox.setAccessibilityHelp(automaticFileCaptureEnabled
+        alsoAddCopiedImageFilesCheckbox.setContextHelp(automaticFileCaptureEnabled
             ? "When checked, copying exactly one local PNG or JPEG file keeps the normal File History event and also adds the image to Rich Text history. This is off by default."
             : "Enable Rich Text history and Include images in Rich Text history before also adding copied image files.")
     }
@@ -937,7 +937,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         ignoredApplicationsView.isAutomaticDashSubstitutionEnabled = false
         ignoredApplicationsView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         ignoredApplicationsView.setAccessibilityLabel("Ignored applications")
-        ignoredApplicationsView.setAccessibilityHelp("One Mac app name, bundle identifier, or executable name per line, such as Safari, com.apple.TextEdit, or KeePassXC.")
+        ignoredApplicationsView.setContextHelp("One Mac app name, bundle identifier, or executable name per line, such as Safari, com.apple.TextEdit, or KeePassXC.")
 
         let scroll = NSScrollView()
         scroll.borderType = .bezelBorder
@@ -965,7 +965,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         for preset in SensitiveDataExclusion.builtInPresets {
             let checkbox = NSButton(checkboxWithTitle: preset.name, target: nil, action: nil)
             checkbox.setAccessibilityLabel(preset.name)
-            checkbox.setAccessibilityHelp("When checked, this preset is excluded from automatic clipboard history if sensitive data mode is set to Exclude from history.")
+            checkbox.setContextHelp("When checked, this preset is excluded from automatic clipboard history if sensitive data mode is set to Exclude from history.")
             sensitiveDataPresetCheckboxes[preset.id] = checkbox
             stack.addArrangedSubview(checkbox)
         }

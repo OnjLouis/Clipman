@@ -25,6 +25,7 @@ gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 from update_service import UpdateError, find_update, stage_update
+import context_help
 
 
 APP_ID = "me.onj.clipman.linux"
@@ -1069,7 +1070,7 @@ class HotkeyEntry(Gtk.Entry):
     def __init__(self, accelerator, label):
         super().__init__()
         self.accelerator = ""
-        self.update_property(
+        context_help.set_properties(self,
             [Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
             [label, "Press a shortcut. Delete or Backspace clears it. Two modifiers are required except with F1 through F12, Grave, or Backslash."],
         )
@@ -1108,6 +1109,8 @@ class HotkeyEntry(Gtk.Entry):
 
     def _key_pressed(self, _controller, keyval, _keycode, state):
         modifiers = state & self.MODIFIERS
+        if keyval == Gdk.KEY_F1 and not modifiers:
+            return False
         if keyval in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_Escape):
             return False
         if keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace) and not modifiers:
@@ -1603,6 +1606,7 @@ class ClipmanApplication(Gtk.Application):
         self.own_clipboard_image_signature = None
         self.own_clipboard_files = None
         self.image_clipboard_cache = ClipboardImageFileCache()
+        self.image_viewer_cache = ClipboardImageFileCache(pathlib.Path(GLib.get_user_runtime_dir() or GLib.get_user_cache_dir()) / "clipman-viewer")
         self.image_clipboard_expiry_source = 0
         self.clipboard_read_busy = False
         self.clipboard_read_from_change = False
@@ -1641,7 +1645,7 @@ class ClipmanApplication(Gtk.Application):
             self.backend = Backend(self._backend_ready, self._fatal_error)
             self._register_hotkeys()
             self._consume_update_result()
-        self.window.present()
+        self._present(self.window)
 
     def do_open(self, files, _n_files, _hint):
         if files:
@@ -1652,6 +1656,10 @@ class ClipmanApplication(Gtk.Application):
 
     def do_shutdown(self):
         self._clear_clipboard_image_file()
+        try:
+            self.image_viewer_cache.clear()
+        except OSError:
+            pass
         for source in (self.poll_source, self.clipboard_change_source, self.update_poll_source, self.startup_update_source, self.image_clipboard_expiry_source):
             if source:
                 GLib.source_remove(source)
@@ -1725,6 +1733,7 @@ class ClipmanApplication(Gtk.Application):
             "open-settings": self.open_settings_folder,
             "toggle-monitoring": self.toggle_monitoring,
             "manual": self.open_manual,
+            "context-help": lambda *_: context_help.show(self.get_active_window(), self.open_manual),
             "check-updates": lambda *_: self.check_for_updates(True),
             "version-history": self.open_version_history,
             "project": self.open_project,
@@ -1774,7 +1783,7 @@ class ClipmanApplication(Gtk.Application):
             "app.top": ["<Control>Home"], "app.bottom": ["<Control>End"],
             "app.preferences": ["<Control>comma"], "app.quit": ["<Control>q"],
             "app.secrets": ["<Control><Shift>e"],
-            "app.manual": ["F1"], "app.check-updates": ["<Shift>F1"], "app.project": ["<Control>F1"],
+            "app.context-help": ["F1"], "app.check-updates": ["<Shift>F1"], "app.project": ["<Control>F1"],
             "app.diagnostics": ["<Alt>F1"],
             "app.plain-text": ["<Control><Shift>c"], "app.trim": ["<Control><Shift>t"],
             "app.single-line": ["<Control><Shift>l"], "app.remove-blank-lines": ["<Control><Shift>b"],
@@ -1799,7 +1808,7 @@ class ClipmanApplication(Gtk.Application):
         self.section_tabs = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.section_tabs.add_css_class("linked")
         self.section_tabs.set_accessible_role(Gtk.AccessibleRole.TAB_LIST)
-        self.section_tabs.update_property([Gtk.AccessibleProperty.LABEL], ["History sections"])
+        context_help.set_properties(self.section_tabs, [Gtk.AccessibleProperty.LABEL], ["History sections"])
         root.append(self.section_tabs)
         self.section_buttons = {}
         self.updating_section_tabs = False
@@ -1813,7 +1822,7 @@ class ClipmanApplication(Gtk.Application):
         for section, (label, shortcut) in section_labels.items():
             button = Gtk.ToggleButton(label=label)
             button.set_accessible_role(Gtk.AccessibleRole.TAB)
-            button.update_property([Gtk.AccessibleProperty.LABEL], [label + " history"])
+            context_help.set_properties(button, [Gtk.AccessibleProperty.LABEL], [label + " history"])
             button.set_tooltip_text(label + " history (" + shortcut + ")")
             if first_button is None:
                 first_button = button
@@ -1829,7 +1838,7 @@ class ClipmanApplication(Gtk.Application):
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         root.append(toolbar)
         self.search = Gtk.SearchEntry(placeholder_text="Search clipboard history")
-        self.search.update_property([Gtk.AccessibleProperty.LABEL], ["Search clipboard history"])
+        context_help.set_properties(self.search, [Gtk.AccessibleProperty.LABEL], ["Search clipboard history"])
         self.search.set_hexpand(True)
         self.search.connect("search-changed", lambda *_: self.rebuild_list())
         self.search.connect("next-match", lambda *_: self.move_selection(1))
@@ -1839,7 +1848,7 @@ class ClipmanApplication(Gtk.Application):
         self.group_picker = Gtk.DropDown(model=self.group_model)
         self.group_picker.set_enable_search(True)
         self.group_picker.set_tooltip_text("Filter by group or device")
-        self.group_picker.update_property([Gtk.AccessibleProperty.LABEL], ["Filter by group or device"])
+        context_help.set_properties(self.group_picker, [Gtk.AccessibleProperty.LABEL], ["Filter by group or device"])
         self.group_picker.connect("notify::selected", self._history_filter_changed)
         self.group_label = Gtk.Label(label="_Filter:", use_underline=True)
         self.group_label.set_mnemonic_widget(self.group_picker)
@@ -1869,7 +1878,7 @@ class ClipmanApplication(Gtk.Application):
         view = Gio.Menu(); view.append("_Text History", "app.text"); view.append("_Links History", "app.links"); view.append("_Rich Text History", "app.rich"); view.append("File H_istory", "app.files"); view.append("Move tab l_eft", "app.move-tab-left"); view.append("Move tab ri_ght", "app.move-tab-right"); view.append("Go to T_op", "app.top"); view.append("Go to _Bottom", "app.bottom")
         self.sort_menu = Gio.Menu(); view.append_submenu("_Sort", self.sort_menu)
         options = Gio.Menu(); options.append("_Preferences", "app.preferences"); options.append("S_ecrets", "app.secrets"); options.append("_Open settings folder", "app.open-settings"); options.append("_Toggle monitoring", "app.toggle-monitoring")
-        help_menu = Gio.Menu(); help_menu.append("_Manual", "app.manual"); help_menu.append("_Check for Updates...", "app.check-updates"); help_menu.append("_Version History", "app.version-history"); help_menu.append("_Project page", "app.project"); help_menu.append("Con_tact", "app.contact"); help_menu.append("_Donate", "app.donate"); help_menu.append("Dia_gnostics", "app.diagnostics"); help_menu.append("_About Clipman", "app.about")
+        help_menu = Gio.Menu(); help_menu.append("Help for _Focused Control", "app.context-help"); help_menu.append("_Manual", "app.manual"); help_menu.append("_Check for Updates...", "app.check-updates"); help_menu.append("_Version History", "app.version-history"); help_menu.append("_Project page", "app.project"); help_menu.append("Con_tact", "app.contact"); help_menu.append("_Donate", "app.donate"); help_menu.append("Dia_gnostics", "app.diagnostics"); help_menu.append("_About Clipman", "app.about")
         menu.append_submenu("_File", file_menu); menu.append_submenu("_Edit", self.edit_menu); menu.append_submenu("Grou_ps", self.groups_menu); menu.append_submenu("_Quick Paste", self.quick_paste_menu); menu.append_submenu("_Actions", self.actions_menu); menu.append_submenu("_View", view); menu.append_submenu("_Options", options); menu.append_submenu("_Help", help_menu)
         self._populate_section_menus()
         self._populate_quick_paste_menu()
@@ -1897,6 +1906,7 @@ class ClipmanApplication(Gtk.Application):
             for label, action in (
                 ("_Restore files to clipboard", "copy-close"), ("Copy file _paths", "copy-paths"),
                 ("Pin or unp_in", "pin"), ("Go to _file", "copy-name-content"),
+                ("_Open location and close", "open-link"),
                 ("_View event details", "details"), ("S_elect all", "select-all"), ("_Delete selected", "delete"),
                 ("Remove _unavailable events", "remove-unavailable-files"),
                 ("Clear file _history", "clear-file-history"),
@@ -1909,7 +1919,7 @@ class ClipmanApplication(Gtk.Application):
                 ("Copy name and c_ontent", "copy-name-content"), ("Cu_t", "cut"),
                 ("Paste _after selected", "paste-after"), ("_Group entry", "group-entry"),
                 ("Entry _properties", "properties"), ("Set as _quick-paste target", "quick-assign"),
-                ("Open _website link", "open-link"),
+                ("Open image or _website link", "open-link"),
                 ("P_ush to other devices", "push"),
                 ("_View full text", "details"), ("Pin or unp_in", "pin"),
                 ("_Delete selected", "delete"), ("S_elect all", "select-all"), ("_Find...", "find"),
@@ -1967,7 +1977,7 @@ class ClipmanApplication(Gtk.Application):
             "select-all": bool(self.visible_entries()), "find": True, "find-next": True, "find-previous": True,
             "clear-file-history": files, "remove-unavailable-files": files,
             "website-title": one_selected and writable_text and can_use_website_title(entry),
-            "open-link": one_selected and not files and bool(openable_web_link(entry.get("text", "") if entry else "")),
+            "open-link": one_selected and bool(entry and (files or openable_web_link(entry.get("text", "")) or parse_clipman_image(entry.get("rich_text")))),
         }
         for name in (
             "plain-text", "trim", "single-line", "remove-blank-lines", "remove-tracking", "clean-sharing",
@@ -2283,6 +2293,9 @@ class ClipmanApplication(Gtk.Application):
             self.sounds.play("skip")
             return GLib.SOURCE_REMOVE
         filename = "Clipboard image.png" if state["mime"] == "image/png" else "Clipboard image.jpg"
+        source = _safe_clipboard_filename_component(state.get("source", ""), limit=64)
+        if source:
+            filename = "Clipboard image - " + source + pathlib.Path(filename).suffix
         threading.Thread(target=self._prepare_image_worker, args=(data, state, filename), daemon=True).start()
         return GLib.SOURCE_REMOVE
 
@@ -2928,7 +2941,7 @@ class ClipmanApplication(Gtk.Application):
                 header.set_margin_top(8); header.set_margin_bottom(8)
                 header.set_margin_start(8); header.set_margin_end(8)
                 separator.set_child(header)
-                separator.update_property(
+                context_help.set_properties(separator,
                     [Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
                     ["Normal Entries", "Separator between pinned and normal entries"],
                 )
@@ -2977,7 +2990,7 @@ class ClipmanApplication(Gtk.Application):
             else:
                 accessible_label = (", ".join(state) + ". " if state else "") + entry_summary(entry)
             row.set_tooltip_text(description)
-            row.update_property(
+            context_help.set_properties(row,
                 [Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
                 [accessible_label, description],
             )
@@ -3061,6 +3074,7 @@ class ClipmanApplication(Gtk.Application):
             menu.append("Restore Files to Clipboard", "app.copy-close")
             menu.append("Copy File Paths", "app.copy-paths")
             menu.append("Go to File", "app.go-to-file")
+            menu.append("Open Location and Close", "app.open-link")
             menu.append("View Event Details", "app.details")
             menu.append("Pin or Unpin", "app.pin")
             menu.append("Move Up", "app.move-up")
@@ -3077,8 +3091,8 @@ class ClipmanApplication(Gtk.Application):
             menu.append("Entry Properties", "app.properties")
             if can_use_website_title(row.clipman_entry):
                 menu.append("Use Website Title as Name...", "app.website-title")
-            if openable_web_link(row.clipman_entry.get("text", "")):
-                menu.append("Open Link", "app.open-link")
+            if openable_web_link(row.clipman_entry.get("text", "")) or parse_clipman_image(row.clipman_entry.get("rich_text")):
+                menu.append("Open Image or Link", "app.open-link")
             menu.append("Set as Quick Paste Target", "app.quick-assign")
             menu.append("Push to Other Devices", "app.push")
             menu.append("Entry Details", "app.details")
@@ -3100,6 +3114,8 @@ class ClipmanApplication(Gtk.Application):
         ]
 
     def _update_section_tabs(self):
+        names = {"text": "Text history", "links": "Links history", "rich": "Rich text history", "files": "File history"}
+        self.listbox._clipman_help_name = names.get(self.section, "Text history")
         available = self._available_sections()
         if self.section not in available:
             self.section = "text"
@@ -3606,12 +3622,12 @@ class ClipmanApplication(Gtk.Application):
         if replace:
             message += " Import and Replace removes the current text history before importing this file."
         area.append(Gtk.Label(label=message, wrap=True, xalign=0))
-        password = Gtk.PasswordEntry(show_peek_icon=True); password.update_property([Gtk.AccessibleProperty.LABEL], ["Import file password"]); area.append(password)
+        password = Gtk.PasswordEntry(show_peek_icon=True); context_help.set_properties(password, [Gtk.AccessibleProperty.LABEL], ["Import file password"]); area.append(password)
         def response(_dialog, code):
             if code == Gtk.ResponseType.OK:
                 self.backend.call("import", {"path": path, "password": password.get_text(), "replace": replace}, lambda result: self._operation_response(result, "Imported clipboard history."))
             dialog.destroy()
-        dialog.connect("response", response); dialog.present(); password.grab_focus()
+        dialog.connect("response", response); self._present(dialog); password.grab_focus()
 
     def export_history(self, *_args):
         chooser = self._clipdb_file_dialog("Export Clipboard History")
@@ -3630,11 +3646,11 @@ class ClipmanApplication(Gtk.Application):
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Export", Gtk.ResponseType.OK)
         area = dialog.get_content_area(); area.set_spacing(8); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         area.append(Gtk.Label(label="Confirm the current history password, then choose how to protect the exported file.", wrap=True, xalign=0))
-        current = Gtk.PasswordEntry(show_peek_icon=True); current.update_property([Gtk.AccessibleProperty.LABEL], ["Current history password"]); area.append(current)
+        current = Gtk.PasswordEntry(show_peek_icon=True); context_help.set_properties(current, [Gtk.AccessibleProperty.LABEL], ["Current history password"]); area.append(current)
         modes = ["Use current history password", "Use a new password", "Use no password"]
-        mode = Gtk.DropDown(model=Gtk.StringList.new(modes)); mode.update_property([Gtk.AccessibleProperty.LABEL], ["Export password choice"]); area.append(mode)
-        new_password = Gtk.PasswordEntry(show_peek_icon=True); new_password.update_property([Gtk.AccessibleProperty.LABEL], ["New export password"]); area.append(new_password)
-        confirm = Gtk.PasswordEntry(show_peek_icon=True); confirm.update_property([Gtk.AccessibleProperty.LABEL], ["Confirm new export password"]); area.append(confirm)
+        mode = Gtk.DropDown(model=Gtk.StringList.new(modes)); context_help.set_properties(mode, [Gtk.AccessibleProperty.LABEL], ["Export password choice"]); area.append(mode)
+        new_password = Gtk.PasswordEntry(show_peek_icon=True); context_help.set_properties(new_password, [Gtk.AccessibleProperty.LABEL], ["New export password"]); area.append(new_password)
+        confirm = Gtk.PasswordEntry(show_peek_icon=True); context_help.set_properties(confirm, [Gtk.AccessibleProperty.LABEL], ["Confirm new export password"]); area.append(confirm)
         def update_fields(*_args):
             visible = mode.get_selected() == 1
             new_password.set_visible(visible); confirm.set_visible(visible)
@@ -3648,7 +3664,7 @@ class ClipmanApplication(Gtk.Application):
             mode_key = ("current", "new", "none")[mode.get_selected()]
             self.backend.call("export", {"path": path, "current_password": current.get_text(), "mode": mode_key, "export_password": new_password.get_text()}, lambda result: self._export_response(result, path))
             dialog.destroy()
-        dialog.connect("response", response); dialog.present(); current.grab_focus()
+        dialog.connect("response", response); self._present(dialog); current.grab_focus()
 
     def _export_response(self, message, path):
         if not message.get("ok"):
@@ -3669,12 +3685,12 @@ class ClipmanApplication(Gtk.Application):
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Clear History", Gtk.ResponseType.OK)
         area = dialog.get_content_area(); area.set_spacing(8); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         area.append(Gtk.Label(label="This removes every text and link entry from the shared Clipman database. Enter the history password to confirm.", wrap=True, xalign=0))
-        password = Gtk.PasswordEntry(show_peek_icon=True); password.update_property([Gtk.AccessibleProperty.LABEL], ["History password"]); area.append(password)
+        password = Gtk.PasswordEntry(show_peek_icon=True); context_help.set_properties(password, [Gtk.AccessibleProperty.LABEL], ["History password"]); area.append(password)
         def response(_dialog, code):
             if code == Gtk.ResponseType.OK:
                 self.backend.call("clear_history", {"password": password.get_text()}, lambda result: self._operation_response(result, "Cleared text and link clipboard history."))
             dialog.destroy()
-        dialog.connect("response", response); dialog.present(); password.grab_focus()
+        dialog.connect("response", response); self._present(dialog); password.grab_focus()
 
     def _put_text(self, text, quiet=False, automatic=False, source="", rich_text=None, failure=None, success=None, capture_observation=None, preserve_existing=False):
         original_text = text
@@ -3737,7 +3753,7 @@ class ClipmanApplication(Gtk.Application):
         area = dialog.get_content_area(); area.set_spacing(8); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         area.append(Gtk.Label(label="Group", xalign=0))
         initial_groups = {entry.get("group", "") for entry in entries}
-        field = Gtk.Entry(text=initial_groups.pop() if len(initial_groups) == 1 else ""); field.update_property([Gtk.AccessibleProperty.LABEL], ["Group"]); area.append(field)
+        field = Gtk.Entry(text=initial_groups.pop() if len(initial_groups) == 1 else ""); context_help.set_properties(field, [Gtk.AccessibleProperty.LABEL], ["Group"]); area.append(field)
         if len(self.groups) > 4:
             area.append(Gtk.Label(label="Existing groups: " + ", ".join(self.groups[4:]), wrap=True, xalign=0))
         def response(_dialog, code):
@@ -3745,7 +3761,7 @@ class ClipmanApplication(Gtk.Application):
                 updates = [{"id": entry["id"], "text": entry["text"], "name": entry.get("name", ""), "group": field.get_text(), "pinned": entry.get("pinned", False), "is_template": entry.get("is_template", False)} for entry in entries]
                 self.backend.call("update_many", {"entries": updates}, self._history_response)
             dialog.destroy()
-        dialog.connect("response", response); dialog.present(); field.grab_focus()
+        dialog.connect("response", response); self._present(dialog); field.grab_focus()
 
     def use_website_title_as_name(self, *_args):
         entry = self.selected_entry()
@@ -3773,10 +3789,10 @@ class ClipmanApplication(Gtk.Application):
             wrap=True, xalign=0,
         ))
         destination_label = Gtk.Label(label="Destination: " + destination, wrap=True, xalign=0, selectable=True)
-        destination_label.update_property([Gtk.AccessibleProperty.LABEL], ["Website destination: " + destination])
+        context_help.set_properties(destination_label, [Gtk.AccessibleProperty.LABEL], ["Website destination: " + destination])
         area.append(destination_label)
         suppress = Gtk.CheckButton(label="Do not show this again")
-        suppress.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Turn this confirmation off. You can turn it back on in Preferences."])
+        context_help.set_properties(suppress, [Gtk.AccessibleProperty.DESCRIPTION], ["Turn this confirmation off. You can turn it back on in Preferences."])
         area.append(suppress)
 
         def response(_dialog, code):
@@ -3788,10 +3804,29 @@ class ClipmanApplication(Gtk.Application):
                 self.preferences.save()
             self._request_website_title(entry)
         dialog.connect("response", response)
-        dialog.present()
+        self._present(dialog)
 
     def open_selected_link(self, *_args):
+        if len(self.selected_entries()) != 1:
+            self.sounds.play("skip")
+            self.set_status("Select one image, link or file-history item first.", True)
+            return
+        if self.section == "files":
+            if self.go_to_selected_file():
+                self.window.set_visible(False)
+            return
         entry = self.selected_entry()
+        image = parse_clipman_image(entry.get("rich_text")) if entry else None
+        if image:
+            try:
+                path = self.image_viewer_cache.materialize(image, entry)
+                self._open_uri(path.as_uri())
+                self.set_status("Opened image in the default application.", True)
+                self.window.set_visible(False)
+            except Exception as error:
+                self.sounds.play("skip")
+                self.set_status("The selected image could not be opened. " + str(error), True)
+            return
         uri = openable_web_link(entry.get("text", "") if entry else "")
         if not uri:
             self.sounds.play("skip")
@@ -3800,6 +3835,7 @@ class ClipmanApplication(Gtk.Application):
         try:
             self._open_uri(uri)
             self.set_status("Opened link in the default browser.", True)
+            self.window.set_visible(False)
         except Exception as error:
             self.sounds.play("skip")
             self.set_status("The selected link could not be opened. " + str(error), True)
@@ -3925,7 +3961,7 @@ class ClipmanApplication(Gtk.Application):
         if self.section == "files": self.show_file_details(entry)
         else: self.show_details(entry)
 
-    def show_entry_dialog(self, entry, focus_quick_paste=False):
+    def show_entry_dialog(self, entry, focus_quick_paste=False, hide_history_after=False):
         embedded_image = parse_clipman_image(entry.get("rich_text")) if entry else None
         dialog = Gtk.Dialog(title="Quick Clip" if entry is None else "Clipboard Entry Properties", transient_for=self.window, modal=True)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.OK)
@@ -3945,7 +3981,7 @@ class ClipmanApplication(Gtk.Application):
         template = Gtk.CheckButton(label="Resolve template fields when copied", active=bool(entry and entry.get("is_template")))
         template.set_sensitive(not bool(embedded_image))
         if embedded_image:
-            template.update_property(
+            context_help.set_properties(template,
                 [Gtk.AccessibleProperty.DESCRIPTION],
                 ["Image content cannot be used as a template."],
             )
@@ -3961,19 +3997,19 @@ class ClipmanApplication(Gtk.Application):
         quick_mode = Gtk.DropDown(model=Gtk.StringList.new(quick_modes))
         quick_mode.set_selected(quick_mode_keys.index(existing_binding.get("mode", "restore")) if existing_binding.get("mode", "restore") in quick_mode_keys else 0)
         quick_mode.set_sensitive(entry is not None and quick_paste.get_active())
-        quick_mode.update_property([Gtk.AccessibleProperty.LABEL], ["Quick Paste mode"])
+        context_help.set_properties(quick_mode, [Gtk.AccessibleProperty.LABEL], ["Quick Paste mode"])
         quick_paste.connect("toggled", lambda control: (quick_hotkey.set_sensitive(entry is not None and control.get_active()), quick_mode.set_sensitive(entry is not None and control.get_active())))
         text_view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR); text_view.set_accepts_tab(False); text_view.set_vexpand(True); text_view.get_buffer().set_text(entry.get("text", "") if entry else "")
         text_view.set_editable(not bool(embedded_image))
         text_label = "Image content" if embedded_image else "Clipboard text"
         if embedded_image:
-            text_view.update_property(
+            context_help.set_properties(text_view,
                 [Gtk.AccessibleProperty.DESCRIPTION],
                 ["This image content cannot be edited. Use Name to rename how the image appears."],
             )
         for label_text, widget in (("Name", name), ("Group", group), (text_label, text_view)):
             label = Gtk.Label(label=label_text, xalign=0); label.set_mnemonic_widget(widget); content.append(label); content.append(widget)
-            widget.update_property([Gtk.AccessibleProperty.LABEL], [label_text])
+            context_help.set_properties(widget, [Gtk.AccessibleProperty.LABEL], [label_text])
         content.append(pinned); content.append(template)
         content.append(quick_paste)
         quick_label = Gtk.Label(label="Quick Paste hotkey", xalign=0); quick_label.set_mnemonic_widget(quick_hotkey)
@@ -3985,13 +4021,13 @@ class ClipmanApplication(Gtk.Application):
         template_tools = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         preset = Gtk.DropDown(model=Gtk.StringList.new([item[0] for item in TEMPLATE_PRESETS])); preset.set_hexpand(True)
-        preset.update_property([Gtk.AccessibleProperty.LABEL], ["Template sample"])
+        context_help.set_properties(preset, [Gtk.AccessibleProperty.LABEL], ["Template sample"])
         insert_preset = Gtk.Button(label="Insert Sample")
         insert_preset.connect("clicked", lambda *_: self._insert_template_text(text_view, template, TEMPLATE_PRESETS[preset.get_selected()][1]))
         preset_row.append(preset); preset_row.append(insert_preset); template_tools.append(preset_row)
         variable_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         variable = Gtk.DropDown(model=Gtk.StringList.new([item[0] for item in TEMPLATE_VARIABLES])); variable.set_hexpand(True)
-        variable.update_property([Gtk.AccessibleProperty.LABEL], ["Template field"])
+        context_help.set_properties(variable, [Gtk.AccessibleProperty.LABEL], ["Template field"])
         insert_variable = Gtk.Button(label="Insert Field")
         insert_variable.connect("clicked", lambda *_: self._insert_template_text(text_view, template, TEMPLATE_VARIABLES[variable.get_selected()][1]))
         variable_row.append(variable); variable_row.append(insert_variable); template_tools.append(variable_row)
@@ -4041,7 +4077,9 @@ class ClipmanApplication(Gtk.Application):
                     self.preferences.save(); self._register_hotkeys(); self._populate_quick_paste_menu()
                 self.backend.call(action, params, self._history_response)
             dialog.destroy()
-        dialog.connect("response", response); dialog.present()
+            if hide_history_after:
+                self.window.set_visible(False)
+        dialog.connect("response", response); self._present(dialog)
         if focus_quick_paste:
             GLib.idle_add(lambda: (quick_hotkey.grab_focus(), False)[1])
         elif entry is None:
@@ -4064,9 +4102,9 @@ class ClipmanApplication(Gtk.Application):
         dialog.add_button("Close", Gtk.ResponseType.CLOSE)
         area = dialog.get_content_area(); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         text = Gtk.TextView(editable=False, cursor_visible=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
-        text.set_accepts_tab(False); text.update_property([Gtk.AccessibleProperty.LABEL], ["Resolved template preview"])
+        text.set_accepts_tab(False); context_help.set_properties(text, [Gtk.AccessibleProperty.LABEL], ["Resolved template preview"])
         text.get_buffer().set_text(message["result"]["text"]); area.append(text)
-        dialog.set_default_size(600, 360); dialog.connect("response", lambda d, _r: d.destroy()); dialog.present()
+        dialog.set_default_size(600, 360); dialog.connect("response", lambda d, _r: d.destroy()); self._present(dialog)
 
     def show_details(self, entry):
         dialog = Gtk.Dialog(title="Clipboard Entry Details", transient_for=self.window, modal=True)
@@ -4080,7 +4118,7 @@ class ClipmanApplication(Gtk.Application):
             preview = Gtk.Picture()
             preview.set_can_shrink(True)
             preview.set_size_request(-1, 260)
-            preview.update_property(
+            context_help.set_properties(preview,
                 [Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
                 ["Image preview: " + embedded_image["alt"], f'{embedded_image["filename"]}, {embedded_image["width"]} by {embedded_image["height"]} pixels'],
             )
@@ -4089,7 +4127,7 @@ class ClipmanApplication(Gtk.Application):
         rendered_html = False if embedded_image else populate_safe_rich_buffer(text.get_buffer(), rich_text, entry["text"])
         if embedded_image:
             text.get_buffer().set_text(entry["text"])
-        text.update_property([Gtk.AccessibleProperty.LABEL], ["Formatted clipboard text" if rendered_html else "Clipboard text"])
+        context_help.set_properties(text, [Gtk.AccessibleProperty.LABEL], ["Formatted clipboard text" if rendered_html else "Clipboard text"])
         content.append(text)
         details = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         values = [
@@ -4115,7 +4153,7 @@ class ClipmanApplication(Gtk.Application):
         for key, value in values:
             row = Gtk.Label(label=f"{key}: {value}", xalign=0); row.set_margin_top(3); row.set_margin_bottom(3); details.append(row)
         content.append(details); dialog.set_default_size(650, 540)
-        dialog.connect("response", lambda d, _r: d.destroy()); dialog.present()
+        dialog.connect("response", lambda d, _r: d.destroy()); self._present(dialog)
 
     def _decode_image_preview(self, picture, embedded_image):
         try:
@@ -4138,7 +4176,7 @@ class ClipmanApplication(Gtk.Application):
         dialog.add_button("Close", Gtk.ResponseType.CLOSE)
         content = dialog.get_content_area(); content.set_spacing(8); content.set_margin_top(12); content.set_margin_bottom(12); content.set_margin_start(12); content.set_margin_end(12)
         files = Gtk.TextView(editable=False, cursor_visible=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, vexpand=True)
-        files.set_accepts_tab(False); files.update_property([Gtk.AccessibleProperty.LABEL], ["File paths"])
+        files.set_accepts_tab(False); context_help.set_properties(files, [Gtk.AccessibleProperty.LABEL], ["File paths"])
         files.get_buffer().set_text("\n".join(event.get("files", [])))
         content.append(files)
         details = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
@@ -4153,15 +4191,15 @@ class ClipmanApplication(Gtk.Application):
         for key, value in values:
             details.append(Gtk.Label(label=f"{key}: {value}", xalign=0))
         content.append(details); dialog.set_default_size(680, 540)
-        dialog.connect("response", lambda d, _r: d.destroy()); dialog.present()
+        dialog.connect("response", lambda d, _r: d.destroy()); self._present(dialog)
 
     def go_to_selected_file(self, *_args):
         if self.section != "files":
-            self.sounds.play("skip"); return
+            self.sounds.play("skip"); return False
         event = self.selected_entry()
         paths = [path for path in (event or {}).get("files", []) if pathlib.Path(path).exists()]
         if len(paths) != 1:
-            self.sounds.play("skip"); self.set_status("Go to File requires one available file or folder.", True); return
+            self.sounds.play("skip"); self.set_status("Go to File requires one available file or folder.", True); return False
         uri = Gio.File.new_for_path(paths[0]).get_uri()
         try:
             proxy = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None, "org.freedesktop.FileManager1", "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1", None)
@@ -4169,8 +4207,9 @@ class ClipmanApplication(Gtk.Application):
         except GLib.Error:
             target = paths[0] if pathlib.Path(paths[0]).is_dir() else str(pathlib.Path(paths[0]).parent)
             try: subprocess.Popen(["xdg-open", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except OSError as error: self.show_error(str(error)); return
+            except OSError as error: self.show_error(str(error)); return False
         self.set_status("Opened the selected file location.", True)
+        return True
 
     def clear_file_history(self, *_args):
         if self.section != "files":
@@ -4242,7 +4281,7 @@ class ClipmanApplication(Gtk.Application):
                 callback(entries)
             dialog.destroy()
         dialog.connect("response", response)
-        dialog.present()
+        self._present(dialog)
 
     def toggle_pin(self, *_args):
         entries = self.selected_entries()
@@ -4256,12 +4295,12 @@ class ClipmanApplication(Gtk.Application):
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Unlock", Gtk.ResponseType.OK)
         area = dialog.get_content_area(); area.set_spacing(8); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         area.append(Gtk.Label(label="Enter the current history password to show secret names and hotkeys.", wrap=True, xalign=0))
-        password = Gtk.PasswordEntry(show_peek_icon=True); password.update_property([Gtk.AccessibleProperty.LABEL], ["History password"]); area.append(password)
+        password = Gtk.PasswordEntry(show_peek_icon=True); context_help.set_properties(password, [Gtk.AccessibleProperty.LABEL], ["History password"]); area.append(password)
         def response(_dialog, code):
             if code == Gtk.ResponseType.OK:
                 self.backend.call("secrets_list", {"password": password.get_text()}, self._secrets_unlocked)
             dialog.destroy()
-        dialog.connect("response", response); dialog.present(); password.grab_focus()
+        dialog.connect("response", response); self._present(dialog); password.grab_focus()
 
     def _secrets_unlocked(self, message):
         if not message.get("ok"):
@@ -4274,7 +4313,7 @@ class ClipmanApplication(Gtk.Application):
         dialog.set_default_size(620, 430)
         area = dialog.get_content_area(); area.set_spacing(8); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         secret_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, activate_on_single_click=False)
-        secret_list.update_property([Gtk.AccessibleProperty.LABEL], ["Saved secrets"])
+        context_help.set_properties(secret_list, [Gtk.AccessibleProperty.LABEL], ["Saved secrets"])
         scroll = Gtk.ScrolledWindow(vexpand=True); scroll.set_child(secret_list); area.append(scroll)
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         add_button = Gtk.Button(label="Add"); edit_button = Gtk.Button(label="Edit"); delete_button = Gtk.Button(label="Delete"); paste_button = Gtk.Button(label="Paste")
@@ -4297,7 +4336,7 @@ class ClipmanApplication(Gtk.Application):
                 label = secret.get("name", "Unnamed secret")
                 if valid: label += "; Hotkey: " + Gtk.accelerator_get_label(keyval, modifiers)
                 row.set_child(Gtk.Label(label=label, xalign=0, margin_top=7, margin_bottom=7, margin_start=7, margin_end=7))
-                row.update_property([Gtk.AccessibleProperty.LABEL], [label]); secret_list.append(row)
+                context_help.set_properties(row, [Gtk.AccessibleProperty.LABEL], [label]); secret_list.append(row)
             if state["secrets"]: secret_list.select_row(secret_list.get_row_at_index(0))
         def selected():
             row = secret_list.get_selected_row(); return getattr(row, "clipman_secret", None) if row else None
@@ -4306,7 +4345,7 @@ class ClipmanApplication(Gtk.Application):
         delete_button.connect("clicked", lambda *_: self._delete_secret(selected(), dialog, state, rebuild))
         paste_button.connect("clicked", lambda *_: self._paste_secret_from_manager(selected(), dialog))
         secret_list.connect("row-activated", lambda *_: self._paste_secret_from_manager(selected(), dialog))
-        rebuild(); dialog.connect("response", lambda d, _r: d.destroy()); dialog.present(); secret_list.grab_focus()
+        rebuild(); dialog.connect("response", lambda d, _r: d.destroy()); self._present(dialog); secret_list.grab_focus()
 
     def _request_secret_edit(self, secret, parent, state, rebuild):
         if not secret: return
@@ -4321,9 +4360,9 @@ class ClipmanApplication(Gtk.Application):
         dialog = Gtk.Dialog(title="Edit Secret" if secret else "Add Secret", transient_for=parent, modal=True)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL); dialog.add_button("Save", Gtk.ResponseType.OK)
         area = dialog.get_content_area(); area.set_spacing(8); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
-        name = Gtk.Entry(text=secret.get("name", "") if secret else ""); name.update_property([Gtk.AccessibleProperty.LABEL], ["Secret name"])
-        value = Gtk.PasswordEntry(show_peek_icon=True); value.set_text(current_value); value.update_property([Gtk.AccessibleProperty.LABEL], ["Secret value"])
-        confirm = Gtk.PasswordEntry(show_peek_icon=True); confirm.set_text(current_value); confirm.update_property([Gtk.AccessibleProperty.LABEL], ["Confirm secret value"])
+        name = Gtk.Entry(text=secret.get("name", "") if secret else ""); context_help.set_properties(name, [Gtk.AccessibleProperty.LABEL], ["Secret name"])
+        value = Gtk.PasswordEntry(show_peek_icon=True); value.set_text(current_value); context_help.set_properties(value, [Gtk.AccessibleProperty.LABEL], ["Secret value"])
+        confirm = Gtk.PasswordEntry(show_peek_icon=True); confirm.set_text(current_value); context_help.set_properties(confirm, [Gtk.AccessibleProperty.LABEL], ["Confirm secret value"])
         current_hotkey = self.preferences.values["secret_hotkeys"].get(secret.get("id"), "") if secret else ""
         hotkey = HotkeyEntry(current_hotkey, "Secret Quick Paste hotkey")
         for label, field in (("Name", name), ("Secret value", value), ("Confirm secret value", confirm), ("Quick Paste hotkey, optional", hotkey)):
@@ -4340,7 +4379,7 @@ class ClipmanApplication(Gtk.Application):
             if accelerator and accelerator in used: error.set_text("That hotkey is already assigned."); return
             params = {"id": secret.get("id", "") if secret else "", "name": name.get_text(), "value": value.get_text()}
             self.backend.call("secret_put", params, lambda message: self._secret_saved(message, accelerator, state, rebuild, dialog))
-        dialog.connect("response", response); dialog.present(); name.grab_focus()
+        dialog.connect("response", response); self._present(dialog); name.grab_focus()
 
     def _secret_saved(self, message, accelerator, state, rebuild, dialog):
         if not message.get("ok"): self.show_error(message.get("error")); return
@@ -4432,14 +4471,14 @@ class ClipmanApplication(Gtk.Application):
         area = dialog.get_content_area(); area.set_spacing(8); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         area.append(Gtk.Label(label="Enter the history password for this Clipman Server database.", wrap=True, xalign=0))
         password = Gtk.PasswordEntry(show_peek_icon=True, placeholder_text="History password"); area.append(password)
-        password.update_property([Gtk.AccessibleProperty.LABEL], ["History password"])
+        context_help.set_properties(password, [Gtk.AccessibleProperty.LABEL], ["History password"])
         remember = Gtk.CheckButton(label="Remember on this device"); area.append(remember)
         def response(_dialog, code):
             if code == Gtk.ResponseType.OK:
                 self.backend.call("unlock", {"password": password.get_text(), "remember": remember.get_active()}, self._setup_response)
             else: self.quit()
             dialog.destroy()
-        dialog.connect("response", response); dialog.present(); password.grab_focus()
+        dialog.connect("response", response); self._present(dialog); password.grab_focus()
 
     def _connection_dialog(self, title, configuring=False, initial=None, parent=None):
         dialog = Gtk.Dialog(title=title, transient_for=parent or self.window, modal=True)
@@ -4449,18 +4488,18 @@ class ClipmanApplication(Gtk.Application):
         for key, label, secret in (("server", "Server address", False), ("token", "Server token", True), ("password", "History password", True), ("machine", "Device name", False)):
             area.append(Gtk.Label(label=label, xalign=0))
             widget = Gtk.PasswordEntry(show_peek_icon=True) if secret else Gtk.Entry()
-            widget.update_property([Gtk.AccessibleProperty.LABEL], [label])
+            context_help.set_properties(widget, [Gtk.AccessibleProperty.LABEL], [label])
             fields[key] = widget; area.append(widget)
         fields["machine"].set_text((initial or {}).get("machine") or self.machine_name or os.uname().nodename)
         if initial:
             fields["server"].set_text(initial.get("server", ""))
             fields["token"].set_text(initial.get("token", ""))
             if initial.get("token_present") and not initial.get("token"):
-                fields["token"].update_property(
+                context_help.set_properties(fields["token"],
                     [Gtk.AccessibleProperty.DESCRIPTION], ["Leave blank to keep the stored server token"],
                 )
             if initial.get("password_saved"):
-                fields["password"].update_property(
+                context_help.set_properties(fields["password"],
                     [Gtk.AccessibleProperty.DESCRIPTION], ["Leave blank to keep the stored history password"],
                 )
             if initial.get("token_present") or initial.get("password_saved"):
@@ -4476,7 +4515,7 @@ class ClipmanApplication(Gtk.Application):
             "ca_fingerprint": (initial or {}).get("ca_fingerprint", ""),
         }
         authority_status = Gtk.Label(label=self._authority_status_text(authority), wrap=True, xalign=0, selectable=True)
-        authority_status.update_property([Gtk.AccessibleProperty.LABEL], ["Private certificate authority status"])
+        context_help.set_properties(authority_status, [Gtk.AccessibleProperty.LABEL], ["Private certificate authority status"])
         area.append(authority_status)
         authority_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         import_authority = Gtk.Button(label="Import Private Authority")
@@ -4498,7 +4537,7 @@ class ClipmanApplication(Gtk.Application):
                 self.backend.call("configure", params, self._setup_response)
             elif configuring: self.quit()
             dialog.destroy()
-        dialog.connect("response", response); dialog.present()
+        dialog.connect("response", response); self._present(dialog)
 
     def _choose_connection_file(self, fields, authority, authority_status):
         chooser = Gtk.FileDialog(title="Import Clipman Server Connection")
@@ -4672,7 +4711,7 @@ class ClipmanApplication(Gtk.Application):
 
         area.append(Gtk.Label(label="Sync channels", xalign=0))
         channel_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, activate_on_single_click=False)
-        channel_list.update_property([Gtk.AccessibleProperty.LABEL], ["Sync channels"])
+        context_help.set_properties(channel_list, [Gtk.AccessibleProperty.LABEL], ["Sync channels"])
         channel_scroll = Gtk.ScrolledWindow(vexpand=True); channel_scroll.set_min_content_height(120)
         channel_scroll.set_child(channel_list); area.append(channel_scroll)
         channel_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -4684,7 +4723,7 @@ class ClipmanApplication(Gtk.Application):
 
         area.append(Gtk.Label(label="Devices", xalign=0))
         device_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, activate_on_single_click=False)
-        device_list.update_property([Gtk.AccessibleProperty.LABEL], ["Devices"])
+        context_help.set_properties(device_list, [Gtk.AccessibleProperty.LABEL], ["Devices"])
         device_scroll = Gtk.ScrolledWindow(vexpand=True); device_scroll.set_min_content_height(120)
         device_scroll.set_child(device_list); area.append(device_scroll)
         device_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -4719,7 +4758,7 @@ class ClipmanApplication(Gtk.Application):
                 label = channel.get("Name", "") + ": " + self._describe_sync_route(channel.get("Route"))
                 row = Gtk.ListBoxRow(); row.clipman_channel = channel
                 row.set_child(Gtk.Label(label=label, xalign=0, wrap=True, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6))
-                row.update_property([Gtk.AccessibleProperty.LABEL], [label]); channel_list.append(row)
+                context_help.set_properties(row, [Gtk.AccessibleProperty.LABEL], [label]); channel_list.append(row)
             if channels: channel_list.select_row(channel_list.get_row_at_index(0))
 
             child = device_list.get_first_child()
@@ -4730,7 +4769,7 @@ class ClipmanApplication(Gtk.Application):
                 label = device.get("Name", "") + ": " + self._describe_sync_subscription(device.get("Channels"))
                 row = Gtk.ListBoxRow(); row.clipman_device = device
                 row.set_child(Gtk.Label(label=label, xalign=0, wrap=True, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6))
-                row.update_property([Gtk.AccessibleProperty.LABEL], [label]); device_list.append(row)
+                context_help.set_properties(row, [Gtk.AccessibleProperty.LABEL], [label]); device_list.append(row)
             if devices: device_list.select_row(device_list.get_row_at_index(0))
 
         def on_enabled_toggled(button):
@@ -4745,7 +4784,7 @@ class ClipmanApplication(Gtk.Application):
         remove_channel_button.connect("clicked", lambda *_: self._remove_sync_channel(selected_channel(), state, dialog, rebuild))
         edit_device_button.connect("clicked", lambda *_: self._show_sync_device_editor(selected_device(), state, dialog, rebuild))
 
-        rebuild(); dialog.connect("response", lambda d, _r: d.destroy()); dialog.present(); channel_list.grab_focus()
+        rebuild(); dialog.connect("response", lambda d, _r: d.destroy()); self._present(dialog); channel_list.grab_focus()
 
     def _save_sync_rules(self, doc, state, parent, rebuild, editor):
         def on_result(message):
@@ -4780,6 +4819,7 @@ class ClipmanApplication(Gtk.Application):
             ("Source devices, comma-separated", devices),
         ):
             visible = Gtk.Label(label=label, xalign=0); visible.set_mnemonic_widget(field)
+            context_help.set_properties(field, [Gtk.AccessibleProperty.LABEL], [label])
             area.append(visible); area.append(field)
         images = Gtk.CheckButton(label="Match rich text containing embedded images", active=(existing_route.get("Kind") == "RichTextImages"))
         area.append(images)
@@ -4805,7 +4845,7 @@ class ClipmanApplication(Gtk.Application):
                 channels[:] = [entry for entry in channels if entry.get("Name", "").strip().casefold() != original_key]
             channels.append({"Name": new_name, "Route": route})
             self._save_sync_rules(doc, state, parent, rebuild, editor)
-        editor.connect("response", response); editor.present(); name.grab_focus()
+        editor.connect("response", response); self._present(editor); name.grab_focus()
 
     def _remove_sync_channel(self, channel, state, parent, rebuild):
         if not channel or state.get("read_only"): return
@@ -4852,6 +4892,7 @@ class ClipmanApplication(Gtk.Application):
             name_value = channel.get("Name", "")
             key = name_value.strip().casefold()
             check = Gtk.CheckButton(label=name_value, active=(all_selected or key in current_keys))
+            context_help.set_properties(check, [Gtk.AccessibleProperty.DESCRIPTION], ["Receive this channel on the selected device. Unchecking hides its clips locally without deleting shared history."])
             check.set_sensitive(not all_selected)
             area.append(check)
             channel_checks.append((name_value, check))
@@ -4878,7 +4919,7 @@ class ClipmanApplication(Gtk.Application):
             else:
                 devices.append({"Name": device.get("Name", ""), "Channels": selected})
             self._save_sync_rules(new_doc, state, parent, rebuild, editor)
-        editor.connect("response", response); editor.present()
+        editor.connect("response", response); self._present(editor)
 
     def _register_hotkeys(self):
         quick_bindings = {
@@ -4915,8 +4956,9 @@ class ClipmanApplication(Gtk.Application):
         elif action == "save":
             self.add_clipboard()
         elif action == "quick-clip":
-            self.window.present()
-            self.new_entry()
+            history_was_visible = self.window.get_visible()
+            self._present(self.window)
+            self.show_entry_dialog(None, hide_history_after=not history_was_visible)
         elif isinstance(action, str) and action.startswith("quick:"):
             self._run_quick_paste(action[6:])
         elif isinstance(action, str) and action.startswith("secret:"):
@@ -5006,7 +5048,7 @@ class ClipmanApplication(Gtk.Application):
         _application, self.previous_window_id = active_application_info()
         if not self.preferences.values["save_list_position"]:
             self.select_first_normal()
-        self.window.present()
+        self._present(self.window)
         GLib.idle_add(self.focus_history)
 
     def _set_monitoring(self, enabled, announce=False):
@@ -5035,12 +5077,13 @@ class ClipmanApplication(Gtk.Application):
         dialog.set_default_size(720, 620)
         area = dialog.get_content_area(); area.set_spacing(10); area.set_margin_top(10); area.set_margin_bottom(10); area.set_margin_start(10); area.set_margin_end(10)
         notebook = Gtk.Notebook(); notebook.set_vexpand(True); area.append(notebook)
+        context_help.set_properties(notebook, [Gtk.AccessibleProperty.LABEL], ["Preference sections"])
 
         def add_page(title, shortcut):
             page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
             page.set_margin_top(12); page.set_margin_bottom(12); page.set_margin_start(12); page.set_margin_end(12)
             label = Gtk.Label(label=title)
-            label.update_property([Gtk.AccessibleProperty.DESCRIPTION], [shortcut])
+            context_help.set_properties(label, [Gtk.AccessibleProperty.DESCRIPTION], [shortcut])
             notebook.append_page(page, label)
             return page
 
@@ -5056,17 +5099,17 @@ class ClipmanApplication(Gtk.Application):
         startup = Gtk.CheckButton(label="Add current clipboard item when Clipman starts", active=self.preferences.values["capture_on_start"])
         sounds = Gtk.CheckButton(label="Play sounds", active=self.preferences.values["play_sounds"])
         clipmerge = Gtk.CheckButton(label="Enable ClipMerge", active=self.preferences.values["clipmerge_enabled"])
-        clipmerge.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Copy the same text or file selection twice within the merge window to append it to the clipboard. This is off by default."])
+        context_help.set_properties(clipmerge, [Gtk.AccessibleProperty.DESCRIPTION], ["Copy the same text or file selection twice within the merge window to append it to the clipboard. This is off by default."])
         clipmerge_window = Gtk.SpinButton.new_with_range(200, 2000, 50)
         clipmerge_window.set_value(self.preferences.values["clipmerge_window_ms"])
-        clipmerge_window.update_property([Gtk.AccessibleProperty.LABEL], ["ClipMerge window in milliseconds"])
+        context_help.set_properties(clipmerge_window, [Gtk.AccessibleProperty.LABEL], ["ClipMerge window in milliseconds"])
         separator_keys = ["newline", "blankline", "space", "commaspace", "custom"]
         clipmerge_separator = Gtk.DropDown(model=Gtk.StringList.new(["New line", "Blank line", "Space", "Comma and space", "Custom"]))
         clipmerge_separator.set_selected(separator_keys.index(self.preferences.values["clipmerge_separator_mode"]))
-        clipmerge_separator.update_property([Gtk.AccessibleProperty.LABEL], ["ClipMerge text separator"])
+        context_help.set_properties(clipmerge_separator, [Gtk.AccessibleProperty.LABEL], ["ClipMerge text separator"])
         clipmerge_custom = Gtk.Entry(text=self.preferences.values["clipmerge_custom_separator"])
-        clipmerge_custom.update_property([Gtk.AccessibleProperty.LABEL], ["Custom ClipMerge text separator"])
-        clipmerge_custom.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Backslash n, backslash r backslash n, and backslash t are supported. Merged formatted text becomes plain text."])
+        context_help.set_properties(clipmerge_custom, [Gtk.AccessibleProperty.LABEL], ["Custom ClipMerge text separator"])
+        context_help.set_properties(clipmerge_custom, [Gtk.AccessibleProperty.DESCRIPTION], ["Backslash n, backslash r backslash n, and backslash t are supported. Merged formatted text becomes plain text."])
         def update_clipmerge_availability(*_args):
             enabled = clipmerge.get_active()
             clipmerge_window.set_sensitive(enabled)
@@ -5078,10 +5121,10 @@ class ClipmanApplication(Gtk.Application):
         multiple_separator_keys = ["none", "newline", "blankline", "space", "commaspace", "custom"]
         multiple_separator = Gtk.DropDown(model=Gtk.StringList.new(["No separator", "New line", "Blank line", "Space", "Comma and space", "Custom"]))
         multiple_separator.set_selected(multiple_separator_keys.index(self.preferences.values["multiple_entry_separator_mode"]))
-        multiple_separator.update_property([Gtk.AccessibleProperty.LABEL], ["Multiple selected entries separator"])
+        context_help.set_properties(multiple_separator, [Gtk.AccessibleProperty.LABEL], ["Multiple selected entries separator"])
         multiple_custom = Gtk.Entry(text=self.preferences.values["multiple_entry_custom_separator"])
-        multiple_custom.update_property([Gtk.AccessibleProperty.LABEL], ["Custom multiple-entry separator"])
-        multiple_custom.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Backslash n, backslash r backslash n, and backslash t are supported."])
+        context_help.set_properties(multiple_custom, [Gtk.AccessibleProperty.LABEL], ["Custom multiple-entry separator"])
+        context_help.set_properties(multiple_custom, [Gtk.AccessibleProperty.DESCRIPTION], ["Backslash n, backslash r backslash n, and backslash t are supported."])
         def update_multiple_separator_availability(*_args):
             multiple_custom.set_sensitive(multiple_separator.get_selected() == 5)
         multiple_separator.connect("notify::selected", update_multiple_separator_availability)
@@ -5090,17 +5133,17 @@ class ClipmanApplication(Gtk.Application):
         auto_remote = Gtk.CheckButton(label="Put new text received from another device on the clipboard", active=self.preferences.values["auto_copy_remote_text"])
         paste_enter = Gtk.CheckButton(label="After Enter, paste into the previous application", active=self.preferences.values["paste_after_enter"])
         paste_enter.set_sensitive(bool(shutil.which("xdotool")) and os.environ.get("XDG_SESSION_TYPE", "").casefold() != "wayland")
-        paste_enter.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["Available in X11 sessions when xdotool is installed. This is off by default."])
+        context_help.set_properties(paste_enter, [Gtk.AccessibleProperty.DESCRIPTION], ["Available in X11 sessions when xdotool is installed. This is off by default."])
         dynamic = Gtk.CheckButton(label="Open history to the section that most recently received an item", active=self.preferences.values["dynamic_history_mode"])
         remove_tracking = Gtk.CheckButton(label="Automatically remove tracking from copied links", active=self.preferences.values["auto_remove_url_tracking"])
         links_enabled = Gtk.CheckButton(label="Show Links History", active=self.preferences.values["links_history_enabled"])
         rich_enabled = Gtk.CheckButton(label="Preserve copied formatting and show Rich Text history", active=self.preferences.values["rich_text_history_enabled"])
-        rich_enabled.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows a separate Rich Text history section. Enable this before copying formatted content. This is off by default."])
+        context_help.set_properties(rich_enabled, [Gtk.AccessibleProperty.DESCRIPTION], ["When checked, Clipman preserves available HTML and RTF formatting alongside plain text and shows a separate Rich Text history section. Enable this before copying formatted content. This is off by default."])
         include_images = Gtk.CheckButton(label="Include images in Rich Text history", active=self.preferences.values["include_images_in_rich_text_history"])
         include_images.set_margin_start(24)
         include_images.set_sensitive(rich_enabled.get_active())
         image_privacy_text = IMAGE_METADATA_DISCLOSURE
-        include_images.update_property([Gtk.AccessibleProperty.DESCRIPTION], [image_privacy_text + " This is off by default."])
+        context_help.set_properties(include_images, [Gtk.AccessibleProperty.DESCRIPTION], [image_privacy_text + " This is off by default."])
         image_privacy = Gtk.Label(label=image_privacy_text, wrap=True, xalign=0)
         image_privacy.set_margin_start(48)
         image_privacy.set_sensitive(rich_enabled.get_active())
@@ -5109,7 +5152,7 @@ class ClipmanApplication(Gtk.Application):
             active=self.preferences.values["add_copied_image_files_to_rich_text_history"],
         )
         add_copied_image_files.set_margin_start(48)
-        add_copied_image_files.update_property(
+        context_help.set_properties(add_copied_image_files,
             [Gtk.AccessibleProperty.DESCRIPTION],
             ["When checked, copying one local PNG or JPEG file adds it to File History and also to Rich Text history. Multiple files, folders and unsupported files remain only in File History. This is off by default."],
         )
@@ -5132,9 +5175,9 @@ class ClipmanApplication(Gtk.Application):
         duplicates = Gtk.CheckButton(label="Keep duplicate text entries", active=self.preferences.values["keep_duplicate_entries"])
         confirm_deletions = Gtk.CheckButton(label="Confirm before deleting entries", active=self.preferences.values["confirm_deletions"])
         confirm_website_titles = Gtk.CheckButton(label="Ask before contacting a website for its title", active=self.preferences.values["confirm_website_title_requests"])
-        confirm_website_titles.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog."])
+        context_help.set_properties(confirm_website_titles, [Gtk.AccessibleProperty.DESCRIPTION], ["When checked, the Use Website Title as Name command asks before contacting the selected public website. You can also turn this prompt off from its confirmation dialog."])
         auto_name_links = Gtk.CheckButton(label="Automatically name copied website links from page headings", active=self.preferences.values["auto_name_copied_website_links"])
-        auto_name_links.update_property([Gtk.AccessibleProperty.DESCRIPTION], ["When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default."])
+        context_help.set_properties(auto_name_links, [Gtk.AccessibleProperty.DESCRIPTION], ["When checked, newly copied unnamed public website links can be contacted once in the background to read their page title. Existing, imported, synchronized, private-looking and unsafe links are never scanned. This is off by default."])
         for control in (monitor, sounds, clipmerge):
             general.append(control)
         clipmerge_window_label = Gtk.Label(label="ClipMerge window, milliseconds", xalign=0); clipmerge_window_label.set_mnemonic_widget(clipmerge_window)
@@ -5180,7 +5223,7 @@ class ClipmanApplication(Gtk.Application):
         update_titles = ["Never", "At startup", "Hourly", "Daily"]
         update_frequency = Gtk.DropDown(model=Gtk.StringList.new(update_titles))
         update_frequency.set_selected(update_keys.index(self.preferences.values["update_check_frequency"]))
-        update_frequency.update_property([Gtk.AccessibleProperty.LABEL], ["Check for updates"])
+        context_help.set_properties(update_frequency, [Gtk.AccessibleProperty.LABEL], ["Check for updates"])
         update_label = Gtk.Label(label="Check for updates", xalign=0); update_label.set_mnemonic_widget(update_frequency)
         install_silently = Gtk.CheckButton(label="Install updates silently", active=self.preferences.values["install_updates_silently"])
         install_silently.set_sensitive(update_frequency.get_selected() != 0)
@@ -5198,7 +5241,7 @@ class ClipmanApplication(Gtk.Application):
         storage.append(Gtk.Label(label="Ignored applications, one process or application name per line", wrap=True, xalign=0))
         ignored = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, vexpand=True)
         ignored.set_accepts_tab(False)
-        ignored.update_property([Gtk.AccessibleProperty.LABEL], ["Ignored applications"])
+        context_help.set_properties(ignored, [Gtk.AccessibleProperty.LABEL], ["Ignored applications"])
         ignored.get_buffer().set_text("\n".join(self.preferences.values["ignored_applications"]))
         ignored_scroll = Gtk.ScrolledWindow(vexpand=True); ignored_scroll.set_min_content_height(140); ignored_scroll.set_child(ignored); storage.append(ignored_scroll)
         note = Gtk.Label(label="Clipboard monitoring and global hotkeys work normally under X11. Wayland compositors may restrict background clipboard access and global shortcut registration.", wrap=True, xalign=0)
@@ -5206,13 +5249,14 @@ class ClipmanApplication(Gtk.Application):
 
         sensitive_mode = Gtk.DropDown(model=Gtk.StringList.new(["Off", "Exclude from history"]))
         sensitive_mode.set_selected(1 if self.preferences.values["sensitive_data_mode"] == "exclude" else 0)
-        sensitive_mode.update_property([Gtk.AccessibleProperty.LABEL], ["Sensitive data mode"])
+        context_help.set_properties(sensitive_mode, [Gtk.AccessibleProperty.LABEL], ["Sensitive data mode"])
         mode_label = Gtk.Label(label="Sensitive data mode", xalign=0); mode_label.set_mnemonic_widget(sensitive_mode)
         sensitive_data.append(mode_label); sensitive_data.append(sensitive_mode)
         sensitive_checks = []
         enabled_sensitive = set(self.preferences.values["sensitive_data_presets"])
         for preset_id, title in SENSITIVE_PRESETS:
             control = Gtk.CheckButton(label=title, active=preset_id in enabled_sensitive)
+            context_help.set_properties(control, [Gtk.AccessibleProperty.DESCRIPTION], ["Exclude this detected pattern from automatic capture when Sensitive data mode is Exclude from history. Existing clips and the system clipboard are unchanged."])
             sensitive_data.append(control); sensitive_checks.append((preset_id, control))
         sensitive_data.append(Gtk.Label(label="Exclusions apply only to automatic clipboard capture. They do not remove text from the system clipboard, and manually adding clipboard content from the Clipman window still works.", wrap=True, xalign=0))
 
@@ -5284,7 +5328,7 @@ class ClipmanApplication(Gtk.Application):
             else:
                 self.preferences.save()
             dialog.destroy()
-        dialog.connect("response", response); dialog.present()
+        dialog.connect("response", response); self._present(dialog)
 
     def _schedule_update_checks(self):
         for name in ("update_poll_source", "startup_update_source"):
@@ -5451,7 +5495,7 @@ class ClipmanApplication(Gtk.Application):
 
     def show_about(self, *_args):
         about = Gtk.AboutDialog(transient_for=self.window, modal=True, program_name="Clipman for Linux", version=VERSION, comments="Accessible clipboard history for Linux, connected to Clipman Server.", website="https://github.com/OnjLouis/Clipman", license_type=Gtk.License.MIT_X11, authors=["Andre Louis", "Clipman contributors"])
-        about.present()
+        self._present(about)
 
     def _set_startup(self, enabled):
         target = config_home() / "autostart" / "me.onj.clipman.linux.desktop"
@@ -5513,9 +5557,9 @@ class ClipmanApplication(Gtk.Application):
         dialog.add_button("Close", Gtk.ResponseType.CLOSE)
         area = dialog.get_content_area(); area.set_margin_top(12); area.set_margin_bottom(12); area.set_margin_start(12); area.set_margin_end(12)
         view = Gtk.TextView(editable=False, cursor_visible=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
-        view.set_accepts_tab(False); view.get_buffer().set_text(text); view.update_property([Gtk.AccessibleProperty.LABEL], ["Diagnostics"])
+        view.set_accepts_tab(False); view.get_buffer().set_text(text); context_help.set_properties(view, [Gtk.AccessibleProperty.LABEL], ["Diagnostics"])
         area.append(view); dialog.set_default_size(680, 480)
-        dialog.connect("response", lambda d, _r: d.destroy()); dialog.present()
+        dialog.connect("response", lambda d, _r: d.destroy()); self._present(dialog)
 
     def open_uri(self, uri):
         self._open_uri(uri)
@@ -5523,6 +5567,10 @@ class ClipmanApplication(Gtk.Application):
     def open_manual(self, *_args):
         manual = pathlib.Path(__file__).resolve().parent / "Manual.html"
         Gio.AppInfo.launch_default_for_uri(manual.as_uri(), None)
+
+    def _present(self, window):
+        context_help.attach(window, self.open_manual)
+        window.present()
 
     def open_version_history(self, *_args):
         self._open_uri("https://github.com/OnjLouis/Clipman/releases")
@@ -5600,7 +5648,7 @@ class ClipmanApplication(Gtk.Application):
         if self.status.get_text() != message:
             self.status.set_text(message)
         if announce:
-            self.status.update_property([Gtk.AccessibleProperty.LABEL], [message])
+            context_help.set_properties(self.status, [Gtk.AccessibleProperty.LABEL], [message])
         if transient:
             self._cancel_status_reset()
             self.transient_status_active = True

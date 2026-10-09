@@ -25,7 +25,7 @@ mkdir -p "$root/libexec" "$root/sounds" "$applications" "$icons" "$metainfo" "$m
 install -m 0755 clipman.py "$root/clipman.py"
 install -m 0755 clipman-hotkeys.py "$root/clipman-hotkeys.py"
 install -m 0755 clipman-updater.py "$root/clipman-updater.py"
-install -m 0644 update_service.py VERSION BUILD_STAMP "$root/"
+install -m 0644 update_service.py context_help.py VERSION BUILD_STAMP "$root/"
 install -m 0755 clipman-linux "$bin/clipman-linux"
 install -m 0755 libexec/clipman-gui-backend "$root/libexec/clipman-gui-backend"
 install -m 0644 Manual.html LICENSE.txt "$root/"

@@ -65,6 +65,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        ContextHelp.shared.install(openManual: { [weak self] in self?.openManual(nil) })
         RuntimeLogger.debug("Application launch callback entered.")
         guard enforceSingleRunningInstance() else {
             RuntimeLogger.debug("Application launch stopped because another Clipman instance remained active.")
@@ -257,6 +258,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ContextHelp.shared.stop()
         RuntimeLogger.debug("Application termination started.")
         NotificationCenter.default.removeObserver(self)
         monitor.stop()
@@ -398,7 +400,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
 		NSApp.windowsMenu = windowMenu
 
 		let helpMenu = NSMenu(title: "Help")
-		helpMenu.addItem(mainMenuItem("Clipman Manual", action: #selector(openManual(_:)), key: f1KeyEquivalent, modifiers: []))
+		helpMenu.addItem(mainMenuItem("Help for Focused Control", action: #selector(showContextHelp(_:)), key: f1KeyEquivalent, modifiers: []))
+		helpMenu.addItem(mainMenuItem("Clipman Manual", action: #selector(openManual(_:))))
 		helpMenu.addItem(mainMenuItem("Version History...", action: #selector(openVersionHistory(_:))))
 		helpMenu.addItem(mainMenuItem("Project Page", action: #selector(openProjectPage(_:)), key: f1KeyEquivalent, modifiers: [.control]))
 		helpMenu.addItem(mainMenuItem("Contact", action: #selector(openContactPage(_:))))
@@ -801,6 +804,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         _ = CGRequestPostEventAccess()
         return CGPreflightPostEventAccess()
     }
+
+    @objc private func showContextHelp(_ sender: Any?) { ContextHelp.shared.show() }
 
     @objc private func openManual(_ sender: Any?) {
         let bundled = Bundle.main.resourceURL?.appendingPathComponent("Manual.html")
@@ -1309,7 +1314,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
     }
 
     @objc private func showQuickClip(_ sender: Any?) {
+        let historyWasVisible = historyWindow.isHistoryVisible
         showHistory(sender)
+        defer { if !historyWasVisible { historyWindow.hide() } }
         historyWindow.showQuickClip()
     }
 
@@ -1843,7 +1850,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
             alert.addButton(withTitle: "Use Website Title")
             let suppress = NSButton(checkboxWithTitle: "Do not show this again", target: nil, action: nil)
             suppress.setAccessibilityLabel("Do not show this again")
-            suppress.setAccessibilityHelp("Turn this confirmation off. You can turn it back on in Preferences.")
+            suppress.setContextHelp("Turn this confirmation off. You can turn it back on in Preferences.")
             alert.accessoryView = suppress
             guard alert.runModal() == .alertSecondButtonReturn else { return }
             if suppress.state == .on {

@@ -277,6 +277,7 @@ namespace Clipman
             RefreshGroupFilterItems();
             RefreshFileClipboardEvents();
             Reload();
+            ContextHelp.Prepare(this, true);
         }
 
         private ShortcutButton CreateCloseButton()
@@ -687,7 +688,8 @@ namespace Clipman
             view.DropDownOpening += (s, e) => UpdateMenuHotkeys();
 
             var help = new ToolStripMenuItem("&Help");
-            help.DropDownItems.Add("&Manual\tF1", null, (s, e) => OpenManual());
+            help.DropDownItems.Add("Help for &focused control\tF1", null, (s, e) => ContextHelp.Show(this));
+            help.DropDownItems.Add("&Manual", null, (s, e) => OpenManual());
             help.DropDownItems.Add("&Check for updates...\tShift+F1", null, (s, e) => UpdateService.CheckForUpdates(this, AppVersion(), exitApp));
             help.DropDownItems.Add("&Version history", null, (s, e) => UpdateService.ShowVersionHistory(this, AppVersion()));
             help.DropDownItems.Add("&Project page\tCtrl+F1", null, (s, e) => UpdateService.OpenProjectPage());
@@ -916,6 +918,8 @@ namespace Clipman
                 pin.Enabled = items.Count > 0;
                 var goToFile = edit.DropDownItems.Add("&Go to file\tCtrl+Enter", null, (s, e) => GoToSelectedFileClipboardEvent());
                 goToFile.Enabled = item != null && item.Files != null && item.Files.Count == 1;
+                var openLocation = edit.DropDownItems.Add("&Open location and close\tAlt+Enter", null, (s, e) => OpenSelectedLink());
+                openLocation.Enabled = goToFile.Enabled && SelectedFileClipboardEvents().Count == 1;
                 var details = edit.DropDownItems.Add("&View event details\tF4", null, (s, e) => ViewSelectedFileClipboardEvent());
                 details.Enabled = item != null;
                 var delete = edit.DropDownItems.Add("&Delete selected\tDel", null, (s, e) => DeleteSelectedFileClipboardEvent());
@@ -937,7 +941,7 @@ namespace Clipman
             edit.DropDownItems.Add("Set as &quick-paste target...", null, (s, e) => ShowEntryProperties(true));
             var websiteTitle = edit.DropDownItems.Add("Use &website title as name...", null, (s, e) => UseWebsiteTitleAsName());
             websiteTitle.Enabled = CanUseWebsiteTitleForSelection();
-            var openLink = edit.DropDownItems.Add("Open lin&k\tAlt+Enter", null, (s, e) => OpenSelectedLink());
+            var openLink = edit.DropDownItems.Add("Open image or lin&k\tAlt+Enter", null, (s, e) => OpenSelectedLink());
             openLink.Enabled = CanOpenSelectedLink();
             edit.DropDownItems.Add("P&ush to other devices\tCtrl+P", null, (s, e) => PushSelectedToOtherMachines());
             edit.DropDownItems.Add("&View full text\tF4", null, (s, e) => ViewSelectedText());
@@ -978,7 +982,7 @@ namespace Clipman
             menu.Items.Add("Set as &quick-paste target...", null, (sender, args) => ShowEntryProperties(true));
             var websiteTitle = menu.Items.Add("Use &website title as name...", null, (sender, args) => UseWebsiteTitleAsName());
             websiteTitle.Enabled = CanUseWebsiteTitleForSelection();
-            var openLink = menu.Items.Add("Open lin&k\tAlt+Enter", null, (sender, args) => OpenSelectedLink());
+            var openLink = menu.Items.Add("Open image or lin&k\tAlt+Enter", null, (sender, args) => OpenSelectedLink());
             openLink.Enabled = CanOpenSelectedLink();
             menu.Items.Add("P&ush to other devices\tCtrl+P", null, (sender, args) => PushSelectedToOtherMachines());
             menu.Items.Add("&View full text\tF4", null, (sender, args) => ViewSelectedText());
@@ -1026,6 +1030,8 @@ namespace Clipman
             }
             var goToFile = menu.Items.Add("&Go to file\tCtrl+Enter", null, (sender, args) => GoToSelectedFileClipboardEvent());
             goToFile.Enabled = item != null && item.Files != null && item.Files.Count == 1;
+            var openLocation = menu.Items.Add("&Open location and close\tAlt+Enter", null, (sender, args) => OpenSelectedLink());
+            openLocation.Enabled = goToFile.Enabled && SelectedFileClipboardEvents().Count == 1;
             var details = menu.Items.Add("&View event details\tF4", null, (sender, args) => ViewSelectedFileClipboardEvent());
             details.Enabled = item != null;
             var delete = menu.Items.Add("&Delete selected\tDel", null, (sender, args) => DeleteSelectedFileClipboardEvent());
@@ -1252,7 +1258,7 @@ namespace Clipman
             else if (e.KeyCode == Keys.F1)
             {
                 e.Handled = true;
-                OpenManual();
+                ContextHelp.Show(this);
             }
             else if (e.Control && e.KeyCode == Keys.Oemcomma)
             {
@@ -1395,7 +1401,7 @@ namespace Clipman
             }
             if (e.KeyCode == Keys.F1)
             {
-                OpenManual();
+                ContextHelp.Show(this);
                 e.Handled = true;
                 return;
             }
@@ -1899,7 +1905,13 @@ namespace Clipman
 
         private void FileEventsListKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Control && e.KeyCode == Keys.Enter)
+            if (e.Alt && e.KeyCode == Keys.Enter)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OpenSelectedLink();
+            }
+            else if (e.Control && e.KeyCode == Keys.Enter)
             {
                 e.Handled = true;
                 e.SuppressKeyPress = true;
@@ -2085,7 +2097,7 @@ namespace Clipman
             }
         }
 
-        private void GoToSelectedFileClipboardEvent()
+        private void GoToSelectedFileClipboardEvent(bool closeAfterOpen = false)
         {
             var item = SelectedFileClipboardEvent();
             if (item == null || item.Files == null || item.Files.Count != 1)
@@ -2107,11 +2119,13 @@ namespace Clipman
                 {
                     Process.Start("explorer.exe", "/select,\"" + path + "\"");
                     statusText.Text = "Opened file location.";
+                    if (closeAfterOpen) CloseHistoryWindow();
                 }
                 else if (Directory.Exists(path))
                 {
                     Process.Start("explorer.exe", "\"" + path + "\"");
                     statusText.Text = "Opened folder.";
+                    if (closeAfterOpen) CloseHistoryWindow();
                 }
                 else
                 {
@@ -3230,17 +3244,55 @@ namespace Clipman
         {
             var selected = SelectedEntries();
             Uri ignored;
-            return selected.Count == 1 && LinkPresentation.TryGetWebUri(selected[0], out ignored);
+            if (selected.Count != 1) return false;
+            RichImageInfo image;
+            if (RichImageData.TryDescribe(selected[0].RichText, out image))
+            {
+                image.Dispose();
+                return true;
+            }
+            return LinkPresentation.TryGetWebUri(selected[0], out ignored);
         }
 
         private void OpenSelectedLink()
         {
+            if (IsFileClipboardTabActive())
+            {
+                if (SelectedFileClipboardEvents().Count != 1)
+                {
+                    playSkipSound();
+                    statusText.Text = "Select one file-history item first.";
+                    return;
+                }
+                GoToSelectedFileClipboardEvent(true);
+                return;
+            }
             var selected = SelectedEntries();
+            if (selected.Count == 1 && selected[0].RichText != null)
+            {
+                try
+                {
+                    var path = RichImageData.CreateViewerFile(selected[0]);
+                    if (path != null)
+                    {
+                        Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+                        statusText.Text = "Opened image in the default application.";
+                        CloseHistoryWindow();
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    playSkipSound();
+                    statusText.Text = "Could not open the selected image: " + ex.Message;
+                    return;
+                }
+            }
             Uri uri;
             if (selected.Count != 1 || !LinkPresentation.TryGetWebUri(selected[0], out uri))
             {
                 playSkipSound();
-                statusText.Text = "Select one HTTP or HTTPS link first.";
+                statusText.Text = "Select one image or HTTP or HTTPS link first.";
                 return;
             }
 
@@ -3252,6 +3304,7 @@ namespace Clipman
                     UseShellExecute = true
                 });
                 statusText.Text = "Opened link in the default browser.";
+                CloseHistoryWindow();
             }
             catch (Exception ex)
             {

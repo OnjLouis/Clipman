@@ -105,7 +105,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         enabledCheckbox.target = self
         enabledCheckbox.action = #selector(enabledChanged(_:))
         enabledCheckbox.setAccessibilityLabel("Enable sync rules")
-        enabledCheckbox.setAccessibilityHelp("When unchecked, every device behaves exactly as it would without sync rules, even if channels are defined. This is the instant global off switch.")
+        enabledCheckbox.setContextHelp("When unchecked, every device behaves exactly as it would without sync rules, even if channels are defined. This is the instant global off switch.")
 
         warningLabel.textColor = .secondaryLabelColor
         warningLabel.maximumNumberOfLines = 3
@@ -233,7 +233,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
         table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = false
         table.setAccessibilityLabel(label)
-        table.setAccessibilityHelp(help)
+        table.setContextHelp(help)
     }
 
     // MARK: - Table data
@@ -311,7 +311,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
             notice = reason
         }
         removeChannelButton.isEnabled = canRemove
-        removeChannelButton.setAccessibilityHelp(removeHelp)
+        removeChannelButton.setContextHelp(removeHelp)
         statusLabel.stringValue = notice.isEmpty ? baselineStatusText : notice
     }
 
@@ -491,17 +491,17 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
 
         let nameField = NSTextField(string: channel.Name)
         nameField.setAccessibilityLabel("Channel name")
-        nameField.setAccessibilityHelp("1 to 32 letters, digits, spaces, dashes or underscores, starting and ending with a letter or digit. The names core, all, pinned and sync-rules are reserved.")
+        nameField.setContextHelp("1 to 32 letters, digits, spaces, dashes or underscores, starting and ending with a letter or digit. The names core, all, pinned and sync-rules are reserved.")
         let groupsField = NSTextField(string: (channel.Route.Groups ?? []).joined(separator: ", "))
         groupsField.setAccessibilityLabel("Groups")
-        groupsField.setAccessibilityHelp("Comma-separated group names. Leave blank to ignore the group.")
+        groupsField.setContextHelp("Comma-separated group names. Leave blank to ignore the group.")
         let devicesField = NSTextField(string: (channel.Route.SourceDevices ?? []).joined(separator: ", "))
         devicesField.setAccessibilityLabel("Source devices")
-        devicesField.setAccessibilityHelp("Comma-separated device names. Leave blank to ignore which device captured the entry.")
+        devicesField.setContextHelp("Comma-separated device names. Leave blank to ignore which device captured the entry.")
         let imagesCheckbox = NSButton(checkboxWithTitle: "Only rich text containing images", target: nil, action: nil)
         imagesCheckbox.state = (channel.Route.Kind ?? "") == SyncRuleEngine.richTextImagesKind ? .on : .off
         imagesCheckbox.setAccessibilityLabel("Only rich text containing images")
-        imagesCheckbox.setAccessibilityHelp("When checked, only entries whose formatted text embeds an image match this channel.")
+        imagesCheckbox.setContextHelp("When checked, only entries whose formatted text embeds an image match this channel.")
 
         let grid = NSGridView(views: [
             [NSTextField(labelWithString: "Name"), nameField],
@@ -554,7 +554,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
 
         let allCheckbox = NSButton(checkboxWithTitle: "All channels", target: nil, action: nil)
         allCheckbox.setAccessibilityLabel("All channels")
-        allCheckbox.setAccessibilityHelp("When checked, this device downloads every channel, including channels added later.")
+        allCheckbox.setContextHelp("When checked, this device downloads every channel, including channels added later.")
         allCheckbox.state = device.Channels.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "*" }) ? .on : .off
 
         let subscribed = Set(device.Channels.map { SyncRuleEngine.normalized($0) })
@@ -570,7 +570,7 @@ final class SyncRulesWindowController: NSWindowController, NSTableViewDataSource
             let checkbox = NSButton(checkboxWithTitle: channel.Name, target: nil, action: nil)
             checkbox.state = subscribed.contains(key) ? .on : .off
             checkbox.setAccessibilityLabel(channel.Name)
-            checkbox.setAccessibilityHelp("When checked, \(device.Name) downloads the \(channel.Name) channel.")
+            checkbox.setContextHelp("When checked, \(device.Name) downloads the \(channel.Name) channel.")
             checkboxes.append((key, checkbox))
             stack.addArrangedSubview(checkbox)
         }
