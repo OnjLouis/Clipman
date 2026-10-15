@@ -19,6 +19,12 @@ namespace Clipman.Tests
         [STAThread]
         private static int Main()
         {
+            Run("server-cache startup requests an unremembered password", ServerCacheStartupRequestsPassword);
+            Run("startup unlock preserves the remember-password choice", StartupUnlockPreservesRememberChoice);
+            Run("startup unlock cancellation preserves settings and history", StartupUnlockCancellationPreservesData);
+            Run("startup unlock retries without saving an incorrect password", StartupUnlockRetriesIncorrectPassword);
+            Run("startup unlock covers imported and auxiliary histories", StartupUnlockCoversSeedAndAuxiliaryHistory);
+            Run("an existing cache takes precedence over an unused seed", StartupUnlockIgnoresUnusedSeed);
             Run("plain F1 is never captured as a global hotkey", PlainF1IsNeverCaptured);
             Run("context help preserves explanations without private values", ContextHelpPreservesExplanations);
             Run("desktop dialog controls have tailored context help", PreferencesHaveContextHelp);
@@ -111,6 +117,174 @@ namespace Clipman.Tests
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
+        }
+
+        private static void ServerCacheStartupRequestsPassword()
+        {
+            using (var fixture = new StartupUnlockFixture())
+            {
+                fixture.Encrypt(fixture.CachePath);
+                fixture.Resolve(message => { fixture.Prompts++; return StartupUnlockFixture.Password; });
+                Assert(fixture.Prompts == 1, "Encrypted server cache did not request its password.");
+                Assert(fixture.SessionPassword == StartupUnlockFixture.Password, "Server cache remained locked.");
+                Assert(!fixture.Settings.RememberDatabasePassword && string.IsNullOrEmpty(fixture.Settings.ProtectedDatabasePassword),
+                    "Session-only unlock unexpectedly saved the password.");
+                Assert(fixture.Settings.DatabaseEncryptionEnabled, "Encrypted cache was treated as unencrypted.");
+                using (var store = new ClipStore(fixture.CachePath, fixture.SessionPassword, "fixture"))
+                    Assert(store.GetEntries().Single().Text == "retained fixture", "Cache contents changed during unlock.");
+            }
+        }
+
+        private static void StartupUnlockPreservesRememberChoice()
+        {
+            foreach (var saved in new[] { "", "invalid-protected-password", DatabasePasswordProtector.Protect(StartupUnlockFixture.Password) })
+            using (var fixture = new StartupUnlockFixture())
+            {
+                fixture.Encrypt(fixture.CachePath);
+                fixture.Settings.RememberDatabasePassword = true;
+                fixture.Settings.DatabaseEncryptionEnabled = true;
+                fixture.Settings.ProtectedDatabasePassword = saved;
+                fixture.Store.Save(fixture.Settings);
+                fixture.Resolve(message => { fixture.Prompts++; return StartupUnlockFixture.Password; });
+                Assert(fixture.Settings.RememberDatabasePassword, "Startup cleared the remembered-password preference.");
+                Assert(fixture.Store.DatabasePassword(fixture.Settings) == StartupUnlockFixture.Password, "Remembered password did not round trip.");
+                Assert(fixture.Prompts == (saved == "" || saved == "invalid-protected-password" ? 1 : 0), "Unexpected password prompt count.");
+                var reloaded = fixture.Store.Load();
+                Assert(reloaded.RememberDatabasePassword && fixture.Store.DatabasePassword(reloaded) == StartupUnlockFixture.Password,
+                    "Remembered password was not retained after reloading settings.");
+            }
+            using (var fixture = new StartupUnlockFixture())
+            {
+                fixture.Encrypt(fixture.CachePath);
+                fixture.SessionPassword = StartupUnlockFixture.Password;
+                fixture.Resolve(message => { throw new InvalidOperationException("Existing session password should not prompt."); });
+                Assert(!fixture.Settings.RememberDatabasePassword, "Existing session password changed the remember choice.");
+            }
+        }
+
+        private static void StartupUnlockCancellationPreservesData()
+        {
+            using (var fixture = new StartupUnlockFixture())
+            {
+                fixture.Encrypt(fixture.CachePath);
+                fixture.Settings.RememberDatabasePassword = true;
+                fixture.Settings.DatabaseEncryptionEnabled = true;
+                fixture.Settings.ProtectedDatabasePassword = "invalid-protected-password";
+                fixture.Store.Save(fixture.Settings);
+                var settingsBefore = File.ReadAllBytes(fixture.Store.SettingsPath);
+                var cacheBefore = File.ReadAllBytes(fixture.CachePath);
+                Expect<OperationCanceledException>(() => fixture.Resolve(message => null));
+                Assert(settingsBefore.SequenceEqual(File.ReadAllBytes(fixture.Store.SettingsPath)), "Cancellation rewrote settings.");
+                Assert(cacheBefore.SequenceEqual(File.ReadAllBytes(fixture.CachePath)), "Cancellation rewrote encrypted history.");
+                Assert(fixture.Settings.RememberDatabasePassword && fixture.Settings.ProtectedDatabasePassword == "invalid-protected-password",
+                    "Cancellation changed password preferences in memory.");
+            }
+        }
+
+        private static void StartupUnlockRetriesIncorrectPassword()
+        {
+            using (var fixture = new StartupUnlockFixture())
+            {
+                fixture.Encrypt(fixture.CachePath);
+                fixture.Settings.RememberDatabasePassword = true;
+                fixture.Settings.DatabaseEncryptionEnabled = true;
+                fixture.Store.Save(fixture.Settings);
+                var before = File.ReadAllBytes(fixture.Store.SettingsPath);
+                var cacheBefore = File.ReadAllBytes(fixture.CachePath);
+                fixture.Resolve(message =>
+                {
+                    Assert(before.SequenceEqual(File.ReadAllBytes(fixture.Store.SettingsPath)), "Invalid password was saved before validation.");
+                    using (var dialog = new PasswordPromptForm("History password", message))
+                    {
+                        var label = dialog.Controls.OfType<Label>().Single();
+                        var size = TextRenderer.MeasureText(message, label.Font, new Size(label.Width, int.MaxValue), TextFormatFlags.WordBreak);
+                        Assert(size.Height <= label.Height, "Unlock prompt message is clipped.");
+                        Assert(dialog.AcceptButton != null && dialog.CancelButton != null, "Unlock prompt lost Enter/Escape actions.");
+                    }
+                    return ++fixture.Prompts == 1 ? "wrong fixture password" : StartupUnlockFixture.Password;
+                });
+                Assert(fixture.Prompts == 2, "Incorrect password was not retried.");
+                Assert(fixture.Store.DatabasePassword(fixture.Settings) == StartupUnlockFixture.Password, "Wrong password was remembered.");
+                Assert(cacheBefore.SequenceEqual(File.ReadAllBytes(fixture.CachePath)), "Unlock modified the encrypted cache.");
+            }
+        }
+
+        private static void StartupUnlockCoversSeedAndAuxiliaryHistory()
+        {
+            foreach (var location in new[] { "seed", "files", "secrets" })
+            using (var fixture = new StartupUnlockFixture())
+            {
+                var path = location == "seed" ? fixture.Settings.DatabasePath
+                    : location == "files" ? fixture.Store.DefaultFileHistoryDatabasePath() : fixture.Store.DefaultSecretsDatabasePath();
+                fixture.Encrypt(path);
+                fixture.Resolve(message => { fixture.Prompts++; return StartupUnlockFixture.Password; });
+                Assert(fixture.Prompts == 1 && fixture.SessionPassword == StartupUnlockFixture.Password,
+                    "Encrypted " + location + " history did not request an unlock password.");
+                Assert(ClipDatabaseFile.IsEncryptedFile(path), "Startup removed encryption from " + location + " history.");
+            }
+        }
+
+        private static void StartupUnlockIgnoresUnusedSeed()
+        {
+            using (var fixture = new StartupUnlockFixture())
+            {
+                fixture.Encrypt(fixture.Settings.DatabasePath);
+                ClipDatabaseFile.SaveAtomic(fixture.CachePath, new ClipDatabase());
+                fixture.Resolve(message => { throw new InvalidOperationException("An unused encrypted seed must not lock a plaintext active cache."); });
+                Assert(string.IsNullOrEmpty(fixture.SessionPassword), "Unused seed changed the active cache password.");
+            }
+        }
+
+        private sealed class StartupUnlockFixture : IDisposable
+        {
+            internal const string Password = "fixture history password";
+            private readonly string root;
+            private readonly ClipmanApplicationContext context;
+            private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+            internal readonly SettingsStore Store;
+            internal readonly AppSettings Settings;
+            internal readonly string CachePath;
+            internal int Prompts;
+
+            internal StartupUnlockFixture()
+            {
+                root = Path.Combine(Path.GetTempPath(), "ClipmanStartupUnlock-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(root);
+                Store = new SettingsStore(root);
+                Settings = new AppSettings { StorageMode = "Server", DatabasePath = Store.DefaultDatabasePath(), UseDefaultDatabasePath = true };
+                Store.Save(Settings);
+                CachePath = Path.Combine(root, "cache.clipdb");
+                // Bypass application startup: never register real hotkeys or touch the real cache.
+                context = (ClipmanApplicationContext)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(ClipmanApplicationContext));
+                typeof(ClipmanApplicationContext).GetField("settingsStore", PrivateInstance).SetValue(context, Store);
+                typeof(ClipmanApplicationContext).GetField("settings", PrivateInstance).SetValue(context, Settings);
+                SessionPassword = "";
+            }
+
+            internal string SessionPassword
+            {
+                get { return (string)typeof(ClipmanApplicationContext).GetField("databasePassword", PrivateInstance).GetValue(context); }
+                set { typeof(ClipmanApplicationContext).GetField("databasePassword", PrivateInstance).SetValue(context, value); }
+            }
+
+            internal void Encrypt(string path)
+            {
+                var database = new ClipDatabase();
+                database.Entries.Add(new ClipEntry { Text = "retained fixture" });
+                ClipDatabaseFile.SaveAtomic(path, database, Password);
+            }
+
+            internal void Resolve(Func<string, string> prompt)
+            {
+                try
+                {
+                    typeof(ClipmanApplicationContext).GetMethod("ResolveDatabasePassword", PrivateInstance, null,
+                        new[] { typeof(string), typeof(Func<string, string>) }, null).Invoke(context, new object[] { CachePath, prompt });
+                }
+                catch (TargetInvocationException ex) { throw ex.InnerException; }
+            }
+
+            public void Dispose() { Directory.Delete(root, true); }
         }
 
         private static void PlainF1IsNeverCaptured()

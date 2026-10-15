@@ -2,6 +2,6 @@
 {
     internal static class BuildInfo
     {
-        public const long BuildStampUtcMs = 1791573570663L;
+        public const long BuildStampUtcMs = 1792041360768L;
     }
 }

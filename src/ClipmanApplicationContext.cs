@@ -2808,23 +2808,23 @@ namespace Clipman
 
         private void ResolveDatabasePassword()
         {
-            var databaseIsEncrypted = false;
-            var fileHistoryIsEncrypted = false;
-            try
+            ResolveDatabasePassword(EffectiveTextHistoryDatabasePath(), message => PasswordPromptForm.Ask(
+                "Clipman history password", message));
+        }
+
+        private void ResolveDatabasePassword(string activeDatabasePath, Func<string, string> requestPassword)
+        {
+            // Server mode opens its cache, or seeds it from the configured file if absent.
+            var historyPath = File.Exists(activeDatabasePath) ? activeDatabasePath : settings.DatabasePath;
+            var encryptedPaths = new[]
             {
-                databaseIsEncrypted = ClipDatabaseFile.IsEncryptedFile(settings.DatabasePath);
-            }
-            catch
-            {
-            }
-            try
-            {
-                fileHistoryIsEncrypted = ClipDatabaseFile.IsEncryptedFile(settingsStore.DefaultFileHistoryDatabasePath());
-            }
-            catch
-            {
-            }
-            if (!databaseIsEncrypted && !fileHistoryIsEncrypted && !settings.DatabaseEncryptionEnabled && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+                historyPath,
+                settingsStore.DefaultFileHistoryDatabasePath(),
+                settingsStore.DefaultSecretsDatabasePath()
+            }.Where(path => !string.IsNullOrWhiteSpace(path) && ClipDatabaseFile.IsEncryptedFile(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var encryptedHistoryExists = encryptedPaths.Count > 0;
+            if (!encryptedHistoryExists && !settings.DatabaseEncryptionEnabled && string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
                 databasePassword = string.Empty;
                 settings.DatabaseEncryptionEnabled = false;
@@ -2833,16 +2833,15 @@ namespace Clipman
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
+            if (settings.RememberDatabasePassword && !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword))
             {
-                settings.DatabaseEncryptionEnabled = true;
-                settings.RememberDatabasePassword = true;
                 try
                 {
                     var password = settingsStore.DatabasePassword(settings);
                     if (!string.IsNullOrEmpty(password))
                     {
                         databasePassword = password;
+                        settings.DatabaseEncryptionEnabled = true;
                         return;
                     }
                 }
@@ -2862,7 +2861,7 @@ namespace Clipman
                 return;
             }
 
-            if (!databaseIsEncrypted && !fileHistoryIsEncrypted)
+            if (!encryptedHistoryExists)
             {
                 settings.DatabaseEncryptionEnabled = false;
                 settings.RememberDatabasePassword = false;
@@ -2871,12 +2870,29 @@ namespace Clipman
                 return;
             }
 
-            var entered = PasswordPromptForm.Ask(
-                "Clipman history password",
-                "This machine needs the password for the encrypted Clipman history database.");
-            if (string.IsNullOrEmpty(entered))
+            string entered;
+            var prompt = "This machine needs the password for the encrypted Clipman history database.";
+            while (true)
             {
-                throw new OperationCanceledException("Clipman history password was not provided.");
+                entered = requestPassword(prompt);
+                if (string.IsNullOrEmpty(entered))
+                {
+                    throw new OperationCanceledException("Clipman history password was not provided.");
+                }
+                try
+                {
+                    // Validate before remembering the password; never rewrite encrypted data here.
+                    foreach (var path in encryptedPaths)
+                    {
+                        ClipDatabaseFile.Load<Dictionary<string, object>>(path, entered);
+                    }
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    if (!(ex is DatabasePasswordRequiredException) && !(ex is System.Security.Cryptography.CryptographicException)) throw;
+                    prompt = "Could not unlock history. Check the password and try again, or Cancel. Your data has not been changed.";
+                }
             }
             databasePassword = entered;
             settings.DatabaseEncryptionEnabled = true;

@@ -92,6 +92,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.10 Windows</h3>
+  <ul>
+    <li>Encrypted server history now asks for its password when Clipman starts if the password was not remembered or Windows cannot recover the saved password, instead of failing to launch. Thanks to Brandon Cross for reporting this. Fixes issue #85.</li>
+    <li>Unlocking keeps your Remember history password choice. Incorrect passwords can be retried, and cancelling leaves encrypted history and saved password preferences unchanged.</li>
+    <li>This is a Windows-only update. The server and other clients are unchanged.</li>
+  </ul>
   <h3>3.1.9 Windows, macOS and Linux</h3>
   <ul>
     <li>F1 explains the focused control in a readable help dialog, including preferences, entry editors, secrets and sync rules. Open Manual still opens the complete manual.</li>
@@ -903,6 +909,7 @@
   <p><strong>Storage and Password:</strong> Choose the shared Clipman data folder, set or change the history password, choose whether this computer remembers the password, remove password encryption, and manage ignored applications. Clipman stores shared text history as <code>clipman-history.clipdb</code> inside the chosen folder.</p>
 
   <p>The Remember history password on this computer checkbox controls convenience versus exposure. When unchecked, Clipman asks for the history password when it starts and keeps the password only for the current run. When checked, Windows stores an unlockable password protected by Windows for the current user and machine, including on Windows 7, and Mac stores it in that user's Keychain for the selected database path. That is convenient for automatic startup, but it cannot protect against malware already running as the same signed-in user. The Use no password button clears the saved history password, clears any session-only password, and rewrites the current database without password encryption. It exists because blank password fields mean "keep the current password"; the explicit button prevents accidental decryption when you only meant to change another setting.</p>
+  <p>On Windows, startup unlocking also covers the encrypted offline cache used in Server mode and encrypted local File History or Secrets. If Windows cannot recover a remembered password, Clipman asks for it again. An incorrect password entered in this prompt can be retried; Cancel stops startup without changing encrypted history or saved password preferences. Enter the existing history password rather than generating a replacement, so your clients continue using the same server history.</p>
 
   <p><strong>Sensitive data:</strong> Sensitive-data exclusions are off by default and device-specific. When the mode is set to Exclude from history, Clipman checks automatic clipboard text capture against the presets you enable. Matching text is not stored in Clipman history, and the system clipboard is not changed, so your immediate paste still works. This filter does not apply to existing history, imports, Send To, Quick Paste, Push to other devices, or entries manually copied from Clipman.</p>
 
