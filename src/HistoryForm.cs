@@ -46,6 +46,7 @@ namespace Clipman
         private readonly AnnouncingComboBox groupFilter;
         private readonly FlowLayoutPanel filterPanel;
         private MenuStrip menuStrip;
+        private EntryPropertiesForm quickClipForm;
         private readonly StatusStrip status;
         private readonly ToolStripStatusLabel statusText;
         private readonly Timer statusResetTimer;
@@ -3976,28 +3977,86 @@ namespace Clipman
 
         public void ShowQuickClip()
         {
-            using (var dialog = new EntryPropertiesForm(null, false, string.Empty, QuickPasteModes.PasteRestore, false, true))
+            ShowQuickClip(null);
+        }
+
+        internal void ShowQuickClip(Action completed)
+        {
+            if (RestoreQuickClip()) return;
+            var dialog = new EntryPropertiesForm(null, false, string.Empty, QuickPasteModes.PasteRestore, false, true);
+            quickClipForm = dialog;
+            // A modal WinForms message loop treats hiding its dialog as completion.
+            // Keep this editor modeless so a hidden draft has an independent lifetime.
+            dialog.FormClosing += (sender, args) =>
             {
-                if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                var entry = store.AddManualEntry(
-                    dialog.EntryText,
-                    dialog.EntryName,
-                    dialog.EntryGroup,
-                    dialog.EntryPinned,
-                    dialog.EntryIsTemplate,
-                    settings.DuplicateMode,
-                    settings.MaxHistoryEntries,
-                    settings.MaxHistoryDays);
-                if (entry == null)
+                if (dialog.DialogResult != DialogResult.OK) return;
+                try
                 {
-                    statusText.Text = "Quick Clip was not saved because it contains no text.";
-                    playSkipSound();
-                    return;
+                    var entry = store.AddManualEntry(
+                        dialog.EntryText,
+                        dialog.EntryName,
+                        dialog.EntryGroup,
+                        dialog.EntryPinned,
+                        dialog.EntryIsTemplate,
+                        settings.DuplicateMode,
+                        settings.MaxHistoryEntries,
+                        settings.MaxHistoryDays);
+                    if (entry == null)
+                    {
+                        statusText.Text = "Quick Clip was not saved because it contains no text.";
+                        playSkipSound();
+                        return;
+                    }
+                    RefreshGroupFilterItems();
+                    Reload(entry.Id, -1);
+                    statusText.Text = "Quick Clip saved.";
                 }
-                RefreshGroupFilterItems();
-                Reload(entry.Id, -1);
-                statusText.Text = "Quick Clip saved.";
-            }
+                catch (Exception ex)
+                {
+                    args.Cancel = true;
+                    dialog.DialogResult = DialogResult.None;
+                    MessageBox.Show(dialog, "Clipman could not save this Quick Clip. Your draft is still open.\r\n\r\n" + ex.Message,
+                        "Clipman Quick Clip", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            };
+            dialog.FormClosed += (sender, args) =>
+            {
+                quickClipForm = null;
+                if (completed != null) completed();
+            };
+            dialog.Show(this);
+        }
+
+        internal bool RestoreQuickClip()
+        {
+            if (quickClipForm == null || quickClipForm.IsDisposed) return false;
+            if (!Visible) Show();
+            if (quickClipForm.WindowState == FormWindowState.Minimized) quickClipForm.WindowState = FormWindowState.Normal;
+            quickClipForm.Show();
+            quickClipForm.BringToFront();
+            quickClipForm.Activate();
+            NativeMethods.SetForegroundWindow(quickClipForm.Handle);
+            return true;
+        }
+
+        internal bool ToggleQuickClip()
+        {
+            return ToggleQuickClip(quickClipForm != null && NativeMethods.GetForegroundWindow() == quickClipForm.Handle);
+        }
+
+        private bool ToggleQuickClip(bool editorHasForeground)
+        {
+            if (quickClipForm == null || quickClipForm.IsDisposed) return false;
+            if (Visible && editorHasForeground) HideWithQuickClip();
+            else RestoreQuickClip();
+            return true;
+        }
+
+        internal void HideWithQuickClip()
+        {
+            if (quickClipForm != null && !quickClipForm.IsDisposed)
+                quickClipForm.Hide();
+            Hide();
         }
 
         private void SelectHistoryTab(string tabId, bool focus)

@@ -803,6 +803,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     private let modeTabStack = NSStackView()
     private var modeButtons: [String: HistoryModeButton] = [:]
     private let toolbarStack = NSStackView()
+    private var entryEditor: NSAlert?
     private let statusLabel = NSTextField(labelWithString: "Text History: no entries.")
     private var steadyStatusProvider: () -> String = { "Ready." }
     private var transientStatusResetWorkItem: DispatchWorkItem?
@@ -926,7 +927,24 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     func hide() {
+        entryEditor?.window.orderOut(nil)
         (window as? HistoryWindow)?.hide()
+    }
+
+    var hasEntryEditor: Bool { entryEditor != nil }
+
+    var isEntryEditorFocused: Bool {
+        entryEditor?.window.isKeyWindow == true && entryEditor?.window.isVisible == true && NSApp.isActive
+    }
+
+    @discardableResult func restoreEntryEditor() -> Bool {
+        guard let entryEditor else { return false }
+        NSApp.unhide(nil)
+        window?.orderFront(nil)
+        if entryEditor.window.isMiniaturized { entryEditor.window.deminiaturize(nil) }
+        entryEditor.window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return true
     }
 
     var isHistoryVisible: Bool {
@@ -1017,8 +1035,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self,
                       let window = self.window,
-                      window.isVisible
+                      window.isVisible,
+                      NSApp.modalWindow == nil,
+                      window.attachedSheet == nil,
+                      NSApp.keyWindow == nil || NSApp.keyWindow === window,
+                      !(NSApp.isActive && window.isKeyWindow)
                 else { return }
+                // A retry must not refocus or announce History behind an editor.
                 NSApp.activate(ignoringOtherApps: true)
                 window.orderFrontRegardless()
                 window.makeKeyAndOrderFront(nil)
@@ -1168,7 +1191,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func configureMainKeyViewLoop() {
         guard let selectedModeButton = modeButtons[mode.tabID] else { return }
-        let keyViews: [NSView] = [searchField, selectedModeButton, tableView]
+        let keyViews: [NSView] = [searchField, selectedModeButton, groupButton, setToFilterButton,
+                                  groupFilterButton, sortButton, directionButton, preferencesButton, tableView]
         for (index, view) in keyViews.enumerated() {
             view.nextKeyView = keyViews[(index + 1) % keyViews.count]
         }
@@ -1230,12 +1254,12 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         selectedGroupLabel.setAccessibilityLabel("Selected entry group")
     }
 
-    private func configureToolbarButton(_ button: NSButton, title: String, action: Selector, tabbable: Bool = false, accessibilityLabel: String) {
+    private func configureToolbarButton(_ button: NSButton, title: String, action: Selector, accessibilityLabel: String) {
         button.title = title
         button.target = self
         button.action = action
         button.bezelStyle = .rounded
-        button.refusesFirstResponder = !tabbable
+        button.refusesFirstResponder = false
         button.setAccessibilityLabel(accessibilityLabel)
     }
 
@@ -2285,7 +2309,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         showEntryProperties(entry: ClipEntry(), quickCopyOnly: false, isNew: true)
     }
 
+    private func runEntryEditor(_ alert: NSAlert) -> NSApplication.ModalResponse {
+        entryEditor = alert
+        defer { entryEditor = nil }
+        return DialogSaveShortcut.runModal(alert, acceptsCommandReturn: true)
+    }
+
     private func showEntryProperties(entry: ClipEntry, quickCopyOnly: Bool, isNew: Bool = false) {
+        if restoreEntryEditor() { return }
         let hasEmbeddedImage = !isNew && EmbeddedImageHTML.imageInfo(from: entry.RichText) != nil
         let alert = NSAlert()
         alert.messageText = isNew ? "Quick Clip" : (quickCopyOnly ? "Set Quick Paste Target" : "Clipboard Entry Properties")
@@ -2403,7 +2434,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         alert.accessoryView = stack
         if isNew { alert.window.initialFirstResponder = textView }
 
-        guard DialogSaveShortcut.runModal(alert, acceptsCommandReturn: true) == .alertFirstButtonReturn else { return }
+        guard runEntryEditor(alert) == .alertFirstButtonReturn else { return }
         if isNew {
             guard !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 showPropertyError("Quick Clip was not saved because it contains no text.")

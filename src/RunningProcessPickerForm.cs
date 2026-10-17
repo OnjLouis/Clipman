@@ -93,6 +93,7 @@ namespace Clipman
             };
             Controls.Add(cancel);
             CancelButton = cancel;
+            ContextHelp.Prepare(this, true);
 
             PopulateProcesses();
         }

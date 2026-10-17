@@ -56,6 +56,7 @@ namespace Clipman
             { "Use no password", "Remove history encryption after confirmation. Do not use this for a shared or public server." },
             { "Ignored applications", "One process name per line, with or without .exe. Automatic copies from these apps are ignored; explicit imports are separate." },
             { "Add running app", "Choose a currently running application to add to the ignore list." },
+            { "Refresh", "Refresh the list of running applications without changing the ignored applications list." },
             { "Run Clipman at Windows startup", "Start the background clipboard manager when you sign into Windows. This does not open history." },
             { "Update check frequency", "Choose when Clipman checks for a newer Windows client. Never disables automatic checks, but manual Check for updates remains available." },
             { "Install updates silently when possible", "Allow automatic update installation without asking. Settings and history are preserved; manual update commands remain available." },
@@ -85,6 +86,12 @@ namespace Clipman
         private bool disposed;
 
         internal ContextHelp() { Application.AddMessageFilter(this); }
+
+        internal static void SetDescription(Control control, string text)
+        {
+            Descriptions.GetValue(control, key => new HelpText()).Text = text;
+            control.AccessibleDescription = string.Empty;
+        }
 
         internal static void Prepare(Control control, bool moveDescriptions)
         {

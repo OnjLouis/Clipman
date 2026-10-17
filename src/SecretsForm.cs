@@ -60,6 +60,7 @@ namespace Clipman
             Controls.Add(buttons);
 
             Load += (s, e) => RefreshList(null);
+            ContextHelp.Prepare(this, true);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)

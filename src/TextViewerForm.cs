@@ -227,6 +227,7 @@ namespace Clipman
 
             AcceptButton = close;
             CancelButton = close;
+            ContextHelp.Prepare(this, true);
             Shown += (s, e) =>
             {
                 textBox.SelectionStart = 0;

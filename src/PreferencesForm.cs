@@ -237,14 +237,15 @@ namespace Clipman
             showHotkey = NewHotkeyBox(settings.ShowHistoryHotkey, "Show or hide clipboard history global hotkey");
             toggleHotkey = NewHotkeyBox(settings.ToggleActiveHotkey, "Toggle clipboard monitoring global hotkey");
             saveCurrentClipboardHotkey = NewHotkeyBox(settings.SaveCurrentClipboardHotkey, "Save current clipboard to history global hotkey, optional");
-            quickClipHotkey = NewHotkeyBox(settings.QuickClipHotkey, "Open Quick Clip global hotkey, optional");
+            quickClipHotkey = NewHotkeyBox(settings.QuickClipHotkey, "Quick Clip global hotkey, optional");
+            quickClipHotkey.AccessibleDescription = "Show or hide one unfinished Quick Clip. Hiding keeps the draft until it is saved, cancelled, or Clipman quits. " + quickClipHotkey.AccessibleDescription;
             confirmSingleModifierHotkeys = NewCheckBox("&Warn before saving single-modifier global hotkeys", settings.ConfirmSingleModifierHotkeys);
             confirmSingleModifierHotkeys.AccessibleDescription = "When checked, Clipman warns before saving an allowed global hotkey that uses only one modifier. You can also turn this warning off from its confirmation dialog.";
             var hotkeyLayout = NewRows();
             AddRow(hotkeyLayout, "&Show history hotkey:", showHotkey);
             AddRow(hotkeyLayout, "&Toggle on/off hotkey:", toggleHotkey);
             AddRow(hotkeyLayout, "Save current &clipboard hotkey:", saveCurrentClipboardHotkey);
-            AddRow(hotkeyLayout, "Open &Quick Clip hotkey:", quickClipHotkey);
+            AddRow(hotkeyLayout, "&Quick Clip hotkey:", quickClipHotkey);
             AddFullRow(hotkeyLayout, confirmSingleModifierHotkeys);
             AddFullRow(hotkeyLayout, NewNote("The Save Current Clipboard hotkey is optional and works as a deliberate one-shot save even when clipboard monitoring is off."));
             AddFullRow(hotkeyLayout, NewNote("Most global hotkeys should use at least two modifiers. For compatibility, one modifier is allowed with function keys, Grave, or Backslash. Single-modifier letters, numbers, comma, and ordinary editing keys are rejected."));

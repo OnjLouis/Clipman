@@ -28,6 +28,8 @@ namespace Clipman.Tests
             Run("plain F1 is never captured as a global hotkey", PlainF1IsNeverCaptured);
             Run("context help preserves explanations without private values", ContextHelpPreservesExplanations);
             Run("desktop dialog controls have tailored context help", PreferencesHaveContextHelp);
+            Run("Quick Clip restores one existing draft", QuickClipRestoresOneExistingDraft);
+            Run("Quick Clip saves and cancels its modeless draft", QuickClipSavesAndCancelsDraft);
             Run("database container caps are aligned", DatabaseContainerCapsAreAligned);
             Run("server polls cannot overlap and respect failure backoff", ServerPollSchedulingIsBounded);
             Run("brief server poll timeouts do not report storage unavailable", TransientServerPollFailuresAreQuiet);
@@ -341,6 +343,9 @@ namespace Clipman.Tests
                 ContextHelp.Prepare(form, true);
                 Assert(field.AccessibleDescription == string.Empty, "Preferences hints should not repeat automatically.");
                 Assert(ContextHelp.Description(field) == "Unlock the encrypted history.", "F1 must retain the existing explanation.");
+                ContextHelp.SetDescription(field, "Updated unlock help.");
+                Assert(field.AccessibleDescription == string.Empty && ContextHelp.Description(field) == "Updated unlock help.",
+                    "Dynamic help must update without returning to automatic speech.");
                 Assert(!ContextHelp.Description(field).Contains(field.Text), "Help must never read a private field value.");
                 using (var dialog = new ContextHelpDialog(ContextHelp.ControlName(field), ContextHelp.Description(field)))
                 {
@@ -356,7 +361,11 @@ namespace Clipman.Tests
             var forms = new Form[] {
                 new PreferencesForm(new AppSettings(), _ => {}, _ => {}, () => false),
                 new EntryPropertiesForm(new ClipEntry { Text = "test" }, false, "", QuickPasteModes.CopyOnly, false),
+                new EntryPropertiesForm(new ClipEntry { Text = "test" }, false, "", QuickPasteModes.CopyOnly, false, true),
                 new SecretEditorForm(new SecretEntry(), true),
+                new SecretsForm(null, () => {}, _ => {}),
+                new GroupPromptForm("", new[] { "Test" }),
+                new RunningProcessPickerForm(),
                 new PasswordPromptForm("Unlock", "Enter the history password."),
                 new TextViewerForm("test"),
                 new SyncChannelEditorForm(null, new List<string>(), new List<string>(), new SyncRulesDocument(), -1),
@@ -373,6 +382,8 @@ namespace Clipman.Tests
                     {
                         if (control is TextBoxBase || control is NumericUpDown || control is ComboBox || control is ButtonBase || control is ListBox || control is TabControl)
                         {
+                            Assert(string.IsNullOrEmpty(control.AccessibleDescription),
+                                "Explanations belong in F1, not automatic speech: " + ContextHelp.ControlName(control));
                             var help = ContextHelp.Description(control);
                             if (help.StartsWith("Enter or review") || help.StartsWith("Type a number") || help.StartsWith("Choose an option") || help.StartsWith("Space changes") || help.StartsWith("Activate this command") || help.StartsWith("Navigate items"))
                                 missing.Add(ContextHelp.ControlName(control));
@@ -384,6 +395,112 @@ namespace Clipman.Tests
                 Assert(missing.Count == 0, "Missing help: " + string.Join("; ", missing.Distinct().ToArray()));
             }
             finally { foreach (var form in forms) form.Dispose(); }
+        }
+
+        private static void QuickClipRestoresOneExistingDraft()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb")))
+                using (var history = CreateTestHistoryForm(store, () => new List<ClipboardEventSummary>()))
+                using (var timer = new System.Windows.Forms.Timer { Interval = 50 })
+                using (var loop = new ApplicationContext())
+                {
+                    var phase = 0;
+                    var retained = false;
+                    var toggled = false;
+                    EntryPropertiesForm original = null;
+                    Exception failure = null;
+                    var ticks = 0;
+                    var toggle = typeof(HistoryForm).GetMethod("ToggleQuickClip", BindingFlags.Instance | BindingFlags.NonPublic,
+                        null, new[] { typeof(bool) }, null);
+                    timer.Tick += (sender, args) =>
+                    {
+                        try
+                        {
+                            Assert(++ticks < 40, "Quick Clip draft test timed out.");
+                            if (phase == 0)
+                            {
+                                original = Application.OpenForms.OfType<EntryPropertiesForm>().SingleOrDefault();
+                                if (original == null) return;
+                                original.Controls.OfType<TextBox>().Single(control => control.Multiline).Text = "Keep this unfinished draft";
+                                toggle.Invoke(history, new object[] { true });
+                                Assert(!history.Visible, "Quick Clip did not hide its history owner.");
+                                phase = 1;
+                                return;
+                            }
+                            Assert(!original.IsDisposed, "Hiding Quick Clip disposed its unfinished draft after the message loop resumed.");
+                            if (phase == 1)
+                            {
+                                Assert(!history.Visible && !original.Visible, "Hiding Quick Clip revealed History after the message loop resumed.");
+                                toggle.Invoke(history, new object[] { false });
+                                toggled = history.Visible && original.Visible;
+                                history.HideWithQuickClip();
+                                phase = 2;
+                                return;
+                            }
+                            if (phase == 2)
+                            {
+                                history.Show();
+                                history.ShowQuickClip();
+                                phase = 3;
+                                return;
+                            }
+                            Assert(Application.OpenForms.OfType<EntryPropertiesForm>().Count() == 1,
+                                "Repeated Quick Clip opened another editor instead of restoring the draft.");
+                            retained = original.Visible && original.Controls.OfType<TextBox>().Single(control => control.Multiline).Text == "Keep this unfinished draft";
+                        }
+                        catch (Exception ex) { failure = ex; }
+                        timer.Stop();
+                        foreach (var editor in Application.OpenForms.OfType<EntryPropertiesForm>().ToArray())
+                        {
+                            editor.DialogResult = DialogResult.Cancel;
+                            editor.Close();
+                        }
+                        loop.ExitThread();
+                    };
+                    history.Show();
+                    history.BeginInvoke(new Action(history.ShowQuickClip));
+                    timer.Start();
+                    Application.Run(loop);
+                    if (failure != null) throw failure;
+                    Assert(retained, "Restoring Quick Clip lost or left the original draft hidden.");
+                    Assert(toggled, "The Quick Clip hotkey must hide and restore the same draft.");
+                    Assert(store.GetEntries().Count == 0, "Cancelling the restored draft unexpectedly saved it.");
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        private static void QuickClipSavesAndCancelsDraft()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanWindowsRegression-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                using (var store = new ClipStore(Path.Combine(directory, "history.clipdb")))
+                using (var history = CreateTestHistoryForm(store, () => new List<ClipboardEventSummary>()))
+                {
+                    history.Show();
+                    var completed = 0;
+                    history.ShowQuickClip(() => completed++);
+                    var cancelled = Application.OpenForms.OfType<EntryPropertiesForm>().Single();
+                    cancelled.Controls.OfType<TextBox>().Single(control => control.Multiline).Text = "Discard this draft";
+                    cancelled.CancelButton.PerformClick();
+                    Assert(cancelled.IsDisposed && completed == 1, "Cancel did not end the draft exactly once.");
+                    Assert(store.GetEntries().Count == 0, "Cancel saved the unfinished draft.");
+                    history.ShowQuickClip(() => completed++);
+                    var saved = Application.OpenForms.OfType<EntryPropertiesForm>().Single();
+                    saved.Controls.OfType<TextBox>().Single(control => control.Multiline).Text = "Save this draft";
+                    saved.AcceptButton.PerformClick();
+                    Assert(saved.IsDisposed && completed == 2, "Save did not end the draft exactly once.");
+                    Assert(store.GetEntries().Single().Text == "Save this draft", "Save did not persist exactly the submitted draft.");
+                    Assert(!history.RestoreQuickClip(), "A completed draft remained available for restoration.");
+                }
+            }
+            finally { Directory.Delete(directory, true); }
         }
 
         private static void UrlOnlyClipboardItemsAreImportedAsLinks()
@@ -2136,8 +2253,9 @@ namespace Clipman.Tests
                 {
                     var content = form.Controls.OfType<TextBox>().First(control => control.AccessibleName == "Image content");
                     Assert(content.ReadOnly, "The image identity field remained editable.");
-                    Assert((content.AccessibleDescription ?? string.Empty).IndexOf("cannot be edited", StringComparison.OrdinalIgnoreCase) >= 0,
-                        "The image editor does not explain why image content is read-only.");
+                    Assert(string.IsNullOrEmpty(content.AccessibleDescription) &&
+                        ContextHelp.Description(content).IndexOf("cannot be edited", StringComparison.OrdinalIgnoreCase) >= 0,
+                        "The image editor must retain its read-only explanation under F1 without repeating it on focus.");
                 }
 
                 using (var store = new ClipStore(databasePath, string.Empty))

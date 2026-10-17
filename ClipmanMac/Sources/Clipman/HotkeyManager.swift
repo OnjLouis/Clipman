@@ -23,7 +23,7 @@ final class HotkeyManager {
         InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
             var hotkeyID = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &hotkeyID)
-            DispatchQueue.main.async {
+            HotkeyManager.scheduleAction {
                 guard let manager = HotkeyManager.current,
                       let action = manager.actionsByID[hotkeyID.id]
                 else {
@@ -33,6 +33,15 @@ final class HotkeyManager {
             }
             return noErr
         }, 1, &eventType, nil, nil)
+    }
+
+    nonisolated static func scheduleAction(_ action: @escaping @MainActor @Sendable () -> Void) {
+        // The main dispatch queue cannot reenter a handler running a modal editor.
+        // Its run loop can, so subsequent hotkeys can hide or restore that editor.
+        RunLoop.main.perform(inModes: [.common, .modalPanel, .eventTracking]) {
+            MainActor.assumeIsolated { action() }
+        }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     func register(showHistory: HotkeyDescriptor, toggleMonitoring: HotkeyDescriptor, saveCurrentClipboard: HotkeyDescriptor?, quickClip: HotkeyDescriptor?, quickCopies: [String: HotkeyDescriptor], secrets: [String: HotkeyDescriptor] = [:]) {

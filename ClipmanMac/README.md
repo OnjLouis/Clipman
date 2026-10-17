@@ -66,7 +66,7 @@ The history window includes an accessible toolbar after the history type control
 
 - `Command+1` through `Command+4`: switch to the visible history area currently shown at that position. The View menu shows the current assignments.
 - `Option+Left` or `Option+Right`: move the focused history tab, keep focus on it, and update the positional `Command+number` assignments.
-- `Tab` or `Shift+Tab`: enter the selected history tab from the normal key loop and continue between the main controls and history list.
+- `Tab` or `Shift+Tab`: move between search, the selected history tab, available toolbar controls and the history list. Dialogs also include buttons, checkboxes and pop-up menus, without changing the system keyboard-navigation preference.
 - `Command+G`: group selected text entries.
 - `Option+G`: open the group filter menu.
 - `Option+1` through `Option+0`: apply one of the first ten group filters in menu order: All, Pinned, Named, Ungrouped, then custom groups.
@@ -139,6 +139,8 @@ The default Apple Silicon signed and notarized ZIP is created at:
 ```
 
 Set `CLIPMAN_MAC_ARCH=x86_64` to build the Intel ZIP named `Clipman-macOS-Intel-<version>.zip` instead. Each package contains a single-architecture app for macOS 13 or later. The in-app updater selects the matching architecture automatically.
+
+On Apple Silicon without Rosetta, explicitly setting `CLIPMAN_MAC_CROSS_COMPILE_ONLY=1` alongside `CLIPMAN_MAC_ARCH=x86_64` builds the Intel package without executing its Intel runtime smoke tests. Architecture, signing, notarization and package checks still run. Run the native Apple Silicon codec, sync and file-history tests separately, and record Intel runtime testing as unverified rather than passed. The default packaging path continues to require runtime smoke tests.
 
 For a Mac-only release, `VERSION` supplies the Mac app and ZIP version without changing other clients. Update or remove that file when the next coordinated release catches up.
 

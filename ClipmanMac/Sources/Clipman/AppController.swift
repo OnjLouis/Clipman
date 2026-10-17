@@ -530,6 +530,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
     }
 
     @objc private func showHistory(_ sender: Any?) {
+        if restoreEntryEditorIfNeeded() { return }
         rememberPreviousFrontmostApplication()
         refreshHistoryWindow()
         if settings.dynamicHistoryMode, receivedHistoryTabPending {
@@ -1314,10 +1315,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
     }
 
     @objc private func showQuickClip(_ sender: Any?) {
+        if historyWindow.hasEntryEditor {
+            if historyWindow.isEntryEditorFocused { historyWindow.hide() }
+            else { _ = restoreEntryEditorIfNeeded() }
+            return
+        }
         let historyWasVisible = historyWindow.isHistoryVisible
         showHistory(sender)
         defer { if !historyWasVisible { historyWindow.hide() } }
         historyWindow.showQuickClip()
+    }
+
+    private func restoreEntryEditorIfNeeded() -> Bool {
+        guard historyWindow.hasEntryEditor else { return false }
+        presentManagedWindow(historyWindow.window) {
+            historyWindow.restoreEntryEditor()
+        }
+        return true
     }
 
     private func clearServerSyncWarningIfNeeded() {

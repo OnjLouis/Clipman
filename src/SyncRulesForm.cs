@@ -201,6 +201,7 @@ namespace Clipman
 
             AcceptButton = okButton;
             CancelButton = cancelButton;
+            ContextHelp.Prepare(this, true);
 
             if (readOnly)
             {
@@ -338,7 +339,7 @@ namespace Clipman
             if (readOnly || !hasSelection)
             {
                 removeChannelButton.Enabled = false;
-                removeChannelButton.AccessibleDescription = "Select a channel to remove.";
+                ContextHelp.SetDescription(removeChannelButton, "Select a channel to remove.");
                 channelStatusLabel.Text = string.Empty;
                 return;
             }
@@ -350,15 +351,15 @@ namespace Clipman
             removeChannelButton.Enabled = canSee;
             if (canSee)
             {
-                removeChannelButton.AccessibleDescription =
-                    "Removes the selected channel. Its entries move to the next matching channel or to the main history.";
+                ContextHelp.SetDescription(removeChannelButton,
+                    "Removes the selected channel. Its entries move to the next matching channel or to the main history.");
                 channelStatusLabel.Text = string.Empty;
             }
             else
             {
                 var notice = "Remove is unavailable: this device is not subscribed to " + (channel.Name ?? key) +
                     " and cannot see its entries. Subscribe this device to the channel first.";
-                removeChannelButton.AccessibleDescription = notice;
+                ContextHelp.SetDescription(removeChannelButton, notice);
                 channelStatusLabel.Text = notice;
             }
         }
@@ -667,6 +668,7 @@ namespace Clipman
             Controls.Add(cancel);
             AcceptButton = ok;
             CancelButton = cancel;
+            ContextHelp.Prepare(this, true);
         }
 
         protected override void OnShown(EventArgs e)
@@ -827,6 +829,7 @@ namespace Clipman
             Controls.Add(cancel);
             AcceptButton = ok;
             CancelButton = cancel;
+            ContextHelp.Prepare(this, true);
         }
 
         protected override void OnShown(EventArgs e)

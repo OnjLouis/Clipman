@@ -155,6 +155,9 @@ final class HelpPanel: NSPanel {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            if event.keyCode == 48, modifiers.isEmpty || modifiers == .shift,
+               let window = event.window ?? NSApp.keyWindow,
+               KeyboardNavigation.move(in: window, backwards: modifiers == .shift) { return nil }
             guard event.keyCode == 122, modifiers.isEmpty else { return event }
             self?.show(); return nil
         }

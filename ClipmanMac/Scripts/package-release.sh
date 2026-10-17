@@ -10,6 +10,15 @@ VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" version)"
 BUILD_VERSION="$(zsh "$ROOT/Scripts/shared-version.sh" build)"
 BUILD_STAMP="$(zsh "$ROOT/Scripts/shared-version.sh" stamp)"
 ARCH="${CLIPMAN_MAC_ARCH:-arm64}"
+CROSS_COMPILE_ONLY="${CLIPMAN_MAC_CROSS_COMPILE_ONLY:-0}"
+if [[ "$CROSS_COMPILE_ONLY" != "0" && "$CROSS_COMPILE_ONLY" != "1" ]]; then
+  echo "CLIPMAN_MAC_CROSS_COMPILE_ONLY must be 0 or 1." >&2
+  exit 2
+fi
+if [[ "$CROSS_COMPILE_ONLY" == "1" && ( "$ARCH" != "x86_64" || "$(uname -m)" != "arm64" ) ]]; then
+  echo "Cross-compile-only validation is supported only for Intel packages built on Apple Silicon." >&2
+  exit 2
+fi
 case "$ARCH" in
   arm64)
     ZIP="$DIST/Clipman-macOS-$VERSION.zip"
@@ -67,9 +76,14 @@ rm -rf "$DIST"
 mkdir -p "$DIST"
 
 swift build --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE"
-swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanCodecSmoke
-swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanSyncSmoke
-swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanFileHistorySmoke
+if [[ "$CROSS_COMPILE_ONLY" == "1" ]]; then
+  echo "Intel runtime smoke tests NOT RUN: explicit cross-compile-only validation."
+  echo "Run the native codec, sync and file-history smoke tests separately before publishing."
+else
+  swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanCodecSmoke
+  swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanSyncSmoke
+  swift run --package-path "$ROOT" --scratch-path "$SCRATCH" --configuration release --triple "$TARGET_TRIPLE" ClipmanFileHistorySmoke
+fi
 zsh "$ROOT/Scripts/test-startup-service.sh" "$SCRATCH/startup-service-smoke"
 zsh "$ROOT/Scripts/test-debug-logger.sh" "$SCRATCH/debug-logger-smoke"
 

@@ -276,6 +276,12 @@ namespace Clipman
 
             AcceptButton = saveButton;
             CancelButton = cancel;
+            if (isNewEntry)
+            {
+                saveButton.Click += (s, e) => Close();
+                cancel.Click += (s, e) => Close();
+            }
+            ContextHelp.Prepare(this, true);
             if (focusQuickCopy)
             {
                 Shown += (s, e) => quickCopyHotkeyBox.Focus();

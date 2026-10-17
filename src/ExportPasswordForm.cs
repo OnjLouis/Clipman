@@ -116,6 +116,7 @@ namespace Clipman
             Controls.Add(cancel);
             AcceptButton = ok;
             CancelButton = cancel;
+            ContextHelp.Prepare(this, true);
 
             currentPassword.CheckedChanged += (s, e) => UpdatePasswordFields();
             newPassword.CheckedChanged += (s, e) => UpdatePasswordFields();

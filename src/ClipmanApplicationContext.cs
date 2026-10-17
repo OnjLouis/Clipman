@@ -199,6 +199,7 @@ namespace Clipman
 
         public void ShowHistory()
         {
+            if (historyForm != null && !historyForm.IsDisposed && historyForm.RestoreQuickClip()) return;
             var historyWasVisible = historyForm != null && !historyForm.IsDisposed && historyForm.Visible;
             if (!historyWasVisible)
             {
@@ -236,20 +237,20 @@ namespace Clipman
 
         public void ShowQuickClip()
         {
+            if (historyForm != null && !historyForm.IsDisposed && historyForm.ToggleQuickClip()) return;
             var historyWasVisible = historyForm != null && !historyForm.IsDisposed && historyForm.Visible;
             ShowHistory();
-            try { historyForm.ShowQuickClip(); }
-            finally
+            historyForm.ShowQuickClip(() =>
             {
                 if (!historyWasVisible && !historyForm.IsDisposed) historyForm.Hide();
-            }
+            });
         }
 
         public void ToggleHistoryWindow()
         {
             if (historyForm != null && !historyForm.IsDisposed && historyForm.Visible && historyForm.WindowState != FormWindowState.Minimized)
             {
-                historyForm.Hide();
+                historyForm.HideWithQuickClip();
                 return;
             }
 

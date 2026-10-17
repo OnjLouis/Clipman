@@ -111,6 +111,7 @@ namespace Clipman
 
             AcceptButton = ok;
             CancelButton = cancel;
+            ContextHelp.Prepare(this, true);
         }
 
         protected override void OnShown(EventArgs e)

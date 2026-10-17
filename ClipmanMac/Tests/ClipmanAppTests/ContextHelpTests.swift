@@ -5,6 +5,161 @@ import ClipmanCore
 @testable import Clipman
 
 final class ContextHelpTests: XCTestCase {
+    @MainActor func testHotkeyActionsRunDuringAnOpenModalEditor() {
+        _ = NSApplication.shared
+        let modal = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
+        let finished = expectation(description: "Hotkey opened and closed its modal editor")
+        var enabled = true
+        var handledWhileModal = false
+        let safety = Timer(timeInterval: 0.5, repeats: false) { _ in
+            MainActor.assumeIsolated { if NSApp.modalWindow === modal { NSApp.abortModal() } }
+        }
+        RunLoop.main.add(safety, forMode: .common)
+        RunLoop.main.add(safety, forMode: .modalPanel)
+        defer { enabled = false; safety.invalidate(); modal.orderOut(nil) }
+        HotkeyManager.scheduleAction {
+            guard enabled else { return }
+            HotkeyManager.scheduleAction {
+                guard enabled else { return }
+                handledWhileModal = NSApp.modalWindow === modal
+                if handledWhileModal { NSApp.stopModal() }
+            }
+            NSApp.runModal(for: modal)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 2)
+        XCTAssertTrue(handledWhileModal, "Hotkeys queued behind the modal editor instead of running inside its event loop.")
+    }
+    @MainActor func testQuickClipReusesHiddenDraftWithoutNestingEditors() {
+        _ = NSApplication.shared
+        let controller = HistoryWindowController()
+        var duplicated = false
+        var restored = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            guard let original = NSApp.modalWindow,
+                  let text = KeyboardNavigation.orderedControls(in: original.contentView!).compactMap({ $0 as? NSTextView }).first else {
+                XCTFail("Quick Clip did not expose its editor.")
+                NSApp.abortModal()
+                return
+            }
+            text.string = "Keep this unfinished draft"
+            controller.hide()
+            XCTAssertFalse(original.isVisible)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                if controller.hasEntryEditor, let nested = NSApp.modalWindow, nested !== original {
+                    duplicated = true
+                    NSApp.abortModal()
+                    nested.orderOut(nil)
+                }
+            }
+            controller.showQuickClip()
+            restored = NSApp.modalWindow === original && original.isVisible && text.string == "Keep this unfinished draft"
+            let cancel = KeyboardNavigation.orderedControls(in: original.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "Cancel" }
+            XCTAssertNotNil(cancel)
+            cancel?.performClick(nil)
+        }
+        controller.showQuickClip()
+        XCTAssertFalse(duplicated)
+        XCTAssertTrue(restored)
+        XCTAssertFalse(controller.hasEntryEditor)
+        controller.window?.orderOut(nil)
+    }
+    @MainActor func testHistoryFocusRetriesDoNotStealFocusFromModalEditor() {
+        _ = NSApplication.shared
+        let controller = HistoryWindowController()
+        let modal = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
+        controller.focusHistoryWindow(nil)
+        let previousControl = NSButton(title: "Previous focus", target: nil, action: nil)
+        controller.window!.contentView!.addSubview(previousControl)
+        XCTAssertTrue(controller.window!.makeFirstResponder(previousControl))
+        defer { modal.orderOut(nil); controller.window?.orderOut(nil) }
+        modal.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            XCTAssertTrue(NSApp.modalWindow === modal)
+            XCTAssertFalse(controller.window!.isKeyWindow, "A delayed History retry took focus from the editor.")
+            XCTAssertTrue(controller.window!.firstResponder === previousControl, "A delayed History retry changed focus and announced the history list behind the editor.")
+            NSApp.stopModal()
+        }
+        NSApp.runModal(for: modal)
+    }
+    @MainActor func testTabVisitsButtonsPopupsAndFieldsInBothDirections() {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 240), styleMask: [.titled], backing: .buffered, defer: false)
+        let field = NSTextField(frame: NSRect(x: 10, y: 190, width: 200, height: 24))
+        let check = NSButton(checkboxWithTitle: "Template entry", target: nil, action: nil)
+        check.frame = NSRect(x: 10, y: 150, width: 200, height: 24)
+        let popup = NSPopUpButton(frame: NSRect(x: 10, y: 110, width: 200, height: 24))
+        popup.addItems(withTitles: ["One", "Two"])
+        let hidden = NSButton(title: "Hidden", target: nil, action: nil)
+        hidden.isHidden = true
+        let disabled = NSButton(title: "Disabled", target: nil, action: nil)
+        disabled.isEnabled = false
+        let save = NSButton(title: "Save", target: nil, action: nil)
+        save.frame = NSRect(x: 10, y: 10, width: 80, height: 24)
+        for view in [field, check, popup, hidden, disabled, save] { window.contentView!.addSubview(view) }
+        XCTAssertTrue(window.makeFirstResponder(field))
+        for target in [check, popup, save, field] {
+            XCTAssertTrue(KeyboardNavigation.move(in: window, backwards: false))
+            XCTAssertTrue(KeyboardNavigation.focusedView(in: window) === target, "Forward: \(target)")
+        }
+        for target in [save, popup, check, field] {
+            XCTAssertTrue(KeyboardNavigation.move(in: window, backwards: true))
+            XCTAssertTrue(KeyboardNavigation.focusedView(in: window) === target, "Reverse: \(target)")
+        }
+    }
+    @MainActor func testHistoryToolbarBelongsToKeyboardLoop() {
+        _ = NSApplication.shared
+        let controller = HistoryWindowController()
+        let root = controller.window!.contentView!
+        func descendants(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap { descendants($0) }
+        }
+        let views = descendants(root)
+        let search = views.first { $0 is NSSearchField }!
+        var loop: [NSView] = []
+        var next: NSView? = search
+        while let view = next, !loop.contains(where: { $0 === view }), loop.count < 100 {
+            loop.append(view)
+            next = view.nextKeyView
+        }
+        for title in ["Set Group...", "Filter: All", "Sort: Last used", "Newest first", "Preferences..."] {
+            let button = views.compactMap { $0 as? NSButton }.first { $0.title == title }!
+            XCTAssertFalse(button.refusesFirstResponder, title)
+            XCTAssertTrue(loop.contains { $0 === button }, title)
+        }
+        XCTAssertFalse(loop.contains { $0.accessibilityLabel() == "History status" })
+        XCTAssertTrue(controller.window!.makeFirstResponder(search))
+        let available = loop.filter { !$0.isHiddenOrHasHiddenAncestor && $0.acceptsFirstResponder && ($0 as? NSControl)?.isEnabled != false }
+        for target in Array(available.dropFirst()) + [search] {
+            XCTAssertTrue(KeyboardNavigation.move(in: controller.window!, backwards: false))
+            XCTAssertTrue(KeyboardNavigation.focusedView(in: controller.window!) === target)
+        }
+        for target in Array(available.dropFirst().reversed()) + [search] {
+            XCTAssertTrue(KeyboardNavigation.move(in: controller.window!, backwards: true))
+            XCTAssertTrue(KeyboardNavigation.focusedView(in: controller.window!) === target)
+        }
+    }
+
+    @MainActor func testEveryEnabledPreferencesControlHasBidirectionalTabAccess() {
+        _ = NSApplication.shared
+        let controller = PreferencesWindowController(settings: .defaults(applicationSupport: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("clipman-keyboard-test")), historyIsEncrypted: false, rememberedPasswordExists: false, databasePasswordAvailable: false)
+        let window = controller.window!
+        window.contentView!.layoutSubtreeIfNeeded()
+        let controls = KeyboardNavigation.orderedControls(in: window.contentView!).filter {
+            $0.acceptsFirstResponder && ($0 as? NSControl)?.isEnabled != false
+        }
+        XCTAssertTrue(controls.contains { $0 is HotkeyCaptureField }, "Shortcut fields are intentionally read-only, but must still be reachable.")
+        XCTAssertGreaterThan(controls.count, 30)
+        XCTAssertTrue(window.makeFirstResponder(controls[0]))
+        for target in Array(controls.dropFirst()) + [controls[0]] {
+            XCTAssertTrue(KeyboardNavigation.move(in: window, backwards: false))
+            XCTAssertTrue(KeyboardNavigation.focusedView(in: window) === target, "Forward: \(target.accessibilityLabel() ?? "control")")
+        }
+        for target in Array(controls.dropFirst().reversed()) + [controls[0]] {
+            XCTAssertTrue(KeyboardNavigation.move(in: window, backwards: true))
+            XCTAssertTrue(KeyboardNavigation.focusedView(in: window) === target, "Reverse: \(target.accessibilityLabel() ?? "control")")
+        }
+    }
     func testImageSourceNamesKeepRealFilenames() {
         XCTAssertEqual(RichTextData.sourceImageFilename("Clipboard image.png", application: "Safari"), "Clipboard image - Safari.png")
         XCTAssertEqual(RichTextData.sourceImageFilename("camera original.jpg", application: "Photos"), "camera original.jpg")
