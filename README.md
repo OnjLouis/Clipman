@@ -9,6 +9,7 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 - [Browse current Windows, macOS, Linux, Android, and server downloads](https://github.com/OnjLouis/Clipman/releases).
 - [Download the latest Clipman Server package](https://onjlouis.github.io/Clipman/server/download.html).
 - [Download Clipman for iPhone and iPad from the App Store](https://apps.apple.com/app/clipman/id6793250105).
+- [Follow the Getting Started guide, with step-by-step examples for screen-reader users](https://onjlouis.github.io/Clipman/getting-started.html).
 - [Read the complete Clipman manual](https://onjlouis.github.io/Clipman/manual.html).
 - [Read the Clipman Server manual](https://onjlouis.github.io/Clipman/server/manual.html).
 
@@ -33,7 +34,7 @@ Windows is portable, macOS has signed and notarized Apple Silicon and Intel buil
 3. Press Enter or activate an entry to return it to the clipboard. On desktop, the Edit menu also offers Copy Name and Content when you want an entry's short Name and full content together.
 4. Use Quick Clip when you want to type a new saved entry directly, or open Preferences or Settings when you want to enable optional views, encryption, synchronization, sounds, or other behavior.
 
-That is enough for ordinary local use. The [full manual](https://onjlouis.github.io/Clipman/manual.html) covers every command, platform shortcut, accessibility behavior, import and export option, privacy control, and synchronization workflow.
+That is enough for ordinary local use. The [Getting Started guide](https://onjlouis.github.io/Clipman/getting-started.html) walks through everyday tasks and shared-folder setup with worked examples. The [full manual](https://onjlouis.github.io/Clipman/manual.html) covers every command, platform shortcut, accessibility behavior, import and export option, privacy control, and synchronization workflow.
 
 ## Choose How To Store History
 

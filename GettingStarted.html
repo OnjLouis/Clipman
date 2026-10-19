@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting Started with Clipman</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.55;
+      margin: 1.5rem auto;
+      padding: 0 1rem;
+      box-sizing: border-box;
+      max-width: 56rem;
+      color: #111;
+      background: #fff;
+      overflow-wrap: anywhere;
+    }
+    h1, h2, h3, h4 {
+      line-height: 1.25;
+    }
+    h2 {
+      margin-top: 2.5rem;
+      border-top: 1px solid #ccc;
+      padding-top: 1rem;
+    }
+    h3 {
+      margin-top: 1.75rem;
+    }
+    table {
+      border-collapse: collapse;
+      table-layout: fixed;
+      width: 100%;
+      margin: 1rem 0;
+    }
+    caption {
+      text-align: left;
+      font-weight: bold;
+      padding-bottom: 0.4rem;
+    }
+    th, td {
+      border: 1px solid #888;
+      padding: 0.45rem 0.6rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f0f0f0;
+    }
+    code, kbd {
+      font-family: Consolas, "Courier New", monospace;
+    }
+    kbd {
+      border: 1px solid #999;
+      border-radius: 0.2rem;
+      padding: 0 0.25rem;
+      background: #f7f7f7;
+    }
+    dt {
+      font-weight: bold;
+      margin-top: 0.8rem;
+    }
+    dd {
+      margin-left: 1.5rem;
+    }
+    .skip-link {
+      position: absolute;
+      left: -999px;
+    }
+    .skip-link:focus {
+      position: static;
+    }
+    a {
+      color: #0645ad;
+    }
+    li {
+      margin-bottom: 0.3rem;
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to the guide</a>
+
+  <header>
+    <h1>Getting Started with Clipman</h1>
+    <p>A friendly, step-by-step guide for screen reader users, written to sit alongside the full <a href="https://onjlouis.github.io/Clipman/manual.html">Clipman manual</a>.</p>
+    <p>By Laurent de Fontenay, with assistance from Claude.</p>
+    <p>Jump straight to <a href="#part-2">desktop first steps</a>, <a href="#part-6">iPhone, iPad and Android</a>, or <a href="#part-5">sharing history between devices</a>.</p>
+  </header>
+
+  <nav aria-labelledby="contents-heading">
+    <h2 id="contents-heading">Contents</h2>
+    <ul>
+      <li><a href="#about-this-guide">About this guide</a></li>
+      <li><a href="#why-clipman">Why use Clipman?</a></li>
+      <li><a href="#what-clipman-does">What Clipman does</a></li>
+      <li><a href="#words-you-will-meet">Words you will meet</a></li>
+      <li><a href="#part-1">Part 1: Installing Clipman</a>
+        <ul>
+          <li><a href="#install-windows">Windows</a></li>
+          <li><a href="#install-mac">Mac</a></li>
+          <li><a href="#install-iphone">iPhone and iPad</a></li>
+          <li><a href="#install-android">Android</a></li>
+          <li><a href="#install-linux">Linux</a></li>
+          <li><a href="#sounds">The sounds Clipman makes</a></li>
+        </ul>
+      </li>
+      <li><a href="#part-2">Part 2: Your first steps (Windows, Mac and Linux)</a>
+        <ul>
+          <li><a href="#tutorial-paste-earlier">Tutorial 1: Paste something you copied earlier</a></li>
+          <li><a href="#tutorial-multiple">Tutorial 2: Select and paste several entries at once</a></li>
+          <li><a href="#tutorial-find">Tutorial 3: Find an entry quickly</a></li>
+          <li><a href="#tutorial-pin">Tutorial 4: Keep your favorites at the top</a></li>
+          <li><a href="#tutorial-name">Tutorial 5: Give an entry a name</a></li>
+          <li><a href="#tutorial-groups">Tutorial 6: Sort entries into groups</a></li>
+          <li><a href="#tutorial-tidy">Tutorial 7: Review, edit and delete entries</a></li>
+          <li><a href="#tutorial-quick-clip">Tutorial 8: Save text without copying it</a></li>
+        </ul>
+      </li>
+      <li><a href="#part-3">Part 3: Doing more with Clipman</a>
+        <ul>
+          <li><a href="#tutorial-quick-paste">Tutorial 9: Paste a saved entry from anywhere with Quick Paste</a></li>
+          <li><a href="#tutorial-templates">Tutorial 10: Insert today's date with a template</a></li>
+          <li><a href="#tutorial-cleanup">Tutorial 11: Clean up messy text</a></li>
+          <li><a href="#links-history">Working with links</a></li>
+          <li><a href="#rich-text-history">Keeping formatting and images</a></li>
+          <li><a href="#file-history">File History</a></li>
+          <li><a href="#more-features">Other useful features</a></li>
+        </ul>
+      </li>
+      <li><a href="#part-4">Part 4: Privacy and security</a>
+        <ul>
+          <li><a href="#pausing">Pausing Clipman for a moment</a></li>
+          <li><a href="#tutorial-ignore-app">Tutorial 12: Stop Clipman recording a password manager</a></li>
+          <li><a href="#sensitive-data">Sensitive data exclusions</a></li>
+          <li><a href="#history-password">Protecting history with a password</a></li>
+          <li><a href="#tutorial-secrets">Tutorial 13: Store a private snippet in Secrets</a></li>
+        </ul>
+      </li>
+      <li><a href="#part-5">Part 5: Using Clipman on more than one device</a>
+        <ul>
+          <li><a href="#choosing-storage">Choosing how to share history</a></li>
+          <li><a href="#before-you-sync">Before you start</a></li>
+          <li><a href="#tutorial-dropbox">Tutorial 14: Share history between a Windows PC and an iPhone using Dropbox</a></li>
+          <li><a href="#other-shared-folders">Other shared folders: OneDrive, iCloud Drive, Google Drive and network shares</a></li>
+          <li><a href="#clipman-server">Clipman Server, in brief</a></li>
+          <li><a href="#sync-rules">Sync rules and channels, in brief</a></li>
+          <li><a href="#remote-clipboard">Getting text from one device onto another's clipboard</a></li>
+        </ul>
+      </li>
+      <li><a href="#part-6">Part 6: Clipman on iPhone, iPad and Android</a>
+        <ul>
+          <li><a href="#mobile-differences">How the mobile apps differ</a></li>
+          <li><a href="#iphone-walkthrough">Finding your way around on iPhone and iPad</a></li>
+          <li><a href="#tutorial-action-button">Tutorial 15: Copy your latest clip with the Action Button</a></li>
+          <li><a href="#android-walkthrough">Finding your way around on Android</a></li>
+        </ul>
+      </li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+      <li><a href="#quick-reference">Quick reference: the keys you will use most</a></li>
+      <li><a href="#getting-help">Getting more help</a></li>
+    </ul>
+  </nav>
+
+  <main id="main" tabindex="-1">
+
+  <section aria-labelledby="about-this-guide">
+    <h2 id="about-this-guide">About this guide</h2>
+    <p>This guide is for anyone new to Clipman, and especially for people who use a screen reader such as JAWS, NVDA or Narrator on Windows, VoiceOver on Mac, iPhone and iPad, or TalkBack on Android. It does not replace the full Clipman manual. Instead, it walks you through the parts most people need, one task at a time, with worked examples you can follow along with at your own pace.</p>
+    <p>Some things to know before you begin:</p>
+    <ul>
+      <li><strong>You do not need to read it all.</strong> Parts 1 and 2 cover everyday use, and they are where you will get the most benefit for your time. Everything after that is optional, so come back to it whenever you are ready.</li>
+      <li><strong>Every tutorial stands on its own.</strong> If a tutorial relies on something from an earlier one, it links back to it, so you can jump straight to the one you need.</li>
+      <li><strong>Headings are your friend.</strong> Each part is a level 2 heading and each tutorial is a level 3 heading, so you can move through the guide using your screen reader's heading navigation.</li>
+      <li><strong>Keys are given for each platform.</strong> Most desktop commands use <kbd>Ctrl</kbd> on Windows and Linux and <kbd>Command</kbd> on Mac. Where the keys differ, both are given, Windows first. Linux uses the same keys as Windows unless the guide says otherwise.</li>
+      <li><strong>Symbol keys are spelled out.</strong> So that your screen reader always reads them, keys such as the backslash are written as words, for example <kbd>Ctrl+Alt+Backslash</kbd>. <kbd>Grave</kbd> means the grave accent key, which on most keyboards is just below <kbd>Escape</kbd>, to the left of the <kbd>1</kbd> key.</li>
+      <li><strong>Screen reader commands are not included.</strong> Where a step depends on your screen reader, such as reading the status bar, the guide says so and leaves the keystroke to you, because it differs between screen readers.</li>
+      <li><strong>Names of buttons and options are in quotation marks.</strong> When the guide mentions something you will find on screen, such as the option “Run Clipman at Windows startup”, its name is in quotation marks, exactly as your screen reader will say it.</li>
+      <li><strong>Press F1 when you are unsure.</strong> On Windows, Mac and Linux, pressing <kbd>F1</kbd> on any Clipman control explains what that control does. Clipman keeps these explanations out of the way, so your screen reader only reads a control's name and value as you move around. Press <kbd>F1</kbd> whenever you want the longer explanation, then <kbd>Escape</kbd> to go back.</li>
+    </ul>
+    <p>This guide was first written for Clipman 3.1.11 on Windows, 3.1.12 on Mac, 3.1.9 on Linux, 3.1.7 on iPhone and iPad, and 3.1.4 on Android, and is maintained alongside the manual. Quick Clip improvements in iOS 3.1.8 are noted below; check the App Store for availability. Your configured shortcuts, filters and sort order may differ from the examples.</p>
+  </section>
+
+  <section aria-labelledby="why-clipman">
+    <h2 id="why-clipman">Why use Clipman?</h2>
+    <p>Think about how often you copy and paste in a day. An email address from one message into another. A reference number from a letter into a web form. A paragraph from a report into an email. Your computer's clipboard holds only one thing at a time, so when you need three pieces of information, you make the same trip three times: switch to the source, find your place, copy, switch back, find your place again, paste. With a screen reader, every one of those switches means listening your way back to where you were. Each trip is small, but over a working day they add up to a lot of time and a lot of tedium.</p>
+    <p>Clipman changes the way you work with information. Because it remembers what you copy, you can go through a document once, copying everything you need as you go, then move to where it all belongs and paste each piece, or all of them in one go. Things you type again and again, such as your address, a standard reply or a reference number, become two or three keystrokes away, from any app. Your clipboard stops being a single slot that is constantly overwritten, and becomes a collection you can search, name, organize and come back to.</p>
+    <p>The benefits grow when you use more than one device. Without Clipman, getting a link or a block of text from your phone to your computer usually means emailing or messaging it to yourself, opening that message on the other device, and copying it out again. With shared history, you add it to Clipman on one device and it is waiting for you on the other.</p>
+    <p>Clipman is designed around the keyboard and the screen reader, not adapted for them afterwards. Its lists are quick to move through, its controls are properly labeled, and its short sounds tell you what has happened without interrupting your speech.</p>
+    <p>Like any tool worth having, it takes a little time to learn. You do not need to learn it all at once. Work through Tutorials 1 to 4 in <a href="#part-2">Part 2</a>, and you will already be saving time every day. The rest of this guide will be here when you want to go further.</p>
+  </section>
+
+  <section aria-labelledby="what-clipman-does">
+    <h2 id="what-clipman-does">What Clipman does</h2>
+    <p>When you copy something, your computer or phone puts it on the <strong>clipboard</strong>. The clipboard only holds one thing at a time, so when you copy something new, the old item is gone.</p>
+    <p>Clipman quietly keeps a list of the things you copy. That list is called your <strong>history</strong>. Later, you can open the history, pick something you copied an hour ago or last week, and put it back on the clipboard so you can paste it again.</p>
+    <p>On top of that, Clipman can:</p>
+    <ul>
+      <li>keep important entries at the top of the list, called “pinning”, so they are always one or two keys away;</li>
+      <li>give entries short names, so you hear “Home address” instead of the whole address as you go through your history;</li>
+      <li>paste a saved entry into any app with a single shortcut, without opening Clipman;</li>
+      <li>keep your history in step between your computer, phone and tablet;</li>
+      <li>stay out of the way when you copy passwords and other private information.</li>
+    </ul>
+    <p>On Windows, Mac and supported Linux desktop sessions, Clipman runs quietly in the background and records what you copy automatically. On iPhone, iPad and Android, clipboard access is restricted in the background, so you add things to Clipman yourself. <a href="#part-6">Part 6</a> explains how.</p>
+  </section>
+
+  <section aria-labelledby="words-you-will-meet">
+    <h2 id="words-you-will-meet">Words you will meet</h2>
+    <p>Clipman uses some words in particular ways. You may wish to learn these now, which will help everything make more sense. Come back here whenever a word in a tutorial is unfamiliar. Each tutorial also explains its terms the first time they come up.</p>
+
+    <h3 id="glossary-basics">The basics</h3>
+    <dl>
+      <dt>Clipboard</dt>
+      <dd>The place your device keeps the last thing you copied or cut. Pasting puts it into whatever you are working on.</dd>
+      <dt>History</dt>
+      <dd>Clipman's list of things you have copied.</dd>
+      <dt>Entry</dt>
+      <dd>One item in your history. If you copy a sentence, that sentence becomes an entry. The full manual sometimes calls an entry a “clip”.</dd>
+      <dt>Monitoring</dt>
+      <dd>Whether Clipman is currently recording what you copy. When monitoring is on, new copies are added to history. When it is off, Clipman ignores them. You can turn monitoring on and off with a shortcut.</dd>
+      <dt>Sections</dt>
+      <dd>The history window is divided into tabs called sections. The Text section is always there. Links and Rich Text sections appear only if you turn them on. The File History section is always there on Windows, Mac and Linux. Optional Links and Rich Text sections are just filtered views of the same history, not separate lists.</dd>
+      <dt>Status bar</dt>
+      <dd>A line at the bottom of the history window that tells you how many entries the current section holds and whether Clipman is ready, for example “262 clipboard entries. Ready.” Use your screen reader's command for reading the status bar to hear it.</dd>
+      <dt>Global hotkey</dt>
+      <dd>A keyboard shortcut that works from any app, not just from inside Clipman. Opening the history window, <kbd>Ctrl+Alt+Backslash</kbd> on Windows and Linux or <kbd>Option+Shift+Grave</kbd> on Mac, is the most common one.</dd>
+    </dl>
+
+    <h3 id="glossary-organizing">Organizing entries</h3>
+    <dl>
+      <dt>Pinned entry</dt>
+      <dd>An entry you have fixed to the top of the list. Pinned entries are never removed by automatic cleanup and the first ten can be copied back into the clipboard with <kbd>Ctrl+1</kbd> to <kbd>Ctrl+0</kbd> when the Clipman window is open.</dd>
+      <dt>Normal entries</dt>
+      <dd>Everything that is not pinned. A row reading “Normal entries” separates pinned entries from normal ones.</dd>
+      <dt>Name</dt>
+      <dd>An optional short label for an entry, such as “Work phone”. It makes entries quicker to recognize. Ordinary desktop copying uses the entry's content, not its name; Copy Name and Content includes both. On mobile, a separate link-copy setting can include link names by default.</dd>
+      <dt>Group</dt>
+      <dd>A folder-like label you can give several entries, such as “Email replies”. You can then show only that group.</dd>
+      <dt>Filter</dt>
+      <dd>The control at the top of the history window that chooses what to show: all entries, only pinned ones, one group, or entries from one device. Windows and Mac also offer Named; Linux offers Normal, for unpinned entries. You reach it with <kbd>Alt+G</kbd> (Mac: <kbd>Option+G</kbd>).</dd>
+      <dt>Device</dt>
+      <dd>The computer, phone or tablet that added an entry. This matters once you share history between several devices.</dd>
+      <dt>Manual order</dt>
+      <dd>An order you arrange yourself by moving entries up and down, instead of sorting by date or text.</dd>
+    </dl>
+
+    <h3 id="glossary-features">Features</h3>
+    <dl>
+      <dt>Quick Clip</dt>
+      <dd>A small editor for typing a new entry straight into Clipman, without copying it from somewhere else first.</dd>
+      <dt>Quick Paste</dt>
+      <dd>A way to paste one particular saved entry into any app using its own keyboard shortcut, without opening Clipman.</dd>
+      <dt>Quick Paste target</dt>
+      <dd>An entry you have set up for Quick Paste. In Entry Properties, it is the entry with the option “Use as quick-paste target” checked. Once checked, you give the entry its own Quick Paste hotkey.</dd>
+      <dt>Quick Paste mode</dt>
+      <dd>What happens to your clipboard when a Quick Paste hotkey is used. <a href="#quick-paste-modes">Tutorial 9</a> explains the three choices.</dd>
+      <dt>Template</dt>
+      <dd>An entry containing placeholders, such as <code>{{year_full}}</code>, that Clipman fills in at the moment you paste it. Good for date stamps.</dd>
+      <dt>Entry Properties</dt>
+      <dd>The window you open with <kbd>F2</kbd> to change an entry's name, group, text, pinned state, template setting and Quick Paste hotkey.</dd>
+      <dt>ClipMerge</dt>
+      <dd>An optional feature that builds one clipboard item from several separate copies. You copy normally, then copy each extra piece twice quickly to add it on.</dd>
+      <dt>Push to other devices</dt>
+      <dd>Sending an existing entry to your other devices as if you had just copied it, so they can put it on their clipboards.</dd>
+      <dt>Secrets</dt>
+      <dd>A separate, password-protected list for short private things like a PIN or a system password. Secrets never appear in normal history and are never shared with other devices.</dd>
+      <dt>File History event</dt>
+      <dd>A record of files or folders you copied or cut in File Explorer or Finder. Clipman stores where the files are, not the files themselves. These records are called events rather than entries, and they stay on the device that recorded them.</dd>
+    </dl>
+
+    <h3 id="glossary-privacy">Privacy</h3>
+    <dl>
+      <dt>Ignored application</dt>
+      <dd>An app whose copies Clipman never records, such as a password manager.</dd>
+      <dt>Sensitive data exclusion</dt>
+      <dd>An optional filter that stops Clipman recording text that looks like a card number, a long security token or similar.</dd>
+      <dt>Privacy signal</dt>
+      <dd>A hidden marker some apps, mainly password managers, attach to what they copy to say “do not record this”. Clipman on Windows respects these automatically.</dd>
+      <dt>History password</dt>
+      <dd>An optional password that encrypts your history file so nobody can read it without the password. It is required for some sharing methods.</dd>
+    </dl>
+
+    <h3 id="glossary-sharing">Sharing history between devices</h3>
+    <dl>
+      <dt>Storage type, or storage mode</dt>
+      <dd>Where your history lives. Windows calls this the storage type and the mobile apps call it the storage mode. There are three choices, described next.</dd>
+      <dt>Local</dt>
+      <dd>History stays on one device only. On Windows and Mac this is the “Local or shared folder” choice with Clipman's default folder.</dd>
+      <dt>Shared folder</dt>
+      <dd>History lives in a folder that a service such as Dropbox, OneDrive or iCloud Drive keeps in step between your devices.</dd>
+      <dt>Clipman Server</dt>
+      <dd>A separate program you run yourself, on a home computer, a Raspberry Pi or a rented server, that keeps history in step between devices.</dd>
+      <dt>Data folder</dt>
+      <dd>The folder on your computer where Clipman keeps your history file, called <code>clipman-history.clipdb</code>, along with that computer's settings.</dd>
+      <dt>Sync, synchronize</dt>
+      <dd>Keeping the same history on several devices, so an entry added on one appears on the others.</dd>
+      <dt>Connection file</dt>
+      <dd>A file ending in <code>.clpconf</code> that holds a Clipman Server's address and access token, so you can set up a device without typing them. Treat it like a password.</dd>
+      <dt>Sync rules, channels and core</dt>
+      <dd>An advanced way to split shared history into separate parts, called channels, so each device only downloads the parts it wants. The main, always-shared part is called core. Most people never need this.</dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="part-1">
+    <h2 id="part-1">Part 1: Installing Clipman</h2>
+    <p>Find your platform below. When you have finished, go on to <a href="#part-2">Part 2</a> if you use Windows, Mac or Linux, or to <a href="#part-6">Part 6</a> if you use an iPhone, iPad or Android device.</p>
+
+    <h3 id="install-windows">Windows</h3>
+    <p><strong>The one shortcut to remember:</strong> once Clipman is running, press <kbd>Ctrl+Alt+Backslash</kbd> from any app to open your history. Press it again, or press <kbd>Escape</kbd>, to hide it. Almost everything in this guide starts with that shortcut.</p>
+    <p>Clipman for Windows is portable. That means there is no installer: you unzip it into a folder and run it from there. Clipman keeps its settings and history in a folder called <code>Settings</code> next to the program, so choose a folder you own.</p>
+    <ol>
+      <li>Go to the <a href="https://github.com/OnjLouis/Clipman/releases">Clipman releases page</a> and download the Windows ZIP file. It is named like <code>Clipman-3.1.11.zip</code>. You can ignore files with Android, Mac, Linux, Server or CLI in their names.</li>
+      <li>Create a folder for Clipman in your user area, for example <code>C:\Users\YourName\Clipman</code>. Avoid <code>C:\Program Files</code>, because Clipman needs to write its settings next to itself and Windows protects that folder.</li>
+      <li>Extract the ZIP into the new folder. In File Explorer, focus the ZIP file, press the <kbd>Applications</kbd> key or <kbd>Shift+F10</kbd>, choose “Extract All”, enter your folder, and press <kbd>Enter</kbd>.</li>
+      <li>Open the folder and run <code>clipman.exe</code>. You will hear a short sound. That is the “monitoring on” sound, and it means Clipman is running and recording what you copy.</li>
+      <li>Try it now: press <kbd>Ctrl+Alt+Backslash</kbd>. The history window opens. It will be nearly empty for now. Press <kbd>Escape</kbd> to hide it again.</li>
+    </ol>
+    <p>Clipman has no main window of its own. It lives in the notification area, sometimes called the system tray. To reach it, press <kbd>Windows+B</kbd>, use the arrow keys to find Clipman (you may need to open the hidden icons first by pressing <kbd>Enter</kbd> on the button that shows them), then press the <kbd>Applications</kbd> key for its menu. The menu lets you show history, turn monitoring on and off, open Secrets, open Preferences, and exit Clipman.</p>
+    <p><strong>To start Clipman automatically when you sign in:</strong></p>
+    <ol>
+      <li>Open Preferences. From the notification area menu choose “Preferences”, or, with the history window open, press <kbd>Ctrl+Comma</kbd>.</li>
+      <li>Press <kbd>Ctrl+5</kbd> to go to the “Startup and updates” tab.</li>
+      <li>Tab to the option “Run Clipman at Windows startup” and press <kbd>Space</kbd> to check it.</li>
+      <li>Press <kbd>Escape</kbd> or activate the “Close” button.</li>
+    </ol>
+    <p><strong>Good to know:</strong> Windows Preferences has no Save button. Your changes are saved when you close the window. The six tabs can be reached directly with <kbd>Ctrl+1</kbd> to <kbd>Ctrl+6</kbd>: General, File history, Hotkeys, Storage and Password, Startup and updates, and Sensitive data.</p>
+
+    <h3 id="install-mac">Mac</h3>
+    <p><strong>The one shortcut to remember:</strong> once Clipman is running, press <kbd>Option+Shift+Grave</kbd> from any app to open your history. Press it again, or press <kbd>Escape</kbd>, to hide it.</p>
+    <ol>
+      <li>Go to the <a href="https://github.com/OnjLouis/Clipman/releases">Clipman releases page</a> and download the Mac ZIP that matches your Mac. There is one for Apple Silicon (M1 and later) and one for Intel. If you are not sure which you have, open the Apple menu, choose “About This Mac”, and check the Chip or Processor line.</li>
+      <li>Open the downloaded ZIP to unzip it. You will get <code>Clipman.app</code>.</li>
+      <li>Move <code>Clipman.app</code> into your Applications folder. In Finder, select it, press <kbd>Command+C</kbd>, open Applications with <kbd>Command+Shift+A</kbd>, and press <kbd>Command+V</kbd>.</li>
+      <li>Open Clipman from Applications. You will hear the “monitoring on” sound.</li>
+      <li>Try it now: press <kbd>Option+Shift+Grave</kbd>. The history window opens. Press <kbd>Escape</kbd> to hide it again.</li>
+    </ol>
+    <p>On Mac, Clipman lives in the menu bar as a menu extra, like the Wi-Fi or volume menus. Use VoiceOver's method for reaching menu extras to find it. When a Clipman window is open, Clipman also has a normal menu bar with File, Edit, Actions, Groups, Quick Paste, View, Window and Help menus.</p>
+    <p>To start Clipman when you log in, open Preferences with <kbd>Command+Comma</kbd>, check the option “Run Clipman at login”, and activate the “Save and Close” button (or press <kbd>Command+S</kbd>). Recent macOS versions call Preferences “Settings” in the main Clipman menu; the shortcut opens the same window.</p>
+    <p>The first time Clipman tries to paste for you, macOS may ask you to allow Clipman to control your computer in Privacy and Security settings. Allow it, then quit and reopen Clipman.</p>
+
+    <h3 id="install-iphone">iPhone and iPad</h3>
+    <p>There is no shortcut to remember on iPhone and iPad. You open Clipman like any other app, and it opens straight to your history.</p>
+    <ol>
+      <li>Install <a href="https://apps.apple.com/app/clipman/id6793250105">Clipman from the App Store</a>.</li>
+      <li>So that Clipman can read what you copy without asking every time, open the iOS Settings app, go to “Apps”, then “Clipman”, then “Paste from Other Apps”, and choose “Allow”. If you prefer to be asked each time, choose “Ask”.</li>
+      <li>Open Clipman. To check or change where history is kept, activate the “More” button at the top right, choose “Settings”, and look at “Storage mode”. Choose “Local” if you only use Clipman on this device for now. You can change this later.</li>
+      <li>Activate the “Save” button at the top of Settings.</li>
+    </ol>
+    <p>Then read <a href="#part-6">Part 6</a> to learn how adding and copying entries works on iPhone and iPad.</p>
+
+    <h3 id="install-android">Android</h3>
+    <p>As on iPhone, there is no shortcut to remember. You open Clipman from your apps and it opens straight to your history.</p>
+    <p>Clipman for Android is offered as an APK file rather than through the Play Store. It needs Android 8 or newer.</p>
+    <ol>
+      <li>Download the Android APK from the <a href="https://github.com/OnjLouis/Clipman/releases">Clipman releases page</a>.</li>
+      <li>Open the APK from your Downloads or Files app. If Android asks whether to allow installing apps from that source, allow it for this install.</li>
+      <li>Install and open Clipman. Settings opens the first time. Choose “Local” under history storage for now, then activate the “Save” button at the top.</li>
+    </ol>
+
+    <h3 id="install-linux">Linux</h3>
+    <p>On Linux, the default shortcut for opening history is the same as on Windows: <kbd>Ctrl+Alt+Backslash</kbd>.</p>
+    <p>Clipman for Linux works with Clipman Server, so you need a server set up first (see <a href="#clipman-server">Clipman Server, in brief</a>). The Linux download includes an installer and its own manual, which covers screen reader setup, the differences between X11 and Wayland, and Linux shortcuts. Once installed, the keys in this guide for Windows also apply to Linux unless the Linux manual says otherwise.</p>
+
+    <h3 id="sounds">The sounds Clipman makes</h3>
+    <p>Clipman uses short sounds to tell you what happened without interrupting your screen reader. They are the same on every platform, and once you know them you will rarely need to check what Clipman did. You can turn them off in Preferences (Windows: the option “Play sounds” on the “General” tab).</p>
+    <ul>
+      <li><strong>Monitoring on</strong> and <strong>monitoring off</strong>: played when Clipman starts and when you toggle monitoring.</li>
+      <li><strong>Copy</strong>: played when something is saved to history, or when you copy an entry from Clipman.</li>
+      <li><strong>Skip</strong>: played when you copy something while monitoring is off, so you know it was not saved. Also played when an action fails.</li>
+      <li><strong>Exclude</strong>: played when Clipman deliberately refuses to save something because it looks private.</li>
+      <li><strong>Remote</strong>: played when text from another of your devices is placed on this device's clipboard.</li>
+      <li><strong>Merge</strong>: played when ClipMerge combines two copies.</li>
+    </ul>
+    <p>If you want different sounds, the full manual's Sounds section explains how to replace them with your own WAV files.</p>
+  </section>
+
+  <section aria-labelledby="part-2">
+    <h2 id="part-2">Part 2: Your first steps (Windows, Mac and Linux)</h2>
+    <p>These eight tutorials cover everything most people use day to day. Do them in order the first time. Each one only takes a few minutes, and each one builds a habit that will save you time.</p>
+    <p><strong>For these examples:</strong> show Text history with the filter set to “All”. They describe new, unpinned entries with the newest at the top. Windows and Mac normally sort by last used; on Linux, choose Newest First from View, Sort if you want that layout. If you use a different sort order, find each entry by its text rather than its position. If “After Enter, paste into the previous application” is enabled, pressing Enter already pastes: do not paste it a second time.</p>
+    <p>You will use one shortcut in every tutorial: the one that opens the history window.</p>
+    <ul>
+      <li>Windows and Linux: <kbd>Ctrl+Alt+Backslash</kbd></li>
+      <li>Mac: <kbd>Option+Shift+Grave</kbd></li>
+    </ul>
+    <p>Pressing it again, or pressing <kbd>Escape</kbd>, hides the window. Hiding the window does not quit Clipman. It keeps running in the background. If the shortcut does nothing on your keyboard, see <a href="#trouble-hotkey">The history shortcut does nothing</a> in Troubleshooting.</p>
+
+    <h3 id="tutorial-paste-earlier">Tutorial 1: Paste something you copied earlier</h3>
+    <p><strong>What you will learn:</strong> how Clipman records what you copy, and how to get an older item back.</p>
+    <p><strong>Worked example:</strong> you copy three short lines, then paste the first one again even though you have copied two other things since.</p>
+    <ol>
+      <li>Open a plain text editor, such as Notepad on Windows or TextEdit on Mac.</li>
+      <li>Type these three lines, pressing <kbd>Enter</kbd> after each:
+        <ul>
+          <li><code>Apples</code></li>
+          <li><code>Bananas</code></li>
+          <li><code>Cherries</code></li>
+        </ul>
+      </li>
+      <li>Go to the start of the first line. Select it with <kbd>Shift+End</kbd> (Mac: <kbd>Command+Shift+Right Arrow</kbd>) and copy it with <kbd>Ctrl+C</kbd> (Mac: <kbd>Command+C</kbd>). You hear the copy sound. “Apples” is now in your history.</li>
+      <li>Do the same for “Bananas” and then “Cherries”. The clipboard now holds only “Cherries”, but Clipman has kept all three.</li>
+      <li>Move to the end of the document and press <kbd>Enter</kbd> to start a new line.</li>
+      <li>Open the history window with <kbd>Ctrl+Alt+Backslash</kbd> (Mac: <kbd>Option+Shift+Grave</kbd>). Focus lands on the Text history list, with the newest entry, “Cherries”, at the top.</li>
+      <li>Press <kbd>Down Arrow</kbd> twice to reach “Apples”.</li>
+      <li>Press <kbd>Enter</kbd>. Clipman puts “Apples” on the clipboard and closes the history window, returning you to your editor.</li>
+      <li>Press <kbd>Ctrl+V</kbd> (Mac: <kbd>Command+V</kbd>). “Apples” is pasted.</li>
+    </ol>
+    <p><strong>What just happened:</strong> pressing <kbd>Enter</kbd> on an entry copies it and closes Clipman. You then paste as you normally would, unless automatic paste is enabled. With the default last-used sort on Windows and Mac, the entry you used moves back to the top; other sort modes can leave it elsewhere.</p>
+    <p><strong>Variations:</strong></p>
+    <ul>
+      <li>To copy an entry but keep the history window open, press <kbd>Ctrl+C</kbd> (Mac: <kbd>Command+C</kbd>) instead of <kbd>Enter</kbd>.</li>
+      <li>To save yourself the paste step, turn on the option “After Enter, paste into the previous application” on the “General” tab of Preferences. Then pressing <kbd>Enter</kbd> in history pastes straight into the app you came from.</li>
+    </ul>
+
+    <h3 id="tutorial-multiple">Tutorial 2: Select and paste several entries at once</h3>
+    <p><strong>What you will learn:</strong> how to choose several entries from your history and paste them all together with a single paste. This is one of the biggest time savers in Clipman. Instead of going back and forth between two documents, you copy everything you need in one pass, then paste it all in one go.</p>
+    <p><strong>New terms:</strong> <strong>selecting</strong> an entry marks it to be included. You can select entries that sit next to each other in the list, or pick out entries from different places in the list.</p>
+    <p><strong>Worked example:</strong> a colleague needs a customer's name, phone number and email address, which are in a letter you have open. You copy all three from the letter, then paste them into an email to your colleague in one go.</p>
+    <ol>
+      <li>In the letter, copy the customer's name. Then copy their phone number. Then copy their email address. You hear the copy sound each time. There is no need to switch to your email in between.</li>
+      <li>Switch to a new email to your colleague and move to where you want the details to go.</li>
+      <li>Open the history window. The email address is at the top, the phone number is second and the name is third.</li>
+      <li>Select all three. The three entries are next to each other, so press <kbd>Shift+Down Arrow</kbd> twice. Your screen reader announces each entry as it is added to the selection.</li>
+      <li>Press <kbd>Enter</kbd>. Clipman copies all three entries to the clipboard as one item and closes the history window.</li>
+      <li>Paste with <kbd>Ctrl+V</kbd> (Mac: <kbd>Command+V</kbd>). The three details are pasted together, each one separated from the next by a blank line.</li>
+    </ol>
+    <h4>Picking entries from different places in the list (Windows)</h4>
+    <p>Often the entries you want are not next to each other. Perhaps you copied something else in between. On Windows you can pick entries out one by one:</p>
+    <ol>
+      <li>Move to the first entry you want. It is selected as you arrive on it.</li>
+      <li>Hold down <kbd>Ctrl</kbd> and use the arrow keys to move to the next entry you want. While you hold <kbd>Ctrl</kbd>, moving does not change what is selected.</li>
+      <li>Still holding <kbd>Ctrl</kbd>, press <kbd>Space</kbd>. The entry is added to the selection.</li>
+      <li>Repeat for each entry you want. If you add one by mistake, press <kbd>Ctrl+Space</kbd> on it again to remove it from the selection.</li>
+      <li>Let go of <kbd>Ctrl</kbd> and press <kbd>Enter</kbd> to copy them all.</li>
+    </ol>
+    <p>Be careful not to press an arrow key without <kbd>Ctrl</kbd> held down, as that selects only the entry you move to and clears the rest.</p>
+    <p>On Mac, use <kbd>Shift</kbd> with the arrow keys to select entries next to each other, or <kbd>Command+A</kbd> to select every entry shown. On Linux, use <kbd>Shift</kbd> with the arrow keys, or <kbd>Ctrl+A</kbd> to select every entry shown. Selecting every entry shown is especially handy together with a group filter (see <a href="#tutorial-groups">Tutorial 6</a>).</p>
+    <p><strong>Good to know:</strong></p>
+    <ul>
+      <li>Entries are always pasted in the order they appear in the list, from top to bottom, not in the order you selected them. If you want a different order, switch to manual order and move entries with <kbd>Alt+Up Arrow</kbd> and <kbd>Alt+Down Arrow</kbd> (Mac: <kbd>Option+Up Arrow</kbd> and <kbd>Option+Down Arrow</kbd>) first.</li>
+      <li>By default, each entry is separated from the next by a blank line. You can choose a single new line, a space, a comma and space, nothing at all, or your own separator, with the setting “Selected-clips join” on the “General” tab of Preferences.</li>
+      <li>Many other commands work on a selection too, including pinning, grouping, deleting and the cleanup actions in <a href="#tutorial-cleanup">Tutorial 11</a>.</li>
+    </ul>
+
+    <h3 id="tutorial-find">Tutorial 3: Find an entry quickly</h3>
+    <p><strong>What you will learn:</strong> three ways to find an entry without arrowing through a long list.</p>
+    <p>Once your history has a few hundred entries, arrowing is slow. Try these instead, with the history window open.</p>
+    <h4>First-letter navigation</h4>
+    <p>Type the first letter of an entry and Clipman jumps to the next entry that starts with that letter. You can type the first few letters to be more precise. Using the list from Tutorial 1, typing <kbd>B</kbd> <kbd>A</kbd> jumps to “Bananas”. Type the letters quickly, one straight after the other. If you pause for more than about a second, Clipman starts a new search. Pause, then press the same letter again to move on to the next entry starting with that letter.</p>
+    <p>This only matches the beginning of an entry. Typing a word from the middle of an entry will not find it. For that, use search, below.</p>
+    <h4>Search anywhere in an entry</h4>
+    <ol>
+      <li>Press <kbd>Ctrl+F</kbd> (Mac: <kbd>Command+F</kbd>).</li>
+      <li>Type a word or part of a word that appears anywhere in the entry, such as “nan”, and press <kbd>Enter</kbd>. Clipman moves to the first match.</li>
+      <li>Press <kbd>F3</kbd> for the next match, or <kbd>Shift+F3</kbd> for the previous one.</li>
+    </ol>
+    <p>Search also looks in entry names, which you will learn about in <a href="#tutorial-name">Tutorial 5</a>.</p>
+    <h4>Move in big steps</h4>
+    <ul>
+      <li><kbd>Home</kbd> and <kbd>End</kbd> go to the first and last entries.</li>
+      <li><kbd>Page Up</kbd> and <kbd>Page Down</kbd> move one screenful at a time.</li>
+    </ul>
+
+    <h3 id="tutorial-pin">Tutorial 4: Keep your favorites at the top</h3>
+    <p><strong>What you will learn:</strong> how to pin entries, and how to copy a pinned entry with a single shortcut.</p>
+    <p><strong>New terms:</strong> a <strong>pinned entry</strong> stays at the top of the list, above everything else, and is never removed by automatic cleanup. Everything else is a <strong>normal entry</strong>.</p>
+    <p><strong>Worked example:</strong> you often type your email address, so you pin it.</p>
+    <ol>
+      <li>Type your email address into any text field, select it, and copy it.</li>
+      <li>Open the history window. Your email address is the top entry.</li>
+      <li>Press <kbd>Shift+Enter</kbd>. The entry is pinned.</li>
+      <li>Press <kbd>Home</kbd> and listen. The entry now begins with the number 1, which means it is the first pinned entry. Below the pinned entries you will find a row reading “Normal entries”. That row is only a divider and cannot be copied.</li>
+      <li>Press <kbd>Escape</kbd> to hide the window.</li>
+    </ol>
+    <p>Now, whenever you want your email address:</p>
+    <ol>
+      <li>Open the history window with <kbd>Ctrl+Alt+Backslash</kbd> (Mac: <kbd>Option+Shift+Grave</kbd>).</li>
+      <li>Press <kbd>Ctrl+1</kbd>. Clipman copies the first pinned entry and closes.</li>
+      <li>Paste it.</li>
+    </ol>
+    <p>The first ten pinned entries are numbered 1 to 9 and then 0, and each can be copied by pressing Control and its number, on both Windows and Mac.</p>
+    <p><strong>Tips:</strong></p>
+    <ul>
+      <li>Press <kbd>Backspace</kbd> in the list to jump past your pinned entries to the first normal entry.</li>
+      <li>To change the order of pinned entries, select one and press <kbd>Alt+Up Arrow</kbd> or <kbd>Alt+Down Arrow</kbd> (Mac: <kbd>Option+Up Arrow</kbd> or <kbd>Option+Down Arrow</kbd>).</li>
+      <li>To unpin, select the entry and press <kbd>Shift+Enter</kbd> again.</li>
+      <li>Pinned entries cannot be deleted by accident. Unpin an entry first if you want to delete it.</li>
+    </ul>
+
+    <h3 id="tutorial-name">Tutorial 5: Give an entry a name</h3>
+    <p><strong>What you will learn:</strong> how to label an entry so it is easy to recognize and find.</p>
+    <p><strong>New terms:</strong> a <strong>name</strong> is a short label for an entry. Clipman reads the name first, which makes an address or web link easier to recognize. Ordinary desktop copying uses the entry's content; Copy Name and Content deliberately includes its name too.</p>
+    <p><strong>Worked example:</strong> you save your home address and name it “Home address”.</p>
+    <ol>
+      <li>Type your address on a few lines in your text editor, select it all, and copy it.</li>
+      <li>Open the history window. Your address is the top entry.</li>
+      <li>Press <kbd>F2</kbd>. The Entry Properties window opens.</li>
+      <li>Focus starts in the “Name” field. Type <code>Home address</code>.</li>
+      <li>If you also want to pin it, tab to the “Pinned” checkbox and press <kbd>Space</kbd>.</li>
+      <li>Save your changes. Windows and Linux: press <kbd>Ctrl+Enter</kbd>, or <kbd>Alt+S</kbd> also works on Windows. Mac: press <kbd>Command+Enter</kbd> or <kbd>Command+S</kbd>.</li>
+    </ol>
+    <p>The entry is now read as “Home address” followed by its text. With ordinary desktop copying, only the address itself is copied.</p>
+    <p><strong>Finding a named entry:</strong> in the history list, type a forward slash followed by the start of the name, for example <code>/Home</code>, and Clipman jumps to it.</p>
+    <p><strong>Good to know:</strong> sometimes you do want the name and the text together, for example “Home address” on one line and the address below it. Select the entry and press <kbd>Ctrl+Enter</kbd> in the history list (Mac: <kbd>Command+Enter</kbd>). This is called Copy Name and Content.</p>
+
+    <h3 id="tutorial-groups">Tutorial 6: Sort entries into groups</h3>
+    <p><strong>What you will learn:</strong> how to put related entries into a group, and how to show only that group.</p>
+    <p><strong>New terms:</strong> a <strong>group</strong> is a label shared by several entries. The <strong>filter</strong> is the list box at the top of the history window that chooses which entries to show.</p>
+    <p>Clipman already groups new entries automatically by the app you copied them from, so you may find groups named after your browser, email program or word processor. If you would rather group everything yourself, turn off the option “Automatically group new clips by source application” on the “General” tab of Preferences.</p>
+    <p><strong>Worked example:</strong> you collect a few standard email replies into a group called “Replies”.</p>
+    <ol>
+      <li>Open the history window and select an entry you want in the group. To select several, use the methods in <a href="#tutorial-multiple">Tutorial 2</a>.</li>
+      <li>Press <kbd>Ctrl+G</kbd> (Mac: <kbd>Command+G</kbd>).</li>
+      <li>Type <code>Replies</code> and press <kbd>Enter</kbd>. If the group already exists, you can choose it from the list instead.</li>
+      <li>To show only that group, press <kbd>Alt+G</kbd> (Mac: <kbd>Option+G</kbd>) to move to the filter.
+        <ul>
+          <li>Windows: use the arrow keys to choose “Replies”, then press <kbd>Enter</kbd>. Focus returns to the list, now showing only that group.</li>
+          <li>Mac: choose “Replies” from the filter menu.</li>
+        </ul>
+      </li>
+      <li>To see everything again, return to the filter and choose “All”.</li>
+    </ol>
+    <h4>Two ways to choose what is shown</h4>
+    <p>There are two places to choose a group, and they do exactly the same job. Use whichever suits you.</p>
+    <ul>
+      <li><strong>The history filter</strong> is a list box at the top of the history window. Press <kbd>Alt+G</kbd> (Mac: <kbd>Option+G</kbd>) to reach it. It is the quickest way once you are used to it.</li>
+      <li><strong>The Groups menu</strong> is in the menu bar. On Windows, press <kbd>Alt</kbd>, then <kbd>P</kbd>. On Mac, it is the Groups menu in the menu bar. It lists the same choices as menu items, and a “Devices” submenu for showing entries from one device. On Windows, each choice is read with its shortcut, so it is a good way to hear all your choices and learn their shortcuts.</li>
+    </ul>
+    <p><strong>Shortcut:</strong> the first ten choices can be selected directly with <kbd>Alt+1</kbd> to <kbd>Alt+0</kbd> (Mac: <kbd>Option+1</kbd> to <kbd>Option+0</kbd>), without going to the filter or the menu. On Windows and Mac they start with All, Pinned, Named and Ungrouped, followed by your own groups. Linux uses Normal instead of Named. So <kbd>Alt+1</kbd> shows everything and <kbd>Alt+2</kbd> shows pinned entries; check the Groups menu for the remaining choices.</p>
+    <p><strong>Good to know:</strong> group names ignore capital letters, so “Replies” and “replies” are the same group. To remove an entry from its group, press <kbd>Ctrl+G</kbd> and choose “No group”, or leave the name blank.</p>
+
+    <h3 id="tutorial-tidy">Tutorial 7: Review, edit and delete entries</h3>
+    <p><strong>What you will learn:</strong> how to read a long entry comfortably, fix its text, and remove entries you no longer want.</p>
+    <h4>Read an entry in full</h4>
+    <p>Select an entry and press <kbd>F4</kbd>. A read-only window opens with the entry's full text, which you can read line by line with your arrow keys. Press <kbd>Tab</kbd> to reach a Details list showing when the entry was added and last used, which device added it, and how long it is. Press <kbd>Escape</kbd> to close.</p>
+    <h4>Fix an entry's text</h4>
+    <p><strong>Worked example:</strong> you copied a phone number with extra words around it, “Call me on 01234 567890 thanks”, and you want only the number.</p>
+    <ol>
+      <li>Select the entry and press <kbd>F2</kbd>.</li>
+      <li>Move to the “Clipboard text” field, which comes after the Name, Group and Quick Paste controls. Press <kbd>Tab</kbd> until you reach it, or on Windows press <kbd>Alt+C</kbd>. This is the text that will be pasted.</li>
+      <li>Edit it as you would in any text field. Delete everything except <code>01234 567890</code>. In this field, <kbd>Enter</kbd> adds a new line rather than saving.</li>
+      <li>Save with <kbd>Ctrl+Enter</kbd> (Mac: <kbd>Command+Enter</kbd>).</li>
+    </ol>
+    <p><strong>Tip:</strong> in this field and in the <kbd>F4</kbd> window, <kbd>Ctrl+Left Arrow</kbd> and <kbd>Ctrl+Right Arrow</kbd> (Mac: <kbd>Option+Left Arrow</kbd> and <kbd>Option+Right Arrow</kbd>) stop at slashes, dots and other punctuation. That makes it much easier to move around inside long web links and file paths.</p>
+    <h4>Delete entries</h4>
+    <ol>
+      <li>Select one or more entries.</li>
+      <li>Press <kbd>Delete</kbd> (Mac: <kbd>Command+Backspace</kbd>).</li>
+      <li>Clipman asks you to confirm. Choose “Yes”. The dialog also lets you stop being asked in future.</li>
+    </ol>
+    <p>Pinned entries are skipped when you delete. Unpin them first if you really want them gone.</p>
+    <h4>Let Clipman tidy up for you</h4>
+    <p>On the “General” tab of Preferences, the settings “Maximum entries” and “Maximum entry age, days” let Clipman remove old entries automatically. Use 0 for no limit. Pinned and named entries are always kept, so Clipman lets you keep important information at your fingertips while getting rid of unnecessary clutter.</p>
+
+    <h3 id="tutorial-quick-clip">Tutorial 8: Save text without copying it</h3>
+    <p><strong>What you will learn:</strong> how to type a new entry straight into Clipman.</p>
+    <p><strong>New terms:</strong> <strong>Quick Clip</strong> is a small editor for creating an entry from scratch. It does not touch your clipboard, so whatever you copied last stays there.</p>
+    <p><strong>Worked example:</strong> you want a ready-made reply saying you are out of the office.</p>
+    <ol>
+      <li>Open the history window and press <kbd>Ctrl+N</kbd> (Mac: <kbd>Command+N</kbd>). The Quick Clip window opens with focus in the “Clipboard text” field.</li>
+      <li>Type: <code>Thanks for your message. I am away until Monday and will reply when I am back.</code></li>
+      <li>Move to the “Name” field, which is near the top of the window. Press <kbd>Shift+Tab</kbd> until you reach it, or on Windows press <kbd>Alt+N</kbd>. Type <code>Out of office</code>.</li>
+      <li>Tab to the “Group” field and type <code>Replies</code>, or leave it blank.</li>
+      <li>Tab to the “Pinned” checkbox and press <kbd>Space</kbd> if you want it at the top.</li>
+      <li>Save with <kbd>Ctrl+Enter</kbd> (Mac: <kbd>Command+Enter</kbd>).</li>
+    </ol>
+    <p>The order of fields is the same in Quick Clip and in Entry Properties: Name, Group, the Pinned and Template checkboxes, the Quick Paste settings, and then Clipboard text, followed by the buttons. On Windows, each labeled field has an Alt shortcut: <kbd>Alt+N</kbd> for Name, <kbd>Alt+G</kbd> for Group, <kbd>Alt+P</kbd> for Pinned and <kbd>Alt+C</kbd> for Clipboard text.</p>
+    <p><strong>Tip:</strong> you can open Quick Clip from any app without opening history first. On the “Hotkeys” tab of Preferences (<kbd>Ctrl+3</kbd> on Windows), focus the “Quick Clip hotkey” field and press the shortcut you want, such as <kbd>Ctrl+Win+F8</kbd>. The tray menu also has a “New Quick Clip” command.</p>
+    <p><strong>If you get interrupted:</strong> on Windows and Mac, the Quick Clip hotkey also puts an unfinished Quick Clip aside. Press it once to hide the editor and go back to what you were doing. Press it again, or open the history window, and your unfinished text is still there. There is only ever one unfinished Quick Clip, so pressing the hotkey again never opens a second, empty editor. The draft is kept until you save it, cancel it with <kbd>Escape</kbd>, or quit Clipman. Quitting Clipman throws it away, so save it first.</p>
+  </section>
+
+  <section aria-labelledby="part-3">
+    <h2 id="part-3">Part 3: Doing more with Clipman</h2>
+    <p>Everything in this part is optional. Pick the topics that sound useful to you. The examples use Windows, Mac and Linux. The mobile apps are covered in <a href="#part-6">Part 6</a>.</p>
+
+    <h3 id="tutorial-quick-paste">Tutorial 9: Paste a saved entry from anywhere with Quick Paste</h3>
+    <p><strong>What you will learn:</strong> how to give an entry its own keyboard shortcut, so you can paste it into any app without opening Clipman at all.</p>
+    <p><strong>New terms:</strong></p>
+    <ul>
+      <li><strong>Quick Paste</strong> means pasting a saved entry with its own global hotkey.</li>
+      <li>A <strong>Quick Paste target</strong> is simply an entry that has been set up this way. In Entry Properties, it is the entry with the option “Use as quick-paste target” checked.</li>
+      <li>The <strong>Quick Paste hotkey</strong> is the shortcut that pastes it. Each target has its own.</li>
+      <li>The <strong>Quick Paste mode</strong> decides what happens to your clipboard afterwards.</li>
+    </ul>
+    <p><strong>Worked example:</strong> you want your email signature pasted whenever you press <kbd>Ctrl+Win+F9</kbd>.</p>
+    <ol>
+      <li>Create the entry. Either copy your signature from an email, or open history and use Quick Clip (<kbd>Ctrl+N</kbd>, see <a href="#tutorial-quick-clip">Tutorial 8</a>). Give it the name <code>Signature</code> so you can recognize it later.</li>
+      <li>In the history window, select the Signature entry and press <kbd>F2</kbd> to open Entry Properties.</li>
+      <li>Check the option “Use as quick-paste target”. On Windows you can press <kbd>Alt+U</kbd>.</li>
+      <li>Move to the “Quick Paste hotkey” field (Windows: <kbd>Alt+H</kbd>). This field records the next key combination you press instead of typing letters. Press <kbd>Ctrl+Win+F9</kbd>. Your screen reader should announce the new shortcut. To clear the field and start again, press <kbd>Delete</kbd> or <kbd>Backspace</kbd>.</li>
+      <li>Leave the “Quick Paste mode” setting on its default, “Paste and restore previous clipboard”, for now.</li>
+      <li>Save with <kbd>Ctrl+Enter</kbd> (Mac: <kbd>Command+Enter</kbd>), then close the history window.</li>
+      <li>Open a new email, move to the end of the message, and press <kbd>Ctrl+Win+F9</kbd>. Your signature is pasted.</li>
+    </ol>
+    <h4 id="quick-paste-modes">The three Quick Paste modes</h4>
+    <ul>
+      <li><strong>“Paste and restore previous clipboard”</strong> (the default): pastes the entry, then puts back whatever was on your clipboard before. Your clipboard is left exactly as it was. This is the right choice most of the time.</li>
+      <li><strong>“Paste and keep target on clipboard”</strong>: pastes the entry and leaves it on the clipboard, so you can paste it again with the normal paste command.</li>
+      <li><strong>“Copy to clipboard only”</strong>: does not paste anything. It only puts the entry on the clipboard, ready for you to paste yourself. This is useful for apps where automatic pasting does not work well.</li>
+    </ul>
+    <h4>Choosing a good shortcut</h4>
+    <ul>
+      <li>Use two modifier keys, such as <kbd>Ctrl+Win</kbd>, <kbd>Ctrl+Shift</kbd> or <kbd>Ctrl+Alt</kbd>, plus a function key or letter. Function keys are the least likely to clash with other programs or with your screen reader.</li>
+      <li>Bear in mind that if you use Leasey, an add-on for JAWS, many <kbd>Ctrl+Shift</kbd> and function key combinations may already be in use, and the Leasey shortcuts will likely take precedence. That is why this guide suggests <kbd>Ctrl+Win</kbd> with a function key. Avoid <kbd>Ctrl+Win+F4</kbd>, which Windows uses to close a virtual desktop.</li>
+      <li>On Mac, avoid <kbd>Control+Option</kbd> combinations, because VoiceOver uses those keys.</li>
+      <li>Clipman refuses shortcuts that would break normal typing, such as <kbd>Ctrl+C</kbd> or a single modifier with a letter. If you choose a shortcut with only one modifier, such as <kbd>Ctrl+F9</kbd>, Clipman warns you first.</li>
+      <li>On many non-US keyboards, <kbd>Ctrl+Alt</kbd> together act like the <kbd>AltGr</kbd> key that types accented letters and symbols. If a <kbd>Ctrl+Alt</kbd> shortcut types a character instead of pasting, use the <kbd>Alt</kbd> key to the left of the spacebar, or choose a different combination.</li>
+    </ul>
+    <h4>Reviewing your Quick Paste targets</h4>
+    <p>Open the “Quick Paste” menu in the history window (Windows: press <kbd>Alt</kbd>, then move to “Quick Paste”). It lists every entry with a Quick Paste hotkey. Choosing one moves focus to that entry, ready for <kbd>F2</kbd> if you want to change or remove its shortcut. Entries with a Quick Paste hotkey also announce the shortcut and mode as part of their row, so you always know which entries have one.</p>
+    <p><strong>Good to know:</strong> Quick Paste works even while monitoring is off. Quick Paste hotkeys belong to each computer, so if you share history with another computer, it keeps its own set of shortcuts.</p>
+
+    <h3 id="tutorial-templates">Tutorial 10: Insert today's date with a template</h3>
+    <p><strong>What you will learn:</strong> how to make an entry that fills in the date, time or other details at the moment you paste it.</p>
+    <p><strong>New terms:</strong> a <strong>template</strong> is an entry containing placeholders in double curly brackets, such as <code>{{year_full}}</code>. When you copy or Quick Paste a template, Clipman replaces each placeholder with its current value. The stored entry itself never changes, so it is ready to use again next time.</p>
+    <p><strong>Worked example:</strong> a date line for the top of letters, such as “16 October 2026”.</p>
+    <ol>
+      <li>Open the history window and press <kbd>Ctrl+N</kbd> (Mac: <kbd>Command+N</kbd>) for Quick Clip.</li>
+      <li>In the “Clipboard text” field, type exactly: <code>{{day_of_month}} {{month_name_full}} {{year_full}}</code></li>
+      <li>Go to the “Name” field and type <code>Today's date</code>.</li>
+      <li>Check the option “Template entry” (Windows: <kbd>Alt+T</kbd>).</li>
+      <li>Check the result with the “Preview template” button. Clipman shows the text as it would be pasted today.</li>
+      <li>Save with <kbd>Ctrl+Enter</kbd> (Mac: <kbd>Command+Enter</kbd>).</li>
+    </ol>
+    <p>Each time you copy this entry, you get that day's date. To make it even faster, give it a Quick Paste hotkey as in <a href="#tutorial-quick-paste">Tutorial 9</a>.</p>
+    <p><strong>Some useful placeholders:</strong></p>
+    <ul>
+      <li><code>{{day_name_full}}</code>: the day of the week, such as Friday.</li>
+      <li><code>{{day_of_month}}</code>: the day number, such as 16. Use <code>{{day_of_month_padded}}</code> for 05 instead of 5.</li>
+      <li><code>{{month_name_full}}</code>: the month name, such as October. <code>{{month_num_padded}}</code> gives 10.</li>
+      <li><code>{{year_full}}</code>: the year, such as 2026.</li>
+      <li><code>{{hour_24_padded}}:{{minute_padded}}</code>: the time, such as 14:05.</li>
+      <li><code>{{username}}</code> and <code>{{os_name}}</code>: your sign-in name and your operating system.</li>
+    </ul>
+    <p>You do not need to remember these. In Entry Properties and Quick Clip, the “Insert sample” button offers ready-made templates and the “Insert field” button inserts any placeholder at the cursor. The full manual lists them all.</p>
+
+    <h3 id="tutorial-cleanup">Tutorial 11: Clean up messy text</h3>
+    <p><strong>What you will learn:</strong> how to fix common problems with copied text without opening another program.</p>
+    <p><strong>Worked example:</strong> you copied a paragraph from a PDF and it arrived broken into short lines. You want it as one line.</p>
+    <ol>
+      <li>Copy the paragraph from the PDF as usual.</li>
+      <li>Open the history window. The paragraph is the top entry.</li>
+      <li>Open the “Actions” menu (Windows: <kbd>Alt+A</kbd>) and choose “Convert to single line”. On Windows the shortcut is <kbd>Ctrl+Shift+L</kbd>.</li>
+      <li>The entry is changed in history and the fixed version is placed on your clipboard, ready to paste.</li>
+    </ol>
+    <p>Other actions you may find useful (shortcuts are for Windows):</p>
+    <ul>
+      <li>“Trim whitespace” (<kbd>Ctrl+Shift+T</kbd>): removes spaces and blank lines from the start and end.</li>
+      <li>“Remove blank lines” (<kbd>Ctrl+Shift+B</kbd>).</li>
+      <li>“Copy as plain text” (<kbd>Ctrl+Shift+C</kbd>): copies without any formatting, and does not change the entry.</li>
+      <li>“HTML to readable text” (<kbd>Ctrl+Shift+H</kbd>): turns web page source code into the words you would read on the page.</li>
+      <li>“Remove URL tracking” (<kbd>Ctrl+Shift+R</kbd>, Mac: <kbd>Command+Shift+R</kbd>) and “Clean link for sharing” (<kbd>Ctrl+Shift+S</kbd>, Mac: <kbd>Command+Shift+S</kbd>): see <a href="#links-history">Working with links</a>.</li>
+      <li>Uppercase, lowercase, URL encode and decode, HTML encode and decode, and line-ending conversion are also in the “Actions” menu.</li>
+    </ul>
+    <p>These actions work on several selected entries at once, too. On Mac, the “Actions” menu offers the link cleanup and line-ending actions.</p>
+
+    <h3 id="links-history">Working with links</h3>
+    <p>If you copy a lot of web links, turn on the Links section. It shows only entries that are a single web address, so they are not mixed in with your other text.</p>
+    <ul>
+      <li><strong>Turn it on:</strong> in Preferences, check the option “Show Links history tab” (Windows: on the “General” tab). Then press <kbd>Alt+L</kbd> in the history window to go to Links (Mac: use the <kbd>Command</kbd> and number shown in the View menu). <kbd>Alt+T</kbd> goes back to Text, and <kbd>Ctrl+Tab</kbd> moves through all sections.</li>
+      <li><strong>Readable labels:</strong> instead of reading out a long address, Clipman reads a short label made from the address, such as “Issues 50; github.com/OnjLouis/Clipman/issues/50”. The full address is still what gets copied.</li>
+      <li><strong>Open a link in your browser:</strong> select it and press <kbd>Alt+Enter</kbd> (Mac: <kbd>Option+Enter</kbd>).</li>
+      <li><strong>Use the page's title as the name:</strong> choose “Use website title as name” from the entry's context menu (press the <kbd>Applications</kbd> key or <kbd>Shift+F10</kbd> on Windows). By default, Clipman asks first, because this contacts the website once. The confirmation and optional automatic naming settings are explained in the full manual.</li>
+      <li><strong>Remove tracking:</strong> many links carry extra tracking codes after a question mark. “Remove URL tracking” strips them. “Clean link for sharing” also removes things like a YouTube start time, so the person you send it to starts from the beginning.</li>
+    </ul>
+
+    <h3 id="rich-text-history">Keeping formatting and images</h3>
+    <p>Normally Clipman stores plain text. If you want to keep formatting, such as headings, bold text and links copied from a web page or a Word document, turn on Rich Text history.</p>
+    <ol>
+      <li>In Preferences, check the option “Preserve copied formatting and show rich text history” (Windows: on the “General” tab).</li>
+      <li>Copy something with formatting. It appears in the Rich Text section (Windows: <kbd>Alt+R</kbd>), instead of Text while that separate section is enabled. The same entry still has a plain-text fallback.</li>
+      <li>Copy it back from Rich Text history and paste it into a word processor. The formatting comes with it.</li>
+    </ol>
+    <p>Only things you copy after turning this on keep their formatting. Editing the text in Entry Properties removes the formatting, because it would no longer match the text.</p>
+    <p><strong>Images:</strong> a further option, “Include copied images in rich text history”, lets Clipman store PNG and JPEG pictures. This is mainly useful for passing photos between your phone and computer through shared history. On a computer, copying an image entry and pasting it into File Explorer or Finder saves it as an image file. On iPhone or Android, share a photo to Clipman from the Photos app. Pressing <kbd>Alt+Enter</kbd> (Mac: <kbd>Option+Enter</kbd>) on an image entry opens it in your default image viewer.</p>
+
+    <h3 id="file-history">File History</h3>
+    <p>When you copy or cut files and folders in File Explorer or Finder, Clipman notes it in File History. It stores where the files are, not the files themselves, and these records stay on the computer that made them.</p>
+    <p><strong>Worked example:</strong> earlier you copied a document to paste into another folder, then copied lots of text since. You want to paste the document again.</p>
+    <ol>
+      <li>Open the history window and press <kbd>Alt+I</kbd> to go to File History (Mac: use the <kbd>Command</kbd> and number shown in the View menu). Each row starts with the file or folder name, then says whether it was a copy or a cut, and how many files.</li>
+      <li>Press <kbd>Alt+Delete</kbd> (Mac: <kbd>Option+Backspace</kbd>). This clears out events whose files are no longer there, for example because they were moved or deleted since. It does not delete any actual files. It is a good habit, because it means everything left in the list can still be pasted.</li>
+      <li>Select the event you want and press <kbd>Enter</kbd>. The files are put back on the clipboard and the window closes.</li>
+      <li>In File Explorer or Finder, go to the destination folder and paste.</li>
+    </ol>
+    <p>Other things you can do in File History:</p>
+    <ul>
+      <li><kbd>Ctrl+C</kbd> (Mac: <kbd>Command+C</kbd>) copies the file paths as text.</li>
+      <li><kbd>Ctrl+Enter</kbd> (Mac: <kbd>Command+Enter</kbd>) opens the folder containing the file, with the file selected.</li>
+      <li><kbd>Ctrl+Delete</kbd> (Mac: <kbd>Control+Backspace</kbd>) clears all unpinned events. Again, no actual files are deleted.</li>
+      <li>If you would like Clipman to clear out unavailable events for you, check the option “Automatically remove unavailable file-history events” on the “File history” tab of Preferences.</li>
+      <li>Pinning, moving and the <kbd>Ctrl+1</kbd> to <kbd>Ctrl+0</kbd> shortcuts work just as they do in Text history.</li>
+    </ul>
+
+    <h3 id="more-features">Other useful features</h3>
+    <h4>ClipMerge: build one item from several copies</h4>
+    <p>ClipMerge is off by default. Turn it on with the option “Turn on ClipMerge” on the “General” tab of Preferences.</p>
+    <p><strong>Worked example:</strong> you are reading a list of contacts in a file and want to collect three phone numbers into one clipboard item that goes into Clipman's text history.</p>
+    <ol>
+      <li>Select the first phone number and copy it once, as normal.</li>
+      <li>Select the second phone number and press the copy shortcut twice quickly, within half a second. You hear the merge sound. The clipboard now holds both numbers, one per line.</li>
+      <li>Select the third number and press copy twice quickly again.</li>
+      <li>Paste. All three numbers arrive together. The combined item is also saved in your Text history.</li>
+    </ol>
+    <p>The time allowed between the two presses, and what goes between the merged pieces, can be changed on the same tab. The two presses for the new piece must come from the same app. The earlier piece can come from a different app, so check the combined result before pasting. File selections merge only when their copy or cut operations match and the source files are still available.</p>
+    <p>ClipMerge and <a href="#tutorial-multiple">selecting several entries</a> reach the same result in different ways. ClipMerge builds the combined item as you copy. Selecting several entries combines them afterwards, from history. Use whichever fits the way you work.</p>
+
+    <h4>Push an entry to your other devices</h4>
+    <p>If you share history between devices (see <a href="#part-5">Part 5</a>), select an entry and press <kbd>Ctrl+P</kbd> (Mac: <kbd>Command+P</kbd>) to send it to your other devices as if you had just copied it. Devices that have the remote clipboard option turned on place it on their clipboard. This works whether you share history through a shared folder or through Clipman Server, so you do not need a server for it. See <a href="#remote-clipboard">Getting text from one device onto another's clipboard</a>.</p>
+
+    <h4>Save the clipboard once while monitoring is off</h4>
+    <p>The tray menu's “Save current clipboard to history” command, or a shortcut you set on the “Hotkeys” tab, saves whatever is on the clipboard right now, even if monitoring is off. This could allow for using Clipman more selectively, if that's your preference: leave monitoring off, and save only the things you choose.</p>
+
+    <h4>Open history in the right section</h4>
+    <p>The option “Open history to the most recent clipboard type”, on the “General” tab, makes the history window open on Links after you copy a link, on File History after you copy a file, and so on.</p>
+
+    <h4>Rearrange the sections</h4>
+    <p>Focus a section tab and press <kbd>Alt+Left Arrow</kbd> or <kbd>Alt+Right Arrow</kbd> (Mac: <kbd>Option+Left Arrow</kbd> or <kbd>Option+Right Arrow</kbd>) to move it. On Windows and Linux, <kbd>Alt+T</kbd>, <kbd>Alt+L</kbd>, <kbd>Alt+R</kbd> and <kbd>Alt+I</kbd> keep working wherever the tabs are.</p>
+
+    <h4>Import, export and backups</h4>
+    <p>Use <kbd>Ctrl+E</kbd> (Mac: <kbd>Command+E</kbd>) to export your history to a file, and <kbd>Ctrl+I</kbd> (Mac: <kbd>Command+I</kbd>) to import one. Choose the <code>.clipdb</code> format for backups, because it can be password protected. JSON and text exports are readable by anyone who opens the file. On Windows, Clipman can also import history from the older Clipman and from Ditto.</p>
+
+    <h4>Send a text file to Clipman (Windows)</h4>
+    <p>In Preferences, check the option “Add Clipman to the Windows Send To menu for text files” on the “Startup and updates” tab. Then, in File Explorer, open the context menu on a text file, choose “Send to”, and choose “Clipman - add text to history”. The file's contents become a new entry.</p>
+  </section>
+
+  <section aria-labelledby="part-4">
+    <h2 id="part-4">Part 4: Privacy and security</h2>
+    <p>Clipman records what you copy, and some of what you copy is private. This part shows how to stop Clipman recording things it should not, and how to protect what it does record. You can use as many or as few of these as you like.</p>
+    <p>Exclusions limit automatic capture; they are not a guarantee that private information can never enter history. Be careful when deliberately pasting, importing or typing content into Clipman, and review what you share. Encryption protects stored history, not an entry you paste into another app.</p>
+
+    <h3 id="pausing">Pausing Clipman for a moment</h3>
+    <p>The simplest protection is to turn monitoring off before you copy something private, and back on afterwards.</p>
+    <ul>
+      <li>Windows and Linux: <kbd>Ctrl+Alt+Grave</kbd></li>
+      <li>Mac: <kbd>Option+Shift+Backslash</kbd></li>
+    </ul>
+    <p>You hear the “off” sound, and while monitoring is off you hear the “skip” sound each time you copy, to remind you nothing is being saved. Press the shortcut again to turn monitoring back on. Clipman remembers whether monitoring was on or off, even after a restart, so listen for the skip sound if you are not sure.</p>
+
+    <h3 id="tutorial-ignore-app">Tutorial 12: Stop Clipman recording a password manager</h3>
+    <p><strong>What you will learn:</strong> how to make Clipman ignore everything copied from one app.</p>
+    <p><strong>New terms:</strong> an <strong>ignored application</strong> is an app whose copies Clipman never saves.</p>
+    <p>Many password managers already mark their copies as private, and Clipman on Windows respects that automatically. If yours does not, or you want to be certain, add it to the ignored list.</p>
+    <p><strong>Worked example (Windows):</strong></p>
+    <ol>
+      <li>Make sure your password manager is running.</li>
+      <li>Open Preferences and press <kbd>Ctrl+4</kbd> for the “Storage and Password” tab.</li>
+      <li>Activate the “Add running app” button (<kbd>Alt+I</kbd>). A list of running programs opens.</li>
+      <li>Find your password manager in the list, for example <code>KeePassXC</code> or <code>1Password</code>, and choose it. It is added to the “Ignored applications” box.</li>
+      <li>Close Preferences with <kbd>Escape</kbd>.</li>
+      <li>Test it: copy something from your password manager. You hear no copy sound and nothing new appears in history.</li>
+    </ol>
+    <p><strong>On Mac:</strong> type the app's name, such as <code>KeePassXC</code>, into the ignored applications box in Preferences, one app per line, then activate the “Save and Close” button.</p>
+
+    <h3 id="sensitive-data">Sensitive data exclusions</h3>
+    <p>Sometimes private things are copied from ordinary apps, such as a card number from a web page. Sensitive data exclusions let Clipman recognize the shape of some kinds of private text and refuse to save it. Your clipboard is not affected, so you can still paste it once.</p>
+    <p>The following steps use Windows Preferences. Other platforms arrange their settings differently; consult the full manual for their available controls.</p>
+    <ol>
+      <li>Open Preferences and press <kbd>Ctrl+6</kbd> for the “Sensitive data” tab.</li>
+      <li>Set “Sensitive data mode” to “Exclude from history”.</li>
+      <li>In the “Exclusion presets” list, check the kinds of text you want excluded. The choices are credit card numbers, US Social Security numbers, international phone numbers, long API keys or tokens, software license keys, and an approximate pattern for US driver's licenses.</li>
+      <li>Close Preferences.</li>
+    </ol>
+    <p>None of these are checked to begin with, because pattern matching can catch harmless text by mistake. For example, “international phone numbers” also catches your own phone number when you copy it. Check only the ones that suit you. The full manual has harmless test values you can copy to check each one is working. You will hear the exclude sound when one is caught.</p>
+
+    <h3 id="history-password">Protecting history with a password</h3>
+    <p>Clipman's history file is compressed, so it cannot be read by simply opening it, but anyone with Clipman could load it. A <strong>history password</strong> encrypts the file so it is unreadable without the password. A password is required for Secrets, and when sharing history through a shared folder with a phone or through Clipman Server.</p>
+    <p><strong>To set a history password on Windows:</strong></p>
+    <ol>
+      <li>Open Preferences and press <kbd>Ctrl+4</kbd> for the “Storage and Password” tab.</li>
+      <li>Type your password in the “History password” field and again in the “Confirm password” field. Check the option “Show history password” if you want to hear what you typed. Or activate the “Generate password” button to have Clipman create a strong one and copy it to your clipboard. Clipman deliberately does not save that copy in history.</li>
+      <li>Decide about the option “Remember history password on this computer”, explained below.</li>
+      <li>Close Preferences.</li>
+    </ol>
+    <p><strong>The option “Remember history password on this computer”:</strong></p>
+    <ul>
+      <li><strong>Checked:</strong> Clipman opens without asking for the password. This is convenient, especially if Clipman starts automatically. The password is protected by your Windows account or your Mac Keychain.</li>
+      <li><strong>Unchecked:</strong> Clipman asks for the password each time it starts and forgets it when it closes. This is safer if other people use your computer account.</li>
+    </ul>
+    <p><strong>Important:</strong> keep the password somewhere safe, such as your password manager. If you lose it, nobody can recover your history, including the developer.</p>
+    <p>Leaving both password fields blank keeps the current password. To remove a password completely, use the “Use no password” button.</p>
+
+    <h3 id="tutorial-secrets">Tutorial 13: Store a private snippet in Secrets</h3>
+    <p><strong>What you will learn:</strong> how to keep a short private item, such as a work PIN or the password for a program that has no password manager support, where only you can paste it.</p>
+    <p><strong>New terms:</strong> <strong>Secrets</strong> is a separate list, protected by your history password. Secrets are typed in by you, never captured from the clipboard, never shown in normal history, and never shared with your other devices.</p>
+    <p><strong>Before you start:</strong> you need a history password. See <a href="#history-password">Protecting history with a password</a>.</p>
+    <p><strong>Worked example (Windows):</strong> you store your door entry code and give it the shortcut <kbd>Ctrl+Win+F12</kbd>.</p>
+    <ol>
+      <li>Press <kbd>Ctrl+Shift+E</kbd> with the history window open, or choose “Secrets” from the tray menu. Mac: <kbd>Command+Shift+E</kbd>, or “Secrets” in the menu extra.</li>
+      <li>Enter your history password when asked.</li>
+      <li>Press <kbd>Insert</kbd> to add a secret. You may need to use your screen reader's bypass key before pressing <kbd>Insert</kbd>, or simply tab to the “Add” button. The Add Secret window opens.</li>
+      <li>In the “Name” field, type <code>Door code</code>.</li>
+      <li>In the “Secret” field, type the code. In the “Confirm” field, type it again. Check the option “Show secret” if you want to hear it.</li>
+      <li>In the “Quick Paste hotkey” field, press <kbd>Ctrl+Win+F12</kbd>. This is optional.</li>
+      <li>Activate the “OK” button, then press <kbd>Escape</kbd> to close Secrets.</li>
+    </ol>
+    <p>Now pressing <kbd>Ctrl+Win+F12</kbd> in any app pastes your door code, then restores whatever was on your clipboard before.</p>
+    <p>In the Secrets list, <kbd>Enter</kbd> pastes the selected secret straight away, <kbd>F2</kbd> edits it, and <kbd>Delete</kbd> removes it. Each of these also has a button you can tab to. The list only ever shows names and shortcuts, never the secrets themselves.</p>
+    <p><strong>A word of caution:</strong> Secrets is a convenience, not a replacement for a password manager. For website passwords, a proper password manager is safer.</p>
+  </section>
+
+  <section aria-labelledby="part-5">
+    <h2 id="part-5">Part 5: Using Clipman on more than one device</h2>
+    <p>Clipman can keep the same history on your computer, phone and tablet. Copy an address on your laptop and it is waiting in Clipman on your iPhone. This is called syncing, and it is where Clipman saves you from emailing things to yourself.</p>
+
+    <h3 id="choosing-storage">Choosing how to share history</h3>
+    <p>There are three ways to store history. Pick the one that matches the devices you use.</p>
+    <ul>
+      <li><strong>Local:</strong> history stays on one device. This is how Clipman starts, and it is all you need if you only use one device.</li>
+      <li><strong>Shared folder:</strong> history lives in a folder that a service you already use, such as Dropbox, OneDrive, iCloud Drive or a home network share, keeps in step between your devices. It works on Windows, Mac, iPhone, iPad and Android when the provider supports the required folder access. You may need the provider's own app installed and signed in. Availability and speed depend on that service.</li>
+      <li><strong>Clipman Server:</strong> you run a small separate program on a computer that is always on, such as a home PC, a Raspberry Pi or a rented server. It is faster and more predictable than a shared folder, and it is the only option on Linux, but it takes more setting up.</li>
+    </ul>
+    <p>If you are unsure, start with a shared folder using a service you already have. You can move to Clipman Server later. This works well enough if you're sharing history between two Windows computers.</p>
+
+    <h3 id="before-you-sync">Before you start</h3>
+    <ul>
+      <li><strong>Back up first.</strong> On each computer that already has history you care about, export it with <kbd>Ctrl+E</kbd> (Mac: <kbd>Command+E</kbd>) as a <code>.clipdb</code> file, and keep the file somewhere outside the shared folder.</li>
+      <li><strong>Choose a history password.</strong> Phones and Clipman Server require one, and every device must use exactly the same password. Store it in your password manager. See <a href="#history-password">Protecting history with a password</a>.</li>
+      <li><strong>Update every device.</strong> Install the latest Clipman on every device you plan to connect.</li>
+      <li><strong>Use a dedicated folder.</strong> Make a new, empty folder just for Clipman, such as <code>Clipman Shared</code> in your cloud storage service. Do not edit, rename or delete the files Clipman puts there.</li>
+    </ul>
+
+    <h3 id="tutorial-dropbox">Tutorial 14: Share history between a Windows PC and an iPhone using Dropbox</h3>
+    <p><strong>What you will learn:</strong> how to set up a shared folder from start to finish, using one of the most common combinations. The same steps work with an iPad, and the Windows half works for a second Windows PC too.</p>
+    <p><strong>You will need:</strong></p>
+    <ul>
+      <li>the Dropbox app installed and signed in on both the PC and the iPhone, using the same Dropbox account;</li>
+      <li>Clipman on both;</li>
+      <li>a history password you have chosen and saved somewhere safe.</li>
+    </ul>
+
+    <h4>Step 1: Create the shared folder on the PC</h4>
+    <ol>
+      <li>Open File Explorer and go to your Dropbox folder. It is usually <code>C:\Users\YourName\Dropbox</code>.</li>
+      <li>Create a new folder with <kbd>Ctrl+Shift+N</kbd>, name it <code>Clipman Shared</code>, and press <kbd>Enter</kbd>.</li>
+      <li>Make sure Dropbox keeps this folder on your PC rather than only online. Open the folder's context menu with the <kbd>Applications</kbd> key and choose Dropbox's “Make available offline” option if it is offered. On Windows 11 you may first need to choose “Show more options”.</li>
+    </ol>
+
+    <h4>Step 2: Back up your existing history</h4>
+    <p>If Clipman on this PC already has entries you want to keep, open the history window, press <kbd>Ctrl+E</kbd>, choose the <code>.clipdb</code> format, and save the file to your Documents folder, not the shared folder.</p>
+
+    <h4>Step 3: Point Clipman on the PC at the shared folder</h4>
+    <ol>
+      <li>Open Preferences and press <kbd>Ctrl+4</kbd> for the “Storage and Password” tab.</li>
+      <li>Check that “Storage type” is set to “Local or shared folder”.</li>
+      <li>Go to the “Data folder” field (<kbd>Alt+D</kbd>). Either type the full path of your new folder, such as <code>C:\Users\YourName\Dropbox\Clipman Shared</code>, or activate the “Browse” button and choose it. Choose the folder itself, not a file inside it.</li>
+      <li>Type your history password in the “History password” field and again in the “Confirm password” field.</li>
+      <li>Check the option “Remember history password on this computer” if you want Clipman to start without asking.</li>
+      <li>Close Preferences with <kbd>Escape</kbd>. Your changes are saved as the window closes.</li>
+    </ol>
+    <p>Clipman now keeps this PC's history in the Dropbox folder. A few files appear there, including <code>clipman-history.clipdb</code> and a settings file named after your computer. Leave them alone.</p>
+    <p>Open the history window. If your earlier entries are missing, press <kbd>Ctrl+I</kbd> and import the backup you made in Step 2. They are added to the shared history.</p>
+    <p>Before going on, give Dropbox a minute to upload the new files.</p>
+
+    <h4>Step 4: Make sure the iPhone can see Dropbox in the Files app</h4>
+    <ol>
+      <li>Open the Files app on your iPhone and go to the “Browse” tab.</li>
+      <li>Look under Locations for “Dropbox”. If it is there, open it and check you can find the <code>Clipman Shared</code> folder.</li>
+      <li>If Dropbox is not listed, activate the “More” button on the Browse screen, choose “Edit”, turn on Dropbox, and choose “Done”.</li>
+    </ol>
+
+    <h4>Step 5: Connect Clipman on the iPhone</h4>
+    <ol>
+      <li>Open Clipman, activate the “More” button at the top right, and choose “Settings”.</li>
+      <li>Under “History storage”, set “Storage mode” to “Shared folder”. A Shared folder sync section appears.</li>
+      <li>In the “Shared history password” field, type exactly the same password you used on the PC.</li>
+      <li>Activate the “Choose shared folder” button. A folder picker opens. Go to Dropbox, then <code>Clipman Shared</code>, and choose “Open” to select that folder. Select the folder itself, not a file inside it.</li>
+      <li>Check that the line above the button now reads “Shared folder: Clipman Shared”.</li>
+      <li>Activate the “Save” button at the top of Settings.</li>
+      <li>Stay in Clipman for a moment. The status line at the bottom includes the entry count and then “Ready. Shared folder sync connected.” once it finishes. The first sync can take a little while.</li>
+    </ol>
+
+    <h4>Step 6: Test it</h4>
+    <ol>
+      <li>On the PC, copy a short phrase, such as <code>Hello from my PC</code>. Wait a few seconds for Dropbox to upload it.</li>
+      <li>Open Clipman on the iPhone and wait for its connected status. If the new entry has not arrived, try browsing to <code>Clipman Shared</code> under Dropbox in the Files app, then return to Clipman. Some providers need that extra refresh.</li>
+      <li>Find “Hello from my PC” in history, using Search if needed. Its position depends on your sort order.</li>
+      <li>Now go the other way. In Clipman on the iPhone, activate the “Quick Clip” button and type <code>Hello from my iPhone</code> into “Clipboard text”. From iOS app version 3.1.8, Quick Clip opens with text focus and the keyboard ready. In earlier versions, navigate to the field and double-tap it if needed. Then activate “Save” at the top.</li>
+      <li>Open the history window on the PC. Your iPhone entry appears there too, once Dropbox has passed it along.</li>
+    </ol>
+
+    <h4>Things to know about Dropbox on iPhone</h4>
+    <ul>
+      <li><strong>If Dropbox has not refreshed, try Files.</strong> In Laurent's testing for this guide, new entries from the PC appeared only after browsing to <code>Clipman Shared</code> in Files first. That is a useful provider-refresh workaround, not a step every user must perform on every sync.</li>
+      <li><strong>Clipman only syncs while it is open on the iPhone.</strong> iOS does not let it work in the background, so open Clipman and give it a moment when you want the latest entries.</li>
+      <li><strong>Each phone keeps a local copy.</strong> If Dropbox or your connection is down, the mobile app can use its cache and retry pending changes when it can sync again. On a computer, the shared folder must remain readable and writable; if it is unavailable, captures can pause or fail. Keep backups, and wait for connected status before relying on another device to have received a change.</li>
+      <li><strong>If Dropbox is too slow for you,</strong> iCloud Drive or Clipman Server may suit you better. Both are described below.</li>
+    </ul>
+
+    <h3 id="other-shared-folders">Other shared folders: OneDrive, iCloud Drive, Google Drive and network shares</h3>
+    <p>The steps are the same as in Tutorial 14. Only the folder changes.</p>
+    <ul>
+      <li><strong>Several Windows PCs, or Windows and Mac:</strong> follow Step 3 on each computer, choosing the same shared folder and the same password. On Mac, the storage settings are in Preferences.</li>
+      <li><strong>OneDrive or Google Drive on a computer:</strong> make sure the folder is set to stay on your computer, using the provider's “Always keep on this device” or “Available offline” option.</li>
+      <li><strong>iCloud Drive with Windows:</strong> install iCloud for Windows from the Microsoft Store, sign in, turn on iCloud Drive, and set your Clipman folder to “Always keep on this device”. Apple's <a href="https://support.apple.com/en-gb/118443">iCloud Drive setup guide for Windows</a> has the details. iCloud Drive is usually the most dependable choice between iPhone and other devices.</li>
+      <li><strong>On iPhone and iPad, not every provider works.</strong> Clipman needs lasting read and write access to a whole folder through Files, not just access to one file. A provider appearing in Files does not guarantee that it supports this. iCloud Drive and Dropbox have worked in testing; if your provider will not let you select and keep access to the folder, use another supported location or Clipman Server.</li>
+      <li><strong>Android:</strong> in Clipman's Settings, choose “Shared Folder”, pick the folder with Android's folder picker, enter the same password, and activate the “Save” button.</li>
+      <li><strong>Network shares:</strong> on Windows and Mac, a shared folder on another computer or a home storage device works if it appears as an ordinary folder or mapped drive.</li>
+    </ul>
+
+    <h3 id="clipman-server">Clipman Server, in brief</h3>
+    <p>Clipman Server is a separate program that holds your shared history on a computer that is always on. It never sees your password, so your history stays encrypted on the server. It is worth the extra effort if a shared folder is too slow, if you use Linux, or if you do not want to rely on a cloud service. It may also prove to be a good alternative for sharing history with an iPhone.</p>
+    <p>Setting up the server itself is covered in the <a href="https://onjlouis.github.io/Clipman/server/manual.html">Clipman Server manual</a>. Once it is running, it creates a <strong>connection file</strong> ending in <code>.clpconf</code>, which holds the server's address and access token. Connecting a device then only takes a minute:</p>
+    <ul>
+      <li><strong>Windows:</strong> open Preferences, press <kbd>Ctrl+4</kbd>, set “Storage type” to “Clipman Server”, activate the “Import server file” button, choose the <code>.clpconf</code> file and confirm, enter your history password in both password fields, and close Preferences.</li>
+      <li><strong>Mac:</strong> open Preferences, choose Clipman Server storage, activate the “Import Server File” button, enter your history password, and activate the “Save and Close” button.</li>
+      <li><strong>iPhone, iPad and Android:</strong> open the <code>.clpconf</code> file from the Files app or your file manager, or use the “Import server connection file” button in Clipman's Settings. Check the address, enter your history password, and activate the “Save” button.</li>
+    </ul>
+    <p>The connection file works like a key to your server. Send it to your devices privately, then delete unnecessary exported copies or keep a protected backup. Never post it publicly. The server token lets a device reach the server; the separate history password selects and decrypts your history. One server can serve several families or groups using the same token and different history passwords. Devices using exactly the same history password share a history; sync channels within it are not separate security boundaries.</p>
+
+    <h3 id="sync-rules">Sync rules and channels, in brief</h3>
+    <p>Sync rules are an advanced, optional feature for people with a large shared history. They split history into named parts called channels, decided by group, by device, or by whether an entry contains an image. Each device then chooses which channels to download, which saves data and time. Everything not claimed by a channel stays in the main part, called core, which every device always gets.</p>
+    <p>Most people never need sync rules. They currently work only with Clipman Server, and channels are created on Windows, Mac, Linux or the command line. Phones and tablets can choose which channels they download. Channels organize history. They do not hide anything, since every device with the same password can read every channel. See the full manual's Sync Rules and Channels section if you want to use them.</p>
+
+    <h3 id="remote-clipboard">Getting text from one device onto another's clipboard</h3>
+    <p>Syncing puts new entries into history on your other devices, but it does not automatically put them on their clipboards. If you want that too, there is an option for it. It works with a shared folder as well as with Clipman Server.</p>
+    <p><strong>Worked example:</strong> you copy a link on your iPhone and want to paste it straight away on your PC.</p>
+    <ol>
+      <li>On the PC, open Preferences and, on the “General” tab, check the option “Put new text received or sent to Clipman on the clipboard”. Close Preferences.</li>
+      <li>On the iPhone, copy the link in Safari, open Clipman, and activate the “Paste” button to add it.</li>
+      <li>Once it syncs, the PC plays the remote sound. The link is on the PC's clipboard, ready to paste with <kbd>Ctrl+V</kbd>.</li>
+    </ol>
+    <p>The equivalent settings are “Copy latest remote item to iOS clipboard” on iPhone and iPad and “Copy remote additions to Android clipboard” on Android. On mobile they only work while Clipman is open. To send an older entry this way, select it and use Push to other devices (<kbd>Ctrl+P</kbd>, Mac: <kbd>Command+P</kbd>).</p>
+  </section>
+
+  <section aria-labelledby="part-6">
+    <h2 id="part-6">Part 6: Clipman on iPhone, iPad and Android</h2>
+
+    <h3 id="mobile-differences">How the mobile apps differ</h3>
+    <p>The biggest difference is that phones and tablets do not let apps watch the clipboard in the background. On a computer, Clipman saves everything you copy. On a phone, Clipman only knows about something when you give it to Clipman. You can do that in several ways:</p>
+    <ul>
+      <li>open Clipman and use the “Paste” button;</li>
+      <li>turn on the option “Add current clipboard on launch” in Settings, so Clipman tries to add supported clipboard content when you open it, subject to the operating system's clipboard permission;</li>
+      <li>use the Share button in another app and choose Clipman;</li>
+      <li>use Quick Clip to type something new;</li>
+      <li>on iPhone and iPad, use Siri, Shortcuts or the Action Button.</li>
+    </ul>
+    <p>The mobile apps also only sync while they are open, and they have no File History or Secrets.</p>
+
+    <h3 id="iphone-walkthrough">Finding your way around on iPhone and iPad</h3>
+    <h4>The main screen</h4>
+    <ul>
+      <li>At the top right are three buttons: “Paste”, which adds what you last copied; “Quick Clip”, which opens an editor for a new entry; and “More”, which holds the other history sections and Settings.</li>
+      <li>The screen also has a search field, a “Filter” button for groups and devices, and the list of entries. Each entry is a single item, so one swipe moves to the next entry.</li>
+      <li>At the bottom is a status line showing the number of entries and whether syncing is working. Double-tapping it moves to the bottom of the list.</li>
+    </ul>
+    <h4>Adding what you copied</h4>
+    <p><strong>Worked example:</strong> save a phone number from a web page.</p>
+    <ol>
+      <li>In Safari, select the phone number and copy it.</li>
+      <li>Open Clipman and double-tap the “Paste” button. A two-finger double-tap, the VoiceOver Magic Tap gesture, does the same thing from anywhere in the list.</li>
+      <li>The number is added to history and you hear the copy sound. Its position depends on your sort order.</li>
+    </ol>
+    <p>If iOS asks whether to allow pasting, choose “Allow”. To stop being asked, see <a href="#install-iphone">the iPhone setup steps</a>.</p>
+    <h4>Typing a new entry with Quick Clip</h4>
+    <ol>
+      <li>Double-tap the “Quick Clip” button. A form opens with “Cancel” and “Save” buttons at the top.</li>
+      <li>The form has the “Name” and “Group” fields and the “Pinned” and “Template” switches first, then the “Clipboard text” field at the bottom. The text you type in “Clipboard text” is what becomes the entry.</li>
+      <li>In app version 3.1.8 and later, focus starts at “Clipboard text” with the keyboard ready. In an earlier version, navigate to that field and double-tap it to start typing. Fill in Name and Group too if you like.</li>
+      <li>Double-tap the “Save” button at the top. It stays dimmed until there is some text in the “Clipboard text” field.</li>
+    </ol>
+    <p>If you leave Clipman before saving, your unfinished Quick Clip is kept and waiting for you when you come back.</p>
+    <h4>Using an entry</h4>
+    <ul>
+      <li><strong>Copy it:</strong> double-tap the entry. It goes on the iOS clipboard, ready to paste in another app.</li>
+      <li><strong>Other actions:</strong> use the VoiceOver Actions rotor for “Open Link” (for links), “View Entry”, “Edit Entry”, “Pin Entry” or “Unpin Entry”, and “Delete Entry”. A named link offers an alternative copy action: with “Copy link names by default” off, it is “Copy Name and Link”; with that setting on, it is “Copy Link”.</li>
+      <li><strong>Move through the list:</strong> a three-finger swipe up or down moves a page at a time.</li>
+      <li><strong>Change section:</strong> a three-finger swipe left or right moves between Text, Links and Rich Text, if they are turned on. The “More” button also lists them.</li>
+    </ul>
+    <h4>Settings</h4>
+    <p>Open Settings from the “More” button. Changes only take effect when you activate the “Save” button at the top. The “Cancel” button, or the VoiceOver scrub gesture, discards them. Useful settings include:</p>
+    <ul>
+      <li>“Add current clipboard on launch”: tries to add supported clipboard content each time you open Clipman, subject to iOS permission.</li>
+      <li>“Require biometric or device authentication”: asks for Face ID, Touch ID or your passcode every time you return to Clipman.</li>
+      <li>“Enable links history” and “Preserve copied formatting and show Rich Text history”: the same optional sections as on a computer.</li>
+      <li>“Sort normal entries”: Manual order, Newest first, Oldest first, or Text.</li>
+      <li>“Confirm before deleting entries”, “Play sounds” and “Use haptics”.</li>
+      <li>“Open Manual”, under Help, opens the full manual in your browser.</li>
+    </ul>
+    <h4>Shortcuts from the Home Screen and Siri</h4>
+    <p>Focus the Clipman icon on the Home Screen and double-tap and hold to see three quick actions: “Quick Clip”, “Add Clipboard to Clipman” and “Copy Latest Clip”. The same three are available to Siri, for example “Add clipboard to Clipman” or “Copy latest from Clipman”, and in the Shortcuts app.</p>
+
+    <h3 id="tutorial-action-button">Tutorial 15: Copy your latest clip with the Action Button</h3>
+    <p><strong>What you will learn:</strong> how to get the newest entry from your synced history onto your iPhone's clipboard with one button press. This needs an iPhone with an Action Button, and works best once you have set up syncing as in <a href="#part-5">Part 5</a>.</p>
+    <ol>
+      <li>Open the iOS Settings app and choose “Action Button”.</li>
+      <li>Swipe through the choices until you reach “Shortcut”.</li>
+      <li>Activate “Choose a Shortcut”, find Clipman, and choose “Copy Latest Clip”.</li>
+      <li>Leave Settings.</li>
+    </ol>
+    <p><strong>Try it:</strong> copy some text on your computer and wait for it to sync. On your iPhone, press and hold the Action Button. Clipman opens, checks your shared history, and puts the newest entry on the iPhone's clipboard. Paste it wherever you need it. If Clipman cannot reach your shared history, it tells you, rather than claiming a successful refresh. A folder provider can still return an older copy; with Dropbox, try the Files refresh workaround in <a href="#tutorial-dropbox">Tutorial 14</a> if needed.</p>
+    <p>You could assign “Add Clipboard to Clipman” instead, to save what you have just copied on the iPhone with one press.</p>
+
+    <h3 id="android-walkthrough">Finding your way around on Android</h3>
+    <p>Clipman for Android works much like the iPhone version, with TalkBack.</p>
+    <ul>
+      <li><strong>Toolbar:</strong> “Paste” adds what you last copied, “Quick Clip” creates a new entry, and “More” holds other sections, Settings and Close. There are also “Filter” and “Top” buttons.</li>
+      <li><strong>Copy an entry:</strong> double-tap it.</li>
+      <li><strong>Other actions:</strong> use TalkBack's actions menu for the same entry actions described above for iPhone, including “Open Link”, “View Entry”, “Edit Entry”, pinning and deletion, plus the context-dependent alternative for copying a named link. The swipe direction can differ between TalkBack and VoiceOver. Long-pressing an entry opens View Entry.</li>
+      <li><strong>Status:</strong> the status at the bottom shows the number of entries and the sync state. Double-tapping it moves to the end of the list. Long-pressing it changes the sort order.</li>
+      <li><strong>Share to Clipman:</strong> choose Clipman from another app's Share menu to add text, a link or a photo.</li>
+      <li><strong>Settings:</strong> open from “More”. Activate the “Save” button at the top to keep changes. The “Cancel” button, or Android's Back, discards them.</li>
+      <li><strong>Updates:</strong> Clipman checks for updates itself. Settings has a “Check Now” button. Android always asks you to approve installing an update.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="troubleshooting">
+    <h2 id="troubleshooting">Troubleshooting</h2>
+
+    <h3 id="trouble-hotkey">The history shortcut does nothing</h3>
+    <ul>
+      <li><strong>Check Clipman is running.</strong> Look for it in the notification area (Windows) or menu bar (Mac). If it is not there, start it again.</li>
+      <li><strong>Your keyboard layout may be the cause.</strong> The default shortcuts use the Backslash and Grave keys, which sit in different places on non-US keyboards. On many layouts, including the UK one, <kbd>Ctrl+Alt</kbd> also acts as <kbd>AltGr</kbd>. Choose shortcuts that suit your keyboard: open Preferences from the tray menu, press <kbd>Ctrl+3</kbd> for the “Hotkeys” tab, focus the “Show history hotkey” field, and press the new combination, such as <kbd>Ctrl+Win+F11</kbd>. Do the same for the “Toggle on/off hotkey” field.</li>
+      <li><strong>Another program may already use it.</strong> Screen readers, screen reader add-ons such as Leasey, and other utilities reserve many shortcuts. Try a different combination.</li>
+      <li>You can always open history from the tray menu with “Show or hide history”.</li>
+    </ul>
+
+    <h3 id="trouble-not-saving">Things I copy are not being saved</h3>
+    <ul>
+      <li><strong>Monitoring may be off.</strong> If you hear the skip sound when you copy, press the monitoring shortcut to turn it back on. The status bar in the history window also says “Monitoring off”.</li>
+      <li><strong>The app may be ignored.</strong> Check the “Ignored applications” box on the “Storage and Password” tab.</li>
+      <li><strong>The text may look private.</strong> If you hear the exclude sound, a sensitive data preset or a privacy marker from the source app has stopped it. This is deliberate.</li>
+      <li><strong>It may be a file.</strong> Files and folders go to File History (<kbd>Alt+I</kbd>), not Text history.</li>
+      <li><strong>On a phone</strong>, nothing is saved automatically. See <a href="#mobile-differences">How the mobile apps differ</a>.</li>
+    </ul>
+
+    <h3 id="trouble-enter">Pressing Enter in history does not paste</h3>
+    <p>That is normal. <kbd>Enter</kbd> puts the entry on the clipboard, and you then paste it yourself. To have Clipman paste for you, turn on the option “After Enter, paste into the previous application” on the “General” tab. On Mac, also allow Clipman to control your computer when macOS asks, then restart Clipman.</p>
+
+    <h3 id="trouble-multiple">Only one entry was pasted when I selected several</h3>
+    <p>Moving with an arrow key without holding <kbd>Ctrl</kbd> selects only the entry you land on, and clears the rest of the selection. Go back through <a href="#tutorial-multiple">Tutorial 2</a>, and keep <kbd>Ctrl</kbd> held down while you move between the entries you want.</p>
+
+    <h3 id="trouble-storage">Clipman says storage is unavailable</h3>
+    <p>Clipman cannot reach its data folder or server. This can happen when a cloud service is not running, a network drive is disconnected, or the computer is offline. Fix the connection and check the status before relying on new captures or synchronization. Server reconnection is automatic. If a shared data folder remains unavailable, Windows offers “Retry storage” in the tray menu and Mac offers “Retry Storage” in the menu extra. Do not delete or replace the history database as a troubleshooting step.</p>
+
+    <h3 id="trouble-sync">My phone is not showing entries from my computer</h3>
+    <ul>
+      <li>Keep Clipman open on the phone for a few seconds. It only syncs while open.</li>
+      <li>Check the status line says the sync is connected.</li>
+      <li>For shared-folder mode, check that every device uses the same folder and password. A wrong password cannot decrypt the existing file and should produce an error; do not overwrite it. For server mode, check the same server address, token and history password. A different server history password selects a separate bucket, which may appear empty without a password error.</li>
+      <li>On the computer, check that your cloud service has finished uploading.</li>
+      <li>With Dropbox on iPhone, try opening the shared folder in Files, then return to Clipman. This helped in Laurent's testing, but is a provider workaround rather than a universal requirement.</li>
+    </ul>
+
+    <h3 id="trouble-quick-clip-iphone">On iPhone, Quick Clip does not let me type</h3>
+    <p>App version 3.1.8 corrects an iOS 27 VoiceOver activation problem and starts Quick Clip at “Clipboard text” with the keyboard ready. Check the App Store for that update. On earlier app versions, find “Clipboard text” after the Name and Group fields and switches, then double-tap it. If iOS 27 VoiceOver activates the history pager instead of the Quick Clip button, try the Home Screen Quick Clip action while waiting for the update. See <a href="#iphone-walkthrough">Typing a new entry with Quick Clip</a>.</p>
+
+    <h3 id="trouble-password">Clipman asks for my password every time it starts</h3>
+    <p>Check the option “Remember history password on this computer” on the “Storage and Password” tab, enter the password when asked, and close Preferences.</p>
+
+    <h3 id="trouble-forgot">I have forgotten my history password</h3>
+    <p>Encrypted history cannot be opened without its password, and nobody can recover it for you. If you have an older backup you can open, import it. Otherwise, point Clipman at a new, empty data folder and start again with a new password.</p>
+
+    <h3 id="trouble-files">Where are Clipman's files?</h3>
+    <p>On Windows, press <kbd>Ctrl+Shift+O</kbd> in the history window, or choose “Open settings folder” from the tray menu. On Mac, use “Open Settings Folder” in the menu extra.</p>
+
+    <h3 id="trouble-report">Reporting a problem</h3>
+    <p>Open diagnostics with <kbd>Alt+F1</kbd> (Mac: <kbd>Option+F1</kbd>). It describes how Clipman is set up and what it last did. Include it when you report a problem through the <a href="https://github.com/OnjLouis/Clipman/issues">Clipman issues page</a> or the “Contact” command in the Help menu.</p>
+  </section>
+
+  <section aria-labelledby="quick-reference">
+    <h2 id="quick-reference">Quick reference: the keys you will use most</h2>
+    <p>These work in the history window unless the table says otherwise. Linux uses the Windows keys. The full manual lists every shortcut.</p>
+    <table>
+      <caption>Common Clipman keyboard shortcuts on Windows, Linux and Mac</caption>
+      <thead>
+        <tr>
+          <th scope="col">Task</th>
+          <th scope="col">Windows and Linux</th>
+          <th scope="col">Mac</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Show or hide history, from any app</th><td><kbd>Ctrl+Alt+Backslash</kbd></td><td><kbd>Option+Shift+Grave</kbd></td></tr>
+        <tr><th scope="row">Turn monitoring on or off, from any app</th><td><kbd>Ctrl+Alt+Grave</kbd></td><td><kbd>Option+Shift+Backslash</kbd></td></tr>
+        <tr><th scope="row">Copy the selected entry or entries and close history</th><td><kbd>Enter</kbd></td><td><kbd>Enter</kbd></td></tr>
+        <tr><th scope="row">Copy the selected entry and keep history open</th><td><kbd>Ctrl+C</kbd></td><td><kbd>Command+C</kbd></td></tr>
+        <tr><th scope="row">Select entries next to each other</th><td><kbd>Shift+Up Arrow</kbd> or <kbd>Shift+Down Arrow</kbd></td><td><kbd>Shift+Up Arrow</kbd> or <kbd>Shift+Down Arrow</kbd></td></tr>
+        <tr><th scope="row">Pick out entries from different places, or select everything shown</th><td>Windows: hold <kbd>Ctrl</kbd>, move with the arrow keys, and press <kbd>Space</kbd> on each entry. Linux: <kbd>Ctrl+A</kbd> selects every entry shown.</td><td><kbd>Command+A</kbd> selects every entry shown</td></tr>
+        <tr><th scope="row">Copy an entry's name and text together</th><td><kbd>Ctrl+Enter</kbd></td><td><kbd>Command+Enter</kbd></td></tr>
+        <tr><th scope="row">Search</th><td><kbd>Ctrl+F</kbd>, then <kbd>F3</kbd> for the next match</td><td><kbd>Command+F</kbd>, then <kbd>F3</kbd> for the next match</td></tr>
+        <tr><th scope="row">Pin or unpin</th><td><kbd>Shift+Enter</kbd></td><td><kbd>Shift+Enter</kbd></td></tr>
+        <tr><th scope="row">Copy one of the first ten pinned entries</th><td><kbd>Ctrl+1</kbd> to <kbd>Ctrl+0</kbd></td><td><kbd>Control+1</kbd> to <kbd>Control+0</kbd></td></tr>
+        <tr><th scope="row">Jump past pinned entries</th><td><kbd>Backspace</kbd></td><td><kbd>Backspace</kbd></td></tr>
+        <tr><th scope="row">Entry Properties: name, group, text, Quick Paste</th><td><kbd>F2</kbd></td><td><kbd>F2</kbd></td></tr>
+        <tr><th scope="row">Save in Entry Properties or Quick Clip</th><td><kbd>Ctrl+Enter</kbd></td><td><kbd>Command+Enter</kbd></td></tr>
+        <tr><th scope="row">Read the whole entry</th><td><kbd>F4</kbd></td><td><kbd>F4</kbd></td></tr>
+        <tr><th scope="row">New entry with Quick Clip</th><td><kbd>Ctrl+N</kbd></td><td><kbd>Command+N</kbd></td></tr>
+        <tr><th scope="row">Put entries into a group</th><td><kbd>Ctrl+G</kbd></td><td><kbd>Command+G</kbd></td></tr>
+        <tr><th scope="row">Go to the history filter</th><td><kbd>Alt+G</kbd></td><td><kbd>Option+G</kbd></td></tr>
+        <tr><th scope="row">Show one of the first ten filter choices</th><td><kbd>Alt+1</kbd> to <kbd>Alt+0</kbd></td><td><kbd>Option+1</kbd> to <kbd>Option+0</kbd></td></tr>
+        <tr><th scope="row">Move an entry up or down</th><td><kbd>Alt+Up Arrow</kbd> or <kbd>Alt+Down Arrow</kbd></td><td><kbd>Option+Up Arrow</kbd> or <kbd>Option+Down Arrow</kbd></td></tr>
+        <tr><th scope="row">Delete</th><td><kbd>Delete</kbd></td><td><kbd>Command+Backspace</kbd></td></tr>
+        <tr><th scope="row">Next or previous section</th><td><kbd>Ctrl+Tab</kbd> or <kbd>Ctrl+Shift+Tab</kbd></td><td>The <kbd>Command</kbd> and number shown in the View menu</td></tr>
+        <tr><th scope="row">Go to Text, Links, Rich Text or File History</th><td><kbd>Alt+T</kbd>, <kbd>Alt+L</kbd>, <kbd>Alt+R</kbd> or <kbd>Alt+I</kbd></td><td>The <kbd>Command</kbd> and number shown in the View menu</td></tr>
+        <tr><th scope="row">Open a link or image</th><td><kbd>Alt+Enter</kbd></td><td><kbd>Option+Enter</kbd></td></tr>
+        <tr><th scope="row">Push an entry to your other devices</th><td><kbd>Ctrl+P</kbd></td><td><kbd>Command+P</kbd></td></tr>
+        <tr><th scope="row">Preferences</th><td><kbd>Ctrl+Comma</kbd></td><td><kbd>Command+Comma</kbd></td></tr>
+        <tr><th scope="row">Secrets</th><td><kbd>Ctrl+Shift+E</kbd></td><td><kbd>Command+Shift+E</kbd></td></tr>
+        <tr><th scope="row">Help for the focused control</th><td><kbd>F1</kbd></td><td><kbd>F1</kbd></td></tr>
+        <tr><th scope="row">Hide history</th><td><kbd>Escape</kbd></td><td><kbd>Escape</kbd></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section aria-labelledby="getting-help">
+    <h2 id="getting-help">Getting more help</h2>
+    <ul>
+      <li>Press <kbd>F1</kbd> on any control in Clipman for a short explanation of what it does.</li>
+      <li>The <a href="https://onjlouis.github.io/Clipman/manual.html">full Clipman manual</a> covers every feature and setting in detail. It is also in the Help menu, under “Manual”.</li>
+      <li>The <a href="https://onjlouis.github.io/Clipman/server/manual.html">Clipman Server manual</a> covers running your own server.</li>
+      <li>Report problems or suggest improvements on the <a href="https://github.com/OnjLouis/Clipman/issues">Clipman issues page</a>.</li>
+      <li>Contact the developer, Andre Louis, at <a href="https://onj.me/contact">onj.me/contact</a>, or through “Contact” in the Help menu.</li>
+    </ul>
+    <p>Clipman is free software. If it makes your day easier, you can support its development at <a href="https://onj.me/donate">onj.me/donate</a>.</p>
+  </section>
+
+  </main>
+</body>
+</html>
