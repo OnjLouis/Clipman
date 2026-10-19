@@ -316,7 +316,7 @@
       <li>Open the folder and run <code>clipman.exe</code>. You will hear a short sound. That is the “monitoring on” sound, and it means Clipman is running and recording what you copy.</li>
       <li>Try it now: press <kbd>Ctrl+Alt+Backslash</kbd>. The history window opens. It will be nearly empty for now. Press <kbd>Escape</kbd> to hide it again.</li>
     </ol>
-    <p>Clipman has no main window of its own. It lives in the notification area, sometimes called the system tray. To reach it, press <kbd>Windows+B</kbd>, use the arrow keys to find Clipman (you may need to open the hidden icons first by pressing <kbd>Enter</kbd> on the button that shows them), then press the <kbd>Applications</kbd> key for its menu. The menu lets you show history, turn monitoring on and off, open Secrets, open Preferences, and exit Clipman.</p>
+    <p>Clipman does not need to keep a window open. It lives in the notification area, sometimes called the system tray. To reach it, press <kbd>Windows+B</kbd>, use the arrow keys to find Clipman (you may need to open the hidden icons first by pressing <kbd>Enter</kbd> on the button that shows them), then press the <kbd>Applications</kbd> key for its menu. The menu lets you show history, turn monitoring on and off, open Secrets, open Preferences, and exit Clipman.</p>
     <p><strong>To start Clipman automatically when you sign in:</strong></p>
     <ol>
       <li>Open Preferences. From the notification area menu choose “Preferences”, or, with the history window open, press <kbd>Ctrl+Comma</kbd>.</li>
@@ -506,7 +506,7 @@
 
     <h3 id="tutorial-groups">Tutorial 6: Sort entries into groups</h3>
     <p><strong>What you will learn:</strong> how to put related entries into a group, and how to show only that group.</p>
-    <p><strong>New terms:</strong> a <strong>group</strong> is a label shared by several entries. The <strong>filter</strong> is the list box at the top of the history window that chooses which entries to show.</p>
+    <p><strong>New terms:</strong> a <strong>group</strong> is a label shared by several entries. The <strong>filter control</strong> at the top of the history window chooses which entries to show.</p>
     <p>Clipman already groups new entries automatically by the app you copied them from, so you may find groups named after your browser, email program or word processor. If you would rather group everything yourself, turn off the option “Automatically group new clips by source application” on the “General” tab of Preferences.</p>
     <p><strong>Worked example:</strong> you collect a few standard email replies into a group called “Replies”.</p>
     <ol>
@@ -524,7 +524,7 @@
     <h4>Two ways to choose what is shown</h4>
     <p>There are two places to choose a group, and they do exactly the same job. Use whichever suits you.</p>
     <ul>
-      <li><strong>The history filter</strong> is a list box at the top of the history window. Press <kbd>Alt+G</kbd> (Mac: <kbd>Option+G</kbd>) to reach it. It is the quickest way once you are used to it.</li>
+      <li><strong>The history filter</strong> is at the top of the history window. Press <kbd>Alt+G</kbd> (Mac: <kbd>Option+G</kbd>) to reach it. Windows exposes a combo box; Mac opens a filter menu. It is the quickest way once you are used to it.</li>
       <li><strong>The Groups menu</strong> is in the menu bar. On Windows, press <kbd>Alt</kbd>, then <kbd>P</kbd>. On Mac, it is the Groups menu in the menu bar. It lists the same choices as menu items, and a “Devices” submenu for showing entries from one device. On Windows, each choice is read with its shortcut, so it is a good way to hear all your choices and learn their shortcuts.</li>
     </ul>
     <p><strong>Shortcut:</strong> the first ten choices can be selected directly with <kbd>Alt+1</kbd> to <kbd>Alt+0</kbd> (Mac: <kbd>Option+1</kbd> to <kbd>Option+0</kbd>), without going to the filter or the menu. On Windows and Mac they start with All, Pinned, Named and Ungrouped, followed by your own groups. Linux uses Normal instead of Named. So <kbd>Alt+1</kbd> shows everything and <kbd>Alt+2</kbd> shows pinned entries; check the Groups menu for the remaining choices.</p>
@@ -883,7 +883,7 @@
     <h4>Things to know about Dropbox on iPhone</h4>
     <ul>
       <li><strong>If Dropbox has not refreshed, try Files.</strong> In Laurent's testing for this guide, new entries from the PC appeared only after browsing to <code>Clipman Shared</code> in Files first. That is a useful provider-refresh workaround, not a step every user must perform on every sync.</li>
-      <li><strong>Clipman only syncs while it is open on the iPhone.</strong> iOS does not let it work in the background, so open Clipman and give it a moment when you want the latest entries.</li>
+      <li><strong>Keep Clipman open for regular refreshes.</strong> iOS limits background work. A share action or pending save can finish separately, but this is not continuous background syncing. Open Clipman and check its status when you want the latest entries.</li>
       <li><strong>Each phone keeps a local copy.</strong> If Dropbox or your connection is down, the mobile app can use its cache and retry pending changes when it can sync again. On a computer, the shared folder must remain readable and writable; if it is unavailable, captures can pause or fail. Keep backups, and wait for connected status before relying on another device to have received a change.</li>
       <li><strong>If Dropbox is too slow for you,</strong> iCloud Drive or Clipman Server may suit you better. Both are described below.</li>
     </ul>
@@ -936,7 +936,7 @@
       <li>use Quick Clip to type something new;</li>
       <li>on iPhone and iPad, use Siri, Shortcuts or the Action Button.</li>
     </ul>
-    <p>The mobile apps also only sync while they are open, and they have no File History or Secrets.</p>
+    <p>The mobile apps refresh history regularly while open, rather than monitoring it continuously in the background. A share action or pending save may finish separately. They have no File History or Secrets.</p>
 
     <h3 id="iphone-walkthrough">Finding your way around on iPhone and iPad</h3>
     <h4>The main screen</h4>
@@ -1036,7 +1036,7 @@
 
     <h3 id="trouble-sync">My phone is not showing entries from my computer</h3>
     <ul>
-      <li>Keep Clipman open on the phone for a few seconds. It only syncs while open.</li>
+      <li>Keep Clipman open on the phone for a few seconds so its regular refresh can run.</li>
       <li>Check the status line says the sync is connected.</li>
       <li>For shared-folder mode, check that every device uses the same folder and password. A wrong password cannot decrypt the existing file and should produce an error; do not overwrite it. For server mode, check the same server address, token and history password. A different server history password selects a separate bucket, which may appear empty without a password error.</li>
       <li>On the computer, check that your cloud service has finished uploading.</li>
