@@ -92,6 +92,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.12 macOS</h3>
+  <ul>
+    <li>Mac updates no longer require Apple's command-line developer tools. Downloaded apps are still checked for the correct signing identity and processor compatibility before installation. Failed validation removes its temporary files without changing the installed app, and a failed replacement restores the previous app.</li>
+    <li>If an older Mac build reports <code>/usr/bin/lipo failed with exit code 1</code>, quit Clipman and manually replace the app in Applications with the matching Apple Silicon or Intel download. Keep your existing settings and history; they do not need to be reset. This fixes issue #86.</li>
+    <li>This is a Mac-only update. Other clients, the server and history formats are unchanged.</li>
+  </ul>
   <h3>3.1.11 Windows and macOS</h3>
   <ul>
     <li>Windows Quick Clip, entry properties, template controls, Secrets, group selection and sync-rule dialogs no longer repeat explanatory help whenever a control receives focus. Press F1 for those explanations; control names, values and safety warnings remain available normally.</li>

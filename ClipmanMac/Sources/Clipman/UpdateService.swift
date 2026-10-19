@@ -179,6 +179,10 @@ final class UpdateService {
     private func stageAndInstall(zipURL: URL, version: String) throws {
         let fileManager = FileManager.default
         let staging = fileManager.temporaryDirectory.appendingPathComponent("ClipmanMacUpdate-\(UUID().uuidString)", isDirectory: true)
+        var installerStarted = false
+        defer {
+            if !installerStarted { try? fileManager.removeItem(at: staging) }
+        }
         let extract = staging.appendingPathComponent("extract", isDirectory: true)
         try fileManager.createDirectory(at: extract, withIntermediateDirectories: true)
 
@@ -194,34 +198,86 @@ final class UpdateService {
             throw NSError(domain: "ClipmanUpdate", code: 1, userInfo: [NSLocalizedDescriptionKey: "The update ZIP did not contain Clipman.app."])
         }
 
-        try verifyReleaseSignature(of: stagedApp)
-        try run("/usr/bin/lipo", arguments: [
-            "-verify_arch", MacReleaseAssetSelector.Architecture.current.machOName,
-            stagedApp.appendingPathComponent("Contents/MacOS/Clipman").path
-        ])
+        try validateUpdate(of: stagedApp, architecture: .current)
 
         let targetApp = Bundle.main.bundleURL.path.hasPrefix("/Applications/")
             ? Bundle.main.bundleURL
             : URL(fileURLWithPath: "/Applications/Clipman.app")
         let scriptURL = staging.appendingPathComponent("install-clipman-update.zsh")
-        let script = """
-        #!/bin/zsh
-        set -euo pipefail
-        while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do
-          sleep 0.2
-        done
-        rm -rf \(shellQuote(targetApp.path))
-        /usr/bin/ditto \(shellQuote(stagedApp.path)) \(shellQuote(targetApp.path))
-        /usr/bin/open -g \(shellQuote(targetApp.path))
-        rm -rf \(shellQuote(staging.path))
-        """
+        let script = installationScript(stagedApp: stagedApp, targetApp: targetApp, staging: staging,
+                                        processID: ProcessInfo.processInfo.processIdentifier)
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [scriptURL.path]
         try process.run()
+        installerStarted = true
         NSApp.terminate(nil)
+    }
+
+    func installationScript(stagedApp: URL, targetApp: URL, staging: URL, processID: Int32, relaunch: Bool = true) -> String {
+        let identifier = UUID().uuidString
+        let wait = processID > 0 ? """
+        for attempt in {1..150}; do
+          if ! kill -0 \(processID) 2>/dev/null; then break; fi
+          sleep 0.2
+        done
+        if kill -0 \(processID) 2>/dev/null; then
+          print -r -- 'Clipman did not exit within 30 seconds; the installed app was not changed.'
+          exit 1
+        fi
+        """ : ""
+        return """
+        #!/bin/zsh
+        set -euo pipefail
+        target=\(shellQuote(targetApp.path))
+        staging=\(shellQuote(staging.path))
+        incoming=\(shellQuote(targetApp.path + ".update-" + identifier))
+        backup=\(shellQuote(targetApp.path + ".rollback-" + identifier))
+        exec > "$staging/install.log" 2>&1
+        finish() {
+          local result=$?
+          trap - EXIT
+          if (( result != 0 )) && [[ -e "$backup" && ! -e "$target" ]]; then
+            /bin/mv "$backup" "$target" || print -r -- "Previous app retained at $backup; restore it manually."
+          fi
+          /bin/rm -rf "$incoming"
+          if (( result == 0 )); then /bin/rm -rf "$backup" "$staging"; fi
+          exit $result
+        }
+        trap finish EXIT
+        \(wait)
+        /usr/bin/ditto \(shellQuote(stagedApp.path)) "$incoming"
+        if [[ -e "$target" ]]; then /bin/mv "$target" "$backup"; fi
+        /bin/mv "$incoming" "$target"
+        \(relaunch ? "/usr/bin/open -g \"$target\"" : "")
+        """
+    }
+
+    func validateUpdate(of appURL: URL, architecture: MacReleaseAssetSelector.Architecture) throws {
+        try verifyReleaseSignature(of: appURL)
+        try verifyArchitecture(of: appURL, architecture: architecture)
+    }
+
+    func verifyArchitecture(of appURL: URL, architecture: MacReleaseAssetSelector.Architecture) throws {
+        // Foundation reads Mach-O architecture metadata without developer tools
+        // or executing the downloaded app (including Intel apps on Apple Silicon).
+        guard let supported = Bundle(url: appURL)?.executableArchitectures, !supported.isEmpty else {
+            throw NSError(domain: "ClipmanUpdate", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "The update does not contain a readable Mac executable. The installed Clipman app has not been changed."
+            ])
+        }
+        let required: Int
+        switch architecture {
+        case .appleSilicon: required = NSBundleExecutableArchitectureARM64
+        case .intel: required = NSBundleExecutableArchitectureX86_64
+        }
+        guard supported.contains(where: { $0.intValue == required }) else {
+            throw NSError(domain: "ClipmanUpdate", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "The update does not support this Mac's processor (\(architecture.machOName)). The installed Clipman app has not been changed. Download the matching Mac package from Version History."
+            ])
+        }
     }
 
     private func verifyReleaseSignature(of appURL: URL) throws {
