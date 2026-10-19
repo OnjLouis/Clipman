@@ -40,10 +40,10 @@ struct HistoryView: View {
                         app.addPastedClipboardPayload(values.first)
                     }
                         .accessibilityHint("Adds the current iOS clipboard text and available formatting to Clipman.")
-                    Button("Quick Clip", systemImage: "square.and.pencil") {
+                    QuickClipToolbarButton {
                         app.beginQuickClip()
                     }
-                    .accessibilityHint("Creates a clipboard entry without changing the iOS clipboard.")
+                    .frame(width: 44, height: 44)
                     Button("More", systemImage: "ellipsis.circle") {
                         // Keep the first presentation from capturing an earlier empty state value.
                         moreActionPresentation = HistoryMoreActionPresentation(

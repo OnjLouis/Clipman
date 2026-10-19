@@ -92,6 +92,12 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.8 iOS</h3>
+  <ul>
+    <li>Quick Clip uses a native accessible button so VoiceOver can open its editor on iOS 27 instead of activating the history pager.</li>
+    <li>Quick Clip starts at Clipboard text with the keyboard ready for writing. VoiceOver receives an initial text-field focus suggestion, without repeated focus changes while history refreshes. Optional names, groups and other details remain available.</li>
+    <li>This is an iOS-only update. Existing draft recovery, history formats and synchronization are unchanged.</li>
+  </ul>
   <h3>3.1.12 macOS</h3>
   <ul>
     <li>Mac updates no longer require Apple's command-line developer tools. Downloaded apps are still checked for the correct signing identity and processor compatibility before installation. Failed validation removes its temporary files without changing the installed app, and a failed replacement restores the previous app.</li>
