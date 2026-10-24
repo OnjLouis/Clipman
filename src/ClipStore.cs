@@ -507,11 +507,19 @@ namespace Clipman
 
         public void MarkUsed(string id)
         {
+            MarkUsedMany(new[] { id });
+        }
+
+        public void MarkUsedMany(IEnumerable<string> ids)
+        {
+            var selected = new HashSet<string>((ids ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)), StringComparer.Ordinal);
+            if (selected.Count == 0) return;
             lock (sync)
             {
-                var entry = database.Entries.FirstOrDefault(e => e.Id == id);
-                if (entry == null) return;
-                entry.LastUsedUnixMs = TimeUtil.NowUnixMs();
+                var entries = database.Entries.Where(entry => selected.Contains(entry.Id)).ToList();
+                if (entries.Count == 0) return;
+                var now = TimeUtil.NowUnixMs();
+                foreach (var entry in entries) entry.LastUsedUnixMs = now;
                 SaveLocked();
             }
         }

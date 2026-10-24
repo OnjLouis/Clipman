@@ -19,6 +19,10 @@ namespace Clipman.Tests
         [STAThread]
         private static int Main()
         {
+            Run("multi-copy marks selected entries with one save", MultiCopyMarksEntriesWithOneSave);
+            Run("merge timing retains the original clipboard notification time", MergeTimingRetainsNotificationTime);
+            Run("native queued copies retain merge timing through a stalled UI", NativeQueuedCopiesRetainMergeTiming);
+            Run("routine website-title diagnostics stay bounded and private", WebsiteTitleDiagnosticsStayBounded);
             Run("server-cache startup requests an unremembered password", ServerCacheStartupRequestsPassword);
             Run("startup unlock preserves the remember-password choice", StartupUnlockPreservesRememberChoice);
             Run("startup unlock cancellation preserves settings and history", StartupUnlockCancellationPreservesData);
@@ -119,6 +123,163 @@ namespace Clipman.Tests
 
             Console.WriteLine(failures == 0 ? "All Windows regression tests passed." : failures + " Windows regression test(s) failed.");
             return failures == 0 ? 0 : 1;
+        }
+
+        private static void MultiCopyMarksEntriesWithOneSave()
+        {
+            const string password = "synthetic multi-copy password";
+            var directory = Path.Combine(Path.GetTempPath(), "ClipmanMultiCopy-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var seed = new ClipDatabase();
+                for (var index = 0; index < 4; index++)
+                    seed.Entries.Add(new ClipEntry { Text = "Synthetic selection " + index, LastUsedUnixMs = 1 });
+                var path = Path.Combine(directory, "history.clipdb");
+                ClipDatabaseFile.SaveAtomic(path, seed, password);
+                using (var server = new RecoveringStorageServer(File.ReadAllBytes(path)))
+                using (var store = new ClipStore(path, password, "Synthetic device"))
+                {
+                    store.ConfigureServerStorage(true, server.Url, "test-token", string.Empty, string.Empty);
+                    Assert(WaitUntil(() => store.GetServerSyncStatus().LastSuccessUnixMs > 0, 5000), "Initial fixture sync failed.");
+                    var before = server.SuccessfulUploads;
+                    var timer = System.Diagnostics.Stopwatch.StartNew();
+                    var ids = seed.Entries.Select(entry => entry.Id).ToArray();
+                    store.MarkUsedMany(ids.Concat(new[] { ids[0], "missing", null }));
+                    timer.Stop();
+                    Console.WriteLine("Multi-copy fixture: " + (server.SuccessfulUploads - before) + " uploads, " + timer.ElapsedMilliseconds + " ms.");
+                    Assert(server.SuccessfulUploads == before + 1, "One copy rewrote and uploaded the database once per selected entry.");
+                    var saved = ClipDatabaseFile.Load(path, password);
+                    Assert(saved.Entries.All(entry => entry.LastUsedUnixMs > 1), "Some selected timestamps were not persisted.");
+                    Assert(saved.Entries.Select(entry => entry.LastUsedUnixMs).Distinct().Count() == 1, "One selection received inconsistent timestamps.");
+                    store.MarkUsedMany(new[] { "missing", (string)null });
+                    Assert(server.SuccessfulUploads == before + 1, "Missing IDs caused an unnecessary save.");
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        private static void MergeTimingRetainsNotificationTime()
+        {
+            var observe = typeof(ClipboardNotificationState).GetMethod("Observe", new[] { typeof(uint), typeof(long?) });
+            var take = typeof(ClipboardNotificationState).GetMethod("TakePending", new[] { typeof(long?).MakeByRefType() });
+            Assert(observe != null && take != null, "Clipboard notifications discard their original timing before capture.");
+            var state = new ClipboardNotificationState();
+            var detector = new ClipMergeDetector();
+            var first = Observation(ClipMergeKind.Text, "test 1", "notepad2", "", "base");
+            first.ChangeIdentifier = 1;
+            detector.Observe(first, 1000, true, 500, false);
+            for (var index = 0; index < 2; index++)
+            {
+                observe.Invoke(state, new object[] { (uint)(index + 2), (long?)(2000 + index * 150) });
+                observe.Invoke(state, new object[] { (uint)(index + 2), (long?)(2100 + index * 150) });
+                var args = new object[] { null };
+                var sequence = (uint)take.Invoke(state, args);
+                Assert((long?)args[0] == 2000 + index * 150, "Duplicate notifications moved the original timestamp.");
+                var incoming = Observation(ClipMergeKind.Text, "test 2", "notepad2", "", "next");
+                incoming.ChangeIdentifier = sequence;
+                var result = detector.Observe(incoming, (long)args[0], true, 500, false);
+                Assert(result.ShouldMerge == (index == 1), "Delayed processing changed the deliberate double-copy decision.");
+            }
+            var empty = new object[] { null };
+            Assert((uint)take.Invoke(state, empty) == 0 && empty[0] == null, "A consumed timestamp was replayed.");
+            observe.Invoke(state, new object[] { (uint)9, (long?)3000 });
+            observe.Invoke(state, new object[] { (uint)10, (long?)3100 });
+            var newest = new object[] { null };
+            Assert((uint)take.Invoke(state, newest) == 10 && (long?)newest[0] == 3100, "New clipboard content inherited an older event time.");
+            Assert(ClipboardNotificationState.MessageObservedMilliseconds(unchecked((int)0xfffffff0), 0x20, 1000) == 952,
+                "The notification timestamp failed across native tick wraparound.");
+            Assert(ClipboardNotificationState.MessageObservedMilliseconds(int.MaxValue - 10, int.MinValue + 9, 1000) == 980,
+                "The notification timestamp failed across the signed native tick boundary.");
+        }
+
+        private static void NativeQueuedCopiesRetainMergeTiming()
+        {
+            using (var window = new QueuedCopyTimingWindow())
+            {
+                var sender = new Thread(() =>
+                {
+                    if (!window.FirstReceived.WaitOne(3000)) return;
+                    Thread.Sleep(100);
+                    QueuedCopyTimingWindow.PostMessage(window.Handle, QueuedCopyTimingWindow.CopyMessage, new IntPtr(3), IntPtr.Zero);
+                }) { IsBackground = true };
+                sender.Start();
+                try
+                {
+                    Assert(QueuedCopyTimingWindow.PostMessage(window.Handle, QueuedCopyTimingWindow.CopyMessage, new IntPtr(2), IntPtr.Zero), "Could not post the test copy notification.");
+                    Assert(WaitUntil(() => { Application.DoEvents(); return window.Complete; }, 5000), "The queued second copy was not dispatched.");
+                    Assert(window.Merged, "A timely second copy missed the merge window because the first save blocked the UI.");
+                    Assert(!window.MergedUsingProcessingClock, "The fixture did not reproduce the old processing-time failure.");
+                    Assert(window.ProcessingDelay >= 600, "The fixture did not actually delay the second copy.");
+                }
+                finally
+                {
+                    window.FirstReceived.Set();
+                    Assert(sender.Join(4000), "The notification fixture thread did not exit.");
+                }
+            }
+        }
+
+        private sealed class QueuedCopyTimingWindow : NativeWindow, IDisposable
+        {
+            public const int CopyMessage = 0x8001;
+            public readonly ManualResetEvent FirstReceived = new ManualResetEvent(false);
+            private readonly ClipMergeDetector detector = new ClipMergeDetector();
+            private readonly ClipMergeDetector processingClockDetector = new ClipMergeDetector();
+            public bool Complete;
+            public bool Merged;
+            public bool MergedUsingProcessingClock;
+            public long ProcessingDelay;
+
+            public QueuedCopyTimingWindow()
+            {
+                CreateHandle(new CreateParams { Parent = new IntPtr(-3) });
+                var first = Observation(ClipMergeKind.Text, "test 1", "notepad2", "", "base");
+                first.ChangeIdentifier = 1;
+                var now = ClipboardFloodGuard.MonotonicMilliseconds();
+                detector.Observe(first, now, true, 500, false);
+                processingClockDetector.Observe(first, now, true, 500, false);
+            }
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            public static extern bool PostMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+            protected override void WndProc(ref Message message)
+            {
+                if (message.Msg != CopyMessage) { base.WndProc(ref message); return; }
+                var now = ClipboardFloodGuard.MonotonicMilliseconds();
+                var observed = ClipboardNotificationState.MessageObservedMilliseconds(NativeMethods.GetMessageTime(), Environment.TickCount, now);
+                var incoming = Observation(ClipMergeKind.Text, "test 2", "notepad2", "", "next");
+                incoming.ChangeIdentifier = (uint)message.WParam.ToInt32();
+                var decision = detector.Observe(incoming, observed, true, 500, false);
+                var oldDecision = processingClockDetector.Observe(incoming, now, true, 500, false);
+                if (incoming.ChangeIdentifier == 2)
+                {
+                    FirstReceived.Set();
+                    Thread.Sleep(800);
+                }
+                else
+                {
+                    ProcessingDelay = now - observed;
+                    Merged = decision.ShouldMerge;
+                    MergedUsingProcessingClock = oldDecision.ShouldMerge;
+                    Complete = true;
+                }
+            }
+
+            public void Dispose() { DestroyHandle(); FirstReceived.Dispose(); }
+        }
+
+        private static void WebsiteTitleDiagnosticsStayBounded()
+        {
+            var type = typeof(ClipStore).Assembly.GetType("Clipman.WebsiteTitleDiagnostics");
+            Assert(type != null, "Routine website failures have no bounded in-memory diagnostics.");
+            var diagnostics = Activator.CreateInstance(type, true);
+            for (var index = 0; index < 1000; index++)
+                type.GetMethod("RecordFailure").Invoke(diagnostics, new object[] { "The website returned HTTP 403. https://private.example/token" });
+            var summary = (string)type.GetMethod("Summary").Invoke(diagnostics, null);
+            Assert(summary.Contains("1000") && summary.Contains("HTTP 403"), "Website failure counts or reason were lost.");
+            Assert(summary.Length < 256 && !summary.Contains("private.example") && !summary.Contains("token"), "Website diagnostics retained private URL details or grew without bounds.");
         }
 
         private static void ServerCacheStartupRequestsPassword()

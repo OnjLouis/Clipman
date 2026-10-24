@@ -93,6 +93,13 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.12 Windows</h3>
+  <ul>
+    <li>ClipMerge measures the double-copy interval from the original Windows clipboard notifications, so time spent processing or saving the first copy does not count against the second press.</li>
+    <li>Copying several selected history entries, including Copy Name and Content, updates their last-used timestamps in one save instead of rewriting and uploading history separately for every entry.</li>
+    <li>Routine automatic website-title failures no longer fill the runtime log. Diagnostics keeps session failure counts and a short reason in memory, without recording the website address. Fault logs still rotate at 1 MiB with three previous generations.</li>
+    <li>This is a Windows-only update. The server, other clients, history format and existing preferences are unchanged.</li>
+  </ul>
   <h3>3.1.8 iOS</h3>
   <ul>
     <li>Quick Clip uses a native accessible button so VoiceOver can open its editor on iOS 27 instead of activating the history pager.</li>
@@ -990,6 +997,7 @@
   <p>For an unnamed HTTP or HTTPS link, use <strong>Use website title as name</strong> from the entry menu when you deliberately want Clipman to contact that site once. Clipman explains that the website can see the request and asks before continuing. The desktop confirmation includes <strong>Do not show this again</strong>; restore it with <strong>Ask before contacting a website for its title</strong> in Preferences. Clipman sends the selected link request without cookies, credentials, or other clipboard content. A deliberate request may contact an otherwise safe public link even when its path or query contains tracking data or looks token-like, but Clipman still refuses embedded credentials, local or private destinations, non-standard ports, unsafe redirects and overlong addresses. Automatic title naming remains more conservative and does not contact capability-looking links. A useful returned title is stored in the ordinary Name field, where it is visible and editable in Entry Properties. If the site cannot be reached or does not return a usable web-page title, Clipman instead saves the same generic offline label already shown for the URL; this works for direct downloads and ordinary pages without relying on a list of file extensions. The exact URL is never replaced and remains available in F4, Entry Properties, and copy operations. Because this is an ordinary name rather than a separate preview file, it follows the entry to other synced clients.</p>
 
   <p>Windows, Mac and Linux also offer <strong>Automatically name copied website links from page headings</strong>. This per-device option is off by default. When enabled, it considers only newly captured, unnamed, link-only public HTTP or HTTPS entries and processes them one at a time in a small background queue. It does not scan existing history, imports, synchronized entries, manually added exceptions, or any address that the manual command would refuse. Automatic lookups do not delay clipboard capture, change the clipboard, play another sound, or display a failure dialog.</p>
+  <p>On Windows, routine automatic-title failures are counted in Diagnostics for the current session instead of written to the runtime log. The summary retains only counts and a brief reason such as an HTTP status, not website addresses. Restarting Clipman clears these counters.</p>
 
   <p>Enabling Links history adds its tab at the saved per-device position. On Mac, the View menu shows its current <code>Command+number</code> shortcut. On Windows and Linux, <code>Alt+L</code> always opens Links when enabled, <code>Alt+I</code> always opens File history, and <code>Ctrl+Tab</code> or <code>Ctrl+Shift+Tab</code> moves through the visible history areas in their current order.</p>
 

@@ -49,6 +49,7 @@ namespace Clipman
         private readonly ClipboardFloodGuardRegistry clipboardFloodGuards = new ClipboardFloodGuardRegistry();
         private readonly ClipboardNotificationState clipboardNotifications = new ClipboardNotificationState();
         private readonly ClipMergeDetector clipMergeDetector = new ClipMergeDetector();
+        private readonly WebsiteTitleDiagnostics websiteTitleDiagnostics = new WebsiteTitleDiagnostics();
         private readonly object automaticWebsiteTitleLock = new object();
         private readonly Queue<AutomaticWebsiteTitleRequest> automaticWebsiteTitleQueue = new Queue<AutomaticWebsiteTitleRequest>();
         private readonly HashSet<string> automaticWebsiteTitleEntryIds = new HashSet<string>(StringComparer.Ordinal);
@@ -719,12 +720,12 @@ namespace Clipman
             if (!settings.AutoNameCopiedWebsiteLinks) return;
             if (!result.Success)
             {
-                Program.WriteRuntimeLog("Automatic website title lookup failed for " + request.Uri.Host + ".", new InvalidOperationException(result.Error));
+                websiteTitleDiagnostics.RecordFailure(result.Error);
                 return;
             }
             if (!store.TrySetNameIfUnchanged(request.EntryId, request.OriginalText, result.Title))
             {
-                Program.WriteRuntimeLog("Automatic website title was not applied because the entry changed.", null);
+                websiteTitleDiagnostics.RecordStaleResult();
             }
         }
 
@@ -739,10 +740,7 @@ namespace Clipman
                 TextDataFormat.UnicodeText);
             data.SetData(ClipmanClipboardData.EntriesFormat, ClipmanClipboardData.SerializeEntries(entries));
             SetClipboardIgnoringNotification(() => Clipboard.SetDataObject(data, true));
-            foreach (var entry in entries)
-            {
-                store.MarkUsed(entry.Id);
-            }
+            store.MarkUsedMany(entries.Select(entry => entry.Id));
             sounds.Copy(settings.SoundsEnabled);
         }
 
@@ -751,10 +749,7 @@ namespace Clipman
             try
             {
                 SetClipboardIgnoringNotification(() => Clipboard.SetText(text ?? string.Empty, TextDataFormat.UnicodeText));
-                foreach (var entry in entries ?? new List<ClipEntry>())
-                {
-                    if (entry != null) store.MarkUsed(entry.Id);
-                }
+                store.MarkUsedMany((entries ?? new List<ClipEntry>()).Where(entry => entry != null).Select(entry => entry.Id));
                 sounds.Copy(settings.SoundsEnabled);
                 return true;
             }
@@ -819,8 +814,9 @@ namespace Clipman
             }
         }
 
-        internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0, bool recovery = false, bool startupCapture = false)
+        internal void HandleClipboardUpdate(bool deliberate = false, uint clipboardSequence = 0, bool recovery = false, bool startupCapture = false, long? observedMilliseconds = null)
         {
+            var captureMilliseconds = observedMilliseconds ?? ClipboardFloodGuard.MonotonicMilliseconds();
             if (!deliberate && clipboardSequence == 0)
             {
                 clipboardSequence = NativeMethods.GetClipboardSequenceNumber();
@@ -930,7 +926,7 @@ namespace Clipman
                 {
                     return;
                 }
-                HandleCapturedFileEvent(fileSummary, sourceProcessName, deliberate, clipboardSequence);
+                HandleCapturedFileEvent(fileSummary, sourceProcessName, deliberate, clipboardSequence, captureMilliseconds);
                 if (settings.RichTextHistoryEnabled && settings.IncludeImagesInRichText && settings.AutoAddImageFilesToRichText)
                 {
                     string imageFilePath;
@@ -1018,7 +1014,7 @@ namespace Clipman
             };
             var mergeDecision = clipMergeDetector.Observe(
                 textObservation,
-                ClipboardFloodGuard.MonotonicMilliseconds(),
+                captureMilliseconds,
                 settings.ClipMergeEnabled,
                 settings.ClipMergeWindowMilliseconds,
                 deliberate);
@@ -1122,7 +1118,7 @@ namespace Clipman
             receivedHistoryTabPending = true;
         }
 
-        private void HandleCapturedFileEvent(ClipboardEventSummary summary, string sourceProcessName, bool deliberate, uint clipboardSequence)
+        private void HandleCapturedFileEvent(ClipboardEventSummary summary, string sourceProcessName, bool deliberate, uint clipboardSequence, long observedMilliseconds)
         {
             if (summary == null || summary.Files == null || summary.Files.Count == 0) return;
             if (string.IsNullOrWhiteSpace(summary.Operation)) summary.Operation = "Copy";
@@ -1137,7 +1133,7 @@ namespace Clipman
             };
             var decision = clipMergeDetector.Observe(
                 observation,
-                ClipboardFloodGuard.MonotonicMilliseconds(),
+                observedMilliseconds,
                 settings.ClipMergeEnabled,
                 settings.ClipMergeWindowMilliseconds,
                 deliberate);
@@ -1852,6 +1848,7 @@ namespace Clipman
                 "Install updates silently: " + settings.InstallUpdatesSilently + "\r\n" +
                 "Database encryption enabled: " + settings.DatabaseEncryptionEnabled + "\r\n" +
                 "Runtime crash log: " + Program.RuntimeLogPath() + "\r\n" +
+                websiteTitleDiagnostics.Summary() + "\r\n" +
                 "User sound override folder: " + Path.Combine(settingsStore.SettingsDirectory, "sounds") + "\r\n" +
                 "Group filter: " + settings.GroupFilter + "\r\n" +
                 "Foreground process: " + FriendlyProcessName(ForegroundProcessName()) + "\r\n" +
@@ -3349,7 +3346,9 @@ namespace Clipman
             private void ClipboardSettleTimerTick(object sender, EventArgs e)
             {
                 clipboardSettleTimer.Stop();
-                app.HandleClipboardUpdate(false, app.clipboardNotifications.TakePending());
+                long? observedMilliseconds;
+                var sequence = app.clipboardNotifications.TakePending(out observedMilliseconds);
+                app.HandleClipboardUpdate(false, sequence, observedMilliseconds: observedMilliseconds);
             }
 
             protected override void WndProc(ref Message m)
@@ -3362,7 +3361,9 @@ namespace Clipman
 
                 if (m.Msg == NativeMethods.WM_CLIPBOARDUPDATE)
                 {
-                    app.clipboardNotifications.Observe(NativeMethods.GetClipboardSequenceNumber());
+                    app.clipboardNotifications.Observe(NativeMethods.GetClipboardSequenceNumber(),
+                        ClipboardNotificationState.MessageObservedMilliseconds(NativeMethods.GetMessageTime(),
+                            Environment.TickCount, ClipboardFloodGuard.MonotonicMilliseconds()));
                     clipboardSettleTimer.Stop();
                     clipboardSettleTimer.Start();
                     return;
