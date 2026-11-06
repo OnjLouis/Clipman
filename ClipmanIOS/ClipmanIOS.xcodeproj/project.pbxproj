@@ -59,6 +59,7 @@
 		80DF3940EAE12616EAA0047D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642C84289DC631AC184C2C31 /* Models.swift */; };
 		80E45DA5F475B7C4C11DCA46 /* SyncRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94940CAE7D6528560D7A1168 /* SyncRules.swift */; };
 		811C3C8A52CA33E287A66E3D /* EmbeddedImageActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB3337F4B5D8DCE696C3B0F /* EmbeddedImageActions.swift */; };
+		8684AACFC14FD34F35514520 /* HistoryPresentationCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7F68713C8643C57CB555885 /* HistoryPresentationCacheTests.swift */; };
 		8A663E92DE347351DB43E840 /* LinkClipboardText.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBF05E24A7471BF1F390339E /* LinkClipboardText.swift */; };
 		8E14E84367FA3025E0FF6F54 /* ClipDatabaseSaltTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DA0CFB29CBE4E02F2F2C08 /* ClipDatabaseSaltTests.swift */; };
 		8F0D5F48C10FD6FABA1F693A /* SettingsMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421A92023DE62708F907B221 /* SettingsMigrationTests.swift */; };
@@ -214,6 +215,7 @@
 		DE80C6C473747E57E01F38BD /* PendingSharedImageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSharedImageStoreTests.swift; sourceTree = "<group>"; };
 		E220028AA8491B7EDB3F81D8 /* ClipmanAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipmanAppIntents.swift; sourceTree = "<group>"; };
 		E794D8E5ABCF25641147F7F3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E7F68713C8643C57CB555885 /* HistoryPresentationCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryPresentationCacheTests.swift; sourceTree = "<group>"; };
 		EB2EFB1F20C842F594E83B53 /* QuickClipDraftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickClipDraftTests.swift; sourceTree = "<group>"; };
 		EE24A8535EA9BC2E20E5A203 /* BackupFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFolderPicker.swift; sourceTree = "<group>"; };
 		EFCE0C638D22648BD22C7867 /* LinkDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkDisplay.swift; sourceTree = "<group>"; };
@@ -292,6 +294,7 @@
 				D2DD45D61DAC284441E87117 /* EmbeddedImageActionTests.swift */,
 				9ACB54CFA7EECAFD185EE92D /* EmbeddedImageTests.swift */,
 				4E54439065F06408A2D77B13 /* HistoryMoreActionsTests.swift */,
+				E7F68713C8643C57CB555885 /* HistoryPresentationCacheTests.swift */,
 				11271ED55C1DD889D9C28F18 /* HistoryReadingStateTests.swift */,
 				16D1BC07F2C20A19047A050B /* HistoryRowPreviewTests.swift */,
 				9330DEB559F71A2DF6CF2E1F /* HistorySortTests.swift */,
@@ -644,6 +647,7 @@
 				210E0E853E14D1545E4E9F9B /* EmbeddedImageActionTests.swift in Sources */,
 				086BAA1E9EE5D69DFD7806E2 /* EmbeddedImageTests.swift in Sources */,
 				CE9278E3DDF0D58CC12C1C2A /* HistoryMoreActionsTests.swift in Sources */,
+				8684AACFC14FD34F35514520 /* HistoryPresentationCacheTests.swift in Sources */,
 				572E00CB905B1C951EDFFDD2 /* HistoryReadingStateTests.swift in Sources */,
 				93CF2C3F38ECCFE2A99CF534 /* HistoryRowPreviewTests.swift in Sources */,
 				C2341AB4F664244178963CC5 /* HistorySortTests.swift in Sources */,
@@ -683,7 +687,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
-				CURRENT_PROJECT_VERSION = 31802;
+				CURRENT_PROJECT_VERSION = 31901;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -692,7 +696,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.1.8;
+				MARKETING_VERSION = 3.1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.share;
 				PRODUCT_NAME = "Share to Clipman";
 				SDKROOT = iphoneos;
@@ -708,7 +712,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31802;
+				CURRENT_PROJECT_VERSION = 31901;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -718,7 +722,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.1.8;
+				MARKETING_VERSION = 3.1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -811,7 +815,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClipmanIOS/Support/ClipmanIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31802;
+				CURRENT_PROJECT_VERSION = 31901;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -821,7 +825,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.1.8;
+				MARKETING_VERSION = 3.1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios;
 				PRODUCT_NAME = Clipman;
 				SDKROOT = iphoneos;
@@ -920,7 +924,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = ClipmanShareExtension/ClipmanShareExtension.entitlements;
-				CURRENT_PROJECT_VERSION = 31802;
+				CURRENT_PROJECT_VERSION = 31901;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ClipmanShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -929,7 +933,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.1.8;
+				MARKETING_VERSION = 3.1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = me.onj.clipman.ios.share;
 				PRODUCT_NAME = "Share to Clipman";
 				SDKROOT = iphoneos;

@@ -27,15 +27,28 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     @Published var isUnlocked: Bool
-    @Published var settings: ClipmanSettings
+    @Published var settings: ClipmanSettings {
+        didSet {
+            if settings.linksEnabled != oldValue.linksEnabled
+                || settings.richTextEnabled != oldValue.richTextEnabled
+                || settings.historySortMode != oldValue.historySortMode {
+                invalidateHistoryPresentation()
+            }
+        }
+    }
     @Published var database = ClipDatabase() {
         didSet {
+            invalidateHistoryPresentation()
             rebuildLinkCache()
         }
     }
     @Published var selectedSection: Section = .text
-    @Published var searchText = ""
-    @Published var historyFilter = HistoryFilter.all
+    @Published var searchText = "" {
+        didSet { if searchText != oldValue { invalidateHistoryPresentation() } }
+    }
+    @Published var historyFilter = HistoryFilter.all {
+        didSet { if historyFilter != oldValue { invalidateHistoryPresentation() } }
+    }
     @Published var status = "Ready."
     @Published var showingSettings = false
     @Published var showingQuickClip = false
@@ -85,6 +98,8 @@ final class ClipmanAppModel: ObservableObject {
     private let quickActionRefreshWaitAttempts = 600
     private var skipNextSettingsClosedRefresh = false
     private var pureLinkEntryIDs = Set<String>()
+    private var presentedEntries: [Section: [ClipEntry]] = [:]
+    private var presentedLinks: [LinkExtractor.LinkItem]?
     private var machineName: String {
         let name = settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? UIDeviceMachine.name : name
@@ -159,6 +174,7 @@ final class ClipmanAppModel: ObservableObject {
     }
 
     func visibleEntries(in section: Section) -> [ClipEntry] {
+        if let cached = presentedEntries[section] { return cached }
         var entries = database.Entries
         switch section {
         case .text:
@@ -184,7 +200,9 @@ final class ClipmanAppModel: ObservableObject {
                 } ?? false)
             }
         }
-        return HistoryPresentationSorter.ordered(entries, mode: settings.historySortMode)
+        let ordered = HistoryPresentationSorter.ordered(entries, mode: settings.historySortMode)
+        presentedEntries[section] = ordered
+        return ordered
     }
 
     var visibleLinkItems: [LinkExtractor.LinkItem] {
@@ -193,6 +211,7 @@ final class ClipmanAppModel: ObservableObject {
 
     func visibleLinkItems(in section: Section) -> [LinkExtractor.LinkItem] {
         guard section == .links else { return [] }
+        if let presentedLinks { return presentedLinks }
         var items = linkItems
         if settings.richTextEnabled {
             items = items.filter { $0.entry.RichText == nil }
@@ -219,11 +238,19 @@ final class ClipmanAppModel: ObservableObject {
                 .enumerated()
                 .map { ($0.element.Id, $0.offset) }
         )
-        return items.enumerated().sorted {
+        let ordered = items.enumerated().sorted {
             let leftRank = entryRanks[$0.element.entry.Id] ?? Int.max
             let rightRank = entryRanks[$1.element.entry.Id] ?? Int.max
             return leftRank == rightRank ? $0.offset < $1.offset : leftRank < rightRank
         }.map(\.element)
+        presentedLinks = ordered
+        return ordered
+    }
+
+    private func invalidateHistoryPresentation() {
+        // VoiceOver focus and transient status updates must not re-sort unchanged history.
+        presentedEntries.removeAll(keepingCapacity: true)
+        presentedLinks = nil
     }
 
     private func matchesHistoryFilter(_ entry: ClipEntry) -> Bool {

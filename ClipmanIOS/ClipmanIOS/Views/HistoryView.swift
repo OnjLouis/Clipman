@@ -10,9 +10,8 @@ struct HistoryView: View {
     @State private var moreActionPresentation: HistoryMoreActionPresentation?
     @State private var pendingMoreAction: HistoryMoreAction?
     @State private var bottomRequests: [ClipmanAppModel.Section: Int] = [:]
-    @AccessibilityFocusState private var focusedHistoryItemID: String?
-
-    private let statusFocusID = "history-status"
+    @State private var historyFocusRequest: HistoryRowFocusRequest?
+    @AccessibilityFocusState private var statusIsFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -31,9 +30,6 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("Clipman")
-            .onChange(of: focusedHistoryItemID) { id in
-                if let id, id != statusFocusID { app.readingState.historyFocusID = id }
-            }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     PasteButton(payloadType: MobileClipboardPayload.self) { values in
@@ -145,7 +141,7 @@ struct HistoryView: View {
         guard let saved, valid.contains(saved) else { return }
         Task { @MainActor in
             await Task.yield()
-            focusedHistoryItemID = saved
+            historyFocusRequest = HistoryRowFocusRequest(target: saved)
         }
     }
 
@@ -193,7 +189,9 @@ struct HistoryView: View {
 
     private func entryList(for section: ClipmanAppModel.Section) -> some View {
         let space = "history-" + section.rawValue
-        let rowIDs = section == .links ? app.visibleLinkItems(in: section).map(\.id) : app.visibleEntries(in: section).map(\.Id)
+        let links = app.visibleLinkItems(in: section)
+        let entries = app.visibleEntries(in: section)
+        let rowIDs = section == .links ? links.map(\.id) : entries.map(\.Id)
         return RememberedList(
             coordinateSpace: space,
             rowIDs: rowIDs,
@@ -203,64 +201,81 @@ struct HistoryView: View {
             onRestore: { if section == app.selectedSection { restoreHistoryFocus() } }
         ) {
             if section == .links {
-                if app.visibleLinkItems(in: section).isEmpty {
+                if links.isEmpty {
                     Text("No links.")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(app.visibleLinkItems(in: section)) { item in
-                    LinkHistoryRow(
-                        item: item,
-                        copyLinkNamesByDefault: app.settings.copyLinkNamesByDefault,
-                        copy: { app.copyLink(item) },
-                        copyLinkOnly: { app.copyLink(item, includeName: false) },
-                        copyNameAndLink: { app.copyLink(item, includeName: true) },
-                        open: { UIApplication.shared.open(item.url) },
-                        view: { app.beginViewing(item.entry) },
-                        edit: { app.beginEditing(item.entry) },
-                        togglePinned: { app.togglePinned(item.entry) },
-                        delete: { requestDelete(item.entry) },
-                        useWebsiteTitle: { pendingWebsiteTitleItem = item }
-                    )
+                ForEach(links) { item in
+                    HistoryRowFocus(
+                        id: linkFocusID(item.id),
+                        request: historyFocusRequest,
+                        remember: rememberHistoryFocus
+                    ) {
+                        LinkHistoryRow(
+                            item: item,
+                            copyLinkNamesByDefault: app.settings.copyLinkNamesByDefault,
+                            copy: { app.copyLink(item) },
+                            copyLinkOnly: { app.copyLink(item, includeName: false) },
+                            copyNameAndLink: { app.copyLink(item, includeName: true) },
+                            open: { UIApplication.shared.open(item.url) },
+                            view: { app.beginViewing(item.entry) },
+                            edit: { app.beginEditing(item.entry) },
+                            togglePinned: { app.togglePinned(item.entry) },
+                            delete: { requestDelete(item.entry) },
+                            useWebsiteTitle: { pendingWebsiteTitleItem = item }
+                        )
+                    }
                     .readingPositionRow(item.id, in: space)
-                    .accessibilityFocused($focusedHistoryItemID, equals: linkFocusID(item.id))
                 }
             } else {
-                if app.visibleEntries(in: section).isEmpty {
+                if entries.isEmpty {
                     Text("No entries.")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(app.visibleEntries(in: section)) { entry in
-                    HistoryEntryRow(
-                        entry: entry,
-                        copyLinkNamesByDefault: app.settings.copyLinkNamesByDefault,
-                        copy: { app.copy(entry) },
-                        copyLinkOnly: {
-                            guard let url = LinkExtractor.exactURL(in: entry) else { return }
-                            app.copyLink(entry, url: url, includeName: false)
-                        },
-                        copyNameAndLink: {
-                            guard let url = LinkExtractor.exactURL(in: entry) else { return }
-                            app.copyLink(entry, url: url, includeName: true)
-                        },
-                        view: { app.beginViewing(entry) },
-                        edit: { app.beginEditing(entry) },
-                        togglePinned: { app.togglePinned(entry) },
-                        delete: { requestDelete(entry) },
-                        saveImageToPhotos: saveImageToPhotos,
-                        shareImage: shareImage,
-                        useWebsiteTitle: { url in
-                            pendingWebsiteTitleItem = LinkExtractor.LinkItem(
-                                id: "\(entry.Id)-website-title",
-                                url: url,
-                                entry: entry
-                            )
-                        }
-                    )
+                ForEach(entries) { entry in
+                    HistoryRowFocus(
+                        id: entryFocusID(entry.Id),
+                        request: historyFocusRequest,
+                        remember: rememberHistoryFocus
+                    ) {
+                        HistoryEntryRow(
+                            entry: entry,
+                            actionOwnerID: ObjectIdentifier(app),
+                            copyLinkNamesByDefault: app.settings.copyLinkNamesByDefault,
+                            copy: { app.copy(entry) },
+                            copyLinkOnly: {
+                                guard let url = LinkExtractor.exactURL(in: entry) else { return }
+                                app.copyLink(entry, url: url, includeName: false)
+                            },
+                            copyNameAndLink: {
+                                guard let url = LinkExtractor.exactURL(in: entry) else { return }
+                                app.copyLink(entry, url: url, includeName: true)
+                            },
+                            view: { app.beginViewing(entry) },
+                            edit: { app.beginEditing(entry) },
+                            togglePinned: { app.togglePinned(entry) },
+                            delete: { requestDelete(entry) },
+                            saveImageToPhotos: saveImageToPhotos,
+                            shareImage: shareImage,
+                            useWebsiteTitle: { url in
+                                pendingWebsiteTitleItem = LinkExtractor.LinkItem(
+                                    id: "\(entry.Id)-website-title",
+                                    url: url,
+                                    entry: entry
+                                )
+                            }
+                        )
+                        .equatable()
+                    }
                     .readingPositionRow(entry.Id, in: space)
-                    .accessibilityFocused($focusedHistoryItemID, equals: entryFocusID(entry.Id))
                 }
             }
         }
+    }
+
+    private func rememberHistoryFocus(_ id: String) {
+        app.readingState.historyFocusID = id
+        if historyFocusRequest?.target == id { historyFocusRequest = nil }
     }
 
     private func requestDelete(_ entry: ClipEntry) {
@@ -296,7 +311,11 @@ struct HistoryView: View {
         guard app.delete(entry) != nil else { return }
         Task { @MainActor in
             await Task.yield()
-            focusedHistoryItemID = nextFocusID ?? statusFocusID
+            if let nextFocusID {
+                historyFocusRequest = HistoryRowFocusRequest(target: nextFocusID)
+            } else {
+                statusIsFocused = true
+            }
         }
     }
 
@@ -347,7 +366,7 @@ struct HistoryView: View {
         .historySortAccessibilityActions { mode in
             app.setHistorySortMode(mode)
         }
-        .accessibilityFocused($focusedHistoryItemID, equals: statusFocusID)
+        .accessibilityFocused($statusIsFocused)
     }
 }
 
@@ -418,8 +437,38 @@ enum HistoryDeletionFocusResolver {
     }
 }
 
-private struct HistoryEntryRow: View {
+private struct HistoryRowFocusRequest: Equatable {
+    let id = UUID()
+    let target: String
+}
+
+private struct HistoryRowFocus<Content: View>: View {
+    let id: String
+    let request: HistoryRowFocusRequest?
+    let remember: (String) -> Void
+    @ViewBuilder let content: () -> Content
+    @AccessibilityFocusState private var isFocused: Bool
+
+    var body: some View {
+        content()
+            .accessibilityFocused($isFocused)
+            .onChange(of: isFocused) { focused in
+                if focused { remember(id) }
+            }
+            .onChange(of: request) { _ in applyFocusRequest() }
+            .onAppear(perform: applyFocusRequest)
+    }
+
+    private func applyFocusRequest() {
+        // Native VoiceOver movement stays row-local; only explicit restoration requests fan out.
+        guard request?.target == id else { return }
+        isFocused = true
+    }
+}
+
+private struct HistoryEntryRow: View, Equatable {
     let entry: ClipEntry
+    let actionOwnerID: ObjectIdentifier
     let copyLinkNamesByDefault: Bool
     let copy: () -> Void
     let copyLinkOnly: () -> Void
@@ -432,39 +481,29 @@ private struct HistoryEntryRow: View {
     let shareImage: (EmbeddedImage) -> Void
     let useWebsiteTitle: (URL) -> Void
 
-    private var embeddedImage: EmbeddedImage? {
-        EmbeddedImageCodec.recognize(entry.RichText)
-    }
-
-    private var singleLink: URL? {
-        guard HistoryRowPreview.canInspectLinks(in: entry.Text) else { return nil }
-        let links = LinkExtractor.links(in: entry.Text)
-        return links.count == 1 ? links[0] : nil
-    }
-
-    private var websiteTitleURL: URL? {
-        guard entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return LinkExtractor.exactHTTPURL(in: entry)
-    }
-
-    private var exactLinkURL: URL? {
-        LinkExtractor.exactURL(in: entry)
-    }
-
-    private var hasNamedLink: Bool {
-        exactLinkURL != nil && !entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var showsCopyLinkAlternative: Bool {
-        hasNamedLink && copyLinkNamesByDefault
-    }
-
-    private var showsCopyNameAndLinkAlternative: Bool {
-        hasNamedLink && !copyLinkNamesByDefault
+    nonisolated static func == (left: Self, right: Self) -> Bool {
+        // Callbacks target this stable app instance and the compared entry; focus is owned outside this view.
+        left.actionOwnerID == right.actionOwnerID
+            && left.entry == right.entry
+            && left.copyLinkNamesByDefault == right.copyLinkNamesByDefault
     }
 
     var body: some View {
-        EntryRow(entry: entry)
+        let embeddedImage = EmbeddedImageCodec.recognize(entry.RichText)
+        let exactLinkURL = LinkExtractor.exactURL(in: entry)
+        let links = exactLinkURL.map { [$0] }
+            ?? (HistoryRowPreview.canInspectLinks(in: entry.Text) ? LinkExtractor.links(in: entry.Text) : [])
+        let singleLink = links.count == 1 ? links[0] : nil
+        let hasName = !entry.Name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasNamedLink = exactLinkURL != nil && hasName
+        let showsCopyLinkAlternative = hasNamedLink && copyLinkNamesByDefault
+        let showsCopyNameAndLinkAlternative = hasNamedLink && !copyLinkNamesByDefault
+        let httpURL = exactLinkURL.flatMap { url in
+            ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? url : nil
+        }
+        let websiteTitleURL = hasName ? nil : httpURL
+        let preview = entry.historyPreview(embeddedImage: embeddedImage, exactHTTPURL: httpURL)
+        return EntryRow(displayText: preview.text, detailText: entry.detailText, pinned: entry.Pinned)
             .contentShape(Rectangle())
             .onTapGesture(perform: copy)
             .swipeActions(edge: .trailing) {
@@ -504,7 +543,7 @@ private struct HistoryEntryRow: View {
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(entry.accessibilityLabelText)
+            .accessibilityLabel(entry.accessibilityLabelText(preview: preview))
             .accessibilityHint("Double tap to copy to clipboard.")
             .accessibilityAddTraits(.isButton)
             .namedLinkAccessibilityAction(enabled: showsCopyLinkAlternative, label: "Copy Link", action: copyLinkOnly)
@@ -685,21 +724,23 @@ private extension View {
 }
 
 private struct EntryRow: View {
-    let entry: ClipEntry
+    let displayText: String
+    let detailText: String
+    let pinned: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                if entry.Pinned {
+                if pinned {
                     Text("Pinned")
                         .font(.caption)
                         .bold()
                 }
-                Text(entry.displayText)
+                Text(displayText)
                     .lineLimit(2)
             }
-            if !entry.Group.isEmpty || !entry.SourceMachine.isEmpty {
-                Text(entry.detailText)
+            if !detailText.isEmpty {
+                Text(detailText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -791,14 +832,21 @@ private struct HistoryFilterChooser: View {
 
 extension ClipEntry {
     var historyPreview: HistoryRowPreview.Value {
+        historyPreview(
+            embeddedImage: EmbeddedImageCodec.recognize(RichText),
+            exactHTTPURL: LinkExtractor.exactHTTPURL(in: self)
+        )
+    }
+
+    fileprivate func historyPreview(embeddedImage: EmbeddedImage?, exactHTTPURL: URL?) -> HistoryRowPreview.Value {
         let name = HistoryRowPreview.metadata(Name)
-        if let image = EmbeddedImageCodec.recognize(RichText) {
+        if let image = embeddedImage {
             return HistoryRowPreview.make(
                 name.isEmpty ? EmbeddedImageCodec.displayText(filename: image.filename) : name,
                 sourceWasTruncated: HistoryRowPreview.exceedsMetadataLimit(Name)
             )
         }
-        if let url = LinkExtractor.exactHTTPURL(in: self) {
+        if let url = exactHTTPURL {
             return HistoryRowPreview.make(
                 LinkDisplay.rowText(for: url, name: name),
                 sourceWasTruncated: HistoryRowPreview.exceedsMetadataLimit(Name)
@@ -828,10 +876,14 @@ extension ClipEntry {
     }
 
     var accessibilityLabelText: String {
+        accessibilityLabelText(preview: historyPreview)
+    }
+
+    fileprivate func accessibilityLabelText(preview: HistoryRowPreview.Value) -> String {
         [
             Pinned ? "Pinned" : nil,
-            displayText,
-            historyPreview.wasTruncated ? "Preview truncated" : nil,
+            preview.text,
+            preview.wasTruncated ? "Preview truncated" : nil,
             Group.isEmpty ? nil : "Group: \(HistoryRowPreview.metadata(Group))",
             SourceMachine.isEmpty ? nil : "Device: \(HistoryRowPreview.metadata(SourceMachine))"
         ]
