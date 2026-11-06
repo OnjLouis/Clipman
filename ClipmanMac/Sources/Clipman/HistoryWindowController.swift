@@ -463,7 +463,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didCleanLinksForSharing entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didNormalizeLineEndings entries: [ClipEntry], style: LineEndingStyle)
     func historyWindow(_ controller: HistoryWindowController, didSetGroup group: String, for entries: [ClipEntry])
-    func historyWindow(_ controller: HistoryWindowController, didChooseFileEvent event: FileClipboardEvent)
+    func historyWindow(_ controller: HistoryWindowController, didChooseFileEvents events: [FileClipboardEvent])
     func historyWindow(_ controller: HistoryWindowController, didTogglePinFileEvent event: FileClipboardEvent)
     func historyWindow(_ controller: HistoryWindowController, didDeleteFileEvent event: FileClipboardEvent)
     func historyWindow(_ controller: HistoryWindowController, didCopyFilePaths events: [FileClipboardEvent])
@@ -1865,7 +1865,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case .entry(let entry):
             historyDelegate?.historyWindow(self, didChoose: entry)
         case .fileEvent(let event):
-            historyDelegate?.historyWindow(self, didChooseFileEvent: event)
+            historyDelegate?.historyWindow(self, didChooseFileEvents: [event])
         case .separator:
             break
         }
@@ -2102,8 +2102,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             } else {
                 historyDelegate?.historyWindow(self, didChoose: entry)
             }
-        } else if let event = selectedFileEvent() {
-            historyDelegate?.historyWindow(self, didChooseFileEvent: event)
+        } else {
+            let events = selectedFileEvents()
+            guard !events.isEmpty else { return }
+            historyDelegate?.historyWindow(self, didChooseFileEvents: events)
         }
     }
 

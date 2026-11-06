@@ -57,6 +57,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>$BUILD_VERSION</string>
   <key>ClipmanBuildStampUtcMs</key>
   <string>$BUILD_STAMP</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>Clipman needs access to restore files you select from network shares and use your chosen history folder.</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsArbitraryLoads</key>

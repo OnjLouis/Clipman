@@ -2006,10 +2006,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         store.setGroup(ids: entries.map(\.Id), group: group)
     }
 
-    func historyWindow(_ controller: HistoryWindowController, didChooseFileEvent event: FileClipboardEvent) {
-        let existing = event.Files.filter { FileManager.default.fileExists(atPath: $0) }
+    func historyWindow(_ controller: HistoryWindowController, didChooseFileEvents events: [FileClipboardEvent]) {
+        let paths = events.flatMap(\.Files)
+        RuntimeLogger.debug("File-history restore requested.", details: "eventCount=\(events.count), fileCount=\(paths.count)")
+        let existing: [String]
+        do {
+            existing = try FileRestoreAccess.readablePaths(paths)
+            RuntimeLogger.debug("File-history read access checked.", details: "readableCount=\(existing.count)")
+        } catch {
+            RuntimeLogger.write("Could not access files selected for restoration.", error: error)
+            sounds.play(.skip)
+            showInformationalAlert(
+                title: "Could Not Restore Files",
+                message: "Clipman could not access the original files. Allow access if macOS asks. If access was denied, review Clipman under System Settings, Privacy & Security, Files and Folders.\n\n\(error.localizedDescription)"
+            )
+            return
+        }
         guard !existing.isEmpty else {
-            NSSound.beep()
+            sounds.play(.skip)
+            showInformationalAlert(title: "Could Not Restore Files", message: "The original files are no longer available at their recorded locations.")
             return
         }
         monitor.writeInternalFiles(existing)
