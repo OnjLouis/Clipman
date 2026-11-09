@@ -93,6 +93,13 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.13 Windows</h3>
+  <ul>
+    <li>Preferences accepts data-folder paths copied from Explorer with surrounding quotation marks, including paths with spaces.</li>
+    <li>Reselecting a custom data folder during startup recovery no longer switches Clipman to the portable Settings folder.</li>
+    <li>If a saved custom folder is visible but this computer's settings file is missing or unreadable, Clipman explains how to restore access instead of creating default settings. Remembered passwords remain protected by Windows.</li>
+    <li>This is a Windows-only update. Other clients, the server and history formats are unchanged.</li>
+  </ul>
   <h3>3.1.13 macOS</h3>
   <ul>
     <li>Restoring File History items from a network share now requests macOS network-volume access when needed, so Finder receives the original files instead of text clippings. If access is denied or the files are unavailable, Clipman explains the problem without replacing your clipboard.</li>
@@ -1172,6 +1179,7 @@
   <p>If the default data folder is in use, Clipman treats it as portable and relocates it when the app folder is moved. If you choose or type a different data folder, Clipman stores the shared history as <code>clipman-history.clipdb</code> inside that folder. Existing explicit <code>.clipdb</code> file paths remain readable for compatibility. If an explicit data location is missing at startup, Clipman asks whether to browse for the data folder in a new location, use the default database beside Clipman, or stop startup.</p>
 
   <p>The live history database uses Clipman's compressed <code>.clipdb</code> format. By default, compression keeps clipboard text out of casual plain-text searches by Windows Search, Spotlight, cloud sync indexers, archive tools, or similar tools. To share clipboard history between machines, set each machine's data folder to the same synced or network-shared folder. Clipman uses the <code>clipman-history.clipdb</code> file inside that folder for shared text history.</p>
+  <p>On Windows, you can paste a data folder copied from Explorer using <strong>Copy as path</strong>, including the surrounding quotation marks. If a previously saved custom folder is visible but this computer's settings file has not synced, Clipman stops without replacing it with defaults. Let the folder finish syncing or restore the settings file before relaunching. The history password is remembered only when <strong>Remember history password on this computer</strong> is checked.</p>
 
   <p>Multiple running Clipman instances can use the same history database. When one device writes a new entry, the database is saved atomically and the other devices reload it when the changed file arrives. Each text entry stores the device name that added or most recently re-added it, and the history list includes a Device column and device sort mode so shared setups can tell which computer, phone, or tablet supplied an entry.</p>
 

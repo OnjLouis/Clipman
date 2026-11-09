@@ -35,6 +35,13 @@ namespace Clipman
             return value;
         }
 
+        internal static T LoadRequired<T>(string path) where T : class
+        {
+            var value = Serializer.Deserialize<T>(File.ReadAllText(path, Encoding.UTF8));
+            if (value == null) throw new InvalidDataException("The settings file is empty or invalid.");
+            return value;
+        }
+
         public static void SaveAtomic<T>(string path, T value)
         {
             var dir = Path.GetDirectoryName(path);

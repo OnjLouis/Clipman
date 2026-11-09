@@ -29,6 +29,9 @@ namespace Clipman.Tests
             Run("startup unlock retries without saving an incorrect password", StartupUnlockRetriesIncorrectPassword);
             Run("startup unlock covers imported and auxiliary histories", StartupUnlockCoversSeedAndAuxiliaryHistory);
             Run("an existing cache takes precedence over an unused seed", StartupUnlockIgnoresUnusedSeed);
+            Run("quoted data paths and remembered passwords survive restart", QuotedDataPathSurvivesRestart);
+            Run("selecting the current custom folder does not switch to portable storage", CustomFolderIsNotPortableDefault);
+            Run("unavailable custom settings do not get replaced by defaults", MissingCustomSettingsDoNotResetPreferences);
             Run("plain F1 is never captured as a global hotkey", PlainF1IsNeverCaptured);
             Run("context help preserves explanations without private values", ContextHelpPreservesExplanations);
             Run("desktop dialog controls have tailored context help", PreferencesHaveContextHelp);
@@ -396,6 +399,95 @@ namespace Clipman.Tests
                 fixture.Resolve(message => { throw new InvalidOperationException("An unused encrypted seed must not lock a plaintext active cache."); });
                 Assert(string.IsNullOrEmpty(fixture.SessionPassword), "Unused seed changed the active cache password.");
             }
+        }
+
+        private static void QuotedDataPathSurvivesRestart()
+        {
+            WithCustomDataFolder((store, folder) =>
+            {
+                var parser = typeof(PreferencesForm).GetMethod("DatabasePathFromFolderOrFile", BindingFlags.NonPublic | BindingFlags.Static);
+                Func<string, string> parse = value => (string)parser.Invoke(null, new object[] { value });
+                var database = Path.Combine(folder, "clipman-history.clipdb");
+                Assert(parse(" \"" + folder + "\\\" ") == database, "Quoted folder with a trailing separator did not resolve.");
+                var explicitFile = Path.Combine(folder, "named history.clipdb");
+                Assert(parse("\"" + explicitFile + "\"") == explicitFile, "Quoted explicit file did not resolve.");
+                var driveRoot = Path.GetPathRoot(folder);
+                Assert(parse("\"" + driveRoot + "\"") == Path.Combine(driveRoot, "clipman-history.clipdb"), "Quoted drive root became drive-relative.");
+                Assert(parse("\"" + folder) == string.Empty, "An unmatched quote was accepted as a path.");
+                var settings = new AppSettings
+                {
+                    DatabasePath = parse("\"" + folder + "\""),
+                    UseDefaultDatabasePath = false,
+                    RememberDatabasePassword = true,
+                    ProtectedDatabasePassword = DatabasePasswordProtector.Protect(StartupUnlockFixture.Password)
+                };
+                store.Save(settings);
+                var restart = new SettingsStore(store.AppDirectory);
+                var loaded = restart.Load();
+                Assert(loaded.DatabasePath == database && restart.SettingsDirectory == folder, "Restart lost the selected folder.");
+                Assert(loaded.RememberDatabasePassword && restart.DatabasePassword(loaded) == StartupUnlockFixture.Password,
+                    "Restart lost the protected password.");
+            });
+        }
+
+        private static void CustomFolderIsNotPortableDefault()
+        {
+            WithCustomDataFolder((store, folder) =>
+            {
+                var database = Path.Combine(folder, "clipman-history.clipdb");
+                store.Save(new AppSettings { DatabasePath = database, UseDefaultDatabasePath = false });
+                Assert(!store.IsCurrentDefaultDatabasePath(database), "Startup recovery would mark the selected custom folder as portable.");
+                Assert(store.IsCurrentDefaultDatabasePath(Path.Combine(store.AppSettingsDirectory, "clipman-history.clipdb")),
+                    "Startup recovery did not recognize the actual portable default.");
+            });
+        }
+
+        private static void MissingCustomSettingsDoNotResetPreferences()
+        {
+            WithCustomDataFolder((store, folder) =>
+            {
+                var database = Path.Combine(folder, "clipman-history.clipdb");
+                ClipDatabaseFile.SaveAtomic(database, new ClipDatabase(), StartupUnlockFixture.Password);
+                store.Save(new AppSettings
+                {
+                    DatabasePath = database,
+                    UseDefaultDatabasePath = false,
+                    RememberDatabasePassword = true,
+                    ProtectedDatabasePassword = DatabasePasswordProtector.Protect(StartupUnlockFixture.Password)
+                });
+                var settingsPath = store.SettingsPath;
+                var pointerPath = Path.Combine(store.AppSettingsDirectory, "settings-location.json");
+                var pointerBefore = File.ReadAllBytes(pointerPath);
+                var historyBefore = File.ReadAllBytes(database);
+                var hidden = settingsPath + ".unavailable";
+                File.Move(settingsPath, hidden);
+                var blocked = false;
+                try { new SettingsStore(store.AppDirectory).Load(); }
+                catch (IOException) { blocked = true; }
+                Assert(blocked && !File.Exists(settingsPath), "Startup recreated the unavailable machine settings as defaults.");
+                Assert(pointerBefore.SequenceEqual(File.ReadAllBytes(pointerPath)), "Startup changed the remembered folder.");
+                Assert(historyBefore.SequenceEqual(File.ReadAllBytes(database)), "Startup changed encrypted history.");
+                File.WriteAllText(settingsPath, "null");
+                blocked = false;
+                try { new SettingsStore(store.AppDirectory).Load(); }
+                catch (IOException) { blocked = true; }
+                Assert(blocked && File.ReadAllText(settingsPath) == "null", "Startup overwrote an incomplete settings file.");
+                File.Delete(settingsPath);
+                File.Move(hidden, settingsPath);
+                var restart = new SettingsStore(store.AppDirectory);
+                var loaded = restart.Load();
+                Assert(loaded.RememberDatabasePassword && restart.DatabasePassword(loaded) == StartupUnlockFixture.Password,
+                    "Restoring the settings file did not restore the protected password.");
+            });
+        }
+
+        private static void WithCustomDataFolder(Action<SettingsStore, string> action)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ClipmanCustomSettings-" + Guid.NewGuid().ToString("N"));
+            var folder = Path.Combine(root, "Shared data", "Settings");
+            Directory.CreateDirectory(folder);
+            try { action(new SettingsStore(Path.Combine(root, "Portable")), folder); }
+            finally { Directory.Delete(root, true); }
         }
 
         private sealed class StartupUnlockFixture : IDisposable

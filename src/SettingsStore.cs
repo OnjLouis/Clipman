@@ -27,8 +27,9 @@ namespace Clipman
         {
             Directory.CreateDirectory(AppSettingsDirectory);
             ResolveSettingsLocationConflicts();
-            var pointerFolder = LoadDataFolderPointer();
-            var loaded = LoadBestSettings(pointerFolder);
+            bool hasSavedMachineFolder;
+            var pointerFolder = LoadDataFolderPointer(out hasSavedMachineFolder);
+            var loaded = LoadBestSettings(pointerFolder, hasSavedMachineFolder);
             SettingsPath = loaded.Path;
             SettingsDirectory = Path.GetDirectoryName(SettingsPath) ?? AppSettingsDirectory;
             SyncConflictResolver.ResolveSettingsConflicts(SettingsPath);
@@ -342,7 +343,7 @@ namespace Clipman
             settings.ServerCaHost = authority.Host;
         }
 
-        private LoadedSettings LoadBestSettings(string pointerFolder)
+        private LoadedSettings LoadBestSettings(string pointerFolder, bool hasSavedMachineFolder)
         {
             if (!string.IsNullOrWhiteSpace(pointerFolder))
             {
@@ -351,7 +352,7 @@ namespace Clipman
                 {
                     try
                     {
-                        return new LoadedSettings(pointerSettingsPath, JsonUtil.Load<AppSettings>(pointerSettingsPath));
+                        return new LoadedSettings(pointerSettingsPath, JsonUtil.LoadRequired<AppSettings>(pointerSettingsPath));
                     }
                     catch (Exception ex)
                     {
@@ -372,6 +373,17 @@ namespace Clipman
                         "Clipman did not switch to the default data folder.");
                 }
 
+                var databasePath = Path.Combine(pointerFolder, "clipman-history.clipdb");
+                if (hasSavedMachineFolder && !IsCurrentDefaultDatabasePath(databasePath))
+                {
+                    // This pointer is saved after the machine settings. A visible cloud folder can still be missing its files.
+                    throw new IOException(
+                        "Clipman cannot find this computer's settings file in the configured data folder:\r\n\r\n" +
+                        pointerSettingsPath +
+                        "\r\n\r\nWait for the folder to sync, or restore the settings file, then start Clipman again. " +
+                        "Clipman did not replace your settings or change the data folder.");
+                }
+
                 var localPath = Path.Combine(AppSettingsDirectory, MachineSettingsFileName());
                 AppSettings settings;
                 try
@@ -385,7 +397,7 @@ namespace Clipman
                     throw new IOException("Clipman could not read the local settings needed to initialize the selected data folder.", ex);
                 }
 
-                settings.DatabasePath = Path.Combine(pointerFolder, "clipman-history.clipdb");
+                settings.DatabasePath = databasePath;
                 settings.UseDefaultDatabasePath = false;
                 return new LoadedSettings(pointerSettingsPath, settings);
             }
@@ -406,8 +418,9 @@ namespace Clipman
             return new LoadedSettings(appSettingsPath, new AppSettings());
         }
 
-        private string LoadDataFolderPointer()
+        private string LoadDataFolderPointer(out bool hasSavedMachineFolder)
         {
+            hasSavedMachineFolder = false;
             var path = Path.Combine(AppSettingsDirectory, PointerFileName);
             ResolveSettingsLocationConflicts();
             if (!File.Exists(path)) return string.Empty;
@@ -419,7 +432,7 @@ namespace Clipman
                 {
                     throw new InvalidDataException("The settings location pointer is empty or invalid.");
                 }
-                return pointer.FolderForMachine(MachineNameSafe());
+                return pointer.FolderForMachine(MachineNameSafe(), out hasSavedMachineFolder);
             }
             catch (Exception ex)
             {
@@ -769,7 +782,7 @@ namespace Clipman
             {
                 return string.Equals(
                     Path.GetFullPath(databasePath),
-                    Path.GetFullPath(DefaultDatabasePath()),
+                    Path.GetFullPath(Path.Combine(AppSettingsDirectory, "clipman-history.clipdb")),
                     StringComparison.OrdinalIgnoreCase);
             }
             catch
@@ -824,14 +837,16 @@ namespace Clipman
                 clients = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
 
-            public string FolderForMachine(string machineName)
+            public string FolderForMachine(string machineName, out bool hasSavedMachineFolder)
             {
+                hasSavedMachineFolder = false;
                 if (!string.IsNullOrWhiteSpace(machineName) && clients != null)
                 {
                     foreach (var pair in clients)
                     {
                         if (string.Equals(pair.Key, machineName, StringComparison.OrdinalIgnoreCase))
                         {
+                            hasSavedMachineFolder = true;
                             return pair.Value ?? string.Empty;
                         }
                     }

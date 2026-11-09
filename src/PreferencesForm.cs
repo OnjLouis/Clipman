@@ -531,6 +531,8 @@ namespace Clipman
             }
 
             if (!ValidateDatabasePasswordInput(false)) return;
+            var resolvedDatabasePath = DatabasePathFromFolderOrFile(databasePath.Text);
+            if (string.IsNullOrEmpty(resolvedDatabasePath)) return;
 
             settings.ShowHistoryHotkey = showHotkey.Text.Trim();
             settings.ToggleActiveHotkey = toggleHotkey.Text.Trim();
@@ -587,7 +589,7 @@ namespace Clipman
                 }
                 settings.DatabaseEncryptionEnabled = settings.DatabaseEncryptionEnabled || !string.IsNullOrWhiteSpace(settings.ProtectedDatabasePassword);
             }
-            settings.DatabasePath = DatabasePathFromFolderOrFile(databasePath.Text);
+            settings.DatabasePath = resolvedDatabasePath;
             settings.UseDefaultDatabasePath = IsCurrentDefaultDatabasePath(settings.DatabasePath);
             settings.StorageMode = StoredStorageMode(Convert.ToString(storageMode.SelectedItem));
             settings.ServerUrl = ServerSettingsSanitizer.CleanUrl(serverUrl.Text);
@@ -698,6 +700,15 @@ namespace Clipman
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (!string.IsNullOrWhiteSpace(databasePath.Text) && string.IsNullOrEmpty(DatabasePathFromFolderOrFile(databasePath.Text)))
+            {
+                MessageBox.Show(this, "Enter a valid Clipman data folder, or use Browse to select it.",
+                    "Clipman Preferences", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                databasePath.Focus();
+                e.Cancel = true;
+                return;
+            }
+
             if (!ValidateDatabasePasswordInput(true))
             {
                 e.Cancel = true;
@@ -1263,8 +1274,12 @@ namespace Clipman
         {
             if (string.IsNullOrWhiteSpace(path)) return string.Empty;
 
-            var trimmed = path.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (string.IsNullOrWhiteSpace(trimmed)) return string.Empty;
+            var trimmed = path.Trim();
+            if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[trimmed.Length - 1] == '"')
+            {
+                trimmed = trimmed.Substring(1, trimmed.Length - 2);
+            }
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return string.Empty;
 
             if (Directory.Exists(trimmed))
             {
