@@ -27,6 +27,24 @@ final class SharedFolderStorageClientTests: XCTestCase {
         XCTAssertEqual(try ClipDatabaseFile.load(secondDownload.data, password: password).Entries.map(\.Text), ["Second"])
     }
 
+    func testProviderNudgeLeavesHistoryAndFolderUnchanged() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = SharedFolderStorageClient(directory: directory, password: password)
+        let revision = try await client.upload(
+            data: try encodedDatabase(text: "Original"),
+            expectedRevision: "",
+            createOnly: true
+        )
+        let filesBefore = try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+
+        try await client.nudgeProvider()
+
+        let metadata = try await client.metadata()
+        XCTAssertEqual(metadata.revision, revision)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(), filesBefore)
+    }
+
     func testStaleRevisionCannotOverwriteNewerFile() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
