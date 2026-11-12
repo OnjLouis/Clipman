@@ -137,6 +137,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         monitor.delegate = self
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
+        monitor.captureUniversalClipboard = settings.captureUniversalClipboard
         monitor.includeImagesInRichTextHistory = settings.richTextHistoryEnabled && settings.includeImagesInRichTextHistory
         monitor.clipMergeEnabled = settings.clipMergeEnabled
         monitor.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(
@@ -900,6 +901,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
             "Remember password: \(settings.rememberDatabasePassword ? "On" : "Off")",
             "Run at login: \(settings.runAtStartup ? "On" : "Off")",
             "Add clipboard item on startup: \(settings.captureClipboardOnStartup ? "On" : "Off")",
+            "Save Universal Clipboard items to history: \(settings.captureUniversalClipboard ? "On" : "Off")",
             "Auto-copy latest remote text: \(settings.autoCopyLatestRemoteText ? "On" : "Off")",
             "Paste after Enter: \(settings.pasteAfterEnter ? "On" : "Off")",
             "Paste automation access: \(CGPreflightPostEventAccess() ? "Allowed" : "Not allowed")",
@@ -2298,6 +2300,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         sounds.isEnabled = settings.soundsEnabled
         monitor.isEnabled = settings.monitoringEnabled
         monitor.ignoredApplications = settings.ignoredApplications
+        monitor.captureUniversalClipboard = settings.captureUniversalClipboard
         monitor.includeImagesInRichTextHistory = settings.richTextHistoryEnabled && settings.includeImagesInRichTextHistory
         monitor.clipMergeEnabled = settings.clipMergeEnabled
         monitor.alsoAddCopiedImageFilesToRichTextHistory = EmbeddedImageFileImport.automaticCaptureEnabled(

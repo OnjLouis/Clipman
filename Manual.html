@@ -93,6 +93,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>3.1.14 macOS</h3>
+  <ul>
+    <li>Added <strong>Save Universal Clipboard items to history</strong> in Preferences. It is on by default, preserving existing behavior. Turn it off to skip automatic capture of items macOS marks as coming from another Apple device, without disabling Universal Clipboard or manual saves. Fixes issue #91.</li>
+  </ul>
   <h3>3.1.13 Windows</h3>
   <ul>
     <li>Preferences accepts data-folder paths copied from Explorer with surrounding quotation marks, including paths with spaces.</li>
@@ -1161,6 +1165,7 @@
   <p>The credit-card test number is a common non-real test value that passes the Luhn checksum. It is useful precisely because Clipman should exclude it while ignoring most random 16-digit strings.</p>
 
   <h2 id="clipboard-privacy-signals">Clipboard Privacy Signals</h2>
+  <p>On Mac, <strong>Save Universal Clipboard items to history</strong> is on by default. Turn it off in Preferences and choose <strong>Save and Close</strong> to skip automatically saving items marked by macOS as arriving through Universal Clipboard, including at Clipman startup. You can still paste them into apps or use <strong>Save Current Clipboard to History</strong>. This setting does not disable Handoff, change Clipman synchronization, or remove previously saved entries.</p>
   <p>On Windows, Clipman also honors standard clipboard privacy signals added by the application that placed data on the clipboard. If a clipboard update contains <code>Clipboard Viewer Ignore</code>, <code>ExcludeClipboardContentFromMonitorProcessing</code>, <code>CanIncludeInClipboardHistory</code> set to zero, or <code>CanUploadToCloudClipboard</code> set to zero, Clipman treats that update as private, plays <code>exclude.wav</code> when sounds are enabled, and stores nothing in text history or file history.</p>
 
   <p>This helps with password managers and secure-copy workflows that mark their own clipboard data as not suitable for history or sync. It is still cooperative: if Chrome, a webpage, a password manager, or another app puts only ordinary text on the clipboard with no privacy format, Clipman cannot reliably tell whether that text came from a password field or a normal webpage. Use ignored applications and Sensitive Data Exclusions for cases where the source app does not mark private clipboard updates itself.</p>

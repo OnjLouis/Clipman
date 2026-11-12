@@ -82,6 +82,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
     private let serverAuthorityStatus = NSTextField(wrappingLabelWithString: "")
     private let serverAuthorityFingerprint = NSTextField()
     private let monitoringCheckbox = NSButton(checkboxWithTitle: "Monitoring enabled", target: nil, action: nil)
+    private let captureUniversalClipboardCheckbox = NSButton(checkboxWithTitle: "Save Universal Clipboard items to history", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds", target: nil, action: nil)
     private let clipMergeCheckbox = NSButton(checkboxWithTitle: "Enable ClipMerge", target: nil, action: nil)
     private let clipMergeWindowField = NSTextField()
@@ -228,6 +229,10 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         monitoringCheckbox.action = nil
         monitoringCheckbox.setAccessibilityLabel("Monitoring enabled")
         grid.addRow(with: [NSGridCell.emptyContentView, monitoringCheckbox])
+        captureUniversalClipboardCheckbox.setAccessibilityLabel("Save Universal Clipboard items to history")
+        captureUniversalClipboardCheckbox.setAccessibilityRole(.checkBox)
+        captureUniversalClipboardCheckbox.setContextHelp("On by default. Turn this off to skip automatic history capture of items macOS identifies as coming from another Apple device. You can still paste or deliberately save those items.")
+        grid.addRow(with: [NSGridCell.emptyContentView, captureUniversalClipboardCheckbox])
 
         soundsCheckbox.target = nil
         soundsCheckbox.action = nil
@@ -390,6 +395,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         serverTokenField.stringValue = settings.serverToken
         updateServerAuthorityStatus()
         monitoringCheckbox.state = settings.monitoringEnabled ? .on : .off
+        captureUniversalClipboardCheckbox.state = settings.captureUniversalClipboard ? .on : .off
         soundsCheckbox.state = settings.soundsEnabled ? .on : .off
         clipMergeCheckbox.state = settings.clipMergeEnabled ? .on : .off
         clipMergeWindowField.integerValue = settings.clipMergeWindowMilliseconds
@@ -728,6 +734,7 @@ final class PreferencesWindowController: NSWindowController, HotkeyCaptureFieldD
         serverUrlField.stringValue = settings.serverUrl
         serverTokenField.stringValue = settings.serverToken
         settings.monitoringEnabled = monitoringCheckbox.state == .on
+        settings.captureUniversalClipboard = captureUniversalClipboardCheckbox.state == .on
         settings.soundsEnabled = soundsCheckbox.state == .on
         settings.clipMergeEnabled = clipMergeCheckbox.state == .on
         settings.clipMergeWindowMilliseconds = ClipMergeDetector.normalizeWindow(clipMergeWindowField.integerValue)

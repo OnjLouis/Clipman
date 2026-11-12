@@ -44,6 +44,7 @@ struct ClipmanSettings: Codable, Equatable {
     var autoNameCopiedWebsiteLinks: Bool
     var runAtStartup: Bool
     var captureClipboardOnStartup: Bool
+    var captureUniversalClipboard: Bool
     var rememberDatabasePassword: Bool
     var autoCopyLatestRemoteText: Bool
     var pasteAfterEnter: Bool
@@ -60,7 +61,7 @@ struct ClipmanSettings: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case machineName, deviceName, databasePath, storageMode = "StorageMode", serverUrl = "ServerUrl", serverToken = "ServerToken", serverCaCertPem = "ServerCaCertPem", serverCaHost = "ServerCaHost", monitoringEnabled, soundsEnabled, clipMergeEnabled, clipMergeWindowMilliseconds, clipMergeSeparatorMode, clipMergeCustomSeparator, multipleEntrySeparatorMode, multipleEntryCustomSeparator, showHistoryHotkey, toggleMonitoringHotkey, saveCurrentClipboardHotkey, quickClipHotkey, windowFrame
         case sortMode, sortDescending, fileHistorySortMode, fileHistorySortDescending, lastSelectedTab, lastSelectedHistoryTab, historyTabOrder, linksHistoryEnabled, richTextHistoryEnabled, includeImagesInRichTextHistory, alsoAddCopiedImageFilesToRichTextHistory, groupFilter, historyFilterType, deviceFilter, confirmDeletions, confirmSingleModifierHotkeys, confirmWebsiteTitleRequests, autoNameCopiedWebsiteLinks, runAtStartup
-        case captureClipboardOnStartup
+        case captureClipboardOnStartup, captureUniversalClipboard
         case rememberDatabasePassword
         case autoCopyLatestRemoteText, pasteAfterEnter, dynamicHistoryMode, updateCheckFrequency, installUpdatesSilently, lastUpdateCheckUnixMs, quickCopyHotkeys, quickPasteModes
         case ignoredApplications
@@ -113,6 +114,7 @@ struct ClipmanSettings: Codable, Equatable {
         autoNameCopiedWebsiteLinks: Bool,
         runAtStartup: Bool,
         captureClipboardOnStartup: Bool,
+        captureUniversalClipboard: Bool,
         rememberDatabasePassword: Bool,
         autoCopyLatestRemoteText: Bool,
         pasteAfterEnter: Bool,
@@ -171,6 +173,7 @@ struct ClipmanSettings: Codable, Equatable {
         self.autoNameCopiedWebsiteLinks = autoNameCopiedWebsiteLinks
         self.runAtStartup = runAtStartup
         self.captureClipboardOnStartup = captureClipboardOnStartup
+        self.captureUniversalClipboard = captureUniversalClipboard
         self.rememberDatabasePassword = rememberDatabasePassword
         self.autoCopyLatestRemoteText = autoCopyLatestRemoteText
         self.pasteAfterEnter = pasteAfterEnter
@@ -235,6 +238,7 @@ struct ClipmanSettings: Codable, Equatable {
         autoNameCopiedWebsiteLinks = try container.decodeIfPresent(Bool.self, forKey: .autoNameCopiedWebsiteLinks) ?? false
         runAtStartup = try container.decodeIfPresent(Bool.self, forKey: .runAtStartup) ?? false
         captureClipboardOnStartup = try container.decodeIfPresent(Bool.self, forKey: .captureClipboardOnStartup) ?? false
+        captureUniversalClipboard = try container.decodeIfPresent(Bool.self, forKey: .captureUniversalClipboard) ?? true
         rememberDatabasePassword = try container.decodeIfPresent(Bool.self, forKey: .rememberDatabasePassword) ?? false
         autoCopyLatestRemoteText = try container.decodeIfPresent(Bool.self, forKey: .autoCopyLatestRemoteText) ?? false
         pasteAfterEnter = try container.decodeIfPresent(Bool.self, forKey: .pasteAfterEnter) ?? false
@@ -313,6 +317,7 @@ struct ClipmanSettings: Codable, Equatable {
         try container.encode(autoNameCopiedWebsiteLinks, forKey: .autoNameCopiedWebsiteLinks)
         try container.encode(runAtStartup, forKey: .runAtStartup)
         try container.encode(captureClipboardOnStartup, forKey: .captureClipboardOnStartup)
+        try container.encode(captureUniversalClipboard, forKey: .captureUniversalClipboard)
         try container.encode(rememberDatabasePassword, forKey: .rememberDatabasePassword)
         try container.encode(autoCopyLatestRemoteText, forKey: .autoCopyLatestRemoteText)
         try container.encode(pasteAfterEnter, forKey: .pasteAfterEnter)
@@ -371,6 +376,7 @@ struct ClipmanSettings: Codable, Equatable {
             autoNameCopiedWebsiteLinks: false,
             runAtStartup: false,
             captureClipboardOnStartup: false,
+            captureUniversalClipboard: true,
             rememberDatabasePassword: false,
             autoCopyLatestRemoteText: false,
             pasteAfterEnter: false,

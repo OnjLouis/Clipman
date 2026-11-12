@@ -43,6 +43,7 @@ protocol ClipboardMonitorDelegate: AnyObject {
 
 @MainActor
 final class ClipboardMonitor: @unchecked Sendable {
+    private static let universalClipboardType = "com.apple.is-remote-clipboard"
     private struct SuppressedText {
         let text: String
         let expires: Date
@@ -51,6 +52,7 @@ final class ClipboardMonitor: @unchecked Sendable {
     weak var delegate: ClipboardMonitorDelegate?
     var isEnabled = true
     var ignoredApplications: [String] = []
+    var captureUniversalClipboard = true
     var includeImagesInRichTextHistory = false
     var alsoAddCopiedImageFilesToRichTextHistory = false
     var clipMergeEnabled = false {
@@ -82,15 +84,13 @@ final class ClipboardMonitor: @unchecked Sendable {
         }
     }
 
-    func captureCurrentContents() {
-        let pasteboard = NSPasteboard.general
+    func captureCurrentContents(from pasteboard: NSPasteboard = .general) {
         lastChangeCount = pasteboard.changeCount
         ignoredChangeCount = nil
         capture(from: pasteboard, playSkipSound: false, deliberate: false, startupCapture: true)
     }
 
-    func saveCurrentContents() {
-        let pasteboard = NSPasteboard.general
+    func saveCurrentContents(from pasteboard: NSPasteboard = .general) {
         lastChangeCount = pasteboard.changeCount
         ignoredChangeCount = nil
         capture(from: pasteboard, playSkipSound: true, deliberate: true, startupCapture: false)
@@ -209,6 +209,15 @@ final class ClipboardMonitor: @unchecked Sendable {
         let observedAtMilliseconds = Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
         let appDiagnostic = foregroundApplicationDiagnostic()
         let pasteboardDiagnostic = pasteboardTypesDiagnostic(from: pasteboard)
+        let types = allPasteboardTypeNames(from: pasteboard)
+        if !deliberate && !captureUniversalClipboard && types.contains(Self.universalClipboardType) {
+            lastClipboardDiagnostic = clipboardDiagnostic(
+                result: "Skipped Universal Clipboard item because automatic capture is disabled for it.",
+                appDiagnostic: appDiagnostic,
+                pasteboardDiagnostic: pasteboardDiagnostic
+            )
+            return
+        }
         if !deliberate && isClipmanForegroundApplication() {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Skipped because Clipman itself was the foreground application.",
@@ -231,7 +240,7 @@ final class ClipboardMonitor: @unchecked Sendable {
             }
             return
         }
-        if shouldSkipPasteboardTypes(pasteboard, includeIgnoredApplications: !deliberate) {
+        if shouldSkipPasteboardTypes(types, includeIgnoredApplications: !deliberate) {
             lastClipboardDiagnostic = clipboardDiagnostic(
                 result: "Skipped because pasteboard types indicate concealed or ignored-application data.",
                 appDiagnostic: appDiagnostic,
@@ -508,8 +517,7 @@ final class ClipboardMonitor: @unchecked Sendable {
         NSWorkspace.shared.frontmostApplication?.processIdentifier == NSRunningApplication.current.processIdentifier
     }
 
-    private func shouldSkipPasteboardTypes(_ pasteboard: NSPasteboard, includeIgnoredApplications: Bool = true) -> Bool {
-        let types = allPasteboardTypeNames(from: pasteboard)
+    private func shouldSkipPasteboardTypes(_ types: [String], includeIgnoredApplications: Bool) -> Bool {
         if types.contains(where: isConcealedPasteboardType) {
             return true
         }
