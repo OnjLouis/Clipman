@@ -94,6 +94,8 @@ final class ClipmanAppModel: ObservableObject {
     private var transientStatusActive = false
     private var statusResetTask: Task<Void, Never>?
     private let pollingIntervalNanoseconds: UInt64 = 5_000_000_000
+    private let providerNudgeInterval: TimeInterval = 60
+    private var lastProviderNudge: Date?
     private let quickActionRefreshWaitNanoseconds: UInt64 = 50_000_000
     private let quickActionRefreshWaitAttempts = 600
     private var skipNextSettingsClosedRefresh = false
@@ -399,6 +401,7 @@ final class ClipmanAppModel: ObservableObject {
                         )
                     }
                 }
+                nudgeSharedFolderProvider()
                 startPolling()
                 if shouldRefreshServer {
                     _ = await refresh(
@@ -506,10 +509,25 @@ final class ClipmanAppModel: ObservableObject {
     func sceneBecameActive() {
         isSceneActive = true
         if isUnlocked {
+            nudgeSharedFolderProvider()
             processPendingSharedItems()
             processPendingQuickAction()
         } else {
             unlock()
+        }
+    }
+
+    /// The regular poll picks up whatever the provider fetches as a result.
+    private func nudgeSharedFolderProvider() {
+        guard settings.storageMode == .sharedFolder else { return }
+        if let lastProviderNudge, Date().timeIntervalSince(lastProviderNudge) < providerNudgeInterval { return }
+        lastProviderNudge = Date()
+        let client = SharedFolderStorageClient(
+            bookmark: settings.sharedFolderBookmark,
+            password: settings.historyPassword
+        )
+        Task.detached(priority: .utility) {
+            try? await client.nudgeProvider()
         }
     }
 
