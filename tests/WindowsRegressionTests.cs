@@ -20,6 +20,7 @@ namespace Clipman.Tests
         private static int Main()
         {
             Run("multi-copy marks selected entries with one save", MultiCopyMarksEntriesWithOneSave);
+            Run("clearing shared history prevents a stale device from bringing it back", ClearHistorySurvivesStaleDevice);
             Run("merge timing retains the original clipboard notification time", MergeTimingRetainsNotificationTime);
             Run("native queued copies retain merge timing through a stalled UI", NativeQueuedCopiesRetainMergeTiming);
             Run("routine website-title diagnostics stay bounded and private", WebsiteTitleDiagnosticsStayBounded);
@@ -283,6 +284,57 @@ namespace Clipman.Tests
             var summary = (string)type.GetMethod("Summary").Invoke(diagnostics, null);
             Assert(summary.Contains("1000") && summary.Contains("HTTP 403"), "Website failure counts or reason were lost.");
             Assert(summary.Length < 256 && !summary.Contains("private.example") && !summary.Contains("token"), "Website diagnostics retained private URL details or grew without bounds.");
+        }
+
+        private static void ClearHistorySurvivesStaleDevice()
+        {
+            WithCustomDataFolder((settings, folder) =>
+            {
+                var path = Path.Combine(folder, "clipman-history.clipdb");
+                var password = StartupUnlockFixture.Password;
+                var now = TimeUtil.NowUnixMs();
+                var removedEarlier = new DeletedClipEntry { Id = "previously-deleted", DeletedUnixMs = now };
+                var stale = new ClipDatabase
+                {
+                    Entries = Enumerable.Range(0, 2736).Select(i => new ClipEntry
+                    {
+                        Id = "clip-" + i,
+                        Text = "Fixture " + i,
+                        CreatedUnixMs = now - 1000,
+                        LastUsedUnixMs = now - 1000,
+                        Pinned = i == 0,
+                        Name = i == 1 ? "Named fixture" : string.Empty
+                    }).ToList(),
+                    DeletedEntries = new List<DeletedClipEntry> { removedEarlier }
+                };
+                ClipDatabaseFile.SaveAtomic(path, stale, password);
+                var backup = Path.Combine(folder, "clipman-history.before-clear-history-fixture.clipdb");
+                File.Copy(path, backup);
+                using (var store = new ClipStore(path, password, "Desktop fixture"))
+                {
+                    Assert(store.ClearHistory(), "Clear could not save the encrypted fixture.");
+                    Assert(store.ClearHistory(), "Clearing an already empty history failed.");
+                }
+
+                var cleared = ClipDatabaseFile.Load(path, password);
+                Assert(cleared.Entries.Count == 0, "Clear did not remove all entries, including pinned and named clips.");
+                Assert(cleared.DeletedEntries.Count == 2737 && cleared.DeletedEntries.Any(d => d.Id == removedEarlier.Id),
+                    "Clear did not persist deletion records for the old clips and retain earlier deletions.");
+                SyncConflictResolver.MergeInto(stale, cleared);
+                Assert(stale.Entries.Count == 0, "A stale peer retained entries after merging the clear.");
+                var offlineSnapshot = ClipDatabaseFile.Load(backup, password);
+                var newCopy = new ClipEntry { Id = "new-copy", Text = "Fixture 0", CreatedUnixMs = TimeUtil.NowUnixMs() + 1000 };
+                offlineSnapshot.Entries.Add(newCopy);
+                SyncConflictResolver.MergeInto(cleared, offlineSnapshot);
+                Assert(cleared.Entries.Count == 1 && cleared.Entries[0].Id == newCopy.Id,
+                    "The stale snapshot restored cleared entries or the clear blocked a genuinely new copy.");
+
+                var conflict = Path.Combine(folder, "clipman-history (Phone conflicted copy).clipdb");
+                File.Copy(backup, conflict);
+                using (var reopened = new ClipStore(path, password, "Desktop fixture"))
+                    Assert(reopened.GetEntries().Count == 0, "A stale provider conflict file restored cleared entries.");
+                Assert(!File.Exists(conflict) && File.Exists(backup), "Conflict recovery did not preserve the separate backup.");
+            });
         }
 
         private static void ServerCacheStartupRequestsPassword()

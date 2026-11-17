@@ -560,6 +560,35 @@ namespace Clipman
             }
         }
 
+        public bool ClearHistory()
+        {
+            lock (sync)
+            {
+                if (database.Entries.Count == 0) return !storageUnavailable;
+
+                var deletedAt = TimeUtil.NowUnixMs();
+                var device = CurrentMachineName();
+                var removed = database.Entries.Where(entry => !string.IsNullOrWhiteSpace(entry.Id)).ToList();
+                var removedIds = new HashSet<string>(removed.Select(entry => entry.Id), StringComparer.Ordinal);
+                if (database.DeletedEntries == null) database.DeletedEntries = new List<DeletedClipEntry>();
+                database.DeletedEntries.RemoveAll(marker => marker != null && removedIds.Contains(marker.Id));
+                foreach (var entry in removed)
+                {
+                    database.DeletedEntries.Add(new DeletedClipEntry
+                    {
+                        Id = entry.Id,
+                        TextHash = ComputeTextHash(entry.Text),
+                        DeletedUnixMs = deletedAt,
+                        SourceMachine = device
+                    });
+                }
+                database.Entries.Clear();
+                SaveLocked();
+                OnChanged();
+                return !storageUnavailable;
+            }
+        }
+
         public void ReplaceAll(IEnumerable<ClipEntry> entries)
         {
             lock (sync)

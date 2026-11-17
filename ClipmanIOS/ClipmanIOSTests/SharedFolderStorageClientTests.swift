@@ -133,6 +133,32 @@ final class SharedFolderStorageClientTests: XCTestCase {
         XCTAssertEqual(merged.DeletedEntries.map(\.Id), [entry.Id])
     }
 
+    func testDesktopClearSuppressesStalePhoneHistoryButKeepsNewCopies() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = SharedFolderStorageClient(directory: directory, password: password)
+        let now = TimeUtil.nowUnixMs()
+        let staleEntries = (0..<2736).map { index in
+            ClipEntry(Id: "clip-\(index)", Text: "Fixture \(index)", CreatedUnixMs: now - 1000, LastUsedUnixMs: now - 1000)
+        }
+        let cleared = ClipDatabase(DeletedEntries: staleEntries.map { entry in
+            DeletedClipEntry(Id: entry.Id, TextHash: SyncConflictResolver.textHash(entry.Text), DeletedUnixMs: now, SourceMachine: "Desktop fixture")
+        })
+        let sharedFile = directory.appendingPathComponent("clipman-history.clipdb")
+        try ClipDatabaseFile.save(cleared, password: password).write(to: sharedFile)
+        let downloaded = try await client.download()
+        let remote = try ClipDatabaseFile.load(downloaded.data, password: password)
+        let stale = ClipDatabase(Entries: staleEntries)
+        let merged = SyncConflictResolver.merge(target: stale, source: remote)
+        XCTAssertTrue(merged.Entries.isEmpty)
+        XCTAssertEqual(merged.DeletedEntries.sorted { $0.Id < $1.Id }, remote.DeletedEntries.sorted { $0.Id < $1.Id })
+
+        let newCopy = ClipEntry(Id: "new-copy", Text: staleEntries[0].Text, CreatedUnixMs: now + 1000, LastUsedUnixMs: now + 1000)
+        let updated = SyncConflictResolver.merge(target: ClipDatabase(Entries: staleEntries + [newCopy]), source: remote)
+        XCTAssertEqual(updated.Entries.map(\.Id), [newCopy.Id])
+        XCTAssertEqual(updated.DeletedEntries.count, staleEntries.count)
+    }
+
     func testChannelUsesMacCompatibleFilename() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

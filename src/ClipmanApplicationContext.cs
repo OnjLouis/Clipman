@@ -1281,15 +1281,19 @@ namespace Clipman
                 "Clear all saved text clipboard history?" +
                 Environment.NewLine +
                 Environment.NewLine +
-                "This will remove every text entry from the current Clipman database. A timestamped backup will be created first.";
+                "This removes all current text, link, and rich text entries, including named and pinned entries. " +
+                "If history is shared, these deletions sync to other devices. A timestamped database backup is made first when a database file exists.";
             if (MessageBox.Show(message, "Clear Clipman history", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             {
                 return false;
             }
 
-            BackupDatabase(settings.DatabasePath, "before-clear-history");
-            store.ReplaceAll(new List<ClipEntry>());
-            return true;
+            BackupDatabase(store.DatabasePath, "before-clear-history");
+            if (store.ClearHistory()) return true;
+
+            MessageBox.Show("Clipman could not finish saving or syncing the clear. Reconnect your storage and check history before trying again.",
+                "Clear Clipman history", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
         }
 
         private static void BackupDatabase(string databasePath, string reason)
