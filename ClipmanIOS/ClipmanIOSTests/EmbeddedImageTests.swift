@@ -7,6 +7,21 @@ import XCTest
 
 final class EmbeddedImageTests: XCTestCase {
     @MainActor
+    func testCopyEmailTextPreservesDigitsAndDoesNotCreateAMailLink() throws {
+        let name = UIPasteboard.Name("ClipmanIOSTests.\(UUID().uuidString)")
+        let pasteboard = try XCTUnwrap(UIPasteboard(name: name, create: true))
+        defer { UIPasteboard.remove(withName: name) }
+
+        for address in ["reader32@gmail.com", "reader32@googlemail.com", "reader@gmail.com"] {
+            let entry = ClipEntry(Text: address)
+            XCTAssertNil(LinkExtractor.exactURL(in: entry))
+            MobileRichTextClipboard.write(entry, includeRichText: true, to: pasteboard)
+            XCTAssertEqual(pasteboard.string, address)
+            XCTAssertFalse(pasteboard.contains(pasteboardTypes: [UTType.url.identifier]))
+        }
+    }
+
+    @MainActor
     func testURLOnlyClipboardCanBeImported() throws {
         let url = "https://example.com/article?from=safari"
         let pasteboardName = UIPasteboard.Name("ClipmanIOSTests.\(UUID().uuidString)")

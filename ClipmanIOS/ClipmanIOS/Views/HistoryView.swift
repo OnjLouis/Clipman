@@ -503,9 +503,11 @@ private struct HistoryEntryRow: View, Equatable {
         }
         let websiteTitleURL = hasName ? nil : httpURL
         let preview = entry.historyPreview(embeddedImage: embeddedImage, exactHTTPURL: httpURL)
-        return EntryRow(displayText: preview.text, detailText: entry.detailText, pinned: entry.Pinned)
-            .contentShape(Rectangle())
-            .onTapGesture(perform: copy)
+        return Button(action: copy) {
+            EntryRow(displayText: preview.text, detailText: entry.detailText, pinned: entry.Pinned)
+                .contentShape(Rectangle())
+        }
+            .buttonStyle(.plain)
             .swipeActions(edge: .trailing) {
                 if let url = singleLink {
                     Button {
@@ -542,10 +544,9 @@ private struct HistoryEntryRow: View, Equatable {
                     }
                 }
             }
-            .accessibilityElement(children: .ignore)
             .accessibilityLabel(entry.accessibilityLabelText(preview: preview))
             .accessibilityHint("Double tap to copy to clipboard.")
-            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, copy)
             .namedLinkAccessibilityAction(enabled: showsCopyLinkAlternative, label: "Copy Link", action: copyLinkOnly)
             .namedLinkAccessibilityAction(enabled: showsCopyNameAndLinkAlternative, action: copyNameAndLink)
             .websiteTitleAccessibilityAction(enabled: websiteTitleURL != nil) {
