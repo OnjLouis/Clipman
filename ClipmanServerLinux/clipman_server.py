@@ -37,9 +37,11 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.7.1"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 BACKUP_PRUNE_INTERVAL_SECONDS = 60 * 60
+TLS_HANDSHAKE_TIMEOUT_SECONDS = 15.0
+CLIENT_SOCKET_TIMEOUT_SECONDS = 60.0
 DATABASE_LOG_PATTERN = re.compile(r"(/api/v1/database/)[^\s\"?]+")
 SETUP_LOG_PATTERN = re.compile(r"(/setup/)[A-Za-z0-9_-]+")
 SETUP_PATH_PATTERN = re.compile(r"\A/setup/([A-Za-z0-9_-]{32,128})(?:/(connection\.clpconf))?\Z")
@@ -1728,6 +1730,21 @@ def setup_page_html(code: str, state: Dict[str, Any], user_agent: str) -> bytes:
 
 class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
+    request_queue_size = 64
+
+    def finish_request(self, request: Any, client_address: Any) -> None:
+        try:
+            request.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        except OSError:
+            pass
+        if isinstance(request, ssl.SSLSocket):
+            request.settimeout(TLS_HANDSHAKE_TIMEOUT_SECONDS)
+            try:
+                request.do_handshake()
+            except (ssl.SSLError, OSError) as error:
+                logging.debug("TLS handshake ended before an HTTP request: %s", type(error).__name__)
+                return
+        super().finish_request(request, client_address)
 
     def __init__(self, server_address: Tuple[str, int], request_handler_class: Any):
         super().__init__(server_address, request_handler_class)
@@ -1825,6 +1842,7 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "ClipmanServerLinux/" + APP_VERSION
     protocol_version = "HTTP/1.1"
+    timeout = CLIENT_SOCKET_TIMEOUT_SECONDS
 
     def do_GET(self) -> None:
         self.route()
@@ -2254,7 +2272,10 @@ def run_server(
     server.config_path = config_path  # type: ignore[attr-defined]
     if tls_context is not None:
         try:
-            server.socket = tls_context.wrap_socket(server.socket, server_side=True)
+            # accept() runs on the listener thread; TLS I/O belongs in finish_request's worker.
+            server.socket = tls_context.wrap_socket(
+                server.socket, server_side=True, do_handshake_on_connect=False
+            )
         except Exception:
             server.server_close()
             raise

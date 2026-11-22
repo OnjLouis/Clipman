@@ -9,6 +9,8 @@ import http.server
 import json
 import io
 import os
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,11 @@ import clipman_server
 
 
 class ServerStartupTests(unittest.TestCase):
+    def test_connection_timeouts_and_listener_backlog_are_bounded(self) -> None:
+        self.assertEqual(15.0, clipman_server.TLS_HANDSHAKE_TIMEOUT_SECONDS)
+        self.assertEqual(60.0, clipman_server.Handler.timeout)
+        self.assertEqual(64, clipman_server.ThreadingServer.request_queue_size)
+
     def write_test_settings(self, root: Path) -> tuple[Path, dict[str, object]]:
         config = root / "settings.json"
         settings, _ = clipman_server.load_settings(config)
@@ -795,6 +802,144 @@ class DatabasePathTests(unittest.TestCase):
             clipman_server.database_path(self.settings, database_id)
 
 
+class ConnectionLifetimeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            openssl = clipman_server.find_openssl()
+        except RuntimeError:
+            raise unittest.SkipTest("OpenSSL is required for real TLS connection tests")
+        cls.certificates = tempfile.TemporaryDirectory()
+        cls.certificate = Path(cls.certificates.name) / "test.crt"
+        cls.key = Path(cls.certificates.name) / "test.key"
+        try:
+            clipman_server.run_openssl(openssl, [
+                "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1",
+                "-keyout", str(cls.key), "-out", str(cls.certificate),
+            ])
+        except Exception:
+            cls.certificates.cleanup()
+            raise
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.certificates.cleanup()
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        config = root / "settings.json"
+        settings, _ = clipman_server.load_settings(config)
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            self.port = probe.getsockname()[1]
+        settings.update({
+            "Host": "127.0.0.1", "Port": self.port,
+            "DatabasePath": str(root / "data" / "history.clipdb"),
+            "CertFile": str(self.certificate), "KeyFile": str(self.key),
+        })
+        clipman_server.save_settings(config, settings)
+        self.errors = (root / "stderr.log").open("w+", encoding="utf-8")
+        self.addCleanup(self.errors.close)
+        script = (
+            "import json,sys\nfrom pathlib import Path\n"
+            "sys.path.insert(0,sys.argv[1])\nimport clipman_server as s\n"
+            "s.TLS_HANDSHAKE_TIMEOUT_SECONDS=2.0\n"
+            "if s.Handler.timeout is not None:s.Handler.timeout=0.4\n"
+            "config=Path(sys.argv[2])\n"
+            "raise SystemExit(s.run_server(json.loads(config.read_text()),config,None,None))\n"
+        )
+        self.process = subprocess.Popen(
+            [sys.executable, "-u", "-c", script, str(Path(__file__).resolve().parent), str(config)],
+            stdout=subprocess.DEVNULL, stderr=self.errors,
+        )
+        self.addCleanup(self.stop_server)
+        self.context = ssl.create_default_context(cafile=str(self.certificate))
+        deadline = time.monotonic() + 8
+        while True:
+            try:
+                self.assertEqual(200, self.health())
+                break
+            except (OSError, http.client.HTTPException):
+                if self.process.poll() is not None or time.monotonic() >= deadline:
+                    self.errors.seek(0)
+                    self.fail("Fixture server did not become ready: " + self.errors.read())
+                time.sleep(0.05)
+
+    def stop_server(self) -> None:
+        if self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=3)
+
+    def health(self) -> int:
+        connection = http.client.HTTPSConnection("127.0.0.1", self.port, context=self.context, timeout=1)
+        try:
+            connection.request("GET", "/api/v1/health")
+            response = connection.getresponse()
+            response.read()
+            return response.status
+        finally:
+            connection.close()
+
+    def test_stalled_tls_handshake_does_not_block_another_client(self) -> None:
+        with socket.create_connection(("127.0.0.1", self.port), timeout=1) as stalled:
+            time.sleep(0.1)
+            self.assertEqual(200, self.health())
+            stalled.settimeout(3)
+            self.assertEqual(b"", stalled.recv(1), "The stalled TLS socket must expire")
+
+    def test_partial_tls_handshake_does_not_block_another_client(self) -> None:
+        with socket.create_connection(("127.0.0.1", self.port), timeout=1) as stalled:
+            stalled.sendall(b"\x16\x03\x01\x00")
+            time.sleep(0.1)
+            self.assertEqual(200, self.health())
+
+    def test_several_stalled_tls_clients_do_not_block_another_client(self) -> None:
+        stalled = []
+        try:
+            for _ in range(12):
+                stalled.append(socket.create_connection(("127.0.0.1", self.port), timeout=1))
+            self.assertEqual(200, self.health())
+        finally:
+            for connection in stalled:
+                connection.close()
+        self.assertEqual(200, self.health())
+
+    def test_invalid_tls_client_does_not_stop_the_listener(self) -> None:
+        with socket.create_connection(("127.0.0.1", self.port), timeout=1) as invalid:
+            invalid.sendall(b"GET / HTTP/1.1\r\n\r\n")
+            time.sleep(0.1)
+            self.assertEqual(200, self.health())
+
+    def test_idle_tls_keep_alive_connection_expires(self) -> None:
+        connection = http.client.HTTPSConnection("127.0.0.1", self.port, context=self.context, timeout=2)
+        try:
+            for _ in range(2):
+                connection.request("GET", "/api/v1/health")
+                response = connection.getresponse()
+                self.assertEqual(200, response.status)
+                response.read()
+            self.assertIsNotNone(connection.sock)
+            self.assertEqual(b"", connection.sock.recv(1))
+        finally:
+            connection.close()
+        self.assertEqual(200, self.health())
+
+    @unittest.skipIf(os.name == "nt", "Windows terminate does not deliver SIGTERM to Python")
+    def test_shutdown_with_a_stalled_tls_handshake(self) -> None:
+        with socket.create_connection(("127.0.0.1", self.port), timeout=1):
+            time.sleep(0.1)
+            self.process.terminate()
+            self.assertEqual(0, self.process.wait(timeout=1.5))
+
+
 class ConditionalCreateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -815,6 +960,19 @@ class ConditionalCreateTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=5)
         self.temp.cleanup()
+
+    def test_idle_plain_http_keep_alive_connection_expires(self) -> None:
+        with mock.patch.object(clipman_server.Handler, "timeout", 0.4):
+            connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
+            try:
+                connection.request("GET", "/api/v1/health")
+                response = connection.getresponse()
+                self.assertEqual(200, response.status)
+                response.read()
+                self.assertIsNotNone(connection.sock)
+                self.assertEqual(b"", connection.sock.recv(1))
+            finally:
+                connection.close()
 
     def request(self, body: bytes) -> tuple[int, bytes, str]:
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
