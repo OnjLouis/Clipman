@@ -11,6 +11,8 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 VERSION="$(tr -d '[:space:]' < "$ROOT/ClipmanServer/version.txt")"
 BUILD_VERSION="$VERSION.0"
+MINIMUM_MACOS="13.0"
+TARGET_TRIPLE="$(uname -m)-apple-macosx$MINIMUM_MACOS"
 if [[ ! "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
   echo "Invalid Clipman Server version: $VERSION" >&2
   exit 1
@@ -20,11 +22,21 @@ rm -rf "$DIST"
 mkdir -p "$MACOS" "$RESOURCES"
 
 swiftc \
+  -target "$TARGET_TRIPLE" \
+  -module-cache-path "$DIST/.module-cache" \
   -o "$MACOS/Clipman Server" \
   "$SERVER_ROOT/Sources/ClipmanServer/main.swift" \
   "$SERVER_ROOT/Sources/ClipmanServer/ReleaseSignature.swift" \
   "$SERVER_ROOT/Sources/ClipmanServer/ServerAppReplacement.swift" \
   -framework AppKit
+rm -rf "$DIST/.module-cache"
+
+# A current SDK must not silently raise the minimum OS to the build host's OS.
+BUILD_INFO="$(xcrun vtool -show-build "$MACOS/Clipman Server")"
+if ! awk -v minimum="$MINIMUM_MACOS" '$1 == "minos" { found = 1; if ($2 != minimum) exit 1 } END { if (!found) exit 1 }' <<< "$BUILD_INFO"; then
+  echo "Server executable does not target macOS $MINIMUM_MACOS." >&2
+  exit 1
+fi
 
 cp "${CLIPMAN_SERVER_SCRIPT:-$ROOT/ClipmanServerLinux/clipman_server.py}" "$RESOURCES/clipman_server.py"
 if [[ -z "${CLIPMAN_WEB_ASSETS:-}" || ! -f "$CLIPMAN_WEB_ASSETS/client.wasm" ]]; then
@@ -55,7 +67,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleVersion</key>
   <string>$BUILD_VERSION</string>
   <key>LSMinimumSystemVersion</key>
-  <string>10.13</string>
+  <string>$MINIMUM_MACOS</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

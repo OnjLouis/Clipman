@@ -93,6 +93,10 @@
   </ul>
 
   <h2 id="changelog">Changelog</h2>
+  <h3>2.7.2 Server</h3>
+  <ul>
+    <li>Fixed the Mac server update requiring the build machine's newer macOS version. The Mac server now targets macOS 13 and later, including macOS 26. Updates also check the declared minimum macOS version before replacing the installed app. Server settings and history are unchanged.</li>
+  </ul>
   <h3>2.7.1 Server</h3>
   <ul>
     <li>Fixed a stalled TLS connection making the entire server unresponsive. Handshakes now run separately with a timeout, and idle HTTP connections expire. This is a server-only update; clipboard clients and saved history are unchanged. Fixes issue #92. Thanks to Victor Tsaran for reporting and reproducing the problem.</li>

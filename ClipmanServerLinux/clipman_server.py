@@ -37,7 +37,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import unquote
 
 
-APP_VERSION = "2.7.1"
+APP_VERSION = "2.7.2"
 DEFAULT_CONFIG = "clipman-server-settings.json"
 BACKUP_PRUNE_INTERVAL_SECONDS = 60 * 60
 TLS_HANDSHAKE_TIMEOUT_SECONDS = 15.0
