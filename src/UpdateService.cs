@@ -265,7 +265,7 @@ namespace Clipman
             if (!silent &&
                 MessageBox.Show(
                         owner,
-                        "Clipman will close, download the update, replace the files in this folder, and restart. Your Settings folder will be kept." + Environment.NewLine + Environment.NewLine + "Do you want to continue?",
+                        "Clipman will close, download and verify the signed update, then restart. Your settings and history will be kept." + Environment.NewLine + Environment.NewLine + "Do you want to continue?",
                         "Clipman Update",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Question,
@@ -278,7 +278,7 @@ namespace Clipman
             {
                 var appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 var exePath = Application.ExecutablePath;
-                var updaterTempDir = GetUpdaterTempDirectory(appDir);
+                var updaterTempDir = GetUpdaterTempDirectory();
                 var updaterRoot = Path.Combine(updaterTempDir, "ClipmanUpdater-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(updaterRoot);
                 var updaterExe = Path.Combine(updaterRoot, "Clipman Updater.exe");
@@ -378,14 +378,14 @@ namespace Clipman
 
         private static GitHubReleaseAsset FindPortableZipAsset(GitHubReleaseInfo release)
         {
-            if (release == null || release.Assets == null) return null;
+            if (release == null || release.Draft || release.Prerelease || release.Assets == null) return null;
             var version = ReleaseVersion(release);
-            if (version == null) return null;
-            var expectedName = "Clipman-" + version + ".zip";
-            return release.Assets
-                .Where(a => a != null && !string.IsNullOrWhiteSpace(a.BrowserDownloadUrl) && !string.IsNullOrWhiteSpace(a.Name))
-                .Where(a => string.Equals(a.Name, expectedName, StringComparison.OrdinalIgnoreCase))
-                .FirstOrDefault();
+            if (version == null || version.Build < 0 || version.Revision >= 0 || release.TagName != "v" + version) return null;
+            var name = WindowsUpdateSignature.PackageName(version);
+            var url = WindowsUpdateSignature.DownloadUrl(version);
+            var suffix = WindowsUpdateSignature.SignatureSuffix;
+            if (!release.Assets.Any(a => a != null && a.Name == name + suffix && a.BrowserDownloadUrl == url + suffix)) return null;
+            return release.Assets.FirstOrDefault(a => a != null && a.Name == name && a.BrowserDownloadUrl == url);
         }
 
         private static string FormatReleaseNotesForDialog(string markdown, string emptyText)
@@ -452,6 +452,8 @@ namespace Clipman
                 TagName = GetString(map, "tag_name"),
                 HtmlUrl = GetString(map, "html_url"),
                 Body = GetString(map, "body"),
+                Draft = GetString(map, "draft").Equals("true", StringComparison.OrdinalIgnoreCase),
+                Prerelease = GetString(map, "prerelease").Equals("true", StringComparison.OrdinalIgnoreCase),
                 Assets = new List<GitHubReleaseAsset>()
             };
 
@@ -494,13 +496,12 @@ namespace Clipman
             }
         }
 
-        private static string GetUpdaterTempDirectory(string appDir)
+        private static string GetUpdaterTempDirectory()
         {
             var candidates = new List<string>();
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (!string.IsNullOrWhiteSpace(localAppData)) candidates.Add(Path.Combine(localAppData, "Temp"));
             candidates.Add(Path.GetTempPath());
-            candidates.Add(Path.Combine(appDir, "Settings", "Update Temp"));
 
             foreach (var candidate in candidates)
             {
@@ -530,6 +531,8 @@ namespace Clipman
             public string TagName { get; set; }
             public string HtmlUrl { get; set; }
             public string Body { get; set; }
+            public bool Draft { get; set; }
+            public bool Prerelease { get; set; }
             public List<GitHubReleaseAsset> Assets { get; set; }
         }
 

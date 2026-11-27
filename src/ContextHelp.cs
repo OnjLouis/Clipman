@@ -110,8 +110,38 @@ namespace Clipman
             return parent;
         }
 
+        private static readonly Dictionary<string, string> EntryDetailInstructions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            { "Name", "The label assigned to this clip. Change it in Entry Properties." },
+            { "Group", "The group assigned to this clip. Use the group filter to find clips in that group." },
+            { "Device", "The device that recorded or created this clip." },
+            { "Pinned", "A pinned clip is protected from ordinary history limits and bulk clearing." },
+            { "Template", "A template expands supported fields, such as the current date, when you copy the full clip from History." },
+            { "Added", "When this clip was first saved to History." },
+            { "Last used", "When Clipman last recorded this clip as used. This can differ from when it was added." },
+            { "Manual order", "The stored position used when History is sorted in Manual order." },
+            { "Text length", "The length of this clip's stored plain text, including spaces and line breaks." },
+            { "Links", "The number of web addresses found in the stored text. The Links list lets you copy or open individual addresses." },
+            { "Formatting", "The stored rich-text formats or the type, dimensions and size of an embedded image." },
+            { "Entry ID", "A unique identifier Clipman uses to recognize this entry independently of its name and text." },
+            { "Selected entries", "The number of History entries combined in this review." },
+            { "Combined text length", "The length of the preview text for all selected entries, including separators." },
+            { "Combined links", "The number of web addresses found in the preview text for all selected entries." }
+        };
+
+        private static string SelectedEntryDetail(Control control)
+        {
+            var list = control as ListView;
+            if (list == null || list.AccessibleName != "Entry details" || !(list.FindForm() is TextViewerForm) || list.SelectedItems.Count != 1)
+                return null;
+            var name = list.SelectedItems[0].Text;
+            return EntryDetailInstructions.ContainsKey(name) ? name : null;
+        }
+
         internal static string ControlName(Control control)
         {
+            var detail = SelectedEntryDetail(control);
+            if (detail != null) return detail;
             for (var current = control; current != null && !(current is Form); current = current.Parent)
             {
                 if (!string.IsNullOrWhiteSpace(current.AccessibleName)) return current.AccessibleName;
@@ -127,6 +157,8 @@ namespace Clipman
 
         internal static string Description(Control control)
         {
+            var detail = SelectedEntryDetail(control);
+            if (detail != null) return EntryDetailInstructions[detail];
             if (control is FocusableImagePreview) return "Read-only preview of the selected embedded image. Copy the history entry to retain its image data; editing its name does not change the image.";
             if (control.FindForm() is ExportPasswordForm && ControlName(control) == "Use no password")
                 return "Create a readable, unencrypted export after confirmation. This does not remove encryption from the live history.";

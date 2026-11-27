@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -52,6 +53,8 @@ namespace Clipman.Tests
             Run("encrypted database round trip", EncryptedDatabaseRoundTrip);
             Run("URL length is bounded before presentation or fetch", UrlLengthIsBounded);
             Run("Open Link accepts only standalone web links", OpenLinkAcceptsOnlyStandaloneWebLinks);
+            Run("F4 accepts keyboard actions on selected preview text", EntryPreviewHandlesSelectionShortcuts);
+            Run("clipboard text fields leave word navigation to Windows", ClipboardTextFieldsUseNativeWordNavigation);
             Run("URL-only clipboard items are imported as links", UrlOnlyClipboardItemsAreImportedAsLinks);
             Run("URL labels accept characters that are illegal in Windows paths", UrlLabelsAcceptWindowsPathCharacters);
             Run("website title safety distinguishes readable slugs from capability tokens", WebsiteTitleSafetyDistinguishesReadableSlugs);
@@ -61,6 +64,8 @@ namespace Clipman.Tests
             Run("runtime logs rotate with a bounded generation count", RuntimeLogsRotateWithBoundedGenerations);
             Run("the updater selects the Windows package when a release has several ZIP assets", UpdaterSelectsWindowsPackageFromMixedReleaseAssets);
             Run("the updater skips newer releases without a Windows package", UpdaterSkipsReleasesWithoutWindowsPackage);
+            Run("Windows update signatures bind the package bytes and version", WindowsUpdateSignaturesBindPackageAndVersion);
+            Run("the Windows updater restores old resources after replacement fails", WindowsUpdateRestoresPreviousFiles);
             Run("image preview is keyboard focusable and accessible", ImagePreviewIsKeyboardFocusable);
             Run("image viewers preserve bytes, dates and history", ImageViewerFilesPreserveHistory);
             Run("embedded image clipboard includes an Explorer file drop", EmbeddedImageClipboardIncludesExplorerFileDrop);
@@ -912,6 +917,131 @@ namespace Clipman.Tests
                 "Ordinary prose containing an URL must not be opened as a link.");
             Assert(!LinkPresentation.TryGetWebUri(new ClipEntry { Text = "clipman://example.com/setup" }, out uri),
                 "Clipman configuration links must not be opened by the browser shortcut.");
+        }
+
+        private static void EntryPreviewHandlesSelectionShortcuts()
+        {
+            const string first = "https://example.com/a(b)";
+            const string second = "http://example.org/q?part=2";
+            const string post = "Read (" + first + ").\r\nThen " + second + " or clipman://example.net.";
+            var start = post.IndexOf(first, StringComparison.Ordinal);
+            var secondStart = post.IndexOf(second, StringComparison.Ordinal);
+            Assert(LinkPresentation.WebUriAtSelection(post, start + first.Length, 0).AbsoluteUri == first,
+                "F4 included wrapping prose punctuation or lost a URL parenthesis.");
+            Assert(LinkPresentation.WebUriAtSelection(post, secondStart + 2, 5).AbsoluteUri == second,
+                "Selecting part of a link did not resolve its full URL.");
+            Assert(LinkPresentation.WebUriAtSelection(post, 0, post.Length) == null &&
+                   LinkPresentation.WebUriAtSelection(post, 0, 4) == null &&
+                   LinkPresentation.WebUriAtSelection(post, post.IndexOf("clipman:", StringComparison.Ordinal), 0) == null,
+                "F4 accepted an ambiguous selection, ordinary text, or a private configuration link.");
+
+            string copied = null;
+            Uri opened = null;
+            var details = new[] { new KeyValuePair<string, string>("Name", "Private post name"),
+                new KeyValuePair<string, string>("Device", "Private device name") };
+            using (var form = new TextViewerForm("Entry preview", post + "\r\n" + first, "Clipboard entry text", "", false, details, null,
+                selection => { copied = selection; return true; }, uri => opened = uri))
+            {
+                form.ShowInTaskbar = false;
+                form.StartPosition = FormStartPosition.Manual;
+                form.Location = new Point(-32000, -32000);
+                Exception failure = null;
+                form.Shown += (sender, args) => form.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                            var field = form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<TextBoxBase>().Single();
+                            Assert(field.Focused, "F4 did not focus the preview text.");
+                            var processKey = typeof(TextViewerForm).GetMethod("ProcessCmdKey", BindingFlags.Instance | BindingFlags.NonPublic);
+                            Func<Keys, bool> press = keys => (bool)processKey.Invoke(form, new object[] { new Message(), keys });
+                            PressPreviewKey(field, Keys.Enter);
+                            Assert(copied == null && form.Visible, "An empty Enter selection copied something or dismissed F4.");
+                            field.Select(0, 4);
+                            PressPreviewKey(field, Keys.Enter);
+                            Assert(copied == "Read" && form.Visible, "Enter did not copy just the selection and keep F4 open.");
+                            field.Select(secondStart + 2, 0);
+                            Assert(press(Keys.Alt | Keys.Enter) && opened != null && opened.AbsoluteUri == second && form.Visible,
+                                "Alt+Enter did not open the link at the cursor and keep F4 open.");
+                            var lists = form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<ListView>().ToArray();
+                            var links = lists.Single(list => list.AccessibleName == "Links");
+                            Assert(links.AccessibilityObject.Name == "Links" && links.View == View.Details && links.Items.Count == 2 &&
+                                   links.Items[0].Text == first && links.Items[1].Text == second,
+                                "The Links list did not expose unique web addresses in reading order.");
+                            PressPreviewKey(field, Keys.Tab);
+                            Assert(links.Focused && links.SelectedIndices[0] == 0, "Tab did not reach the Links list with the first link selected.");
+                            PressPreviewKey(links, Keys.Down);
+                            Assert(links.SelectedIndices[0] == 1, "Down did not select the next link.");
+                            Assert(press(Keys.Control | Keys.C) && copied == second, "Ctrl+C did not copy the exact selected URL.");
+                            opened = null;
+                            PressPreviewKey(links, Keys.Enter);
+                            Assert(opened != null && opened.AbsoluteUri == second && form.Visible, "Enter did not open the selected link and keep F4 open.");
+                            PressPreviewKey(links, Keys.Apps);
+                            var menu = links.ContextMenuStrip;
+                            Assert(menu.Visible && menu.Items.Count == 2 && menu.Items[0].Text.StartsWith("&Copy Link") && menu.Items[1].Text.StartsWith("&Open Link"),
+                                "The Application key did not expose the link commands.");
+                            copied = null;
+                            menu.Items[0].PerformClick();
+                            Assert(copied == second, "The link context menu did not act on the selected row.");
+                            menu.Close();
+                            links.Focus();
+                            PressPreviewKey(links, Keys.Tab);
+                            var metadata = lists.Single(list => list.AccessibleName == "Entry details");
+                            Assert(metadata.Focused && ContextHelp.ControlName(metadata) == "Name" &&
+                                   ContextHelp.Description(metadata).Contains("label assigned"), "The first detail did not expose its own F1 help.");
+                            PressPreviewKey(metadata, Keys.Down);
+                            Assert(ContextHelp.ControlName(metadata) == "Device" && ContextHelp.Description(metadata).Contains("device that recorded") &&
+                                   !ContextHelp.Description(metadata).Contains("Private"), "Details help did not follow the selected property or exposed its value.");
+                    }
+                    catch (Exception error)
+                    {
+                        failure = error;
+                    }
+                    finally
+                    {
+                        form.Close();
+                    }
+                }));
+                form.ShowDialog();
+                if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+            }
+        }
+
+        private static void PressPreviewKey(Control control, Keys key)
+        {
+            Assert(QueuedCopyTimingWindow.PostMessage(control.Handle, 0x0100, (IntPtr)key, IntPtr.Zero), "Could not post the key down message.");
+            Assert(QueuedCopyTimingWindow.PostMessage(control.Handle, 0x0101, (IntPtr)key, IntPtr.Zero), "Could not post the key up message.");
+            Application.DoEvents();
+        }
+
+        private static void ClipboardTextFieldsUseNativeWordNavigation()
+        {
+            const string text = "First word https://example.org/article";
+            var richText = new RichTextPayload
+            {
+                Version = 1,
+                RtfBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(@"{\rtf1 First word https://example.org/article}")),
+                PreferredFormat = "Rtf"
+            };
+            using (var preview = new TextViewerForm(text))
+            using (var richPreview = new TextViewerForm("Clipman Entry Text", text, "Clipboard entry text", "", false, null, richText))
+            using (var properties = new EntryPropertiesForm(new ClipEntry { Text = text }, false, null, null, false))
+            {
+                var plainField = preview.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<TextBox>().Single();
+                var richField = richPreview.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<RichTextBox>().Single();
+                var editor = properties.Controls.OfType<TextBox>().Single(control => control.AccessibleName == "Clipboard text");
+                var onKeyDown = typeof(Control).GetMethod("OnKeyDown", BindingFlags.Instance | BindingFlags.NonPublic);
+                foreach (var field in new TextBoxBase[] { plainField, richField, editor })
+                {
+                    foreach (var chord in new[] { Keys.Control | Keys.Left, Keys.Control | Keys.Right,
+                        Keys.Control | Keys.Shift | Keys.Left, Keys.Control | Keys.Shift | Keys.Right })
+                    {
+                        var key = new KeyEventArgs(chord);
+                        onKeyDown.Invoke(field, new object[] { key });
+                        Assert(!key.Handled && !key.SuppressKeyPress,
+                            field.AccessibleName + " intercepted native Windows word navigation for " + chord + ".");
+                    }
+                }
+            }
         }
 
         private static void LinkLabelsRemoveUnsafeUnicode()
@@ -2607,25 +2737,25 @@ namespace Clipman.Tests
                 "The updater release model or package selector could not be located.");
 
             var release = Activator.CreateInstance(releaseType);
-            releaseType.GetProperty("TagName").SetValue(release, "v3.1.0", null);
+            releaseType.GetProperty("TagName").SetValue(release, "v3.1.15", null);
             var assets = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(assetType));
             foreach (var name in new[]
             {
-                "Clipman-3.1.0-Source.zip",
-                "Clipman-3.1.0.zip",
-                "Clipman-macOS-3.1.0.zip"
+                "Clipman-3.1.15-Source.zip",
+                "Clipman-3.1.15.zip", "Clipman-Windows-x64-3.1.15.zip", "Clipman-Windows-x64-3.1.15.zip.sig",
+                "Clipman-macOS-3.1.15.zip"
             })
             {
                 var asset = Activator.CreateInstance(assetType);
                 assetType.GetProperty("Name").SetValue(asset, name, null);
-                assetType.GetProperty("BrowserDownloadUrl").SetValue(asset, "https://example.invalid/" + name, null);
+                assetType.GetProperty("BrowserDownloadUrl").SetValue(asset, "https://github.com/OnjLouis/Clipman/releases/download/" + releaseType.GetProperty("TagName").GetValue(release, null) + "/" + name, null);
                 assets.Add(asset);
             }
             releaseType.GetProperty("Assets").SetValue(release, assets, null);
 
             var selected = selector.Invoke(null, new[] { release });
             var selectedName = selected == null ? string.Empty : (string)assetType.GetProperty("Name").GetValue(selected, null);
-            Assert(selectedName == "Clipman-3.1.0.zip",
+            Assert(selectedName == "Clipman-Windows-x64-3.1.15.zip",
                 "The updater selected '" + selectedName + "' instead of the Windows program ZIP.");
         }
 
@@ -2641,9 +2771,9 @@ namespace Clipman.Tests
             var releases = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(releaseType));
             foreach (var fixture in new[]
             {
-                new { Tag = "v3.1.2", Assets = new[] { "Clipman-Android-3.1.2.apk", "Source-Clipman-3.1.2.zip" } },
-                new { Tag = "v3.1.1", Assets = new[] { "Clipman-3.1.1.zip", "Clipman-Android-3.1.1.apk" } },
-                new { Tag = "v3.0.0", Assets = new[] { "Clipman-3.0.0.zip" } }
+                new { Tag = "v3.1.17", Assets = new[] { "Clipman-Windows-x64-3.1.17.zip" } },
+                new { Tag = "v3.1.16", Assets = new[] { "Clipman-3.1.16.zip", "Clipman-Android-3.1.16.apk" } },
+                new { Tag = "v3.1.15", Assets = new[] { "Clipman-Windows-x64-3.1.15.zip", "Clipman-Windows-x64-3.1.15.zip.sig" } }
             })
             {
                 var release = Activator.CreateInstance(releaseType);
@@ -2653,7 +2783,7 @@ namespace Clipman.Tests
                 {
                     var asset = Activator.CreateInstance(assetType);
                     assetType.GetProperty("Name").SetValue(asset, name, null);
-                    assetType.GetProperty("BrowserDownloadUrl").SetValue(asset, "https://example.invalid/" + name, null);
+                    assetType.GetProperty("BrowserDownloadUrl").SetValue(asset, "https://github.com/OnjLouis/Clipman/releases/download/" + releaseType.GetProperty("TagName").GetValue(release, null) + "/" + name, null);
                     assets.Add(asset);
                 }
                 releaseType.GetProperty("Assets").SetValue(release, assets, null);
@@ -2662,8 +2792,101 @@ namespace Clipman.Tests
 
             var selected = selector.Invoke(null, new object[] { releases });
             var selectedTag = selected == null ? string.Empty : (string)releaseType.GetProperty("TagName").GetValue(selected, null);
-            Assert(selectedTag == "v3.1.1",
+            Assert(selectedTag == "v3.1.15",
                 "The updater selected '" + selectedTag + "' instead of the newest release with a Windows package.");
+        }
+
+        private static void WindowsUpdateSignaturesBindPackageAndVersion()
+        {
+            var package = Encoding.ASCII.GetBytes("exact package bytes");
+            var version = new Version(3, 1, 15);
+            var url = "https://github.com/OnjLouis/Clipman/releases/download/v3.1.15/Clipman-Windows-x64-3.1.15.zip";
+            Assert(WindowsUpdateSignature.DownloadVersion(url) == version, "A current Windows release must resolve to its exact version.");
+            foreach (var badUrl in new[]
+            {
+                url.Replace("https:", "http:"), url.Replace("github.com", "example.invalid"),
+                url.Replace("x64", "arm64"), url.Replace("v3.1.15", "v3.1.16"), url + "?download"
+            })
+            {
+                Assert(WindowsUpdateSignature.DownloadVersion(badUrl) == null, "An unexpected update URL was accepted.");
+            }
+            using (var rsa = new RSACryptoServiceProvider(3072, new CspParameters(24) { Flags = CspProviderFlags.CreateEphemeralKey }))
+            using (var hash = SHA256.Create())
+            {
+                var algorithm = CryptoConfig.MapNameToOID("SHA256");
+                var digest = BitConverter.ToString(hash.ComputeHash(package)).Replace("-", "").ToLowerInvariant();
+                var message = Encoding.ASCII.GetBytes("Clipman Windows x64 ZIP\n3.1.15\n" + digest + "\n");
+                var signature = rsa.SignData(message, algorithm);
+                var publicKey = rsa.ToXmlString(false);
+                using (var input = new MemoryStream(package))
+                {
+                    WindowsUpdateSignature.Verify(input, signature, version, publicKey);
+                }
+                AssertWindowsUpdateRejected(package, null, version, publicKey);
+                AssertWindowsUpdateRejected(package, signature.Take(signature.Length - 1).ToArray(), version, publicKey);
+                AssertWindowsUpdateRejected(package, signature.Concat(new byte[] { 0 }).ToArray(), version, publicKey);
+                AssertWindowsUpdateRejected(package, new byte[signature.Length], version, publicKey);
+                AssertWindowsUpdateRejected(package, signature, new Version(3, 1, 16), publicKey);
+                package[0] ^= 1;
+                AssertWindowsUpdateRejected(package, signature, version, publicKey);
+            }
+        }
+
+        private static void AssertWindowsUpdateRejected(byte[] package, byte[] signature, Version version, string publicKey)
+        {
+            using (var input = new MemoryStream(package))
+            {
+                try
+                {
+                    WindowsUpdateSignature.Verify(input, signature, version, publicKey);
+                }
+                catch (InvalidDataException)
+                {
+                    return;
+                }
+                throw new InvalidOperationException("An invalid Windows update signature was accepted.");
+            }
+        }
+
+        private static void WindowsUpdateRestoresPreviousFiles()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ClipmanUpdateTest-" + Guid.NewGuid().ToString("N"));
+            var target = Path.Combine(root, "install");
+            var stage = Path.Combine(root, "stage");
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(target, "Settings"));
+                Directory.CreateDirectory(Path.Combine(stage, "sounds"));
+                var original = Path.Combine(target, "clipman.exe");
+                File.Copy(typeof(Program).Assembly.Location, original);
+                File.Copy(original, Path.Combine(stage, "clipman.exe"));
+                File.WriteAllText(Path.Combine(target, "Manual.html"), "old manual");
+                File.WriteAllText(Path.Combine(target, "Settings", "sentinel"), "existing settings and history");
+                File.WriteAllText(Path.Combine(stage, "Manual.html"), "new manual");
+                File.WriteAllText(Path.Combine(stage, "LICENSE.txt"), "new license");
+                File.WriteAllText(Path.Combine(stage, "sqlite3.dll"), "new library");
+                File.WriteAllText(Path.Combine(stage, "sounds", "copy.wav"), "new sound");
+                var version = typeof(Program).Assembly.GetName().Version;
+                var current = new Version(version.Major, version.Minor, version.Build);
+                bool rejected = false;
+                using (File.Open(original, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    try { Program.InstallWindowsUpdate(stage, target, current); }
+                    catch (IOException) { rejected = true; }
+                }
+                Assert(rejected, "The open executable should prevent installation.");
+                Assert(File.ReadAllText(Path.Combine(target, "Manual.html")) == "old manual", "The existing manual was not restored.");
+                Assert(!File.Exists(Path.Combine(target, "LICENSE.txt")) && !Directory.Exists(Path.Combine(target, "sounds")), "Rollback left staged files behind.");
+                Assert(!Directory.GetFileSystemEntries(target, ".clipman-update*").Any(), "Rollback left a temporary file behind.");
+                Program.InstallWindowsUpdate(stage, target, current);
+                Assert(File.ReadAllText(Path.Combine(target, "Manual.html")) == "new manual", "The verified update did not replace the manual.");
+                Assert(File.ReadAllText(Path.Combine(target, "Settings", "sentinel")) == "existing settings and history", "The update changed live data.");
+                Assert(!Directory.GetFileSystemEntries(target, ".clipman-update*").Any(), "Successful replacement left a temporary file behind.");
+            }
+            finally
+            {
+                Directory.Delete(root, true);
+            }
         }
 
         private static void SingleModifierHotkeyWarningPreferenceDefaultsAndRoundTrips()

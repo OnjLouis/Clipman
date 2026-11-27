@@ -10,6 +10,9 @@ namespace Clipman
     internal static class LinkPresentation
     {
         internal const int MaximumUrlCharacters = 8192;
+        private static readonly Regex PreviewWebLink = new Regex(
+            @"(?<![\w/:])https?://[^\s<>'""\p{Cc}]+",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
         private static readonly HashSet<string> DocumentExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -38,6 +41,63 @@ namespace Clipman
             if (!TryGetUri(entry, out uri)) return false;
             return uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
                    uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static Uri WebUriAtSelection(string text, int start, int length)
+        {
+            Uri result = null;
+            foreach (var link in PreviewLinks(text))
+            {
+                if (link.Item1 > start + length) break;
+                var overlaps = length == 0
+                    ? start <= link.Item2
+                    : start < link.Item2 && link.Item1 < start + length;
+                if (!overlaps) continue;
+                if (result != null) return null;
+                result = link.Item3;
+            }
+            return result;
+        }
+
+        internal static IEnumerable<Uri> WebUrisIn(string text)
+        {
+            return PreviewLinks(text).Select(link => link.Item3);
+        }
+
+        private static IEnumerable<Tuple<int, int, Uri>> PreviewLinks(string text)
+        {
+            for (var match = PreviewWebLink.Match(text ?? string.Empty); match.Success; match = match.NextMatch())
+            {
+                if (match.Length > MaximumUrlCharacters) continue;
+                var candidate = match.Value;
+                var length = PreviewUrlEnd(candidate);
+                Uri uri;
+                if (TryGetUri(candidate.Substring(0, length), out uri))
+                    yield return Tuple.Create(match.Index, match.Index + length, uri);
+            }
+        }
+
+        private static int PreviewUrlEnd(string candidate)
+        {
+            const string closing = ")]}";
+            int?[] unmatched = null;
+            var end = candidate.Length;
+            while (end > 0)
+            {
+                var last = candidate[end - 1];
+                if (".,;:!?".IndexOf(last) < 0)
+                {
+                    var index = closing.IndexOf(last);
+                    if (index < 0) break;
+                    if (unmatched == null) unmatched = new int?[closing.Length];
+                    var opening = "([{"[index];
+                    var excess = unmatched[index] ?? (candidate.Count(c => c == last) - candidate.Count(c => c == opening));
+                    if (excess <= 0) break;
+                    unmatched[index] = excess - 1;
+                }
+                end--;
+            }
+            return end;
         }
 
         internal static bool IsUrlWithinLimit(Uri uri)

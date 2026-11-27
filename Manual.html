@@ -105,6 +105,13 @@
   <ul>
     <li>Fixed VoiceOver double-tap to copy from Text and Rich Text history, including Gmail addresses that previously did not copy.</li>
   </ul>
+  <h3>3.1.15 Windows</h3>
+  <ul>
+    <li>F4 lists web addresses found in the clip text. Use Tab to reach Links, Ctrl+C to copy an address, Enter to open it, or the Application key or Shift+F10 for link actions. In Details, F1 explains the selected field.</li>
+    <li>Text review and Entry Properties use standard Windows word navigation.</li>
+    <li>Clipman now verifies a publisher signature before installing a downloaded Windows update. Version 3.1.14 and earlier require a one-time manual upgrade to this version.</li>
+  </ul>
+
   <h3>3.1.15 macOS</h3>
   <ul>
     <li>The F4 review window lists web addresses found in the clip text. Tab moves to Links, Command+C copies the selected address, and Return opens it.</li>
@@ -924,7 +931,7 @@
       <tr><td>Pin or unpin selected entry</td><td><code>Shift+Enter</code></td><td><code>Shift+Enter</code></td></tr>
       <tr><td>Open Entry Properties</td><td><code>F2</code></td><td><code>F2</code></td></tr>
       <tr><td>View selected text in a read-only window</td><td><code>F4</code></td><td><code>F4</code></td></tr>
-      <tr><td>Move by URL/code boundary in text review or Entry Properties text</td><td><code>Ctrl+Left</code> or <code>Ctrl+Right</code></td><td><code>Option+Left</code> or <code>Option+Right</code></td></tr>
+      <tr><td>Move by word or boundary in text review or Entry Properties text</td><td><code>Ctrl+Left</code> or <code>Ctrl+Right</code></td><td><code>Option+Left</code> or <code>Option+Right</code></td></tr>
       <tr><td>Assign selected entries to a group</td><td><code>Ctrl+G</code></td><td><code>Command+G</code></td></tr>
       <tr><td>Move focus to the group filter</td><td><code>Alt+G</code></td><td><code>Option+G</code></td></tr>
       <tr><td>Jump to one of the first ten group filters</td><td><code>Alt+1</code> to <code>Alt+0</code></td><td><code>Option+1</code> to <code>Option+0</code></td></tr>
@@ -1020,9 +1027,11 @@
   <h2 id="entry-names-and-text">Entry Names and Text</h2>
   <p>Use <code>F2</code> to open Entry Properties for the selected entry. You can add a short name or hint, assign a group, configure a Quick Paste hotkey, and edit the stored clipboard text itself. Enter adds a new line in the Clipboard text field; tab to Save when finished, press <code>Ctrl+Enter</code> on Windows or Linux, or press <code>Command+Enter</code> on Mac. Windows also accepts <code>Alt+S</code>, and Mac accepts <code>Command+S</code>. This is useful when a clip contains extra lines or unwanted surrounding text and you want to clean it without using another editor.</p>
 
-  <p>In Entry Properties and the <code>F4</code> text review window, word navigation is tuned for URLs and code-like strings. On Windows, <code>Ctrl+Left</code> and <code>Ctrl+Right</code> stop at punctuation and symbol boundaries such as slashes, question marks, ampersands, equals signs, dashes, and underscores. On Mac, use <code>Option+Left</code> and <code>Option+Right</code>. Add <code>Shift</code> on either platform to extend the selection.</p>
+  <p>In Entry Properties and the <code>F4</code> text review window, <code>Ctrl+Left</code> and <code>Ctrl+Right</code> use standard Windows word navigation. On Mac, <code>Option+Left</code> and <code>Option+Right</code> stop at punctuation and symbol boundaries in URLs and code-like strings. Add <code>Shift</code> on either platform to extend the selection.</p>
 
-  <p>The <code>F4</code> text review window shows the clipboard text first, followed by a separate Details list or table in tab order. Details include useful metadata such as name, group, source device, pinned/template state, added and last-used times, manual order where present, text length, link count, and entry ID.</p>
+  <p>The <code>F4</code> text review window shows the clipboard text first. If the clip contains web addresses, <code>Tab</code> moves from the text to a separate <strong>Links</strong> list. Use the arrow keys to select an address, <code>Ctrl+C</code> (<code>Command+C</code> on Mac) to copy it, or <code>Enter</code> (<code>Return</code> on Mac) to open it in the default browser. On Windows, the Application key or <code>Shift+F10</code> opens the link's context menu.</p>
+  <p>The Details list follows. Use the arrow keys to select a detail and press <code>F1</code> for an explanation of that field. Closing help returns you to the Details list.</p>
+  <p>While the review text has focus, highlight text and press <code>Ctrl+C</code> (<code>Command+C</code> on Mac) to copy the selection. The review stays open after copying or opening a link. <code>Alt+Enter</code> (<code>Option+Return</code> on Mac) also opens a web address at the cursor in the preview text or the selected address in Links.</p>
 
   <p>For example, an entry containing <code>1234</code> can be shown as <code>Test: 1234</code>. The name is metadata only: copying, cutting, exporting to text, and viewing full text use the clipboard text without the name.</p>
 
@@ -1038,8 +1047,6 @@
   <p>Clipman gives unnamed links a readable label from the address itself, such as <strong>Issues 50; github.com/OnjLouis/Clipman/issues/50</strong>. This works immediately, including for existing history, and never contacts the website. An F2 name remains first and always takes precedence.</p>
 
   <p>On Android and iOS, <strong>Copy link names by default</strong> in mobile Settings controls how an ordinary activation copies a named link. It is off by default, so activation copies the unchanged link and the entry menu or screen-reader actions offer <strong>Copy Name and Link</strong>. When enabled, activation places the saved Name on the first line and the link on the next line, while the alternative action becomes <strong>Copy Link</strong>. This avoids presenting a second action that merely repeats the default behaviour.</p>
-
-  <p>On Mac, use <code>Command+C</code> to copy highlighted text in the <code>F4</code> review window. If the clip text contains web addresses, press <code>Tab</code> to reach <strong>Links</strong>. Use the arrow keys to select an address, <code>Command+C</code> to copy it, or <code>Return</code> to open it in your default browser. In <strong>Details</strong>, select a row and press <code>F1</code> for help on that field.</p>
 
   <p>For an unnamed HTTP or HTTPS link, use <strong>Use website title as name</strong> from the entry menu when you deliberately want Clipman to contact that site once. Clipman explains that the website can see the request and asks before continuing. The desktop confirmation includes <strong>Do not show this again</strong>; restore it with <strong>Ask before contacting a website for its title</strong> in Preferences. Clipman sends the selected link request without cookies, credentials, or other clipboard content. A deliberate request may contact an otherwise safe public link even when its path or query contains tracking data or looks token-like, but Clipman still refuses embedded credentials, local or private destinations, non-standard ports, unsafe redirects and overlong addresses. Automatic title naming remains more conservative and does not contact capability-looking links. A useful returned title is stored in the ordinary Name field, where it is visible and editable in Entry Properties. If the site cannot be reached or does not return a usable web-page title, Clipman instead saves the same generic offline label already shown for the URL; this works for direct downloads and ordinary pages without relying on a list of file extensions. The exact URL is never replaced and remains available in F4, Entry Properties, and copy operations. Because this is an ordinary name rather than a separate preview file, it follows the entry to other synced clients.</p>
 
@@ -1230,7 +1237,8 @@
 
   <p>When Windows uses the install-local <code>Settings</code> folder beside <code>clipman.exe</code>, Clipman writes a small shared update-state file there. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance from that same shared installation sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy. A custom data folder elsewhere may still share history and settings, but it does not coordinate executable replacement; each separately installed Clipman updates normally without being stopped by another machine's build marker.</p>
 
-  <p>During an online or automatic update, Clipman downloads the release ZIP to a temporary folder, asks other instances running from the same install-local shared folder to close briefly, replaces the app files while preserving <code>Settings</code>, then starts the updated copy. When the new copy starts it publishes the new shared update state, so other computers using that same shared installation can restart after their cloud service or network share exposes the updated executable. Separately installed clients that share only a custom data folder remain running and use their own updater.</p>
+  <p>When upgrading from Windows 3.1.14 or earlier, download <code>Clipman-Windows-x64-3.1.15.zip</code> from <a href="https://github.com/OnjLouis/Clipman/releases/tag/v3.1.15">the Windows release</a>. Exit Clipman on computers that use that same install folder, extract the ZIP into the existing Clipman folder, and start <code>clipman.exe</code>. Keep the existing <code>Settings</code> folder and any separate data folder.</p>
+  <p>For future online and automatic Windows updates, Clipman downloads the ZIP and its publisher signature to a temporary location and verifies both before replacing app files. If verification fails, the installed files are kept. For updates to a shared installation, Clipman asks other instances using that same installation to close briefly. They can restart after the updated executable is available on the cloud service or network share. Separately installed clients that share only a custom data folder continue to use their own updater.</p>
 
   <h2 id="iphone-ipad-setup">iPhone and iPad Setup</h2>
 

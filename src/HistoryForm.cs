@@ -3222,10 +3222,12 @@ namespace Clipman
                 "Clipman Entry Text",
                 text,
                 "Clipboard entry text",
-                "Read-only clipboard entry text.",
+                "Use Control+C to copy highlighted text. Tab moves to Links when the clip contains web links.",
                 false,
                 details,
-                selected.Count == 1 ? selected[0].RichText : null))
+                selected.Count == 1 ? selected[0].RichText : null,
+                selection => copyPlainText(selection, null),
+                OpenWebLink))
             {
                 viewer.ShowDialog(this);
             }
@@ -3299,11 +3301,7 @@ namespace Clipman
 
             try
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = uri.AbsoluteUri,
-                    UseShellExecute = true
-                });
+                OpenWebLink(uri);
                 statusText.Text = "Opened link in the default browser.";
                 CloseHistoryWindow();
             }
@@ -3312,6 +3310,11 @@ namespace Clipman
                 playSkipSound();
                 statusText.Text = "Could not open the selected link: " + ex.Message;
             }
+        }
+
+        private static void OpenWebLink(Uri uri)
+        {
+            Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true });
         }
 
         private void UseWebsiteTitleAsName()

@@ -191,7 +191,6 @@ namespace Clipman
                     ? "This image content cannot be edited. Use the Name field to rename how the image appears."
                     : "Clipboard text stored for this entry. Editing this field changes what Clipman copies for this entry."
             };
-            TextBoundaryNavigator.Attach(textBox);
             Controls.Add(textBox);
 
             var insertPreset = new Button

@@ -11,19 +11,22 @@ namespace Clipman
 {
     internal static partial class Program
     {
+        private const int MaximumWindowsUpdateBytes = 64 * 1024 * 1024;
+
         private static void ApplyUpdateFromCommandLine(string[] args)
         {
+            string targetDir;
+            string exePath;
+            var noRestart = args.Any(arg => string.Equals(arg, "--update-no-restart", StringComparison.OrdinalIgnoreCase));
+            TryGetOptionValue(args, "--update-target", out targetDir);
+            TryGetOptionValue(args, "--update-exe", out exePath);
+            var canRestart = false;
             try
             {
                 string zipUrl;
-                string targetDir;
-                string exePath;
                 string tempBase;
                 string pidText;
-                var noRestart = args.Any(arg => string.Equals(arg, "--update-no-restart", StringComparison.OrdinalIgnoreCase));
                 TryGetOptionValue(args, "--update-url", out zipUrl);
-                TryGetOptionValue(args, "--update-target", out targetDir);
-                TryGetOptionValue(args, "--update-exe", out exePath);
                 TryGetOptionValue(args, "--update-temp", out tempBase);
                 TryGetOptionValue(args, "--update-wait-pid", out pidText);
 
@@ -34,6 +37,13 @@ namespace Clipman
                     throw new InvalidOperationException("The updater was not given enough information to install the update.");
                 }
 
+                exePath = Path.GetFullPath(exePath);
+                targetDir = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.Equals(exePath, Path.Combine(targetDir, "clipman.exe"), StringComparison.OrdinalIgnoreCase) || !File.Exists(exePath))
+                {
+                    throw new InvalidOperationException("The updater must target an existing Clipman installation.");
+                }
+
                 WriteUpdateHistory(targetDir, "Update command received.");
                 int processId;
                 if (int.TryParse(pidText, out processId) && processId > 0)
@@ -42,12 +52,16 @@ namespace Clipman
                     WaitForProcessExit(processId);
                 }
 
-                ApplyUpdate(zipUrl, targetDir, exePath, string.IsNullOrWhiteSpace(tempBase) ? Path.GetTempPath() : tempBase, noRestart);
+                canRestart = !noRestart;
+                ApplyWindowsUpdate(zipUrl, targetDir, exePath, string.IsNullOrWhiteSpace(tempBase) ? Path.GetTempPath() : tempBase, noRestart, DownloadUpdateFile);
             }
             catch (Exception ex)
             {
                 WriteUpdateHistory(args, "ERROR: " + ex.Message);
                 WriteUpdaterLog(args, ex);
+                Environment.ExitCode = 1;
+                if (canRestart && !(ex is UpdateRollbackException)) TryRestartUpdatedApp(exePath, targetDir);
+                if (noRestart) return;
                 MessageBox.Show(
                     "Clipman update failed:" + Environment.NewLine + Environment.NewLine + ex.Message,
                     "Clipman updater",
@@ -56,8 +70,22 @@ namespace Clipman
             }
         }
 
-        private static void ApplyUpdate(string zipUrl, string targetDir, string exePath, string tempBase, bool noRestart)
+        internal static void ApplyWindowsUpdate(string zipUrl, string targetDir, string exePath, string tempBase, bool noRestart, Action<Uri, Stream, int> download)
         {
+            var version = WindowsUpdateSignature.DownloadVersion(zipUrl);
+            var current = InstalledUpdateVersion(exePath);
+            if (version == null || version <= current)
+            {
+                throw new InvalidDataException("The update must be a newer Windows release from the Clipman project.");
+            }
+
+            tempBase = Path.GetFullPath(tempBase).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(tempBase, targetDir, StringComparison.OrdinalIgnoreCase) ||
+                tempBase.StartsWith(targetDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("The Windows update must be staged outside the installed folder.");
+            }
+            CheckUpdatePath(tempBase, true);
             Directory.CreateDirectory(tempBase);
             var root = Path.Combine(tempBase, "ClipmanUpdate_" + Guid.NewGuid().ToString("N"));
             var zip = Path.Combine(root, "update.zip");
@@ -67,56 +95,34 @@ namespace Clipman
 
             try
             {
-                WriteUpdateHistory(targetDir, "Downloading update ZIP.");
-                DownloadUpdateZip(zipUrl, zip);
-
-                WriteUpdateHistory(targetDir, "Extracting update ZIP.");
-                ZipFile.ExtractToDirectory(zip, stage);
-
-                var source = FindUpdateSourceFolder(stage);
-                if (string.IsNullOrWhiteSpace(source))
+                WriteUpdateHistory(targetDir, "Downloading update publisher signature and ZIP.");
+                byte[] signature;
+                using (var signatureFile = new MemoryStream())
                 {
-                    throw new InvalidOperationException("The update ZIP does not contain clipman.exe.");
+                    download(new Uri(zipUrl + WindowsUpdateSignature.SignatureSuffix), signatureFile, WindowsUpdateSignature.SignatureBytes);
+                    signature = signatureFile.ToArray();
+                }
+                using (var archive = new FileStream(zip, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+                {
+                    download(new Uri(zipUrl), archive, MaximumWindowsUpdateBytes);
+                    archive.Position = 0;
+                    ExtractVerifiedWindowsUpdate(archive, signature, version, stage);
+                }
+                if (InstalledUpdateVersion(Path.Combine(stage, "clipman.exe")) != version)
+                {
+                    throw new InvalidDataException("The signed Windows update executable does not match the release version.");
                 }
 
                 WriteUpdateHistory(targetDir, "Requesting other shared-folder instances to close.");
                 SharedUpdateStateStore.PublishCloseRequest(Path.Combine(targetDir, "Settings"), exePath, 90);
                 Thread.Sleep(5000);
 
-                WriteUpdateHistory(targetDir, "Update source located. Applying files.");
-                Directory.CreateDirectory(targetDir);
-                CleanupObsoleteRootUpdateFolders(targetDir);
-                CleanupObsoleteFactorySoundBackups(targetDir);
-
-                foreach (var item in Directory.GetFileSystemEntries(source))
+                WriteUpdateHistory(targetDir, "Publisher signature verified. Applying files.");
+                if (InstalledUpdateVersion(exePath) >= version)
                 {
-                    var name = Path.GetFileName(item);
-                    if (IsPreservedRuntimeItem(name))
-                    {
-                        continue;
-                    }
-
-                    var destination = Path.Combine(targetDir, name);
-                    if (Directory.Exists(item))
-                    {
-                        if (IsFactoryReplacedDirectory(name))
-                        {
-                            ReplaceFactoryDirectory(item, destination);
-                        }
-                        else
-                        {
-                            ReplaceDirectory(item, destination);
-                        }
-                    }
-                    else
-                    {
-                        CopyFileWithRetry(item, destination);
-                    }
+                    throw new InvalidDataException("Another update already installed this version or a newer version of Clipman.");
                 }
-
-                TryDeleteFile(Path.Combine(targetDir, "README.md"));
-                CleanupObsoleteFactorySoundBackups(targetDir);
-                CleanupEmptyBackupFolders(targetDir);
+                InstallWindowsUpdate(stage, targetDir, current);
             }
             finally
             {
@@ -131,41 +137,6 @@ namespace Clipman
 
             WriteUpdateHistory(targetDir, "Update applied. Restarting Clipman.");
             TryRestartUpdatedApp(exePath, targetDir);
-        }
-
-        private static bool IsPreservedRuntimeItem(string name)
-        {
-            foreach (var preserved in new[] { "Settings", "Logs", "Backups" })
-            {
-                if (string.Equals(name, preserved, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool IsFactoryReplacedDirectory(string name)
-        {
-            return string.Equals(name, "sounds", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static void ReplaceFactoryDirectory(string source, string destination)
-        {
-            Directory.CreateDirectory(destination);
-            CopyFactoryDirectoryBestEffort(source, destination);
-            PruneFactoryDirectoryBestEffort(source, destination);
-        }
-
-        private static void ReplaceDirectory(string source, string destination)
-        {
-            if (Directory.Exists(destination))
-            {
-                DeleteDirectoryWithRetry(destination);
-            }
-
-            CopyDirectory(source, destination);
         }
 
         private static void CleanupObsoleteRootUpdateFolders(string targetDir)
@@ -249,26 +220,73 @@ namespace Clipman
             }
         }
 
-        private static void DownloadUpdateZip(string zipUrl, string destination)
+        private static void ExtractVerifiedWindowsUpdate(Stream archive, byte[] signature, Version version, string stage)
         {
-            NetworkSecurity.EnableModernTls();
-            using (var client = new WebClient())
+            WindowsUpdateSignature.Verify(archive, signature, version);
+            archive.Position = 0;
+            using (var zip = new ZipArchive(archive, ZipArchiveMode.Read, true))
             {
-                client.Headers[HttpRequestHeader.UserAgent] = "Clipman updater";
-                client.DownloadFile(zipUrl, destination);
+                zip.ExtractToDirectory(stage);
             }
         }
 
-        private static string FindUpdateSourceFolder(string stage)
+        private static void DownloadUpdateFile(Uri url, Stream destination, int maximumBytes)
         {
-            var direct = Path.Combine(stage, "clipman.exe");
-            if (File.Exists(direct))
+            NetworkSecurity.EnableModernTls();
+            for (var redirects = 0; redirects < 6; redirects++)
             {
-                return stage;
-            }
+                if (url.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(url.UserInfo) || !url.IsDefaultPort)
+                {
+                    throw new InvalidDataException("The Windows update download must use HTTPS.");
+                }
 
-            var candidates = Directory.GetFiles(stage, "clipman.exe", SearchOption.AllDirectories);
-            return candidates.Length == 0 ? string.Empty : Path.GetDirectoryName(candidates[0]);
+                var request = (HttpWebRequest)WebRequest.Create(url);
+                request.UserAgent = "Clipman updater";
+                request.AllowAutoRedirect = false;
+                request.Timeout = 30000;
+                request.ReadWriteTimeout = 30000;
+                try
+                {
+                    using (var response = (HttpWebResponse)request.GetResponse())
+                    {
+                        var status = (int)response.StatusCode;
+                        if (status >= 300 && status < 400)
+                        {
+                            if (!Uri.TryCreate(url, response.Headers[HttpResponseHeader.Location], out url))
+                            {
+                                throw new InvalidDataException("The Windows update returned an invalid download location.");
+                            }
+                            continue;
+                        }
+                        if (status != 200 || response.ContentLength > maximumBytes)
+                        {
+                            throw new InvalidDataException("The Windows update download has an unexpected response or size.");
+                        }
+                        using (var input = response.GetResponseStream())
+                        {
+                            var buffer = new byte[65536];
+                            var time = Stopwatch.StartNew();
+                            int count;
+                            while ((count = input.Read(buffer, 0, buffer.Length)) != 0)
+                            {
+                                if (destination.Length + count > maximumBytes || time.Elapsed.TotalSeconds > 120)
+                                {
+                                    throw new InvalidDataException("The Windows update download exceeded its size or time limit.");
+                                }
+                                destination.Write(buffer, 0, count);
+                            }
+                        }
+                        return;
+                    }
+                }
+                catch (WebException error)
+                {
+                    if (error.Response != null) error.Response.Close();
+                    var fileName = maximumBytes == WindowsUpdateSignature.SignatureBytes ? "publisher signature" : "ZIP";
+                    throw new IOException("Could not download the Windows update " + fileName + ".", error);
+                }
+            }
+            throw new InvalidDataException("The Windows update exceeded its download redirect limit.");
         }
 
         private static void WaitForProcessExit(int processId)
@@ -277,10 +295,13 @@ namespace Clipman
             {
                 using (var process = Process.GetProcessById(processId))
                 {
-                    process.WaitForExit(30000);
+                    if (!process.WaitForExit(30000))
+                    {
+                        throw new IOException("Clipman is still running. Close it before trying the update again.");
+                    }
                 }
             }
-            catch
+            catch (ArgumentException)
             {
             }
         }
@@ -317,122 +338,6 @@ namespace Clipman
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
-        }
-
-        private static void CopyDirectory(string source, string destination)
-        {
-            Directory.CreateDirectory(destination);
-            foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
-            {
-                Directory.CreateDirectory(Path.Combine(destination, RelativePath(source, directory)));
-            }
-
-            foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-            {
-                var target = Path.Combine(destination, RelativePath(source, file));
-                Directory.CreateDirectory(Path.GetDirectoryName(target));
-                CopyFileWithRetry(file, target);
-            }
-        }
-
-        private static void CopyFactoryDirectoryBestEffort(string source, string destination)
-        {
-            foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
-            {
-                Directory.CreateDirectory(Path.Combine(destination, RelativePath(source, directory)));
-            }
-
-            foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-            {
-                var target = Path.Combine(destination, RelativePath(source, file));
-                try
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(target));
-                    CopyFileWithRetry(file, target);
-                }
-                catch (Exception ex)
-                {
-                    WriteUpdateHistory(Path.GetDirectoryName(destination), "Warning: could not update factory file " + target + ": " + ex.Message);
-                }
-            }
-        }
-
-        private static void PruneFactoryDirectoryBestEffort(string source, string destination)
-        {
-            try
-            {
-                foreach (var file in Directory.GetFiles(destination, "*", SearchOption.AllDirectories))
-                {
-                    var relative = RelativePath(destination, file);
-                    if (File.Exists(Path.Combine(source, relative)))
-                    {
-                        continue;
-                    }
-
-                    TryDeleteFile(file);
-                }
-
-                foreach (var folder in Directory.GetDirectories(destination, "*", SearchOption.AllDirectories)
-                    .OrderByDescending(path => path.Length))
-                {
-                    RemoveEmptyDirectory(folder);
-                }
-            }
-            catch (Exception ex)
-            {
-                WriteUpdateHistory(Path.GetDirectoryName(destination), "Warning: could not fully prune factory folder " + destination + ": " + ex.Message);
-            }
-        }
-
-        private static void CopyFileWithRetry(string source, string destination)
-        {
-            Exception last = null;
-            for (var attempt = 0; attempt < 30; attempt++)
-            {
-                try
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                    File.Copy(source, destination, true);
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    last = ex;
-                    Thread.Sleep(1000);
-                }
-            }
-
-            throw new IOException("Could not replace " + destination + " after waiting for other instances to close.", last);
-        }
-
-        private static void DeleteDirectoryWithRetry(string path)
-        {
-            Exception last = null;
-            for (var attempt = 0; attempt < 30; attempt++)
-            {
-                try
-                {
-                    if (Directory.Exists(path))
-                    {
-                        Directory.Delete(path, true);
-                    }
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    last = ex;
-                    Thread.Sleep(1000);
-                }
-            }
-
-            throw new IOException("Could not replace " + path + " after waiting for other instances to close.", last);
-        }
-
-        private static string RelativePath(string root, string path)
-        {
-            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var fullPath = Path.GetFullPath(path);
-            return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) ? fullPath.Substring(fullRoot.Length) : Path.GetFileName(path);
         }
 
         private static void RemoveEmptyDirectory(string folder)
