@@ -109,7 +109,7 @@
   <ul>
     <li>F4 lists web addresses found in the clip text. Use Tab to reach Links, Ctrl+C to copy an address, Enter to open it, or the Application key or Shift+F10 for link actions. In Details, F1 explains the selected field.</li>
     <li>Text review and Entry Properties use standard Windows word navigation.</li>
-    <li>Clipman now verifies a publisher signature before installing a downloaded Windows update. Version 3.1.14 and earlier require a one-time manual upgrade to this version.</li>
+    <li>Clipman now verifies a publisher signature before installing a downloaded Windows update. Clipman 3.1.14 can use its existing updater once to install 3.1.15 and begin verifying future updates.</li>
   </ul>
 
   <h3>3.1.15 macOS</h3>
@@ -1237,7 +1237,8 @@
 
   <p>When Windows uses the install-local <code>Settings</code> folder beside <code>clipman.exe</code>, Clipman writes a small shared update-state file there. It records the current public version, an internal UTC build stamp, the machine that published it, and the expected executable hash. If another running Clipman instance from that same shared installation sees a newer build stamp and the updated executable has synced to that machine, it restarts itself so it runs the current copy. A custom data folder elsewhere may still share history and settings, but it does not coordinate executable replacement; each separately installed Clipman updates normally without being stopped by another machine's build marker.</p>
 
-  <p>When upgrading from Windows 3.1.14 or earlier, download <code>Clipman-Windows-x64-3.1.15.zip</code> from <a href="https://github.com/OnjLouis/Clipman/releases/tag/v3.1.15">the Windows release</a>. Exit Clipman on computers that use that same install folder, extract the ZIP into the existing Clipman folder, and start <code>clipman.exe</code>. Keep the existing <code>Settings</code> folder and any separate data folder.</p>
+  <p>To upgrade from Windows 3.1.14, use <strong>Help, Check for Updates</strong>. Clipman can also install 3.1.15 automatically when silent updates are enabled. This one-time upgrade uses the older updater, which cannot verify publisher signatures. The new version verifies them on subsequent updates.</p>
+  <p>To update manually, <a href="https://github.com/OnjLouis/Clipman/releases/download/v3.1.15/Clipman-Windows-x64-3.1.15.zip">download Clipman 3.1.15 for Windows</a>. Exit Clipman on computers that use that same install folder, extract the ZIP into the existing Clipman folder, and start <code>clipman.exe</code>. Keep the existing <code>Settings</code> folder and any separate data folder.</p>
   <p>For future online and automatic Windows updates, Clipman downloads the ZIP and its publisher signature to a temporary location and verifies both before replacing app files. If verification fails, the installed files are kept. For updates to a shared installation, Clipman asks other instances using that same installation to close briefly. They can restart after the updated executable is available on the cloud service or network share. Separately installed clients that share only a custom data folder continue to use their own updater.</p>
 
   <h2 id="iphone-ipad-setup">iPhone and iPad Setup</h2>
