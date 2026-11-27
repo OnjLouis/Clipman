@@ -6,6 +6,8 @@ Clipman is designed around fast keyboard and screen-reader use. History is a rea
 
 ## Get Clipman
 
+**Using Windows 3.1.14 or earlier?** [Download Clipman 3.1.15 for Windows directly](https://github.com/OnjLouis/Clipman/releases/download/v3.1.15/Clipman-Windows-x64-3.1.15.zip). Close Clipman, extract the ZIP into your existing Clipman folder, and start Clipman again. Keep your Settings folder and any separate data folder. After this one-time upgrade, Clipman can install signed updates through Check for Updates.
+
 - [Browse current Windows, macOS, Linux, Android, and server downloads](https://github.com/OnjLouis/Clipman/releases).
 - [Download the latest Clipman Server package](https://onjlouis.github.io/Clipman/server/download.html).
 - [Download Clipman for iPhone and iPad from the App Store](https://apps.apple.com/app/clipman/id6793250105).
