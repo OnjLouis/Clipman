@@ -1511,6 +1511,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, Clip
         sounds.play(.copy)
     }
 
+    func historyWindow(_ controller: HistoryWindowController, didCopyTextSelection text: String) -> Bool {
+        guard monitor.writeInternalText(text) else { return false }
+        sounds.play(.copy)
+        return true
+    }
+
     func historyWindow(_ controller: HistoryWindowController, didCopyNameAndContent entries: [ClipEntry]) {
         guard !entries.isEmpty else { return }
         if settings.pasteAfterEnter, !ensurePasteAutomationAccess() {

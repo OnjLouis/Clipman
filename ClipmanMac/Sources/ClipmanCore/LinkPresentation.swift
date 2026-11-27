@@ -2,6 +2,9 @@ import Foundation
 
 public struct LinkPresentation: Equatable, Sendable {
     package static let maximumURLCharacters = 8_192
+    private static let previewWebLink = try! NSRegularExpression(
+        pattern: #"(?<![\w/:])https?://[^\s<>'"\p{Cc}]+"#, options: [.caseInsensitive]
+    )
 
     public let label: String
     public let destination: String
@@ -180,6 +183,68 @@ public struct LinkPresentation: Equatable, Sendable {
             return nil
         }
         return url
+    }
+
+    package static func webURL(in text: String, at selection: NSRange) -> URL? {
+        let value = text as NSString
+        guard selection.location <= value.length, selection.length <= value.length - selection.location else { return nil }
+        let selectionEnd = NSMaxRange(selection)
+        var result: URL?
+        var ambiguous = false
+        enumeratePreviewLinks(in: text) { url, range in
+            if range.location > selectionEnd { return false }
+            let overlaps = selection.length == 0
+                ? selection.location <= NSMaxRange(range)
+                : selection.location < NSMaxRange(range) && range.location < selectionEnd
+            guard overlaps else { return true }
+            if result != nil {
+                ambiguous = true
+                return false
+            }
+            result = url
+            return true
+        }
+        return ambiguous ? nil : result
+    }
+
+    package static func previewURLs(in text: String) -> [URL] {
+        var links: [URL] = []
+        enumeratePreviewLinks(in: text) { url, _ in
+            links.append(url)
+            return true
+        }
+        return links
+    }
+
+    private static func enumeratePreviewLinks(in text: String, visit: (URL, NSRange) -> Bool) {
+        let value = text as NSString
+        previewWebLink.enumerateMatches(in: text, range: NSRange(location: 0, length: value.length)) { match, _, stop in
+            guard let range = match?.range, range.length <= maximumURLCharacters else { return }
+            let trimmed = trimmingProsePunctuation(value.substring(with: range))
+            guard let url = webURL(trimmed) else { return }
+            if !visit(url, NSRange(location: range.location, length: trimmed.utf16.count)) {
+                stop.pointee = true
+            }
+        }
+    }
+
+    private static func trimmingProsePunctuation(_ candidate: String) -> String {
+        var value = candidate[...]
+        let opening: [Character: Character] = [")": "(", "]": "[", "}": "{"]
+        var unmatched: [Character: Int] = [:]
+        while let last = value.last {
+            if ".,;:!?".contains(last) {
+                value.removeLast()
+            } else if let first = opening[last] {
+                let excess = unmatched[last] ?? (candidate.filter { $0 == last }.count - candidate.filter { $0 == first }.count)
+                guard excess > 0 else { break }
+                unmatched[last] = excess - 1
+                value.removeLast()
+            } else {
+                break
+            }
+        }
+        return String(value)
     }
 
     private static func isUUID(_ value: String) -> Bool {

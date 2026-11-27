@@ -212,6 +212,73 @@ private final class ReadOnlyTextPanel: NSPanel {
     }
 }
 
+private final class ReadOnlyClipTextView: BoundaryAwareTextView {
+    var copySelection: ((String) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard let copySelection,
+              event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) else {
+            super.keyDown(with: event)
+            return
+        }
+        let selection = selectedRange()
+        if modifiers.isEmpty {
+            if selection.length > 0 && !copySelection((string as NSString).substring(with: selection)) {
+                showShortcutError("Could not copy the selected text.")
+            }
+        } else if modifiers == .option {
+            guard let url = LinkPresentation.webURL(in: string, at: selection) else {
+                NSSound.beep()
+                return
+            }
+            if !NSWorkspace.shared.open(url) {
+                showShortcutError("Could not open the selected link.")
+            }
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    private func showShortcutError(_ message: String) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.beginSheetModal(for: window)
+    }
+}
+
+private final class PreviewLinksTable: NSTableView {
+    var destinations: [URL] = []
+    var copyAddress: ((String) -> Bool)?
+
+    @objc func copy(_ sender: Any?) {
+        guard destinations.indices.contains(selectedRow), copyAddress?(destinations[selectedRow].absoluteString) == true else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    @objc func openSelectedLink(_ sender: Any?) {
+        guard destinations.indices.contains(selectedRow), NSWorkspace.shared.open(destinations[selectedRow]) else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if modifiers == .command && event.charactersIgnoringModifiers?.lowercased() == "c" {
+            copy(nil)
+        } else if (modifiers.isEmpty || modifiers == .option) &&
+                    (event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter)) {
+            openSelectedLink(nil)
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
+
 @MainActor
 private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
     private let panel: ReadOnlyTextPanel
@@ -219,9 +286,10 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
     private let detailsTable: NSTableView?
     private let closeButton: NSButton
     private let detailsDataSource: MetadataTableDataSource?
+    private let linksDataSource: MetadataTableDataSource?
     private var modalIsRunning = false
 
-    init(title: String, accessibilityLabel: String, text: String, details: [(String, String)], richText: RichTextPayload?) {
+    init(title: String, accessibilityLabel: String, text: String, details: [(String, String)], richText: RichTextPayload?, copySelection: ((String) -> Bool)?) {
         let embeddedImage = EmbeddedImageHTML.imageInfo(from: richText)
         panel = ReadOnlyTextPanel(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: details.isEmpty ? 470 : 650),
@@ -232,7 +300,9 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
         panel.title = title
         panel.minSize = NSSize(width: 560, height: details.isEmpty ? 360 : 500)
 
-        textView = BoundaryAwareTextView(frame: NSRect(x: 0, y: 0, width: 640, height: 300))
+        let clipTextView = ReadOnlyClipTextView(frame: NSRect(x: 0, y: 0, width: 640, height: 300))
+        clipTextView.copySelection = copySelection
+        textView = clipTextView
         textView.string = text
         textView.isEditable = false
         textView.isSelectable = true
@@ -253,7 +323,11 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
             textView.textStorage?.setAttributedString(attributed)
         }
         textView.setAccessibilityLabel(accessibilityLabel)
-        textView.setContextHelp("Read the selected clip without editing it. Text can be selected and copied; Tab moves to its details or Close.")
+        if copySelection != nil {
+            textView.setContextHelp("Use Command+C to copy highlighted text. Tab moves to Links when the clip contains web links.")
+        } else {
+            textView.setContextHelp("Read the selected clip without editing it. Text can be selected and copied; Tab moves to its details or Close.")
+        }
 
         let textScroll = NSScrollView()
         textScroll.borderType = .bezelBorder
@@ -285,7 +359,48 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
             imageView.heightAnchor.constraint(equalToConstant: 220).isActive = true
         }
         rootStack.addArrangedSubview(textScroll)
-        textScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+
+        var linksTable: PreviewLinksTable?
+        var destinations: [URL] = []
+        if copySelection != nil {
+            destinations = LinkPresentation.previewURLs(in: textView.string)
+            if textView.string != text { destinations += LinkPresentation.previewURLs(in: text) }
+            var seen = Set<String>()
+            destinations = destinations.filter { seen.insert($0.absoluteString).inserted }
+        }
+        textScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: destinations.isEmpty ? 260 : 170).isActive = true
+        if destinations.isEmpty {
+            linksDataSource = nil
+        } else {
+            let linksLabel = NSTextField(labelWithString: "Links")
+            linksLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+            rootStack.addArrangedSubview(linksLabel)
+            let table = PreviewLinksTable(frame: NSRect(x: 0, y: 0, width: 640, height: 105))
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("address"))
+            column.width = 620
+            table.addTableColumn(column)
+            table.headerView = nil
+            table.destinations = destinations
+            table.copyAddress = copySelection
+            table.allowsMultipleSelection = false
+            table.setAccessibilityLabel("Links")
+            table.setContextHelp("Use the arrow keys to select a link, Command+C to copy its address, or Return to open it.")
+            table.target = table
+            table.doubleAction = #selector(PreviewLinksTable.openSelectedLink(_:))
+            let dataSource = MetadataTableDataSource(rows: destinations.map { ($0.absoluteString, "") })
+            table.dataSource = dataSource
+            table.delegate = dataSource
+            table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            linksDataSource = dataSource
+            linksTable = table
+
+            let linksScroll = NSScrollView()
+            linksScroll.borderType = .bezelBorder
+            linksScroll.hasVerticalScroller = true
+            linksScroll.documentView = table
+            rootStack.addArrangedSubview(linksScroll)
+            linksScroll.heightAnchor.constraint(equalToConstant: 105).isActive = true
+        }
 
         if details.isEmpty {
             detailsTable = nil
@@ -295,13 +410,15 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
             detailsLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
             rootStack.addArrangedSubview(detailsLabel)
 
-            let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 640, height: max(160, CGFloat(details.count) * 24 + 28)))
+            let table = EntryDetailsTable(frame: NSRect(x: 0, y: 0, width: 640, height: max(160, CGFloat(details.count) * 24 + 28)))
             table.allowsColumnReordering = false
             table.allowsColumnResizing = true
             table.allowsMultipleSelection = false
             table.usesAlternatingRowBackgroundColors = true
             table.rowHeight = 24
             table.setAccessibilityLabel("Clip details")
+            table.setContextHelp("Use the arrow keys to select a detail. F1 explains the selected detail.")
+            table.propertyNames = details.map { $0.0 }
             let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
             nameColumn.title = "Property"
             nameColumn.width = 180
@@ -315,6 +432,7 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
             let dataSource = MetadataTableDataSource(rows: details)
             table.dataSource = dataSource
             table.delegate = dataSource
+            table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             detailsTable = table
             detailsDataSource = dataSource
 
@@ -350,14 +468,11 @@ private final class ReadOnlyTextPanelController: NSObject, NSWindowDelegate {
             rootStack.bottomAnchor.constraint(equalTo: content.bottomAnchor)
         ])
 
-        if let detailsTable {
-            textView.nextKeyView = detailsTable
-            detailsTable.nextKeyView = closeButton
-            closeButton.nextKeyView = textView
-        } else {
-            textView.nextKeyView = closeButton
-            closeButton.nextKeyView = textView
-        }
+        var keyViews: [NSView] = [textView]
+        if let linksTable { keyViews.append(linksTable) }
+        if let detailsTable { keyViews.append(detailsTable) }
+        keyViews.append(closeButton)
+        for (view, next) in zip(keyViews, keyViews.dropFirst() + [textView]) { view.nextKeyView = next }
         panel.initialFirstResponder = textView
     }
 
@@ -450,6 +565,7 @@ protocol HistoryWindowControllerDelegate: AnyObject {
     func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, isTemplate: Bool, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode)
     func historyWindow(_ controller: HistoryWindowController, didCreateQuickClipWithName name: String, group: String, text: String, isPinned: Bool, isTemplate: Bool)
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry])
+    func historyWindow(_ controller: HistoryWindowController, didCopyTextSelection text: String) -> Bool
     func historyWindow(_ controller: HistoryWindowController, didCopyNameAndContent entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry])
     func historyWindow(_ controller: HistoryWindowController, didPushToOtherMachines entries: [ClipEntry])
@@ -2196,7 +2312,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                 accessibilityLabel: "Selected clipboard entry text",
                 text: entry.Text,
                 details: clipboardEntryDetails(entry),
-                richText: entry.RichText
+                richText: entry.RichText,
+                copySelection: { [weak self] text in
+                    guard let self else { return false }
+                    return self.historyDelegate?.historyWindow(self, didCopyTextSelection: text) ?? false
+                }
             )
             return
         }
@@ -2288,13 +2408,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         return regex.numberOfMatches(in: text, options: [], range: range)
     }
 
-    private func showReadOnlyText(title: String, accessibilityLabel: String, text: String, details: [(String, String)] = [], richText: RichTextPayload? = nil) {
+    private func showReadOnlyText(title: String, accessibilityLabel: String, text: String, details: [(String, String)] = [], richText: RichTextPayload? = nil, copySelection: ((String) -> Bool)? = nil) {
         let controller = ReadOnlyTextPanelController(
             title: title,
             accessibilityLabel: accessibilityLabel,
             text: text,
             details: details,
-            richText: richText
+            richText: richText,
+            copySelection: copySelection
         )
         controller.runModal(relativeTo: window)
     }

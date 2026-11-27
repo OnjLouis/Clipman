@@ -5,6 +5,26 @@ import ClipmanCore
 @testable import Clipman
 
 final class ContextHelpTests: XCTestCase {
+    @MainActor func testPreviewDetailsHelpFollowsSelectedProperty() {
+        _ = NSApplication.shared
+        let table = EntryDetailsTable()
+        table.propertyNames = ["Name", "Device"]
+        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("property")))
+        let source = DetailHelpRows()
+        table.dataSource = source
+        table.reloadData()
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        XCTAssertEqual(table.selectedPropertyHelp?.name, "Name")
+        XCTAssertTrue(table.selectedPropertyHelp?.instructions.contains("label assigned") == true)
+        table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        XCTAssertEqual(table.selectedPropertyHelp?.name, "Device")
+        XCTAssertTrue(table.selectedPropertyHelp?.instructions.contains("device that recorded") == true)
+    }
+
+    private final class DetailHelpRows: NSObject, NSTableViewDataSource {
+        func numberOfRows(in tableView: NSTableView) -> Int { 2 }
+    }
+
     @MainActor func testHotkeyActionsRunDuringAnOpenModalEditor() {
         _ = NSApplication.shared
         let modal = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 150), styleMask: [.titled], backing: .buffered, defer: false)

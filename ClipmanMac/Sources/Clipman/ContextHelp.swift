@@ -1,6 +1,36 @@
 import AppKit
 import ObjectiveC
 
+final class EntryDetailsTable: NSTableView {
+    var propertyNames: [String] = []
+
+    var selectedPropertyHelp: (name: String, instructions: String)? {
+        guard propertyNames.indices.contains(selectedRow) else { return nil }
+        let name = propertyNames[selectedRow]
+        guard let instructions = Self.propertyHelp[name] else { return nil }
+        return (name, instructions)
+    }
+
+    private static let propertyHelp: [String: String] = [
+        "Name": "The label assigned to this clip. Change it in Entry Properties.",
+        "Group": "The group assigned to this clip. Use the group filter to find clips in that group.",
+        "Device": "The device that recorded or created this clip.",
+        "Pinned": "A pinned clip is protected from ordinary history limits and bulk clearing.",
+        "Template": "A template expands supported fields, such as the current date, when you copy the full clip from History.",
+        "Added": "When this clip was first saved to History.",
+        "Last used": "When Clipman last recorded this clip as used. This can differ from when it was added.",
+        "Manual order": "The stored position used when History is sorted in Manual order.",
+        "Text length": "The length of this clip's stored plain text, including spaces and line breaks.",
+        "Links": "The number of web addresses found in the stored text. The Links list lets you copy or open individual addresses.",
+        "Formatting": "The rich-text formats stored with this clip.",
+        "Image filename": "The name stored with the embedded image. It does not identify a file that must still exist on disk.",
+        "Image type": "The format in which the embedded image is stored, such as PNG or JPEG.",
+        "Image dimensions": "The width and height of the embedded image, in pixels.",
+        "Image size": "The amount of stored image data, in bytes or a larger unit.",
+        "Entry ID": "A unique identifier Clipman uses to recognize this entry independently of its name and text."
+    ]
+}
+
 struct FocusedHelpContent {
     let title: String
     let instructions: String
@@ -20,6 +50,9 @@ struct FocusedHelpContent {
                 return nil
             }
             view = editingField(root)
+        }
+        if let details = view as? EntryDetailsTable, let help = details.selectedPropertyHelp {
+            return FocusedHelpContent(title: help.name, instructions: help.instructions, restoreView: details)
         }
         var focused = window === NSApp.keyWindow ? accessibilityFocus() : nil
         if view is NSTableView { focused = view }

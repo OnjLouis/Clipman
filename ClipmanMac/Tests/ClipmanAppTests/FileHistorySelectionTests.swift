@@ -54,6 +54,7 @@ final class FileHistorySelectionTests: XCTestCase {
     func historyWindow(_ controller: HistoryWindowController, didUpdateProperties entry: ClipEntry, name: String, group: String, text: String, isTemplate: Bool, useQuickCopy: Bool, quickCopyHotkey: HotkeyDescriptor?, quickPasteMode: QuickPasteMode) {}
     func historyWindow(_ controller: HistoryWindowController, didCreateQuickClipWithName name: String, group: String, text: String, isPinned: Bool, isTemplate: Bool) {}
     func historyWindow(_ controller: HistoryWindowController, didCopy entries: [ClipEntry]) {}
+    func historyWindow(_ controller: HistoryWindowController, didCopyTextSelection text: String) -> Bool { false }
     func historyWindow(_ controller: HistoryWindowController, didCopyNameAndContent entries: [ClipEntry]) {}
     func historyWindow(_ controller: HistoryWindowController, didCut entries: [ClipEntry]) {}
     func historyWindow(_ controller: HistoryWindowController, didPushToOtherMachines entries: [ClipEntry]) {}

@@ -105,6 +105,12 @@
   <ul>
     <li>Fixed VoiceOver double-tap to copy from Text and Rich Text history, including Gmail addresses that previously did not copy.</li>
   </ul>
+  <h3>3.1.15 macOS</h3>
+  <ul>
+    <li>The F4 review window lists web addresses found in the clip text. Tab moves to Links, Command+C copies the selected address, and Return opens it.</li>
+    <li>F1 explains the selected field in the Details table. Command+C copies selected text in the preview.</li>
+  </ul>
+
   <h3>3.1.14 Windows</h3>
   <ul>
     <li><strong>Clear text history</strong> now records deletions for sync, so another device with an older copy cannot bring the cleared clips back. This covers text, links, and rich text, including pinned and named entries.</li>
@@ -1032,6 +1038,8 @@
   <p>Clipman gives unnamed links a readable label from the address itself, such as <strong>Issues 50; github.com/OnjLouis/Clipman/issues/50</strong>. This works immediately, including for existing history, and never contacts the website. An F2 name remains first and always takes precedence.</p>
 
   <p>On Android and iOS, <strong>Copy link names by default</strong> in mobile Settings controls how an ordinary activation copies a named link. It is off by default, so activation copies the unchanged link and the entry menu or screen-reader actions offer <strong>Copy Name and Link</strong>. When enabled, activation places the saved Name on the first line and the link on the next line, while the alternative action becomes <strong>Copy Link</strong>. This avoids presenting a second action that merely repeats the default behaviour.</p>
+
+  <p>On Mac, use <code>Command+C</code> to copy highlighted text in the <code>F4</code> review window. If the clip text contains web addresses, press <code>Tab</code> to reach <strong>Links</strong>. Use the arrow keys to select an address, <code>Command+C</code> to copy it, or <code>Return</code> to open it in your default browser. In <strong>Details</strong>, select a row and press <code>F1</code> for help on that field.</p>
 
   <p>For an unnamed HTTP or HTTPS link, use <strong>Use website title as name</strong> from the entry menu when you deliberately want Clipman to contact that site once. Clipman explains that the website can see the request and asks before continuing. The desktop confirmation includes <strong>Do not show this again</strong>; restore it with <strong>Ask before contacting a website for its title</strong> in Preferences. Clipman sends the selected link request without cookies, credentials, or other clipboard content. A deliberate request may contact an otherwise safe public link even when its path or query contains tracking data or looks token-like, but Clipman still refuses embedded credentials, local or private destinations, non-standard ports, unsafe redirects and overlong addresses. Automatic title naming remains more conservative and does not contact capability-looking links. A useful returned title is stored in the ordinary Name field, where it is visible and editable in Entry Properties. If the site cannot be reached or does not return a usable web-page title, Clipman instead saves the same generic offline label already shown for the URL; this works for direct downloads and ordinary pages without relying on a list of file extensions. The exact URL is never replaced and remains available in F4, Entry Properties, and copy operations. Because this is an ordinary name rather than a separate preview file, it follows the entry to other synced clients.</p>
 

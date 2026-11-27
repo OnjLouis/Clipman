@@ -79,6 +79,8 @@ The history window includes an accessible toolbar after the history type control
 - `Command+V`: paste clipboard text after the selected text entry.
 - `Command+N`: open Quick Clip and type a new saved entry directly.
 - `Option+Enter`: open the selected standalone HTTP or HTTPS link in the default browser.
+- In the `F4` review text, `Command+C` copies highlighted text. When the clip contains web addresses, `Tab` moves to Links, where `Command+C` copies the selected address and `Return` opens it. Both leave the review window open.
+- In the `F4` Details table, use the arrow keys to choose a field and press `F1` for help with that field.
 - `Command+I`: import clipboard entries from `.clipdb`, JSON, or text.
 - `Command+E`: export clipboard entries to `.clipdb`, JSON, or text.
 - `Command+Shift+R`: remove URL tracking from selected text entries.

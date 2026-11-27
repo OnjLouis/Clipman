@@ -16,4 +16,18 @@ final class LinkPresentationTests: XCTestCase {
             "Inside No. 9.7z"
         )
     }
+
+    func testEntryPreviewResolvesOnlyOneVisibleWebLinkAtSelection() {
+        let first = "https://example.com/a(b)"
+        let second = "http://example.org/q?part=2"
+        let post = "Read (\(first)).\r\nThen \(second) or clipman://example.net."
+        let text = post as NSString
+        XCTAssertEqual(LinkPresentation.webURL(in: post, at: NSRange(location: NSMaxRange(text.range(of: first)), length: 0))?.absoluteString, first)
+        let insideSecond = NSRange(location: text.range(of: second).location + 2, length: 5)
+        XCTAssertEqual(LinkPresentation.webURL(in: post, at: insideSecond)?.absoluteString, second)
+        XCTAssertNil(LinkPresentation.webURL(in: post, at: NSRange(location: 0, length: text.length)))
+        XCTAssertNil(LinkPresentation.webURL(in: post, at: text.range(of: "Read")))
+        XCTAssertNil(LinkPresentation.webURL(in: post, at: text.range(of: "clipman:")))
+        XCTAssertEqual(LinkPresentation.previewURLs(in: post).map(\.absoluteString), [first, second])
+    }
 }
