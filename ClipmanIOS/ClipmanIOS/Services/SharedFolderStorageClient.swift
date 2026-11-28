@@ -142,6 +142,27 @@ final class SharedFolderStorageClient: @unchecked Sendable, HistoryStorageClient
         }
     }
 
+    /// Dropbox on iOS can keep serving a stale local copy until something writes to
+    /// the folder. Writing and removing a separate file wakes the provider without
+    /// touching history, so no other device sees an entry or a deletion marker.
+    func nudgeProvider() async throws {
+        guard isConfigured else { return }
+        try withDirectory { directory in
+            let target = directory.appendingPathComponent(Self.providerNudgeFileName, isDirectory: false)
+            var coordinationError: NSError?
+            var writeResult: Result<Void, Error> = .success(())
+            NSFileCoordinator().coordinate(writingItemAt: target, options: [], error: &coordinationError) { coordinatedURL in
+                writeResult = Result { try Data(UUID().uuidString.utf8).write(to: coordinatedURL, options: .atomic) }
+            }
+            if let coordinationError { throw coordinationError }
+            try writeResult.get()
+            NSFileCoordinator().coordinate(writingItemAt: target, options: .forDeleting, error: &coordinationError) { coordinatedURL in
+                try? FileManager.default.removeItem(at: coordinatedURL)
+            }
+            if let coordinationError { throw coordinationError }
+        }
+    }
+
     private func readCandidates() throws -> [Candidate] {
         guard isConfigured else {
             throw password.isEmpty ? SharedFolderStorageError.invalidPassword : SharedFolderStorageError.unavailable
@@ -221,6 +242,8 @@ final class SharedFolderStorageClient: @unchecked Sendable, HistoryStorageClient
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return try body(directory)
     }
+
+    private static let providerNudgeFileName = "clipman-provider-nudge.tmp"
 
     private struct Candidate {
         var url: URL
